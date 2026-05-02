@@ -7,3 +7,4 @@ export * from "./alarm_rules";
 export * from "./users";
 export * from "./brokers";
 export * from "./api_clients";
+export * from "./destinations";

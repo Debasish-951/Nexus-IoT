@@ -3,6 +3,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import Layout from "@/components/Layout";
+import { UserProvider } from "@/contexts/UserContext";
 import NotFound from "@/pages/not-found";
 import Dashboard from "@/pages/Dashboard";
 import Assets from "@/pages/Assets";
@@ -15,6 +16,9 @@ import Brokers from "@/pages/Brokers";
 import ApiClients from "@/pages/ApiClients";
 import Settings from "@/pages/Settings";
 import IngestSimulator from "@/pages/IngestSimulator";
+import Destinations from "@/pages/Destinations";
+import DataExplorer from "@/pages/DataExplorer";
+import NodeRedDocs from "@/pages/NodeRedDocs";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -38,6 +42,9 @@ function AppRouter() {
         <Route path="/users" component={Users} />
         <Route path="/brokers" component={Brokers} />
         <Route path="/api-clients" component={ApiClients} />
+        <Route path="/destinations" component={Destinations} />
+        <Route path="/data-explorer" component={DataExplorer} />
+        <Route path="/node-red-docs" component={NodeRedDocs} />
         <Route path="/settings" component={Settings} />
         <Route path="/simulator" component={IngestSimulator} />
         <Route component={NotFound} />
@@ -49,12 +56,14 @@ function AppRouter() {
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
-      <TooltipProvider>
-        <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
-          <AppRouter />
-        </WouterRouter>
-        <Toaster />
-      </TooltipProvider>
+      <UserProvider>
+        <TooltipProvider>
+          <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+            <AppRouter />
+          </WouterRouter>
+          <Toaster />
+        </TooltipProvider>
+      </UserProvider>
     </QueryClientProvider>
   );
 }

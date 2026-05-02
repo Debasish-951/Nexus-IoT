@@ -10,6 +10,7 @@ import usersRouter from "./users";
 import brokersRouter from "./brokers";
 import apiClientsRouter from "./api_clients";
 import dashboardRouter from "./dashboard";
+import destinationsRouter from "./destinations";
 
 const router: IRouter = Router();
 
@@ -24,5 +25,6 @@ router.use(usersRouter);
 router.use(brokersRouter);
 router.use(apiClientsRouter);
 router.use(dashboardRouter);
+router.use(destinationsRouter);
 
 export default router;
