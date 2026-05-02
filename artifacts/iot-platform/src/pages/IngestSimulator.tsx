@@ -48,87 +48,96 @@ const CHART_COLORS = [
 ];
 
 // ── Preset payloads ──────────────────────────────────────────────────────────
-const PRESETS = [
+// Each preset exposes the data metrics for charting (randomize returns only data fields)
+// and optionally a buildPayload() that overrides the default { deviceId, timestamp, metrics } envelope.
+interface Preset {
+  id: string;
+  label: string;
+  description: string;
+  deviceId: string;
+  metrics: Record<string, number>;
+  randomize: (base: Record<string, number>) => Record<string, number>;
+  buildPayload?: (metrics: Record<string, number>) => object;
+}
+
+const SENSORGROW_BASE_DATA: Record<string, number> = {
+  vibration_rms_displacement_y: 0.000049,
+  vibration_rms_velocity_x: 1.1,
+  vibration_max_f_acceleration_x: 0.97,
+  vibration_peak_to_peak_velocity_x: 6.6,
+  vibration_max_velocity_z: 2.1,
+  vibration_max_acceleration_y: 0.571429,
+  vibration_derived_peak_displacement_z: 0.000069,
+  vibration_peak_to_peak_acceleration_z: 0.832653,
+  ultrasound: 53.167,
+  temperature: 31.706,
+  vibration_peak_to_peak_displacement_x: 0.00014,
+  vibration_rms_velocity_z: 0.8,
+  vibration_derived_peak_velocity_y: 1.1312,
+  vibration_peak_to_peak_velocity_y: 3.8,
+  radio_strength: 0,
+  vibration_peak_to_peak_displacement_z: 0.000098,
+  vibration_rms_acceleration_z: 0.10102,
+  vibration_derived_peak_velocity_x: 1.5554,
+  vibration_rms_acceleration_y: 0.15102,
+  vibration_max_f_acceleration_y: 0.48,
+  vibration_max_acceleration_z: 0.416327,
+  vibration_max_velocity_y: 1.9,
+  vibration_peak_to_peak_displacement_y: 0.000102,
+  vibration_peak_to_peak_acceleration_x: 1.728571,
+  vibration_derived_peak_velocity_z: 1.1312,
+  vibration_derived_peak_displacement_x: 0.000099,
+  vibration_derived_peak_displacement_y: 0.000069,
+  vibration_derived_peak_acceleration_x: 0.278471,
+  vibration_max_displacement_x: 0.00007,
+  vibration_peak_to_peak_velocity_z: 4.2,
+  vibration_max_displacement_z: 0.000049,
+  vibration_rms_displacement_x: 0.00007,
+  battery: 3,
+  vibration_rms_velocity_y: 0.8,
+  vibration_derived_peak_acceleration_z: 0.142843,
+  runhours: 1654,
+  vibration_max_velocity_x: 3.3,
+  vibration_peak_to_peak_acceleration_y: 1.142857,
+  vibration_max_displacement_y: 0.000051,
+  vibration_rms_acceleration_x: 0.196939,
+  vibration_max_acceleration_x: 0.864286,
+  vibration_rms_displacement_z: 0.000049,
+};
+
+const PRESETS: Preset[] = [
   {
-    id: "rf-dryer",
-    label: "RF Dryer (Energy)",
-    description: "Energy meter readings from the RF dryer device",
-    deviceId: "rf-dryer",
-    metrics: {
-      energy_meter_kwh: 4659.16,
-      interval_kwh: 0.72,
-      daily_cum_kwh: 52.49,
-      wtd_cum_kwh: 124.60,
-      mtd_cum_kwh: 1201.35,
-      ytd_cum_kwh: 5451.70,
-    } as Record<string, number>,
-    randomize: (base: Record<string, number>): Record<string, number> => ({
-      energy_meter_kwh: +(base.energy_meter_kwh + Math.random() * 0.8 - 0.1).toFixed(2),
-      interval_kwh: +(Math.random() * 1.5).toFixed(3),
-      daily_cum_kwh: +(base.daily_cum_kwh + Math.random() * 0.5).toFixed(2),
-      wtd_cum_kwh: +(base.wtd_cum_kwh + Math.random() * 0.5).toFixed(2),
-      mtd_cum_kwh: +(base.mtd_cum_kwh + Math.random() * 0.5).toFixed(2),
-      ytd_cum_kwh: +(base.ytd_cum_kwh + Math.random() * 0.5).toFixed(2),
-    }),
-  },
-  {
-    id: "extrudr",
-    label: "Extruder (Process)",
-    description: "Temperature and pressure from the extruder",
-    deviceId: "extrudr",
-    metrics: {
-      temperature: 185.4,
-      pressure: 12.3,
-      rpm: 120,
-      torque: 450,
-      throughput_kg_h: 85.2,
-    } as Record<string, number>,
-    randomize: (base: Record<string, number>): Record<string, number> => ({
-      temperature: +(base.temperature + (Math.random() * 6 - 3)).toFixed(1),
-      pressure: +(base.pressure + (Math.random() * 0.8 - 0.4)).toFixed(2),
-      rpm: Math.round(base.rpm + (Math.random() * 10 - 5)),
-      torque: Math.round(base.torque + (Math.random() * 20 - 10)),
-      throughput_kg_h: +(base.throughput_kg_h + (Math.random() * 4 - 2)).toFixed(1),
-    }),
-  },
-  {
-    id: "sensorgrow",
-    label: "Sensorgrow (IoT Sensor)",
-    description: "Generic sensor node telemetry",
+    id: "sensorgrow-fan",
+    label: "Sensorgrow — Fan Drive End",
+    description: "Real Node-RED payload from Sensorgrow sensor S125010T1TA10 on Fan Drive End. 40+ vibration, ultrasound, temperature metrics. Triggers Temperature Warning and Ultrasound Alert on first send.",
     deviceId: "sensorgrow",
-    metrics: {
-      temperature: 24.5,
-      humidity: 62.3,
-      co2_ppm: 412,
-      lux: 1850,
-    } as Record<string, number>,
-    randomize: (base: Record<string, number>): Record<string, number> => ({
-      temperature: +(base.temperature + (Math.random() * 2 - 1)).toFixed(1),
-      humidity: +(base.humidity + (Math.random() * 4 - 2)).toFixed(1),
-      co2_ppm: Math.round(base.co2_ppm + (Math.random() * 20 - 10)),
-      lux: Math.round(base.lux + (Math.random() * 200 - 100)),
+    metrics: { ...SENSORGROW_BASE_DATA },
+    randomize: (base) => ({
+      ...base,
+      // Drift vibration slightly
+      vibration_rms_velocity_x: +(base.vibration_rms_velocity_x + (Math.random() * 0.3 - 0.15)).toFixed(4),
+      vibration_rms_velocity_y: +(base.vibration_rms_velocity_y + (Math.random() * 0.2 - 0.1)).toFixed(4),
+      vibration_rms_velocity_z: +(base.vibration_rms_velocity_z + (Math.random() * 0.2 - 0.1)).toFixed(4),
+      vibration_max_velocity_x: +(base.vibration_max_velocity_x + (Math.random() * 0.4 - 0.2)).toFixed(4),
+      // Drift temperature slowly
+      temperature: +(base.temperature + (Math.random() * 0.4 - 0.2)).toFixed(3),
+      // Drift ultrasound
+      ultrasound: +(base.ultrasound + (Math.random() * 1 - 0.5)).toFixed(3),
+      // Runhours increments
+      runhours: Math.round(base.runhours + 1),
+      // Battery stays stable (3V lithium)
+      battery: +(Math.min(3.1, Math.max(2.4, base.battery + (Math.random() * 0.02 - 0.01)))).toFixed(2),
     }),
-  },
-  {
-    id: "energy_analytics",
-    label: "Energy Analytics",
-    description: "Power quality monitoring",
-    deviceId: "energy_analytics",
-    metrics: {
-      voltage_l1: 230.4,
-      voltage_l2: 229.8,
-      voltage_l3: 231.2,
-      current_l1: 12.3,
-      active_power_kw: 8.45,
-      power_factor: 0.92,
-    } as Record<string, number>,
-    randomize: (base: Record<string, number>): Record<string, number> => ({
-      voltage_l1: +(base.voltage_l1 + (Math.random() * 4 - 2)).toFixed(1),
-      voltage_l2: +(base.voltage_l2 + (Math.random() * 4 - 2)).toFixed(1),
-      voltage_l3: +(base.voltage_l3 + (Math.random() * 4 - 2)).toFixed(1),
-      current_l1: +(base.current_l1 + (Math.random() * 2 - 1)).toFixed(2),
-      active_power_kw: +(base.active_power_kw + (Math.random() * 1 - 0.5)).toFixed(3),
-      power_factor: +(Math.min(1, Math.max(0.8, base.power_factor + (Math.random() * 0.04 - 0.02)))).toFixed(3),
+    buildPayload: (data) => ({
+      deviceId: "sensorgrow",
+      timestamp: new Date().toISOString(),
+      timestampUnix: Date.now(),
+      receivedAt: new Date().toISOString(),
+      capturedAt: new Date().toISOString(),
+      sensor: { serial: "S125010T1TA10", mac: "00:80:e1:11:00:2b" },
+      asset: { tag_id: null, name: "Fan", id: 4979 },
+      measurement_point: { name: "Fan Drive End", id: 9362 },
+      data,
     }),
   },
 ];
@@ -347,11 +356,9 @@ export default function IngestSimulator() {
   // Rebuild JSON whenever preset or metrics change (only when not auto-sending)
   useEffect(() => {
     if (autoSend) return;
-    const payload = {
-      deviceId: selectedPreset.deviceId,
-      timestamp: new Date().toISOString(),
-      metrics: currentMetrics,
-    };
+    const payload = selectedPreset.buildPayload
+      ? selectedPreset.buildPayload(currentMetrics)
+      : { deviceId: selectedPreset.deviceId, timestamp: new Date().toISOString(), metrics: currentMetrics };
     setRawJson(JSON.stringify(payload, null, 2));
     setJsonError(null);
   }, [selectedPreset, currentMetrics, autoSend]);
@@ -405,8 +412,11 @@ export default function IngestSimulator() {
         setTotalSent((n) => n + 1);
         if (res.ok) {
           setTotalSuccess((n) => n + 1);
-          // Add point to chart (use provided metrics, or parse from payload)
-          const chartMetrics = metricsForChart ?? (payload as any).metrics;
+          // Add point to chart — try metricsForChart, then .metrics, then .data
+          const rawPayload = payload as any;
+          const chartMetrics = metricsForChart
+            ?? rawPayload.metrics
+            ?? rawPayload.data;
           if (chartMetrics && typeof chartMetrics === "object") {
             addChartPoint(chartMetrics as Record<string, number>);
           }
@@ -461,11 +471,9 @@ export default function IngestSimulator() {
     const runTick = (metricsSnapshot: Record<string, number>) => {
       const newMetrics = selectedPreset.randomize(metricsSnapshot);
       setCurrentMetrics(newMetrics);
-      const payload = {
-        deviceId: selectedPreset.deviceId,
-        timestamp: new Date().toISOString(),
-        metrics: newMetrics,
-      };
+      const payload = selectedPreset.buildPayload
+        ? selectedPreset.buildPayload(newMetrics)
+        : { deviceId: selectedPreset.deviceId, timestamp: new Date().toISOString(), metrics: newMetrics };
       sendPayload(payload, newMetrics);
       return newMetrics;
     };

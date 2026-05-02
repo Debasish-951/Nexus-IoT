@@ -9,17 +9,75 @@ import {
   alarmsTable,
   alarmHistoryTable,
 } from "@workspace/db";
-import {
-  IngestPayloadBody,
-  IngestBatchBody,
-  GetTelemetryParams,
-  GetTelemetryQueryParams,
-} from "@workspace/api-zod";
+import { GetTelemetryParams, GetTelemetryQueryParams } from "@workspace/api-zod";
 
 const router: IRouter = Router();
 
+// ── Timestamp helper ──────────────────────────────────────────────────────────
+// timestampUnix can be seconds (10-digit) or milliseconds (13-digit)
+function toDate(unix: number): Date {
+  return new Date(unix > 1e12 ? unix : unix * 1000);
+}
+
+// ── Sensorgrow payload normaliser ─────────────────────────────────────────────
+// Accepts either the standard format  { deviceId, metrics, … }
+// or the Sensorgrow / Node-RED format { deviceId, data, sensor, asset, measurement_point, … }
+// and returns a unified internal representation.
+interface NormalisedPayload {
+  deviceId: string;
+  timestamp?: Date;
+  metrics: Record<string, unknown>;
+  sensorSerial?: string;
+  externalAssetName?: string;
+  measurementPoint?: string;
+}
+
+function normalise(body: Record<string, unknown>): NormalisedPayload | null {
+  if (!body.deviceId || typeof body.deviceId !== "string") return null;
+
+  let ts: Date | undefined;
+  if (typeof body.timestampUnix === "number") {
+    ts = toDate(body.timestampUnix);
+  } else if (body.capturedAt) {
+    ts = new Date(body.capturedAt as string);
+  } else if (body.receivedAt) {
+    ts = new Date(body.receivedAt as string);
+  } else if (body.timestamp) {
+    // "2025-12-18 12:53:27.826-05.5:30" — non-standard; try coercion, fall back to now
+    try { ts = new Date(body.timestamp as string); } catch { ts = new Date(); }
+    if (isNaN(ts.getTime())) ts = new Date();
+  }
+
+  // Sensorgrow format → `data` holds the metric values
+  if (body.data && typeof body.data === "object" && !Array.isArray(body.data)) {
+    const sensor = body.sensor as Record<string, unknown> | undefined;
+    const asset  = body.asset  as Record<string, unknown> | undefined;
+    const mp     = body.measurement_point as Record<string, unknown> | undefined;
+    return {
+      deviceId: body.deviceId,
+      timestamp: ts,
+      metrics: body.data as Record<string, unknown>,
+      sensorSerial:       sensor?.serial as string | undefined,
+      externalAssetName:  (asset?.name as string | undefined)?.trim(),
+      measurementPoint:   mp?.name as string | undefined,
+    };
+  }
+
+  // Standard format → `metrics` holds the metric values
+  if (body.metrics && typeof body.metrics === "object" && !Array.isArray(body.metrics)) {
+    return {
+      deviceId: body.deviceId,
+      timestamp: ts,
+      metrics: body.metrics as Record<string, unknown>,
+    };
+  }
+
+  // No metrics at all — still accept (0 records written)
+  return { deviceId: body.deviceId, timestamp: ts, metrics: {} };
+}
+
 // ── Operator evaluation ───────────────────────────────────────────────────────
-function evalOperator(value: number, op: string, threshold: number): boolean {
+function evalOp(value: number, op: string, threshold: number): boolean {
   switch (op) {
     case "gt":  return value > threshold;
     case "lt":  return value < threshold;
@@ -31,7 +89,7 @@ function evalOperator(value: number, op: string, threshold: number): boolean {
   }
 }
 
-// ── Alarm-rule evaluation after each ingest ───────────────────────────────────
+// ── Alarm rule evaluation ─────────────────────────────────────────────────────
 interface AlarmEvent {
   ruleId: string;
   ruleName: string;
@@ -52,61 +110,41 @@ async function evaluateAlarmRules(
 ): Promise<AlarmEvent[]> {
   const events: AlarmEvent[] = [];
 
-  // Load all enabled threshold rules for this asset (or asset-independent rules)
   const rules = await db
     .select()
     .from(alarmRulesTable)
-    .where(
-      and(
-        eq(alarmRulesTable.enabled, true),
-        eq(alarmRulesTable.alarmType, "threshold")
-      )
-    );
+    .where(and(eq(alarmRulesTable.enabled, true), eq(alarmRulesTable.alarmType, "threshold")));
 
   for (const rule of rules) {
-    // Skip rules scoped to a different asset
     if (rule.assetId && rule.assetId !== assetId) continue;
-    // Skip rules without a metric or operator/threshold
     if (!rule.metric || !rule.operator || rule.threshold == null) continue;
-    // Skip if this metric isn't in the payload
-    const rawValue = metrics[rule.metric];
-    if (rawValue === undefined) continue;
-    const value = Number(rawValue);
+    const raw = metrics[rule.metric];
+    if (raw === undefined) continue;
+    const value = Number(raw);
     if (isNaN(value)) continue;
 
-    const conditionMet = evalOperator(value, rule.operator, rule.threshold);
+    const conditionMet = evalOp(value, rule.operator, rule.threshold);
 
-    // Find any currently ACTIVE alarm for this rule
-    const [existingAlarm] = await db
-      .select({ id: alarmsTable.id, status: alarmsTable.status })
+    const [existing] = await db
+      .select({ id: alarmsTable.id })
       .from(alarmsTable)
-      .where(
-        and(
-          eq(alarmsTable.ruleId, rule.id),
-          eq(alarmsTable.status, "active")
-        )
-      )
+      .where(and(eq(alarmsTable.ruleId, rule.id), eq(alarmsTable.status, "active")))
       .limit(1);
 
-    if (conditionMet && !existingAlarm) {
-      // ── Trigger new alarm ──
-      const [newAlarm] = await db
-        .insert(alarmsTable)
-        .values({
-          name: rule.name,
-          assetId,
-          assetName,
-          ruleId: rule.id,
-          severity: rule.severity,
-          status: "active",
-          alarmClass: "threshold",
-          message: `${rule.metric} ${rule.operator} ${rule.threshold} (value: ${value})`,
-          triggerValue: value,
-          triggeredAt: ts,
-        })
-        .returning();
+    if (conditionMet && !existing) {
+      const [newAlarm] = await db.insert(alarmsTable).values({
+        name: rule.name,
+        assetId,
+        assetName,
+        ruleId: rule.id,
+        severity: rule.severity,
+        status: "active",
+        alarmClass: "threshold",
+        message: `${rule.metric} ${rule.operator} ${rule.threshold} (value: ${value})`,
+        triggerValue: value,
+        triggeredAt: ts,
+      }).returning();
 
-      // Write to alarm history
       await db.insert(alarmHistoryTable).values({
         alarmId: newAlarm.id,
         assetId,
@@ -117,145 +155,102 @@ async function evaluateAlarmRules(
         triggeredAt: ts,
       });
 
-      events.push({
-        ruleId: rule.id,
-        ruleName: rule.name,
-        metric: rule.metric,
-        value,
-        threshold: rule.threshold,
-        operator: rule.operator,
-        severity: rule.severity,
-        event: "triggered",
-        alarmId: newAlarm.id,
-      });
-    } else if (!conditionMet && existingAlarm) {
-      // ── Clear existing alarm (with deadband check) ──
+      events.push({ ruleId: rule.id, ruleName: rule.name, metric: rule.metric, value,
+        threshold: rule.threshold, operator: rule.operator, severity: rule.severity,
+        event: "triggered", alarmId: newAlarm.id });
+
+    } else if (!conditionMet && existing) {
       const deadband = rule.deadband ?? 0;
-      const clearOk = deadband === 0
-        ? true
-        : !evalOperator(value, rule.operator, rule.threshold - deadband);
+      const clearOk  = deadband === 0 ? true
+        : !evalOp(value, rule.operator, rule.threshold - deadband);
 
       if (clearOk) {
-        await db
-          .update(alarmsTable)
-          .set({ status: "cleared", clearedAt: ts })
-          .where(eq(alarmsTable.id, existingAlarm.id));
+        await db.update(alarmsTable).set({ status: "cleared", clearedAt: ts })
+          .where(eq(alarmsTable.id, existing.id));
+        await db.update(alarmHistoryTable).set({ status: "cleared", clearedAt: ts })
+          .where(eq(alarmHistoryTable.alarmId, existing.id));
 
-        await db
-          .update(alarmHistoryTable)
-          .set({ status: "cleared", clearedAt: ts })
-          .where(eq(alarmHistoryTable.alarmId, existingAlarm.id));
-
-        events.push({
-          ruleId: rule.id,
-          ruleName: rule.name,
-          metric: rule.metric,
-          value,
-          threshold: rule.threshold,
-          operator: rule.operator,
-          severity: rule.severity,
-          event: "cleared",
-          alarmId: existingAlarm.id,
-        });
+        events.push({ ruleId: rule.id, ruleName: rule.name, metric: rule.metric, value,
+          threshold: rule.threshold, operator: rule.operator, severity: rule.severity,
+          event: "cleared", alarmId: existing.id });
       }
     }
   }
-
   return events;
 }
 
-// ── Core payload processing ───────────────────────────────────────────────────
-async function processPayload(payload: {
-  deviceId: string;
-  assetId?: string | null;
-  timestamp?: Date | string | null;
-  timestampUnix?: number | null;
-  metrics?: Record<string, unknown>;
-}) {
-  let assetId = payload.assetId;
-  let assetName = payload.deviceId;
+// ── Core ingest logic ─────────────────────────────────────────────────────────
+async function processNormalised(n: NormalisedPayload, assetIdHint?: string) {
+  let assetId: string | null = assetIdHint ?? null;
+  let assetName = n.externalAssetName ?? n.deviceId;
 
-  // If no assetId, try to find asset by deviceId as identifier
   if (!assetId) {
     const [asset] = await db
       .select({ id: assetsTable.id, name: assetsTable.name })
       .from(assetsTable)
-      .where(eq(assetsTable.identifier, payload.deviceId));
-    assetId = asset?.id;
+      .where(eq(assetsTable.identifier, n.deviceId));
+    assetId = asset?.id ?? null;
     if (asset?.name) assetName = asset.name;
   } else {
-    const [asset] = await db
-      .select({ name: assetsTable.name })
-      .from(assetsTable)
-      .where(eq(assetsTable.id, assetId));
+    const [asset] = await db.select({ name: assetsTable.name })
+      .from(assetsTable).where(eq(assetsTable.id, assetId));
     if (asset?.name) assetName = asset.name;
   }
 
-  if (!assetId || !payload.metrics) {
-    return { recordsWritten: 0, assetId: null, assetName: null, alarmEvents: [] };
+  const ts = n.timestamp ?? new Date();
+
+  if (!assetId || Object.keys(n.metrics).length === 0) {
+    return { recordsWritten: 0, assetId, assetName, alarmEvents: [] };
   }
 
-  let ts: Date;
-  if (payload.timestampUnix) {
-    ts = new Date(payload.timestampUnix * 1000);
-  } else if (payload.timestamp) {
-    ts = new Date(payload.timestamp as string);
-  } else {
-    ts = new Date();
-  }
-
-  const records = Object.entries(payload.metrics).map(([metric, value]) => ({
+  const records = Object.entries(n.metrics).map(([metric, value]) => ({
     assetId,
-    deviceId: payload.deviceId,
+    deviceId: n.deviceId,
     metric,
     value,
     timestamp: ts,
     quality: "good",
   }));
 
-  if (records.length > 0) {
-    await db.insert(telemetryTable).values(records as any[]);
+  await db.insert(telemetryTable).values(records as any[]);
 
-    // Update matching dynamic attributes
-    for (const [metric, value] of Object.entries(payload.metrics)) {
-      await db
-        .update(attributesTable)
-        .set({ value, timestamp: ts })
-        .where(
-          and(
-            eq(attributesTable.assetId, assetId as string),
-            eq(attributesTable.tagName, `${payload.deviceId}.${metric}`)
-          )
-        );
-    }
+  // Update dynamic attributes that match this device's tag pattern
+  for (const [metric, value] of Object.entries(n.metrics)) {
+    await db.update(attributesTable)
+      .set({ value, timestamp: ts })
+      .where(and(
+        eq(attributesTable.assetId, assetId as string),
+        eq(attributesTable.tagName, `${n.deviceId}.${metric}`)
+      ));
   }
 
-  // Evaluate alarm rules against ingested metrics
-  const alarmEvents = await evaluateAlarmRules(
-    assetId as string,
-    assetName,
-    payload.metrics,
-    ts
-  );
+  // Update sensor serial attribute if provided
+  if (n.sensorSerial) {
+    await db.update(attributesTable)
+      .set({ value: n.sensorSerial, timestamp: ts })
+      .where(and(
+        eq(attributesTable.assetId, assetId as string),
+        eq(attributesTable.tagName, `${n.deviceId}.sensor_serial`)
+      ));
+  }
+
+  const alarmEvents = await evaluateAlarmRules(assetId as string, assetName, n.metrics, ts);
 
   return { recordsWritten: records.length, assetId, assetName, alarmEvents };
 }
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 router.post("/ingest/payload", async (req, res): Promise<void> => {
-  const parsed = IngestPayloadBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+  const body = req.body as Record<string, unknown>;
+  const normalised = normalise(body);
+
+  if (!normalised) {
+    res.status(400).json({ error: "Missing required field: deviceId" });
     return;
   }
 
-  const result = await processPayload({
-    deviceId: parsed.data.deviceId,
-    assetId: parsed.data.assetId ?? null,
-    timestamp: parsed.data.timestamp ?? null,
-    timestampUnix: parsed.data.timestampUnix ?? null,
-    metrics: parsed.data.metrics as Record<string, unknown> ?? {},
-  });
+  const assetIdHint = typeof body.assetId === "string" ? body.assetId : undefined;
+  const result = await processNormalised(normalised, assetIdHint);
 
   const triggered = result.alarmEvents.filter((e) => e.event === "triggered");
   const cleared   = result.alarmEvents.filter((e) => e.event === "cleared");
@@ -264,6 +259,7 @@ router.post("/ingest/payload", async (req, res): Promise<void> => {
     success: true,
     recordsWritten: result.recordsWritten,
     assetId: result.assetId,
+    assetName: result.assetName,
     message: `Ingested ${result.recordsWritten} metric(s)`,
     alarmsTriggered: triggered.length,
     alarmsCleared: cleared.length,
@@ -272,72 +268,48 @@ router.post("/ingest/payload", async (req, res): Promise<void> => {
 });
 
 router.post("/ingest/batch", async (req, res): Promise<void> => {
-  const parsed = IngestBatchBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+  const items = req.body;
+  if (!Array.isArray(items)) {
+    res.status(400).json({ error: "Body must be an array of payload objects" });
     return;
   }
 
   let successCount = 0;
   let failureCount = 0;
-  let totalAlarmsTriggered = 0;
-  let totalAlarmsCleared = 0;
+  let totalTriggered = 0;
+  let totalCleared   = 0;
 
-  for (const payload of parsed.data) {
+  for (const item of items) {
     try {
-      const result = await processPayload({
-        deviceId: payload.deviceId,
-        assetId: payload.assetId ?? null,
-        timestamp: payload.timestamp ?? null,
-        timestampUnix: payload.timestampUnix ?? null,
-        metrics: payload.metrics as Record<string, unknown> ?? {},
-      });
-      totalAlarmsTriggered += result.alarmEvents.filter((e) => e.event === "triggered").length;
-      totalAlarmsCleared   += result.alarmEvents.filter((e) => e.event === "cleared").length;
+      const n = normalise(item as Record<string, unknown>);
+      if (!n) { failureCount++; continue; }
+      const result = await processNormalised(n);
+      totalTriggered += result.alarmEvents.filter((e) => e.event === "triggered").length;
+      totalCleared   += result.alarmEvents.filter((e) => e.event === "cleared").length;
       successCount++;
     } catch {
       failureCount++;
     }
   }
 
-  res.json({
-    success: failureCount === 0,
-    totalRecords: parsed.data.length,
-    successCount,
-    failureCount,
-    alarmsTriggered: totalAlarmsTriggered,
-    alarmsCleared: totalAlarmsCleared,
-  });
+  res.json({ success: failureCount === 0, totalRecords: items.length,
+    successCount, failureCount,
+    alarmsTriggered: totalTriggered, alarmsCleared: totalCleared });
 });
 
 router.get("/telemetry/:assetId", async (req, res): Promise<void> => {
   const params = GetTelemetryParams.safeParse(req.params);
-  if (!params.success) {
-    res.status(400).json({ error: params.error.message });
-    return;
-  }
+  if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
 
   const query = GetTelemetryQueryParams.safeParse(req.query);
-  if (!query.success) {
-    res.status(400).json({ error: query.error.message });
-    return;
-  }
+  if (!query.success) { res.status(400).json({ error: query.error.message }); return; }
 
   const conditions = [eq(telemetryTable.assetId, params.data.assetId)];
+  if (query.data.metric) conditions.push(eq(telemetryTable.metric, query.data.metric));
+  if (query.data.from) conditions.push(gte(telemetryTable.timestamp, new Date(query.data.from as string)));
+  if (query.data.to)   conditions.push(lte(telemetryTable.timestamp, new Date(query.data.to as string)));
 
-  if (query.data.metric) {
-    conditions.push(eq(telemetryTable.metric, query.data.metric));
-  }
-  if (query.data.from) {
-    conditions.push(gte(telemetryTable.timestamp, new Date(query.data.from as string)));
-  }
-  if (query.data.to) {
-    conditions.push(lte(telemetryTable.timestamp, new Date(query.data.to as string)));
-  }
-
-  const records = await db
-    .select()
-    .from(telemetryTable)
+  const records = await db.select().from(telemetryTable)
     .where(and(...conditions))
     .orderBy(desc(telemetryTable.timestamp))
     .limit(query.data.limit ?? 100);
