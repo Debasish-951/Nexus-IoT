@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import {
   useListAssets,
   useListAssetAttributes,
@@ -29,10 +29,14 @@ import {
   ChevronRight, ChevronDown, Blocks, Plus, Trash2, Edit2,
   Search, Download, FileSpreadsheet, Braces, LayoutTemplate,
   CheckCircle2, AlertTriangle, Info, Folder, FolderOpen, Calculator,
-  Zap, HelpCircle,
+  Zap, HelpCircle, TrendingUp, RefreshCw,
 } from "lucide-react";
+import {
+  LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
+  ResponsiveContainer, ReferenceLine,
+} from "recharts";
 import { cn } from "@/lib/utils";
-import { format } from "date-fns";
+import { format, subHours, subDays } from "date-fns";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface Asset {
@@ -135,6 +139,219 @@ const JSON_EXAMPLE = JSON.stringify([
   { name: "Temperature", type: "dynamic", dataType: "double", tagName: "sensorgrow.temperature", uom: "°C" },
   { name: "Sensor Serial", type: "static", dataType: "text", tagName: "sensorgrow.sensor_serial" },
 ], null, 2);
+
+const TIME_RANGES = [
+  { label: "1 h",  hours: 1 },
+  { label: "6 h",  hours: 6 },
+  { label: "24 h", hours: 24 },
+  { label: "7 d",  hours: 24 * 7 },
+];
+
+const CHART_COLORS = [
+  "#3b82f6","#22c55e","#f97316","#a855f7","#ef4444","#14b8a6","#eab308","#6366f1",
+];
+
+// ── Trends Panel ──────────────────────────────────────────────────────────────
+function TrendsPanel({ assetId, attrList }: { assetId: string; attrList: any[] }) {
+  const numericAttrs = attrList.filter((a: any) =>
+    ["dynamic","metric","runtime"].includes(a.type) &&
+    ["double","number","float"].includes(a.dataType?.toLowerCase?.() ?? "")
+  );
+
+  const [selectedMetrics, setSelectedMetrics] = useState<string[]>([]);
+  const [rangeHours, setRangeHours] = useState(1);
+  const [telemetry, setTelemetry] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [lastFetch, setLastFetch] = useState<Date | null>(null);
+
+  // Default to first available numeric attribute
+  useEffect(() => {
+    if (numericAttrs.length > 0 && selectedMetrics.length === 0) {
+      const first = numericAttrs[0];
+      const metricKey = first.tagName?.split(".").pop() ?? first.name;
+      setSelectedMetrics([metricKey]);
+    }
+  }, [attrList]);
+
+  const fetchTelemetry = useCallback(async () => {
+    if (selectedMetrics.length === 0) return;
+    setLoading(true);
+    try {
+      const from = (rangeHours <= 24 ? subHours(new Date(), rangeHours) : subDays(new Date(), rangeHours / 24)).toISOString();
+      const allRows: any[] = [];
+      for (const metric of selectedMetrics) {
+        const params = new URLSearchParams({ metric, from, limit: "1000" });
+        const res = await fetch(`/api/telemetry/${assetId}?${params}`);
+        if (res.ok) {
+          const rows: any[] = await res.json();
+          allRows.push(...rows.map((r) => ({ ...r, _metric: metric })));
+        }
+      }
+      // Pivot: group by timestamp, one key per metric
+      const byTs: Record<string, any> = {};
+      for (const row of allRows) {
+        const ts = new Date(row.timestamp).getTime();
+        if (!byTs[ts]) byTs[ts] = { ts, time: format(new Date(row.timestamp), rangeHours <= 1 ? "HH:mm:ss" : rangeHours <= 24 ? "HH:mm" : "MM/dd HH:mm") };
+        const v = Number(row.value);
+        if (!isNaN(v)) byTs[ts][row._metric] = v;
+      }
+      const sorted = Object.values(byTs).sort((a, b) => a.ts - b.ts);
+      setTelemetry(sorted);
+      setLastFetch(new Date());
+    } finally { setLoading(false); }
+  }, [assetId, selectedMetrics, rangeHours]);
+
+  useEffect(() => { fetchTelemetry(); }, [fetchTelemetry]);
+
+  function toggleMetric(key: string) {
+    setSelectedMetrics((prev) =>
+      prev.includes(key) ? prev.filter((m) => m !== key) : [...prev, key]
+    );
+  }
+
+  function exportTelemetryCsv() {
+    const metric = selectedMetrics[0];
+    const from = (rangeHours <= 24 ? subHours(new Date(), rangeHours) : subDays(new Date(), rangeHours / 24)).toISOString();
+    const params = new URLSearchParams(metric ? { metric, from } : { from });
+    const url = `/api/telemetry/${assetId}/export?${params}`;
+    const a = document.createElement("a");
+    a.href = url; a.download = `telemetry_${assetId}_${Date.now()}.csv`;
+    a.click();
+  }
+
+  const metricOptions = numericAttrs.map((a: any) => ({
+    key: a.tagName?.split(".").pop() ?? a.name,
+    label: a.name,
+    uom: a.uom,
+  }));
+
+  const hasData = telemetry.length > 0;
+
+  return (
+    <div className="p-4 space-y-4">
+      {/* Controls */}
+      <div className="flex items-center gap-3 flex-wrap">
+        {/* Metric toggles */}
+        <div className="flex items-center gap-1.5 flex-wrap">
+          <span className="text-xs text-muted-foreground font-medium">Metrics:</span>
+          {metricOptions.length === 0 ? (
+            <span className="text-xs text-muted-foreground italic">No numeric attributes found</span>
+          ) : metricOptions.map(({ key, label, uom }, i) => (
+            <button key={key}
+              onClick={() => toggleMetric(key)}
+              className={cn("text-xs px-2 py-0.5 rounded-full border font-medium transition-colors",
+                selectedMetrics.includes(key)
+                  ? "border-transparent text-white"
+                  : "border-border text-muted-foreground hover:bg-muted"
+              )}
+              style={selectedMetrics.includes(key) ? { backgroundColor: CHART_COLORS[i % CHART_COLORS.length] } : {}}
+            >
+              {label}{uom ? ` (${uom})` : ""}
+            </button>
+          ))}
+        </div>
+
+        <div className="flex-1" />
+
+        {/* Time range */}
+        <div className="flex items-center bg-muted rounded-md p-0.5">
+          {TIME_RANGES.map(({ label, hours }) => (
+            <button key={hours}
+              onClick={() => setRangeHours(hours)}
+              className={cn("text-xs px-2.5 py-1 rounded transition-colors",
+                rangeHours === hours ? "bg-background shadow-sm font-medium" : "text-muted-foreground hover:text-foreground"
+              )}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <button onClick={fetchTelemetry} disabled={loading}
+          className="p-1.5 rounded hover:bg-muted transition-colors text-muted-foreground disabled:opacity-50">
+          <RefreshCw className={cn("w-3.5 h-3.5", loading && "animate-spin")} />
+        </button>
+
+        <Button size="sm" variant="outline" className="h-7 text-xs" onClick={exportTelemetryCsv}>
+          <Download className="w-3.5 h-3.5 mr-1" /> Export CSV
+        </Button>
+      </div>
+
+      {/* Chart */}
+      <div className="rounded-lg border border-border bg-card p-4">
+        {loading && telemetry.length === 0 ? (
+          <Skeleton className="h-64 w-full" />
+        ) : !hasData ? (
+          <div className="h-64 flex flex-col items-center justify-center text-muted-foreground">
+            <TrendingUp className="w-10 h-10 mb-3 opacity-20" />
+            <p className="text-sm font-medium">No telemetry data in this time range</p>
+            <p className="text-xs mt-1 opacity-60">
+              {selectedMetrics.length === 0
+                ? "Select a metric above to see its trend"
+                : `No data for "${selectedMetrics.join(", ")}" in the past ${rangeHours < 24 ? `${rangeHours}h` : `${rangeHours / 24}d`}`}
+            </p>
+          </div>
+        ) : (
+          <ResponsiveContainer width="100%" height={280}>
+            <LineChart data={telemetry} margin={{ top: 4, right: 12, left: 0, bottom: 4 }}>
+              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+              <XAxis dataKey="time" tick={{ fontSize: 10 }} tickLine={false} axisLine={false} />
+              <YAxis tick={{ fontSize: 10 }} tickLine={false} axisLine={false} width={40} />
+              <Tooltip
+                contentStyle={{ fontSize: 11, borderRadius: 6, border: "1px solid hsl(var(--border))", background: "hsl(var(--card))" }}
+                labelStyle={{ fontWeight: 600, marginBottom: 4 }}
+              />
+              {selectedMetrics.map((metric, i) => (
+                <Line
+                  key={metric}
+                  type="monotone"
+                  dataKey={metric}
+                  stroke={CHART_COLORS[i % CHART_COLORS.length]}
+                  strokeWidth={2}
+                  dot={telemetry.length < 50}
+                  activeDot={{ r: 4 }}
+                  connectNulls={false}
+                />
+              ))}
+            </LineChart>
+          </ResponsiveContainer>
+        )}
+      </div>
+
+      {/* Summary stats */}
+      {hasData && (
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          {selectedMetrics.map((metric, i) => {
+            const vals = telemetry.map((r) => r[metric]).filter((v) => v != null) as number[];
+            if (vals.length === 0) return null;
+            const min = Math.min(...vals); const max = Math.max(...vals);
+            const avg = vals.reduce((a, b) => a + b, 0) / vals.length;
+            const last = vals[vals.length - 1];
+            const color = CHART_COLORS[i % CHART_COLORS.length];
+            return (
+              <div key={metric} className="rounded-lg border border-border bg-muted/30 p-3" style={{ borderLeftColor: color, borderLeftWidth: 3 }}>
+                <p className="text-xs font-medium mb-1.5 truncate">{metric}</p>
+                <div className="grid grid-cols-2 gap-y-1 text-xs">
+                  <span className="text-muted-foreground">Last</span><span className="font-mono font-medium">{last.toFixed(2)}</span>
+                  <span className="text-muted-foreground">Avg</span><span className="font-mono">{avg.toFixed(2)}</span>
+                  <span className="text-muted-foreground">Min</span><span className="font-mono">{min.toFixed(2)}</span>
+                  <span className="text-muted-foreground">Max</span><span className="font-mono">{max.toFixed(2)}</span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1.5">{vals.length} samples</p>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {lastFetch && (
+        <p className="text-xs text-muted-foreground flex items-center gap-1">
+          <RefreshCw className="w-3 h-3" />
+          Updated {format(lastFetch, "HH:mm:ss")}
+        </p>
+      )}
+    </div>
+  );
+}
 
 // ── Main component ────────────────────────────────────────────────────────────
 export default function Assets() {
@@ -438,6 +655,7 @@ export default function Assets() {
               <div className="px-4 pt-2 border-b border-border bg-card">
                 <TabsList className="h-8">
                   <TabsTrigger value="attributes" className="text-xs h-7">Attributes</TabsTrigger>
+                  <TabsTrigger value="trends" className="text-xs h-7 gap-1"><TrendingUp className="w-3 h-3" />Trends</TabsTrigger>
                   <TabsTrigger value="table" className="text-xs h-7">Table</TabsTrigger>
                   <TabsTrigger value="media" className="text-xs h-7">Media</TabsTrigger>
                 </TabsList>
@@ -561,6 +779,9 @@ export default function Assets() {
                     )}
                   </tbody>
                 </table>
+              </TabsContent>
+              <TabsContent value="trends" className="flex-1 overflow-auto m-0">
+                <TrendsPanel assetId={selectedAsset.id} attrList={attrList} />
               </TabsContent>
               <TabsContent value="table" className="flex-1 flex items-center justify-center m-0">
                 <p className="text-sm text-muted-foreground">Table view — coming soon</p>

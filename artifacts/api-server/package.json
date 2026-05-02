@@ -17,6 +17,7 @@
     "drizzle-orm": "catalog:",
     "expr-eval": "^2.0.2",
     "express": "^5",
+    "mqtt": "^5.15.1",
     "pino": "^9",
     "pino-http": "^10"
   },

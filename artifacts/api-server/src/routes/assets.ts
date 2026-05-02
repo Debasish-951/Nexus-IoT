@@ -243,13 +243,14 @@ router.post("/assets/:id/apply-template", async (req, res): Promise<void> => {
 
     try {
       await db.insert(attributesTable).values({
-        assetId:  id,
-        name:     def.name,
-        type:     def.type     ?? "static",
-        dataType: def.dataType ?? "text",
-        value:    def.value    ?? null,
-        tagName:  resolvedTagName,
-        uom:      def.uom      ?? null,
+        assetId:    id,
+        name:       def.name,
+        type:       def.type       ?? "static",
+        dataType:   def.dataType   ?? "text",
+        value:      def.value      ?? null,
+        tagName:    resolvedTagName,
+        uom:        def.uom        ?? null,
+        expression: def.expression ?? null,
       });
       existingNames.add(nameKey);
       if (tagKey) existingTagNames.add(tagKey);

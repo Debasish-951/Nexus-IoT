@@ -16,8 +16,11 @@ export const alarmRulesTable = pgTable("alarm_rules", {
   onDelay: integer("on_delay"),
   offDelay: integer("off_delay"),
   scanRate: integer("scan_rate").default(2),
+  rocWindow: integer("roc_window").default(60), // seconds window for rate-of-change
   enabled: boolean("enabled").notNull().default(true),
   requireAcknowledge: boolean("require_acknowledge").notNull().default(true),
+  webhookUrl: text("webhook_url"),
+  webhookEnabled: boolean("webhook_enabled").notNull().default(false),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });
