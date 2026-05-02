@@ -20,13 +20,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
+import { Switch } from "@/components/ui/switch";
+import { Label } from "@/components/ui/label";
 import { useForm } from "react-hook-form";
 import { Form, FormField, FormItem, FormLabel, FormControl, FormDescription } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
 import {
   ChevronRight, ChevronDown, Blocks, Plus, Trash2, Edit2,
   Search, Download, FileSpreadsheet, Braces, LayoutTemplate,
-  CheckCircle2, AlertTriangle, Info, Folder, FolderOpen,
+  CheckCircle2, AlertTriangle, Info, Folder, FolderOpen, Calculator,
+  Zap, HelpCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
@@ -40,66 +43,62 @@ interface Asset {
 }
 interface AttrDef {
   name: string; type: string; dataType: string;
-  value?: string; tagName?: string; uom?: string;
+  value?: string; tagName?: string; uom?: string; expression?: string;
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Attribute type badge ──────────────────────────────────────────────────────
 function AttributeType({ type }: { type: string }) {
-  const colors: Record<string, string> = {
+  const styles: Record<string, string> = {
     static:  "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300",
     dynamic: "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300",
     metric:  "bg-purple-100 text-purple-700 dark:bg-purple-950 dark:text-purple-300",
+    runtime: "bg-orange-100 text-orange-700 dark:bg-orange-950 dark:text-orange-300",
   };
-  return <span className={cn("text-xs px-1.5 py-0.5 rounded font-medium", colors[type] ?? "bg-muted text-muted-foreground")}>{type}</span>;
+  return (
+    <span className={cn("text-xs px-1.5 py-0.5 rounded font-medium inline-flex items-center gap-1",
+      styles[type] ?? "bg-muted text-muted-foreground")}>
+      {type === "runtime" && <Calculator className="w-2.5 h-2.5" />}
+      {type}
+    </span>
+  );
 }
 
-// ── Asset tree node with inline "Add child" ───────────────────────────────────
+// ── Asset tree node ───────────────────────────────────────────────────────────
 function AssetTreeNode({ asset, allAssets, selectedId, onSelect, onAddChild, depth }: {
   asset: Asset; allAssets: Asset[]; selectedId: string | null;
   onSelect: (a: Asset) => void; onAddChild: (parentId: string) => void; depth: number;
 }) {
-  const children = allAssets.filter((a) => a.parentId === asset.id);
+  const children   = allAssets.filter((a) => a.parentId === asset.id);
   const [expanded, setExpanded] = useState(depth < 2);
   const hasChildren = children.length > 0;
-  const isSelected = selectedId === asset.id;
 
   return (
     <div>
       <div
-        className={cn(
-          "group flex items-center gap-1 py-1 px-1 rounded cursor-pointer text-sm transition-colors",
-          isSelected ? "bg-primary/10 text-primary font-medium" : "hover:bg-muted/60"
-        )}
+        className={cn("group flex items-center gap-1 py-1 px-1 rounded cursor-pointer text-sm transition-colors",
+          selectedId === asset.id ? "bg-primary/10 text-primary font-medium" : "hover:bg-muted/60")}
         style={{ paddingLeft: `${6 + depth * 14}px` }}
         onClick={() => onSelect(asset)}
       >
-        {/* Expand/collapse toggle */}
         {hasChildren ? (
           <button onClick={(e) => { e.stopPropagation(); setExpanded((o) => !o); }} className="shrink-0 p-0.5">
             {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
           </button>
         ) : <span className="w-4 shrink-0" />}
 
-        {/* Icon: folder for groups, block for leaf */}
         {hasChildren || asset.childCount > 0
           ? expanded
             ? <FolderOpen className="w-3.5 h-3.5 shrink-0 text-amber-500/80" />
             : <Folder className="w-3.5 h-3.5 shrink-0 text-amber-500/80" />
           : <Blocks className="w-3.5 h-3.5 shrink-0 text-primary/60" />
         }
-
         <span className="truncate flex-1 text-xs">{asset.name}</span>
-
-        {/* Inline add-child button */}
-        <button
-          title="Add child asset"
+        <button title="Add child asset"
           onClick={(e) => { e.stopPropagation(); onAddChild(asset.id); }}
-          className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all shrink-0"
-        >
+          className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all shrink-0">
           <Plus className="w-3 h-3" />
         </button>
       </div>
-
       {expanded && children.map((child) => (
         <AssetTreeNode key={child.id} asset={child} allAssets={allAssets}
           selectedId={selectedId} onSelect={onSelect} onAddChild={onAddChild} depth={depth + 1} />
@@ -131,11 +130,7 @@ function parseCsv(text: string): AttrDef[] {
   return results;
 }
 
-const CSV_EXAMPLE = `name,type,dataType,tagName,uom
-Temperature,dynamic,double,sensorgrow.temperature,°C
-Vibration RMS X,dynamic,double,sensorgrow.vibration_rms_velocity_x,mm/s
-Sensor Serial,static,text,sensorgrow.sensor_serial,`;
-
+const CSV_EXAMPLE = `name,type,dataType,tagName,uom\nTemperature,dynamic,double,sensorgrow.temperature,°C\nVibration RMS X,dynamic,double,sensorgrow.vibration_rms_velocity_x,mm/s\nSensor Serial,static,text,sensorgrow.sensor_serial,`;
 const JSON_EXAMPLE = JSON.stringify([
   { name: "Temperature", type: "dynamic", dataType: "double", tagName: "sensorgrow.temperature", uom: "°C" },
   { name: "Sensor Serial", type: "static", dataType: "text", tagName: "sensorgrow.sensor_serial" },
@@ -146,21 +141,26 @@ export default function Assets() {
   const { toast } = useToast();
   const qc = useQueryClient();
 
-  const [search, setSearch]                 = useState("");
-  const [selectedAsset, setSelectedAsset]   = useState<Asset | null>(null);
-  const [addAssetOpen, setAddAssetOpen]     = useState(false);
+  const [search, setSearch]             = useState("");
+  const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
+  const [addAssetOpen, setAddAssetOpen] = useState(false);
   const [addAssetParentId, setAddAssetParentId] = useState<string | null>(null);
-  const [addAttrOpen, setAddAttrOpen]       = useState(false);
-  const [importOpen, setImportOpen]         = useState(false);
-  const [importTab, setImportTab]           = useState<"template" | "csv" | "json">("template");
+  const [addAttrOpen, setAddAttrOpen]   = useState(false);
+  const [editAttr, setEditAttr]         = useState<any | null>(null);
+  const [importOpen, setImportOpen]     = useState(false);
+  const [importTab, setImportTab]       = useState<"template" | "csv" | "json">("template");
 
-  const [csvText, setCsvText]               = useState("");
-  const [jsonText, setJsonText]             = useState("");
-  const [previewRows, setPreviewRows]       = useState<AttrDef[]>([]);
-  const [parseError, setParseError]         = useState<string | null>(null);
-  const [importing, setImporting]           = useState(false);
+  const [csvText, setCsvText]           = useState("");
+  const [jsonText, setJsonText]         = useState("");
+  const [previewRows, setPreviewRows]   = useState<AttrDef[]>([]);
+  const [parseError, setParseError]     = useState<string | null>(null);
+  const [importing, setImporting]       = useState(false);
   const [applyingTemplate, setApplyingTemplate] = useState(false);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
+
+  // Add/Edit attribute form state
+  const [attrUseExpr, setAttrUseExpr]   = useState(false);
+  const [editAttrUseExpr, setEditAttrUseExpr] = useState(false);
 
   const { data: assets }     = useListAssets();
   const { data: attributes } = useListAssetAttributes(selectedAsset?.id ?? "", {
@@ -174,10 +174,11 @@ export default function Assets() {
   const deleteAttr  = useDeleteAttribute();
 
   const assetForm = useForm({ defaultValues: { name: "", identifier: "", parentId: "" } });
-  const attrForm  = useForm({ defaultValues: { name: "", type: "static", dataType: "text", value: "", tagName: "", uom: "" } });
+  const attrForm  = useForm({ defaultValues: { name: "", type: "static", dataType: "double", value: "", tagName: "", uom: "", expression: "" } });
+  const editAttrForm = useForm({ defaultValues: { name: "", type: "static", dataType: "double", value: "", tagName: "", uom: "", expression: "" } });
 
-  const allAssets    = (assets     as Asset[] | undefined) ?? [];
-  const templateList = (templates  as any[]   | undefined) ?? [];
+  const allAssets    = (assets    as Asset[] | undefined) ?? [];
+  const templateList = (templates as any[]   | undefined) ?? [];
   const rootAssets   = allAssets.filter((a) => !a.parentId);
   const attrList     = (attributes as any[] | undefined) ?? [];
 
@@ -185,53 +186,46 @@ export default function Assets() {
     ? allAssets.filter((a) => a.name.toLowerCase().includes(search.toLowerCase()) || a.identifier.toLowerCase().includes(search.toLowerCase()))
     : [];
 
-  // Build indented label for parent selector
-  function buildParentLabel(asset: Asset, depth = 0): string {
-    return `${"  ".repeat(depth)}${asset.name}`;
-  }
   function flattenTree(roots: Asset[], all: Asset[], depth = 0): Array<{ asset: Asset; depth: number }> {
     const result: Array<{ asset: Asset; depth: number }> = [];
     for (const a of roots) {
       result.push({ asset: a, depth });
-      const children = all.filter((c) => c.parentId === a.id);
-      result.push(...flattenTree(children, all, depth + 1));
+      result.push(...flattenTree(all.filter((c) => c.parentId === a.id), all, depth + 1));
     }
     return result;
   }
   const treeFlat = flattenTree(rootAssets, allAssets);
 
-  // ── Open Add Asset dialog, optionally pre-fill parent ─────────────────────
+  // Available attribute names for expression autocomplete
+  const attrNames = attrList
+    .filter((a: any) => a.type !== "runtime")
+    .map((a: any) => a.name as string);
+
   function openAddAsset(parentId: string | null = null) {
     setAddAssetParentId(parentId);
     assetForm.reset({ name: "", identifier: "", parentId: parentId ?? "" });
     setAddAssetOpen(true);
   }
 
-  // ── Auto-generate identifier from name ────────────────────────────────────
   function handleNameChange(name: string) {
     assetForm.setValue("name", name);
-    const current = assetForm.getValues("identifier");
-    if (!current || current === assetForm.getValues("name").toLowerCase().replace(/\s+/g, "_")) {
-      assetForm.setValue("identifier", name.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, ""));
-    }
+    const curr = assetForm.getValues("identifier");
+    if (!curr) assetForm.setValue("identifier", name.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, ""));
   }
 
   // ── Parse preview ─────────────────────────────────────────────────────────
   function handleParse() {
-    setParseError(null);
-    setPreviewRows([]);
+    setParseError(null); setPreviewRows([]);
     try {
       if (importTab === "csv") {
         const rows = parseCsv(csvText);
-        if (rows.length === 0) { setParseError("No data rows found. Check the CSV format."); return; }
+        if (rows.length === 0) { setParseError("No data rows found."); return; }
         setPreviewRows(rows);
       } else if (importTab === "json") {
         const parsed = JSON.parse(jsonText);
         setPreviewRows(Array.isArray(parsed) ? parsed : [parsed]);
       }
-    } catch (e: any) {
-      setParseError(e.message);
-    }
+    } catch (e: any) { setParseError(e.message); }
   }
 
   // ── Bulk import ───────────────────────────────────────────────────────────
@@ -240,23 +234,19 @@ export default function Assets() {
     setImporting(true);
     try {
       const res = await fetch(`/api/assets/${selectedAsset.id}/attributes/bulk`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ attributes: previewRows }),
       });
       const data = await res.json();
       if (!res.ok) { toast({ title: "Import failed", description: data.error, variant: "destructive" }); return; }
       const desc = data.skipped > 0
-        ? `${data.created} created · ${data.skipped} skipped (already exist): ${(data.skippedItems ?? []).join(", ")}`
+        ? `${data.created} created · ${data.skipped} skipped: ${(data.skippedItems ?? []).join(", ")}`
         : `${data.created} attribute(s) created`;
       toast({ title: "Import complete", description: desc });
       qc.invalidateQueries({ queryKey: getListAssetAttributesQueryKey(selectedAsset.id) });
       qc.invalidateQueries({ queryKey: getListAssetsQueryKey() });
-      setImportOpen(false);
-      setPreviewRows([]); setCsvText(""); setJsonText("");
-    } finally {
-      setImporting(false);
-    }
+      closeImport();
+    } finally { setImporting(false); }
   }
 
   // ── Apply template ────────────────────────────────────────────────────────
@@ -267,32 +257,51 @@ export default function Assets() {
     setApplyingTemplate(true);
     try {
       const res = await fetch(`/api/assets/${selectedAsset.id}/apply-template`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
+        method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ templateId: tid }),
       });
       const data = await res.json();
       if (!res.ok) { toast({ title: "Failed", description: data.error, variant: "destructive" }); return; }
       let desc = `${data.created} attribute(s) created`;
-      if (data.skipped > 0) desc += ` · ${data.skipped} skipped (already exist): ${(data.skippedItems ?? []).join(", ")}`;
+      if (data.skipped > 0) desc += ` · ${data.skipped} skipped: ${(data.skippedItems ?? []).join(", ")}`;
       toast({ title: `Template "${data.templateName}" applied`, description: desc });
       qc.invalidateQueries({ queryKey: getListAssetAttributesQueryKey(selectedAsset.id) });
       qc.invalidateQueries({ queryKey: getListAssetsQueryKey() });
-      setImportOpen(false);
-      setSelectedTemplateId("");
-    } finally {
-      setApplyingTemplate(false);
-    }
+      closeImport(); setSelectedTemplateId("");
+    } finally { setApplyingTemplate(false); }
+  }
+
+  // ── Save edited attribute ─────────────────────────────────────────────────
+  async function handleSaveEdit(data: any) {
+    if (!editAttr) return;
+    const body: Record<string, any> = {
+      name: data.name, type: data.type, dataType: data.dataType,
+      value: data.value || null, tagName: data.tagName || null,
+      uom: data.uom || null,
+      expression: editAttrUseExpr ? data.expression || null : null,
+    };
+    if (editAttrUseExpr) body.type = "runtime";
+
+    try {
+      const res = await fetch(`/api/attributes/${editAttr.id}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      if (!res.ok) { const d = await res.json(); toast({ title: "Update failed", description: d.error, variant: "destructive" }); return; }
+      toast({ title: "Attribute updated" });
+      qc.invalidateQueries({ queryKey: getListAssetAttributesQueryKey(selectedAsset!.id) });
+      setEditAttr(null); editAttrForm.reset();
+    } catch (e: any) { toast({ title: "Error", description: e.message, variant: "destructive" }); }
   }
 
   // ── Export CSV ────────────────────────────────────────────────────────────
   function handleExportCsv() {
     if (attrList.length === 0) return;
-    const header = "name,type,dataType,value,tagName,uom";
+    const header = "name,type,dataType,value,tagName,uom,expression";
     const rows = attrList.map((a: any) =>
       [a.name, a.type, a.dataType,
         a.value != null ? String(typeof a.value === "object" ? JSON.stringify(a.value) : a.value) : "",
-        a.tagName ?? "", a.uom ?? ""]
+        a.tagName ?? "", a.uom ?? "", a.expression ?? ""]
         .map((v) => `"${String(v).replace(/"/g, '""')}"`)
         .join(",")
     );
@@ -304,33 +313,45 @@ export default function Assets() {
     a.click(); URL.revokeObjectURL(url);
   }
 
-  // ── Add asset ─────────────────────────────────────────────────────────────
   function onAddAsset(data: { name: string; identifier: string; parentId?: string }) {
-    createAsset.mutate(
-      { data: { name: data.name, identifier: data.identifier, parentId: data.parentId || null } },
-      {
-        onSuccess: (created: any) => {
-          toast({ title: "Asset created", description: data.parentId ? `Added under ${allAssets.find((a) => a.id === data.parentId)?.name ?? "parent"}` : "Added at root level" });
-          qc.invalidateQueries({ queryKey: getListAssetsQueryKey() });
-          setAddAssetOpen(false);
-          assetForm.reset();
-        },
-      }
-    );
+    createAsset.mutate({ data: { name: data.name, identifier: data.identifier, parentId: data.parentId || null } }, {
+      onSuccess: () => {
+        toast({ title: "Asset created" });
+        qc.invalidateQueries({ queryKey: getListAssetsQueryKey() });
+        setAddAssetOpen(false); assetForm.reset();
+      },
+    });
   }
 
-  function onAddAttr(data: { name: string; type: string; dataType: string; value?: string; tagName?: string; uom?: string }) {
+  function onAddAttr(data: { name: string; type: string; dataType: string; value?: string; tagName?: string; uom?: string; expression?: string }) {
     if (!selectedAsset) return;
-    createAttr.mutate(
-      { id: selectedAsset.id, data: { name: data.name, type: data.type as any, dataType: data.dataType as any, value: data.value || null, tagName: data.tagName || null, uom: data.uom || null } },
-      {
-        onSuccess: () => {
-          toast({ title: "Attribute added" });
-          qc.invalidateQueries({ queryKey: getListAssetAttributesQueryKey(selectedAsset.id) });
-          setAddAttrOpen(false); attrForm.reset();
-        },
-      }
-    );
+    const finalType = attrUseExpr ? "runtime" : data.type;
+    createAttr.mutate({
+      id: selectedAsset.id,
+      data: {
+        name: data.name, type: finalType as any, dataType: data.dataType as any,
+        value: data.value || null, tagName: data.tagName || null, uom: data.uom || null,
+        expression: attrUseExpr ? data.expression || null : null,
+      } as any,
+    }, {
+      onSuccess: () => {
+        toast({ title: "Attribute added" });
+        qc.invalidateQueries({ queryKey: getListAssetAttributesQueryKey(selectedAsset.id) });
+        setAddAttrOpen(false); attrForm.reset(); setAttrUseExpr(false);
+      },
+    });
+  }
+
+  function openEditAttr(attr: any) {
+    setEditAttr(attr);
+    const hasExpr = !!attr.expression;
+    setEditAttrUseExpr(hasExpr);
+    editAttrForm.reset({
+      name: attr.name, type: attr.type, dataType: attr.dataType,
+      value: attr.value != null ? String(attr.value) : "",
+      tagName: attr.tagName ?? "", uom: attr.uom ?? "",
+      expression: attr.expression ?? "",
+    });
   }
 
   function closeImport() {
@@ -342,33 +363,28 @@ export default function Assets() {
   return (
     <div className="flex h-full overflow-hidden">
 
-      {/* ── Asset tree ─────────────────────────────────────────────────── */}
+      {/* ── Asset tree ──────────────────────────────────────────────────── */}
       <div className="w-64 border-r border-border flex flex-col shrink-0 bg-card">
         <div className="p-3 border-b border-border">
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
-            <Input placeholder="Search assets…" value={search}
-              onChange={(e) => setSearch(e.target.value)} className="pl-8 h-8 text-xs" />
+            <Input placeholder="Search assets…" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-8 h-8 text-xs" />
           </div>
         </div>
-
         <ScrollArea className="flex-1">
           <div className="p-1.5 space-y-0.5">
             {!assets ? (
               Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-7 w-full rounded" />)
             ) : search ? (
-              filteredSearch.length === 0 ? (
-                <p className="text-xs text-muted-foreground text-center py-4">No assets match</p>
-              ) : (
-                filteredSearch.map((a) => (
+              filteredSearch.length === 0
+                ? <p className="text-xs text-muted-foreground text-center py-4">No assets match</p>
+                : filteredSearch.map((a) => (
                   <div key={a.id} onClick={() => setSelectedAsset(a)}
-                    className={cn("flex items-center gap-1.5 py-1 px-2 rounded cursor-pointer text-xs transition-colors",
+                    className={cn("flex items-center gap-1.5 py-1 px-2 rounded cursor-pointer text-xs",
                       selectedAsset?.id === a.id ? "bg-primary/10 text-primary font-medium" : "hover:bg-muted/60")}>
-                    <Blocks className="w-3.5 h-3.5 shrink-0 text-primary/60" />
-                    <span className="truncate">{a.name}</span>
+                    <Blocks className="w-3.5 h-3.5 shrink-0 text-primary/60" /><span className="truncate">{a.name}</span>
                   </div>
                 ))
-              )
             ) : rootAssets.length === 0 ? (
               <div className="px-3 py-8 text-center text-muted-foreground">
                 <Blocks className="w-8 h-8 mx-auto mb-2 opacity-20" />
@@ -383,13 +399,11 @@ export default function Assets() {
                   selectedId={selectedAsset?.id ?? null}
                   onSelect={setSelectedAsset}
                   onAddChild={(pid) => openAddAsset(pid)}
-                  depth={0}
-                />
+                  depth={0} />
               ))
             )}
           </div>
         </ScrollArea>
-
         <div className="p-2 border-t border-border">
           <Button size="sm" variant="outline" className="w-full text-xs h-7" onClick={() => openAddAsset(null)}>
             <Plus className="w-3.5 h-3.5 mr-1" /> Add Root Asset
@@ -401,16 +415,13 @@ export default function Assets() {
       <div className="flex-1 flex flex-col overflow-hidden">
         {selectedAsset ? (
           <>
-            {/* Header */}
             <div className="px-4 py-3 border-b border-border bg-card flex items-center justify-between gap-3">
               <div className="min-w-0">
                 <h2 className="font-semibold text-sm truncate">{selectedAsset.name}</h2>
                 <p className="text-xs text-muted-foreground font-mono mt-0.5">{selectedAsset.identifier}</p>
               </div>
               <div className="flex items-center gap-2 shrink-0">
-                {selectedAsset.templateName && (
-                  <Badge variant="secondary" className="text-xs">{selectedAsset.templateName}</Badge>
-                )}
+                {selectedAsset.templateName && <Badge variant="secondary" className="text-xs">{selectedAsset.templateName}</Badge>}
                 <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => openAddAsset(selectedAsset.id)}>
                   <Plus className="w-3 h-3 mr-1" /> Add Child
                 </Button>
@@ -435,7 +446,7 @@ export default function Assets() {
               <TabsContent value="attributes" className="flex-1 overflow-auto m-0">
                 {/* Toolbar */}
                 <div className="p-3 flex items-center gap-2 border-b border-border bg-muted/30 flex-wrap">
-                  <Button size="sm" className="h-7 text-xs" onClick={() => setAddAttrOpen(true)}>
+                  <Button size="sm" className="h-7 text-xs" onClick={() => { attrForm.reset(); setAttrUseExpr(false); setAddAttrOpen(true); }}>
                     <Plus className="w-3.5 h-3.5 mr-1" /> Add
                   </Button>
                   <div className="h-5 w-px bg-border" />
@@ -464,14 +475,14 @@ export default function Assets() {
                   <thead>
                     <tr className="border-b border-border bg-muted/50 sticky top-0 z-10">
                       <th className="text-left px-3 py-2 font-medium text-muted-foreground w-8"></th>
-                      <th className="text-left px-3 py-2 font-medium text-muted-foreground">Type</th>
+                      <th className="text-left px-3 py-2 font-medium text-muted-foreground w-24">Type</th>
                       <th className="text-left px-3 py-2 font-medium text-muted-foreground">Name</th>
                       <th className="text-left px-3 py-2 font-medium text-muted-foreground">Value</th>
-                      <th className="text-left px-3 py-2 font-medium text-muted-foreground">Tag Name</th>
-                      <th className="text-left px-3 py-2 font-medium text-muted-foreground">UoM</th>
+                      <th className="text-left px-3 py-2 font-medium text-muted-foreground">Expression</th>
+                      <th className="text-left px-3 py-2 font-medium text-muted-foreground">Tag / UoM</th>
                       <th className="text-left px-3 py-2 font-medium text-muted-foreground">Quality</th>
-                      <th className="text-left px-3 py-2 font-medium text-muted-foreground">Timestamp</th>
-                      <th className="px-3 py-2"></th>
+                      <th className="text-left px-3 py-2 font-medium text-muted-foreground">Updated</th>
+                      <th className="px-3 py-2 w-8"></th>
                     </tr>
                   </thead>
                   <tbody>
@@ -487,9 +498,6 @@ export default function Assets() {
                           <div className="flex flex-col items-center gap-3 text-muted-foreground">
                             <Blocks className="w-8 h-8 opacity-20" />
                             <p className="text-sm">No attributes yet</p>
-                            <p className="text-xs opacity-60 max-w-xs">
-                              Apply a template to stamp all attribute definitions in one click, or add attributes one by one.
-                            </p>
                             <Button size="sm" variant="outline" className="h-7 text-xs"
                               onClick={() => { setImportTab("template"); setImportOpen(true); }}>
                               <LayoutTemplate className="w-3.5 h-3.5 mr-1" /> Apply Template
@@ -499,9 +507,12 @@ export default function Assets() {
                       </tr>
                     ) : (
                       attrList.map((attr: any) => (
-                        <tr key={attr.id} className="border-b border-border/50 hover:bg-muted/30 transition-colors group">
+                        <tr key={attr.id}
+                          className={cn("border-b border-border/50 hover:bg-muted/30 transition-colors group",
+                            attr.type === "runtime" && "bg-orange-50/30 dark:bg-orange-950/10")}>
                           <td className="px-3 py-2">
-                            <button className="text-muted-foreground hover:text-primary opacity-0 group-hover:opacity-100">
+                            <button className="text-muted-foreground hover:text-primary opacity-0 group-hover:opacity-100"
+                              onClick={() => openEditAttr(attr)}>
                               <Edit2 className="w-3 h-3" />
                             </button>
                           </td>
@@ -509,25 +520,38 @@ export default function Assets() {
                           <td className="px-3 py-2 font-medium">{attr.name}</td>
                           <td className="px-3 py-2 font-mono">
                             {attr.value != null
-                              ? String(typeof attr.value === "object" ? JSON.stringify(attr.value) : attr.value)
+                              ? <span className={cn(attr.type === "runtime" && "font-semibold text-orange-700 dark:text-orange-400")}>
+                                  {String(typeof attr.value === "object" ? JSON.stringify(attr.value) : attr.value)}
+                                  {attr.uom && <span className="text-muted-foreground ml-1 font-normal">{attr.uom}</span>}
+                                </span>
+                              : <span className="text-muted-foreground/40">—</span>}
+                          </td>
+                          <td className="px-3 py-2">
+                            {attr.expression
+                              ? <code className="text-xs bg-orange-100 dark:bg-orange-950/40 text-orange-800 dark:text-orange-300 px-1.5 py-0.5 rounded font-mono">
+                                  {attr.expression}
+                                </code>
                               : <span className="text-muted-foreground/40">—</span>}
                           </td>
                           <td className="px-3 py-2 text-muted-foreground font-mono">
-                            {attr.tagName ?? <span className="text-muted-foreground/40">—</span>}
+                            {attr.tagName ? <span className="text-xs">{attr.tagName}</span> : <span className="text-muted-foreground/40">—</span>}
                           </td>
-                          <td className="px-3 py-2">{attr.uom ?? <span className="text-muted-foreground/40">—</span>}</td>
                           <td className="px-3 py-2">
                             {attr.quality
-                              ? <span className={cn("text-xs", attr.quality === "good" ? "text-green-600" : "text-yellow-600")}>{attr.quality}</span>
+                              ? <span className={cn("text-xs",
+                                  attr.quality === "good" ? "text-green-600" :
+                                  attr.quality === "bad"  ? "text-red-500"  : "text-yellow-600")}>
+                                  {attr.quality}
+                                </span>
                               : <span className="text-muted-foreground/40">—</span>}
                           </td>
                           <td className="px-3 py-2 text-muted-foreground">
                             {attr.timestamp ? format(new Date(attr.timestamp), "MM/dd HH:mm:ss") : <span className="text-muted-foreground/40">—</span>}
                           </td>
                           <td className="px-3 py-2">
-                            <button className="text-muted-foreground hover:text-destructive transition-colors opacity-0 group-hover:opacity-100"
+                            <button className="text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100"
                               onClick={() => deleteAttr.mutate({ id: attr.id }, {
-                                onSuccess: () => { toast({ title: "Attribute deleted" }); qc.invalidateQueries({ queryKey: getListAssetAttributesQueryKey(selectedAsset.id) }); }
+                                onSuccess: () => { toast({ title: "Deleted" }); qc.invalidateQueries({ queryKey: getListAssetAttributesQueryKey(selectedAsset.id) }); }
                               })}>
                               <Trash2 className="w-3 h-3" />
                             </button>
@@ -538,7 +562,6 @@ export default function Assets() {
                   </tbody>
                 </table>
               </TabsContent>
-
               <TabsContent value="table" className="flex-1 flex items-center justify-center m-0">
                 <p className="text-sm text-muted-foreground">Table view — coming soon</p>
               </TabsContent>
@@ -558,7 +581,7 @@ export default function Assets() {
         )}
       </div>
 
-      {/* ── Add Asset Dialog ──────────────────────────────────────────────── */}
+      {/* ── Add Asset Dialog ──────────────────────────────────────────── */}
       <Dialog open={addAssetOpen} onOpenChange={(v) => { if (!v) { setAddAssetOpen(false); assetForm.reset(); } }}>
         <DialogContent>
           <DialogHeader>
@@ -572,33 +595,19 @@ export default function Assets() {
           <Form {...assetForm}>
             <form onSubmit={assetForm.handleSubmit(onAddAsset)} className="space-y-4">
               <FormField control={assetForm.control} name="name" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Name *</FormLabel>
-                  <FormControl>
-                    <Input placeholder="e.g. Fan, Compressor, Plant 2"
-                      {...field}
-                      onChange={(e) => handleNameChange(e.target.value)} />
-                  </FormControl>
+                <FormItem><FormLabel>Name *</FormLabel>
+                  <FormControl><Input placeholder="e.g. Fan, Compressor, Plant 2" {...field} onChange={(e) => handleNameChange(e.target.value)} /></FormControl>
                 </FormItem>
               )} />
-
               <FormField control={assetForm.control} name="identifier" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Identifier *</FormLabel>
-                  <FormControl>
-                    <Input placeholder="unique_key (auto-filled from name)" className="font-mono" {...field} />
-                  </FormControl>
-                  <FormDescription className="text-xs">
-                    Used as the tag name prefix — e.g. <code className="bg-muted px-1 rounded">fan_de</code> → tags like <code className="bg-muted px-1 rounded">fan_de.temperature</code>
-                  </FormDescription>
+                <FormItem><FormLabel>Identifier *</FormLabel>
+                  <FormControl><Input placeholder="unique_key" className="font-mono" {...field} /></FormControl>
+                  <FormDescription className="text-xs">Tag name prefix when applying templates</FormDescription>
                 </FormItem>
               )} />
-
-              {/* Parent selector — only shown when creating a root asset (allows re-parenting) */}
               {!addAssetParentId && (
                 <FormField control={assetForm.control} name="parentId" render={({ field }) => (
-                  <FormItem>
-                    <FormLabel>Parent Asset <span className="text-muted-foreground font-normal">(optional)</span></FormLabel>
+                  <FormItem><FormLabel>Parent Asset <span className="text-muted-foreground font-normal">(optional)</span></FormLabel>
                     <Select value={field.value || "__root__"} onValueChange={(v) => field.onChange(v === "__root__" ? "" : v)}>
                       <FormControl><SelectTrigger><SelectValue placeholder="None (root level)" /></SelectTrigger></FormControl>
                       <SelectContent>
@@ -610,11 +619,9 @@ export default function Assets() {
                         ))}
                       </SelectContent>
                     </Select>
-                    <FormDescription className="text-xs">Place this asset under an existing node in the hierarchy</FormDescription>
                   </FormItem>
                 )} />
               )}
-
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => { setAddAssetOpen(false); assetForm.reset(); }}>Cancel</Button>
                 <Button type="submit" disabled={createAsset.isPending}>Add Asset</Button>
@@ -624,60 +631,115 @@ export default function Assets() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Add Attribute Dialog ─────────────────────────────────────────── */}
-      <Dialog open={addAttrOpen} onOpenChange={setAddAttrOpen}>
-        <DialogContent>
-          <DialogHeader><DialogTitle>Add Attribute</DialogTitle></DialogHeader>
+      {/* ── Add Attribute Dialog ─────────────────────────────────────── */}
+      <Dialog open={addAttrOpen} onOpenChange={(v) => { if (!v) { setAddAttrOpen(false); attrForm.reset(); setAttrUseExpr(false); } }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Add Attribute</DialogTitle>
+            <DialogDescription>Add a single attribute to {selectedAsset?.name}.</DialogDescription>
+          </DialogHeader>
           <Form {...attrForm}>
             <form onSubmit={attrForm.handleSubmit(onAddAttr)} className="space-y-4">
               <FormField control={attrForm.control} name="name" render={({ field }) => (
-                <FormItem><FormLabel>Name *</FormLabel><FormControl><Input placeholder="e.g. Temperature" {...field} /></FormControl></FormItem>
-              )} />
-              <div className="grid grid-cols-2 gap-3">
-                <FormField control={attrForm.control} name="type" render={({ field }) => (
-                  <FormItem><FormLabel>Type</FormLabel>
-                    <Select value={field.value} onValueChange={field.onChange}>
-                      <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-                      <SelectContent>
-                        <SelectItem value="static">Static</SelectItem>
-                        <SelectItem value="dynamic">Dynamic</SelectItem>
-                        <SelectItem value="metric">Metric</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </FormItem>
-                )} />
-                <FormField control={attrForm.control} name="dataType" render={({ field }) => (
-                  <FormItem><FormLabel>Data Type</FormLabel>
-                    <Select value={field.value} onValueChange={field.onChange}>
-                      <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-                      <SelectContent>
-                        <SelectItem value="text">Text</SelectItem>
-                        <SelectItem value="number">Number</SelectItem>
-                        <SelectItem value="double">Double</SelectItem>
-                        <SelectItem value="boolean">Boolean</SelectItem>
-                        <SelectItem value="timestamp">Timestamp</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </FormItem>
-                )} />
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                <FormField control={attrForm.control} name="tagName" render={({ field }) => (
-                  <FormItem><FormLabel>Tag Name</FormLabel>
-                    <FormControl><Input placeholder="device.metric_key" className="font-mono text-xs" {...field} /></FormControl>
-                  </FormItem>
-                )} />
-                <FormField control={attrForm.control} name="uom" render={({ field }) => (
-                  <FormItem><FormLabel>UoM</FormLabel><FormControl><Input placeholder="°C, mm/s, V" {...field} /></FormControl></FormItem>
-                )} />
-              </div>
-              <FormField control={attrForm.control} name="value" render={({ field }) => (
-                <FormItem><FormLabel>Value <span className="text-muted-foreground font-normal">(optional, for static)</span></FormLabel>
-                  <FormControl><Input placeholder="e.g. S125010T1TA10" {...field} /></FormControl>
+                <FormItem><FormLabel>Name *</FormLabel>
+                  <FormControl><Input placeholder="e.g. Avg Temperature" {...field} /></FormControl>
                 </FormItem>
               )} />
+
+              {/* Use Expression toggle */}
+              <div className="flex items-center justify-between rounded-lg border border-border p-3">
+                <div className="space-y-0.5">
+                  <Label className="text-sm font-medium flex items-center gap-1.5">
+                    <Calculator className="w-3.5 h-3.5 text-orange-500" /> Use Expression (Runtime)
+                  </Label>
+                  <p className="text-xs text-muted-foreground">
+                    Calculate this attribute from others on every payload ingest
+                  </p>
+                </div>
+                <Switch checked={attrUseExpr} onCheckedChange={setAttrUseExpr} />
+              </div>
+
+              {attrUseExpr ? (
+                <ExpressionEditor
+                  control={attrForm.control}
+                  attrNames={attrNames}
+                />
+              ) : (
+                <div className="grid grid-cols-2 gap-3">
+                  <FormField control={attrForm.control} name="type" render={({ field }) => (
+                    <FormItem><FormLabel>Type</FormLabel>
+                      <Select value={field.value} onValueChange={field.onChange}>
+                        <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                        <SelectContent>
+                          <SelectItem value="static">Static</SelectItem>
+                          <SelectItem value="dynamic">Dynamic</SelectItem>
+                          <SelectItem value="metric">Metric</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </FormItem>
+                  )} />
+                  <FormField control={attrForm.control} name="dataType" render={({ field }) => (
+                    <FormItem><FormLabel>Data Type</FormLabel>
+                      <Select value={field.value} onValueChange={field.onChange}>
+                        <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                        <SelectContent>
+                          <SelectItem value="text">Text</SelectItem>
+                          <SelectItem value="number">Number</SelectItem>
+                          <SelectItem value="double">Double</SelectItem>
+                          <SelectItem value="boolean">Boolean</SelectItem>
+                          <SelectItem value="timestamp">Timestamp</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </FormItem>
+                  )} />
+                </div>
+              )}
+
+              {!attrUseExpr && (
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <FormField control={attrForm.control} name="tagName" render={({ field }) => (
+                      <FormItem><FormLabel>Tag Name</FormLabel>
+                        <FormControl><Input placeholder="device.key" className="font-mono text-xs" {...field} /></FormControl>
+                      </FormItem>
+                    )} />
+                    <FormField control={attrForm.control} name="uom" render={({ field }) => (
+                      <FormItem><FormLabel>UoM</FormLabel>
+                        <FormControl><Input placeholder="°C, mm/s, V" {...field} /></FormControl>
+                      </FormItem>
+                    )} />
+                  </div>
+                  <FormField control={attrForm.control} name="value" render={({ field }) => (
+                    <FormItem><FormLabel>Value <span className="text-muted-foreground font-normal">(optional, for static)</span></FormLabel>
+                      <FormControl><Input placeholder="e.g. S125010T1TA10" {...field} /></FormControl>
+                    </FormItem>
+                  )} />
+                </>
+              )}
+
+              {attrUseExpr && (
+                <div className="grid grid-cols-2 gap-3">
+                  <FormField control={attrForm.control} name="uom" render={({ field }) => (
+                    <FormItem><FormLabel>UoM</FormLabel>
+                      <FormControl><Input placeholder="°C, mm/s, V" {...field} /></FormControl>
+                    </FormItem>
+                  )} />
+                  <FormField control={attrForm.control} name="dataType" render={({ field }) => (
+                    <FormItem><FormLabel>Data Type</FormLabel>
+                      <Select value={field.value} onValueChange={field.onChange}>
+                        <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                        <SelectContent>
+                          <SelectItem value="double">Double</SelectItem>
+                          <SelectItem value="number">Number</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </FormItem>
+                  )} />
+                </div>
+              )}
+
               <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => { setAddAttrOpen(false); attrForm.reset(); }}>Cancel</Button>
+                <Button type="button" variant="outline" onClick={() => { setAddAttrOpen(false); attrForm.reset(); setAttrUseExpr(false); }}>Cancel</Button>
                 <Button type="submit" disabled={createAttr.isPending}>Add Attribute</Button>
               </DialogFooter>
             </form>
@@ -685,66 +747,118 @@ export default function Assets() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Apply Template / Import Dialog ──────────────────────────────── */}
+      {/* ── Edit Attribute Dialog ────────────────────────────────────── */}
+      <Dialog open={!!editAttr} onOpenChange={(v) => { if (!v) { setEditAttr(null); editAttrForm.reset(); } }}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Edit Attribute</DialogTitle>
+            <DialogDescription>Update the configuration for "{editAttr?.name}".</DialogDescription>
+          </DialogHeader>
+          <Form {...editAttrForm}>
+            <form onSubmit={editAttrForm.handleSubmit(handleSaveEdit)} className="space-y-4">
+              <FormField control={editAttrForm.control} name="name" render={({ field }) => (
+                <FormItem><FormLabel>Name *</FormLabel><FormControl><Input {...field} /></FormControl></FormItem>
+              )} />
+
+              {/* Use Expression toggle */}
+              <div className="flex items-center justify-between rounded-lg border border-border p-3">
+                <div className="space-y-0.5">
+                  <Label className="text-sm font-medium flex items-center gap-1.5">
+                    <Calculator className="w-3.5 h-3.5 text-orange-500" /> Use Expression (Runtime)
+                  </Label>
+                  <p className="text-xs text-muted-foreground">Calculate from other attribute values on ingest</p>
+                </div>
+                <Switch checked={editAttrUseExpr} onCheckedChange={setEditAttrUseExpr} />
+              </div>
+
+              {editAttrUseExpr ? (
+                <ExpressionEditor control={editAttrForm.control} attrNames={attrNames.filter((n) => n !== editAttr?.name)} />
+              ) : (
+                <div className="grid grid-cols-2 gap-3">
+                  <FormField control={editAttrForm.control} name="type" render={({ field }) => (
+                    <FormItem><FormLabel>Type</FormLabel>
+                      <Select value={field.value} onValueChange={field.onChange}>
+                        <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                        <SelectContent>
+                          <SelectItem value="static">Static</SelectItem>
+                          <SelectItem value="dynamic">Dynamic</SelectItem>
+                          <SelectItem value="metric">Metric</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </FormItem>
+                  )} />
+                  <FormField control={editAttrForm.control} name="dataType" render={({ field }) => (
+                    <FormItem><FormLabel>Data Type</FormLabel>
+                      <Select value={field.value} onValueChange={field.onChange}>
+                        <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                        <SelectContent>
+                          <SelectItem value="text">Text</SelectItem><SelectItem value="number">Number</SelectItem>
+                          <SelectItem value="double">Double</SelectItem><SelectItem value="boolean">Boolean</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </FormItem>
+                  )} />
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-3">
+                <FormField control={editAttrForm.control} name="tagName" render={({ field }) => (
+                  <FormItem><FormLabel>Tag Name</FormLabel>
+                    <FormControl><Input className="font-mono text-xs" {...field} /></FormControl>
+                  </FormItem>
+                )} />
+                <FormField control={editAttrForm.control} name="uom" render={({ field }) => (
+                  <FormItem><FormLabel>UoM</FormLabel><FormControl><Input {...field} /></FormControl></FormItem>
+                )} />
+              </div>
+
+              <DialogFooter>
+                <Button type="button" variant="outline" onClick={() => { setEditAttr(null); editAttrForm.reset(); }}>Cancel</Button>
+                <Button type="submit">Save</Button>
+              </DialogFooter>
+            </form>
+          </Form>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Apply Template / Import Dialog ──────────────────────────── */}
       <Dialog open={importOpen} onOpenChange={(v) => { if (!v) closeImport(); }}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Add Attributes to "{selectedAsset?.name}"</DialogTitle>
-            <DialogDescription>
-              Three ways to bulk-add attributes. Duplicates (same name or tag) are automatically skipped.
-            </DialogDescription>
+            <DialogDescription>Duplicates (same name or tag) are automatically skipped.</DialogDescription>
           </DialogHeader>
 
           <Tabs value={importTab} onValueChange={(v) => { setImportTab(v as any); setPreviewRows([]); setParseError(null); }}>
             <TabsList className="grid grid-cols-3 w-full">
-              <TabsTrigger value="template" className="text-xs gap-1.5">
-                <LayoutTemplate className="w-3 h-3" /> Apply Template
-              </TabsTrigger>
-              <TabsTrigger value="csv" className="text-xs gap-1.5">
-                <FileSpreadsheet className="w-3 h-3" /> CSV
-              </TabsTrigger>
-              <TabsTrigger value="json" className="text-xs gap-1.5">
-                <Braces className="w-3 h-3" /> JSON Array
-              </TabsTrigger>
+              <TabsTrigger value="template" className="text-xs gap-1.5"><LayoutTemplate className="w-3 h-3" /> Apply Template</TabsTrigger>
+              <TabsTrigger value="csv" className="text-xs gap-1.5"><FileSpreadsheet className="w-3 h-3" /> CSV</TabsTrigger>
+              <TabsTrigger value="json" className="text-xs gap-1.5"><Braces className="w-3 h-3" /> JSON Array</TabsTrigger>
             </TabsList>
 
-            {/* ── Apply Template tab ────────────────────────────────────── */}
             <TabsContent value="template" className="space-y-3 mt-3">
-              <div className="rounded-md bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/40 p-3 space-y-1.5 text-xs">
-                <p className="font-semibold text-blue-800 dark:text-blue-300 flex items-center gap-1.5">
+              <div className="rounded-md bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/40 p-3 text-xs">
+                <p className="font-semibold text-blue-800 dark:text-blue-300 flex items-center gap-1.5 mb-1.5">
                   <Info className="w-3.5 h-3.5" /> How Apply Template works
                 </p>
                 <ul className="text-blue-700 dark:text-blue-400 space-y-1">
-                  <li>• You define the attribute schema once in <strong>Asset Templates</strong> (by pasting a Node-RED payload)</li>
-                  <li>• Here you stamp that schema onto this asset — it copies every attribute definition in bulk</li>
-                  <li>• Tag names are resolved automatically: template key <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">temperature</code> → <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">{selectedAsset?.identifier ?? "asset"}.temperature</code></li>
-                  <li>• If an attribute already exists on this asset it is <strong>skipped</strong>, not duplicated</li>
+                  <li>• Schema defined once in Asset Templates (via device payload) → stamped onto this asset here</li>
+                  <li>• Tag names resolved: <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">temperature</code> → <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">{selectedAsset?.identifier ?? "asset"}.temperature</code></li>
+                  <li>• Existing attributes are skipped, not duplicated</li>
                 </ul>
               </div>
-
               <div className="space-y-1.5">
                 <label className="text-xs font-medium">Select Template</label>
-                <Select value={selectedTemplateId || selectedAsset?.templateId || ""}
-                  onValueChange={setSelectedTemplateId}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Choose a template…" />
-                  </SelectTrigger>
+                <Select value={selectedTemplateId || selectedAsset?.templateId || ""} onValueChange={setSelectedTemplateId}>
+                  <SelectTrigger><SelectValue placeholder="Choose a template…" /></SelectTrigger>
                   <SelectContent>
                     {templateList.map((t: any) => (
-                      <SelectItem key={t.id} value={t.id}>
-                        {t.name} <span className="text-muted-foreground ml-1">({t.attributeCount} attrs)</span>
-                      </SelectItem>
+                      <SelectItem key={t.id} value={t.id}>{t.name} <span className="text-muted-foreground ml-1">({t.attributeCount} attrs)</span></SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                {templateList.length === 0 && (
-                  <p className="text-xs text-muted-foreground">
-                    No templates yet — go to Asset Templates, paste a device payload, and save.
-                  </p>
-                )}
               </div>
-
-              {/* Preview of what will be added */}
+              {/* Preview */}
               {(() => {
                 const tid = selectedTemplateId || selectedAsset?.templateId || "";
                 const tmpl = templateList.find((t: any) => t.id === tid);
@@ -753,37 +867,29 @@ export default function Assets() {
                 return (
                   <div className="rounded border border-border overflow-hidden">
                     <div className="bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground">
-                      Preview — {defs.length} attribute{defs.length !== 1 ? "s" : ""} will be created
-                      (tag prefix: <code className="font-mono">{selectedAsset?.identifier ?? "asset"}.</code>)
+                      {defs.length} attribute{defs.length !== 1 ? "s" : ""} · prefix: <code className="font-mono">{selectedAsset?.identifier ?? "asset"}.</code>
                     </div>
-                    <div className="max-h-48 overflow-auto">
+                    <div className="max-h-40 overflow-auto">
                       <table className="w-full text-xs">
-                        <thead>
-                          <tr className="border-b border-border/50 bg-muted/30">
-                            <th className="text-left px-3 py-1.5 font-medium text-muted-foreground">Name</th>
-                            <th className="text-left px-3 py-1.5 font-medium text-muted-foreground">Type</th>
-                            <th className="text-left px-3 py-1.5 font-medium text-muted-foreground">Resolved Tag Name</th>
-                            <th className="text-left px-3 py-1.5 font-medium text-muted-foreground">UoM</th>
+                        <thead><tr className="border-b border-border/50 bg-muted/30">
+                          <th className="text-left px-3 py-1.5 font-medium text-muted-foreground">Name</th>
+                          <th className="text-left px-3 py-1.5 font-medium text-muted-foreground">Resolved Tag</th>
+                          <th className="text-left px-3 py-1.5 font-medium text-muted-foreground">UoM</th>
+                        </tr></thead>
+                        <tbody>{defs.map((d: any, i: number) => (
+                          <tr key={i} className="border-b border-border/50 last:border-0">
+                            <td className="px-3 py-1.5 font-medium">{d.name}</td>
+                            <td className="px-3 py-1.5 font-mono text-muted-foreground">
+                              {d.tagName ? `${selectedAsset?.identifier ?? "asset"}.${d.tagName}` : "—"}
+                            </td>
+                            <td className="px-3 py-1.5">{d.uom || "—"}</td>
                           </tr>
-                        </thead>
-                        <tbody>
-                          {defs.map((d: any, i: number) => (
-                            <tr key={i} className="border-b border-border/50 last:border-0">
-                              <td className="px-3 py-1.5 font-medium">{d.name}</td>
-                              <td className="px-3 py-1.5 text-muted-foreground">{d.type}</td>
-                              <td className="px-3 py-1.5 font-mono text-muted-foreground">
-                                {d.tagName ? `${selectedAsset?.identifier ?? "asset"}.${d.tagName}` : "—"}
-                              </td>
-                              <td className="px-3 py-1.5">{d.uom || "—"}</td>
-                            </tr>
-                          ))}
-                        </tbody>
+                        ))}</tbody>
                       </table>
                     </div>
                   </div>
                 );
               })()}
-
               <DialogFooter>
                 <Button variant="outline" onClick={closeImport}>Cancel</Button>
                 <Button onClick={handleApplyTemplate} disabled={applyingTemplate || (!selectedTemplateId && !selectedAsset?.templateId)}>
@@ -792,15 +898,9 @@ export default function Assets() {
               </DialogFooter>
             </TabsContent>
 
-            {/* ── CSV tab ────────────────────────────────────────────────── */}
             <TabsContent value="csv" className="space-y-3 mt-3">
-              <div className="rounded-md bg-muted/40 border border-border p-3 text-xs text-muted-foreground space-y-1">
-                <p className="font-semibold text-foreground">When to use CSV import</p>
-                <p>Use this if you want to add attributes that are <em>specific to this asset only</em> and don't belong in a shared template — e.g. one-off calibration values, asset-specific serial numbers, or a spreadsheet someone sent you.</p>
-                <p>Columns: <code className="bg-muted px-1 rounded">name</code>, <code className="bg-muted px-1 rounded">type</code>, <code className="bg-muted px-1 rounded">dataType</code>, <code className="bg-muted px-1 rounded">tagName</code>, <code className="bg-muted px-1 rounded">uom</code></p>
-              </div>
               <div className="flex items-center justify-between">
-                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">CSV</label>
+                <p className="text-xs text-muted-foreground">Columns: name, type, dataType, tagName, uom</p>
                 <button className="text-xs text-primary hover:underline" onClick={() => setCsvText(CSV_EXAMPLE)}>Load example</button>
               </div>
               <Textarea value={csvText} onChange={(e) => { setCsvText(e.target.value); setPreviewRows([]); setParseError(null); }}
@@ -817,14 +917,9 @@ export default function Assets() {
               </DialogFooter>
             </TabsContent>
 
-            {/* ── JSON tab ──────────────────────────────────────────────── */}
             <TabsContent value="json" className="space-y-3 mt-3">
-              <div className="rounded-md bg-muted/40 border border-border p-3 text-xs text-muted-foreground space-y-1">
-                <p className="font-semibold text-foreground">When to use JSON import</p>
-                <p>Same use case as CSV but in JSON array format. Useful if you already have attribute data in a JSON file or API response.</p>
-              </div>
               <div className="flex items-center justify-between">
-                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">JSON Array</label>
+                <p className="text-xs text-muted-foreground">JSON array of attribute objects</p>
                 <button className="text-xs text-primary hover:underline" onClick={() => setJsonText(JSON_EXAMPLE)}>Load example</button>
               </div>
               <Textarea value={jsonText} onChange={(e) => { setJsonText(e.target.value); setPreviewRows([]); setParseError(null); }}
@@ -847,7 +942,73 @@ export default function Assets() {
   );
 }
 
-// ── Simple read-only preview table ────────────────────────────────────────────
+// ── Expression Editor subcomponent ────────────────────────────────────────────
+function ExpressionEditor({ control, attrNames }: { control: any; attrNames: string[] }) {
+  const [showHint, setShowHint] = useState(false);
+  return (
+    <div className="space-y-2">
+      <FormField control={control} name="expression" render={({ field }) => (
+        <FormItem>
+          <div className="flex items-center justify-between">
+            <FormLabel className="flex items-center gap-1.5">
+              <Calculator className="w-3.5 h-3.5 text-orange-500" /> Expression
+            </FormLabel>
+            <button type="button" onClick={() => setShowHint((v) => !v)}
+              className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1">
+              <HelpCircle className="w-3 h-3" /> syntax help
+            </button>
+          </div>
+          <FormControl>
+            <Input
+              placeholder="e.g. (Temperature + Ultrasound) / 2"
+              className="font-mono text-xs"
+              {...field}
+            />
+          </FormControl>
+          <FormDescription className="text-xs">
+            Use attribute names as variables. Evaluated on every ingest.
+          </FormDescription>
+        </FormItem>
+      )} />
+
+      {showHint && (
+        <div className="rounded-md bg-muted/50 border border-border p-3 space-y-2 text-xs">
+          <p className="font-medium">Supported operators & functions</p>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-muted-foreground">
+            <span><code className="bg-muted px-1 rounded">+ - * /</code> arithmetic</span>
+            <span><code className="bg-muted px-1 rounded">^ or **</code> power</span>
+            <span><code className="bg-muted px-1 rounded">abs(x)</code> absolute value</span>
+            <span><code className="bg-muted px-1 rounded">sqrt(x)</code> square root</span>
+            <span><code className="bg-muted px-1 rounded">round(x)</code> round</span>
+            <span><code className="bg-muted px-1 rounded">min(a,b) max(a,b)</code></span>
+            <span><code className="bg-muted px-1 rounded">sin(x) cos(x)</code> trig</span>
+            <span><code className="bg-muted px-1 rounded">log(x) exp(x)</code></span>
+          </div>
+          {attrNames.length > 0 && (
+            <div>
+              <p className="font-medium mb-1">Available attributes</p>
+              <div className="flex flex-wrap gap-1">
+                {attrNames.map((n) => (
+                  <code key={n} className="bg-orange-100 dark:bg-orange-950/40 text-orange-800 dark:text-orange-300 px-1.5 py-0.5 rounded text-xs">{n}</code>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="border-t border-border/50 pt-2 space-y-1">
+            <p className="font-medium">Examples</p>
+            <div className="text-muted-foreground space-y-0.5">
+              <p><code className="bg-muted px-1 rounded">(Temperature + Ultrasound) / 2</code> — average of two sensors</p>
+              <p><code className="bg-muted px-1 rounded">Temperature * 1.8 + 32</code> — Celsius to Fahrenheit</p>
+              <p><code className="bg-muted px-1 rounded">sqrt(Vibration_RMS_Vel_X ^ 2 + Vibration_RMS_Vel_Y ^ 2)</code></p>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Import preview table ──────────────────────────────────────────────────────
 function ImportPreviewTable({ rows }: { rows: AttrDef[] }) {
   return (
     <div className="rounded border border-border overflow-hidden">

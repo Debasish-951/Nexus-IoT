@@ -10,19 +10,39 @@ import {
   alarmHistoryTable,
 } from "@workspace/db";
 import { GetTelemetryParams, GetTelemetryQueryParams } from "@workspace/api-zod";
+import { Parser } from "expr-eval";
 
 const router: IRouter = Router();
 
+// ── Safe expression parser (no JS eval, sandboxed) ───────────────────────────
+const exprParser = new Parser({
+  operators: {
+    add: true, concatenate: false, conditional: true,
+    divide: true, factorial: false, multiply: true,
+    power: true, remainder: true, subtract: true,
+    logical: true, comparison: true, in: false,
+    assignment: false,
+  },
+});
+
+// Evaluate a runtime expression given a map of variable → numeric value.
+// Returns null if expression is invalid or variables are missing.
+function evalExpression(expr: string, vars: Record<string, number>): number | null {
+  try {
+    const result = exprParser.evaluate(expr, vars);
+    if (typeof result !== "number" || !isFinite(result)) return null;
+    return result;
+  } catch {
+    return null;
+  }
+}
+
 // ── Timestamp helper ──────────────────────────────────────────────────────────
-// timestampUnix can be seconds (10-digit) or milliseconds (13-digit)
 function toDate(unix: number): Date {
   return new Date(unix > 1e12 ? unix : unix * 1000);
 }
 
 // ── Sensorgrow payload normaliser ─────────────────────────────────────────────
-// Accepts either the standard format  { deviceId, metrics, … }
-// or the Sensorgrow / Node-RED format { deviceId, data, sensor, asset, measurement_point, … }
-// and returns a unified internal representation.
 interface NormalisedPayload {
   deviceId: string;
   timestamp?: Date;
@@ -43,12 +63,10 @@ function normalise(body: Record<string, unknown>): NormalisedPayload | null {
   } else if (body.receivedAt) {
     ts = new Date(body.receivedAt as string);
   } else if (body.timestamp) {
-    // "2025-12-18 12:53:27.826-05.5:30" — non-standard; try coercion, fall back to now
     try { ts = new Date(body.timestamp as string); } catch { ts = new Date(); }
     if (isNaN(ts.getTime())) ts = new Date();
   }
 
-  // Sensorgrow format → `data` holds the metric values
   if (body.data && typeof body.data === "object" && !Array.isArray(body.data)) {
     const sensor = body.sensor as Record<string, unknown> | undefined;
     const asset  = body.asset  as Record<string, unknown> | undefined;
@@ -57,13 +75,12 @@ function normalise(body: Record<string, unknown>): NormalisedPayload | null {
       deviceId: body.deviceId,
       timestamp: ts,
       metrics: body.data as Record<string, unknown>,
-      sensorSerial:       sensor?.serial as string | undefined,
-      externalAssetName:  (asset?.name as string | undefined)?.trim(),
-      measurementPoint:   mp?.name as string | undefined,
+      sensorSerial:      sensor?.serial as string | undefined,
+      externalAssetName: (asset?.name as string | undefined)?.trim(),
+      measurementPoint:  mp?.name as string | undefined,
     };
   }
 
-  // Standard format → `metrics` holds the metric values
   if (body.metrics && typeof body.metrics === "object" && !Array.isArray(body.metrics)) {
     return {
       deviceId: body.deviceId,
@@ -72,7 +89,6 @@ function normalise(body: Record<string, unknown>): NormalisedPayload | null {
     };
   }
 
-  // No metrics at all — still accept (0 records written)
   return { deviceId: body.deviceId, timestamp: ts, metrics: {} };
 }
 
@@ -91,15 +107,9 @@ function evalOp(value: number, op: string, threshold: number): boolean {
 
 // ── Alarm rule evaluation ─────────────────────────────────────────────────────
 interface AlarmEvent {
-  ruleId: string;
-  ruleName: string;
-  metric: string;
-  value: number;
-  threshold: number | null;
-  operator: string | null;
-  severity: string;
-  event: "triggered" | "cleared";
-  alarmId: string;
+  ruleId: string; ruleName: string; metric: string;
+  value: number; threshold: number | null; operator: string | null;
+  severity: string; event: "triggered" | "cleared"; alarmId: string;
 }
 
 async function evaluateAlarmRules(
@@ -133,26 +143,16 @@ async function evaluateAlarmRules(
 
     if (conditionMet && !existing) {
       const [newAlarm] = await db.insert(alarmsTable).values({
-        name: rule.name,
-        assetId,
-        assetName,
-        ruleId: rule.id,
-        severity: rule.severity,
-        status: "active",
-        alarmClass: "threshold",
+        name: rule.name, assetId, assetName, ruleId: rule.id,
+        severity: rule.severity, status: "active", alarmClass: "threshold",
         message: `${rule.metric} ${rule.operator} ${rule.threshold} (value: ${value})`,
-        triggerValue: value,
-        triggeredAt: ts,
+        triggerValue: value, triggeredAt: ts,
       }).returning();
 
       await db.insert(alarmHistoryTable).values({
-        alarmId: newAlarm.id,
-        assetId,
-        assetName,
-        name: rule.name,
-        severity: rule.severity,
-        status: "active",
-        triggeredAt: ts,
+        alarmId: newAlarm.id, assetId, assetName,
+        name: rule.name, severity: rule.severity,
+        status: "active", triggeredAt: ts,
       });
 
       events.push({ ruleId: rule.id, ruleName: rule.name, metric: rule.metric, value,
@@ -177,6 +177,49 @@ async function evaluateAlarmRules(
     }
   }
   return events;
+}
+
+// ── Runtime attribute evaluator ───────────────────────────────────────────────
+// After dynamic attributes are updated, fetch all "runtime" attributes for the asset,
+// build a variable scope from ALL current attribute values (name → numeric value),
+// evaluate each expression, and write the result back.
+async function evaluateRuntimeAttributes(assetId: string, ts: Date): Promise<void> {
+  // Fetch every attribute for this asset (we need values for the variable scope)
+  const allAttrs = await db
+    .select({ id: attributesTable.id, name: attributesTable.name, type: attributesTable.type, value: attributesTable.value, expression: attributesTable.expression })
+    .from(attributesTable)
+    .where(eq(attributesTable.assetId, assetId));
+
+  // Build variable map: attribute name (spaces replaced with underscore) → number
+  const vars: Record<string, number> = {};
+  for (const attr of allAttrs) {
+    if (attr.value == null) continue;
+    const num = Number(attr.value);
+    if (!isNaN(num)) {
+      // Support both exact name and underscore variant so expressions work either way
+      vars[attr.name] = num;
+      vars[attr.name.replace(/\s+/g, "_")] = num;
+      // Also strip special chars for bare identifiers
+      const safe = attr.name.replace(/[^a-zA-Z0-9_]/g, "_");
+      vars[safe] = num;
+    }
+  }
+
+  // Evaluate each runtime attribute
+  const runtimeAttrs = allAttrs.filter((a) => a.type === "runtime" && a.expression);
+  for (const attr of runtimeAttrs) {
+    const result = evalExpression(attr.expression!, vars);
+    if (result !== null) {
+      await db.update(attributesTable)
+        .set({ value: result, timestamp: ts, quality: "good" })
+        .where(eq(attributesTable.id, attr.id));
+    } else {
+      // Mark quality as bad if expression failed to evaluate (e.g. missing variable)
+      await db.update(attributesTable)
+        .set({ quality: "bad", timestamp: ts })
+        .where(eq(attributesTable.id, attr.id));
+    }
+  }
 }
 
 // ── Core ingest logic ─────────────────────────────────────────────────────────
@@ -204,17 +247,12 @@ async function processNormalised(n: NormalisedPayload, assetIdHint?: string) {
   }
 
   const records = Object.entries(n.metrics).map(([metric, value]) => ({
-    assetId,
-    deviceId: n.deviceId,
-    metric,
-    value,
-    timestamp: ts,
-    quality: "good",
+    assetId, deviceId: n.deviceId, metric, value, timestamp: ts, quality: "good",
   }));
 
   await db.insert(telemetryTable).values(records as any[]);
 
-  // Update dynamic attributes that match this device's tag pattern
+  // Update matching dynamic attributes
   for (const [metric, value] of Object.entries(n.metrics)) {
     await db.update(attributesTable)
       .set({ value, timestamp: ts })
@@ -224,7 +262,7 @@ async function processNormalised(n: NormalisedPayload, assetIdHint?: string) {
       ));
   }
 
-  // Update sensor serial attribute if provided
+  // Update sensor serial attribute
   if (n.sensorSerial) {
     await db.update(attributesTable)
       .set({ value: n.sensorSerial, timestamp: ts })
@@ -233,6 +271,9 @@ async function processNormalised(n: NormalisedPayload, assetIdHint?: string) {
         eq(attributesTable.tagName, `${n.deviceId}.sensor_serial`)
       ));
   }
+
+  // ── Evaluate runtime (computed) attributes ────────────────────────────────
+  await evaluateRuntimeAttributes(assetId as string, ts);
 
   const alarmEvents = await evaluateAlarmRules(assetId as string, assetName, n.metrics, ts);
 
@@ -274,10 +315,8 @@ router.post("/ingest/batch", async (req, res): Promise<void> => {
     return;
   }
 
-  let successCount = 0;
-  let failureCount = 0;
-  let totalTriggered = 0;
-  let totalCleared   = 0;
+  let successCount = 0; let failureCount = 0;
+  let totalTriggered = 0; let totalCleared = 0;
 
   for (const item of items) {
     try {

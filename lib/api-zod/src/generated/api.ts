@@ -121,7 +121,7 @@ export const ListAssetAttributesResponseItem = zod.object({
   id: zod.string(),
   assetId: zod.string(),
   name: zod.string(),
-  type: zod.enum(["static", "dynamic", "metric"]),
+  type: zod.enum(["static", "dynamic", "metric", "runtime"]),
   dataType: zod.enum(["text", "number", "boolean", "timestamp", "double"]),
   value: zod.unknown().nullish(),
   tagName: zod.string().nullish(),
@@ -144,7 +144,7 @@ export const CreateAssetAttributeParams = zod.object({
 
 export const CreateAssetAttributeBody = zod.object({
   name: zod.string(),
-  type: zod.enum(["static", "dynamic", "metric"]),
+  type: zod.enum(["static", "dynamic", "metric", "runtime"]),
   dataType: zod.enum(["text", "number", "boolean", "timestamp", "double"]),
   value: zod.unknown().nullish(),
   tagName: zod.string().nullish(),
@@ -170,7 +170,7 @@ export const UpdateAttributeResponse = zod.object({
   id: zod.string(),
   assetId: zod.string(),
   name: zod.string(),
-  type: zod.enum(["static", "dynamic", "metric"]),
+  type: zod.enum(["static", "dynamic", "metric", "runtime"]),
   dataType: zod.enum(["text", "number", "boolean", "timestamp", "double"]),
   value: zod.unknown().nullish(),
   tagName: zod.string().nullish(),

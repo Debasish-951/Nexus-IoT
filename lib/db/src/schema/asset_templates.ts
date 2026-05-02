@@ -5,7 +5,7 @@ import { z } from "zod/v4";
 
 export interface AttributeDefinition {
   name: string;
-  type: "static" | "dynamic" | "metric";
+  type: "static" | "dynamic" | "metric" | "runtime";
   dataType: "text" | "number" | "double" | "boolean" | "timestamp";
   tagName?: string;
   uom?: string;
