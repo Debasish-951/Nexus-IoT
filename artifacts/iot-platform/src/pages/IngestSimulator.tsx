@@ -1,6 +1,11 @@
 import { useState, useRef, useEffect, useCallback } from "react";
-import { useGetRecentTelemetry } from "@workspace/api-client-react";
-import { getGetRecentTelemetryQueryKey } from "@workspace/api-client-react";
+import {
+  useGetRecentTelemetry,
+  getGetRecentTelemetryQueryKey,
+  getListAlarmsQueryKey,
+  getGetAlarmStatsQueryKey,
+} from "@workspace/api-client-react";
+import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -25,6 +30,7 @@ import {
 import {
   Play, Square, Send, RefreshCw, Zap, ChevronRight,
   CheckCircle2, XCircle, Clock, Activity, Cpu, TrendingUp,
+  Bell, BellOff,
 } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -128,6 +134,18 @@ const PRESETS = [
 ];
 
 // ── Types ────────────────────────────────────────────────────────────────────
+interface AlarmEvent {
+  ruleId: string;
+  ruleName: string;
+  metric: string;
+  value: number;
+  threshold: number | null;
+  operator: string | null;
+  severity: string;
+  event: "triggered" | "cleared";
+  alarmId: string;
+}
+
 interface LogEntry {
   id: string;
   ts: Date;
@@ -136,6 +154,7 @@ interface LogEntry {
   status: "success" | "error";
   response: object;
   durationMs: number;
+  alarmEvents: AlarmEvent[];
 }
 
 type ChartPoint = Record<string, number | string>;
@@ -171,10 +190,24 @@ function JsonEditor({
   );
 }
 
+const SEVERITY_COLORS: Record<string, string> = {
+  critical: "bg-red-500",
+  high: "bg-orange-500",
+  medium: "bg-yellow-500",
+  low: "bg-blue-500",
+  info: "bg-slate-400",
+};
+
 function LogRow({ entry }: { entry: LogEntry }) {
   const [expanded, setExpanded] = useState(false);
+  const triggered = entry.alarmEvents.filter((e) => e.event === "triggered");
+  const cleared   = entry.alarmEvents.filter((e) => e.event === "cleared");
   return (
-    <div className={cn("border-b border-border/50 text-xs", entry.status === "error" ? "bg-red-50/30 dark:bg-red-950/20" : "")}>
+    <div className={cn(
+      "border-b border-border/50 text-xs",
+      entry.status === "error" ? "bg-red-50/30 dark:bg-red-950/20" : "",
+      triggered.length > 0 ? "bg-orange-50/30 dark:bg-orange-950/20" : "",
+    )}>
       <button
         className="w-full flex items-center gap-2 px-3 py-2 hover:bg-muted/40 transition-colors text-left"
         onClick={() => setExpanded((o) => !o)}
@@ -185,6 +218,18 @@ function LogRow({ entry }: { entry: LogEntry }) {
           : <XCircle className="w-3.5 h-3.5 shrink-0 text-red-500" />}
         <span className="font-mono text-muted-foreground">{format(entry.ts, "HH:mm:ss.SSS")}</span>
         <span className="font-medium text-foreground flex-1 truncate">{entry.preset}</span>
+        {triggered.length > 0 && (
+          <span className="flex items-center gap-1 text-orange-600 dark:text-orange-400 font-medium shrink-0">
+            <Bell className="w-3 h-3" />
+            {triggered.length} alarm{triggered.length > 1 ? "s" : ""}
+          </span>
+        )}
+        {cleared.length > 0 && (
+          <span className="flex items-center gap-1 text-muted-foreground shrink-0">
+            <BellOff className="w-3 h-3" />
+            {cleared.length} cleared
+          </span>
+        )}
         <span className="text-muted-foreground">{entry.durationMs}ms</span>
         <Badge
           variant={entry.status === "success" ? "outline" : "destructive"}
@@ -194,18 +239,62 @@ function LogRow({ entry }: { entry: LogEntry }) {
         </Badge>
       </button>
       {expanded && (
-        <div className="px-3 pb-3 grid grid-cols-2 gap-2">
-          <div>
-            <p className="text-muted-foreground font-medium mb-1">Payload</p>
-            <pre className="bg-muted/60 rounded p-2 text-xs overflow-auto max-h-48 whitespace-pre-wrap">
-              {JSON.stringify(entry.payload, null, 2)}
-            </pre>
-          </div>
-          <div>
-            <p className="text-muted-foreground font-medium mb-1">Response</p>
-            <pre className="bg-muted/60 rounded p-2 text-xs overflow-auto max-h-48 whitespace-pre-wrap">
-              {JSON.stringify(entry.response, null, 2)}
-            </pre>
+        <div className="px-3 pb-3 space-y-2">
+          {/* Alarm events */}
+          {entry.alarmEvents.length > 0 && (
+            <div>
+              <p className="text-muted-foreground font-medium mb-1.5">Alarm Events</p>
+              <div className="space-y-1">
+                {entry.alarmEvents.map((ae) => (
+                  <div
+                    key={ae.alarmId}
+                    className={cn(
+                      "flex items-center gap-2 rounded px-2 py-1.5 text-xs border",
+                      ae.event === "triggered"
+                        ? "border-orange-300/60 bg-orange-50/50 dark:border-orange-700/40 dark:bg-orange-950/30"
+                        : "border-border/50 bg-muted/30"
+                    )}
+                  >
+                    {ae.event === "triggered"
+                      ? <Bell className="w-3 h-3 text-orange-500 shrink-0" />
+                      : <BellOff className="w-3 h-3 text-muted-foreground shrink-0" />}
+                    <span
+                      className={cn("w-1.5 h-1.5 rounded-full shrink-0", SEVERITY_COLORS[ae.severity] ?? "bg-slate-400")}
+                    />
+                    <span className="font-medium">{ae.ruleName}</span>
+                    <span className="text-muted-foreground">—</span>
+                    <span className="font-mono">{ae.metric}</span>
+                    <span className="text-muted-foreground">{ae.operator}</span>
+                    <span className="font-mono font-semibold">{ae.threshold}</span>
+                    <span className="text-muted-foreground">(got</span>
+                    <span className={cn("font-mono font-semibold", ae.event === "triggered" ? "text-orange-600 dark:text-orange-400" : "text-green-600")}>
+                      {ae.value}
+                    </span>
+                    <span className="text-muted-foreground">)</span>
+                    <Badge
+                      variant="outline"
+                      className={cn("ml-auto h-4 px-1 text-xs capitalize", ae.severity === "critical" ? "border-red-400 text-red-500" : ae.severity === "high" ? "border-orange-400 text-orange-500" : "")}
+                    >
+                      {ae.severity}
+                    </Badge>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+          <div className="grid grid-cols-2 gap-2">
+            <div>
+              <p className="text-muted-foreground font-medium mb-1">Payload</p>
+              <pre className="bg-muted/60 rounded p-2 text-xs overflow-auto max-h-40 whitespace-pre-wrap">
+                {JSON.stringify(entry.payload, null, 2)}
+              </pre>
+            </div>
+            <div>
+              <p className="text-muted-foreground font-medium mb-1">Response</p>
+              <pre className="bg-muted/60 rounded p-2 text-xs overflow-auto max-h-40 whitespace-pre-wrap">
+                {JSON.stringify(entry.response, null, 2)}
+              </pre>
+            </div>
           </div>
         </div>
       )}
@@ -233,6 +322,7 @@ function ChartTooltip({ active, payload, label }: any) {
 // ── Main component ────────────────────────────────────────────────────────────
 export default function IngestSimulator() {
   const qc = useQueryClient();
+  const { toast } = useToast();
 
   const [selectedPreset, setSelectedPreset] = useState(PRESETS[0]);
   const [currentMetrics, setCurrentMetrics] = useState<Record<string, number>>({ ...PRESETS[0].metrics });
@@ -244,6 +334,7 @@ export default function IngestSimulator() {
   const [log, setLog] = useState<LogEntry[]>([]);
   const [totalSent, setTotalSent] = useState(0);
   const [totalSuccess, setTotalSuccess] = useState(0);
+  const [totalAlarmsTriggered, setTotalAlarmsTriggered] = useState(0);
   const intervalRef = useRef<number | null>(null);
 
   // Chart state
@@ -296,6 +387,9 @@ export default function IngestSimulator() {
         const data = await res.json();
         const durationMs = Math.round(performance.now() - start);
 
+        const alarmEvents: AlarmEvent[] = data?.alarmEvents ?? [];
+        const newlyTriggered = alarmEvents.filter((e: AlarmEvent) => e.event === "triggered");
+
         const entry: LogEntry = {
           id: crypto.randomUUID(),
           ts: new Date(),
@@ -304,6 +398,7 @@ export default function IngestSimulator() {
           status: res.ok ? "success" : "error",
           response: data,
           durationMs,
+          alarmEvents,
         };
 
         setLog((l) => [entry, ...l].slice(0, 100));
@@ -314,6 +409,21 @@ export default function IngestSimulator() {
           const chartMetrics = metricsForChart ?? (payload as any).metrics;
           if (chartMetrics && typeof chartMetrics === "object") {
             addChartPoint(chartMetrics as Record<string, number>);
+          }
+          // Handle alarm events
+          if (newlyTriggered.length > 0) {
+            setTotalAlarmsTriggered((n) => n + newlyTriggered.length);
+            // Toast for each triggered alarm (max 3 to avoid spam)
+            newlyTriggered.slice(0, 3).forEach((ae: AlarmEvent) => {
+              toast({
+                title: `🔔 Alarm triggered: ${ae.ruleName}`,
+                description: `${ae.metric} ${ae.operator} ${ae.threshold} — current value: ${ae.value} (${ae.severity})`,
+                variant: "destructive",
+              });
+            });
+            // Refresh alarms list so the Alarms page shows the new entry
+            qc.invalidateQueries({ queryKey: getListAlarmsQueryKey() });
+            qc.invalidateQueries({ queryKey: getGetAlarmStatsQueryKey() });
           }
         }
 
@@ -327,6 +437,7 @@ export default function IngestSimulator() {
           status: "error",
           response: { error: err instanceof Error ? err.message : String(err) },
           durationMs: Math.round(performance.now() - start),
+          alarmEvents: [],
         };
         setLog((l) => [entry, ...l].slice(0, 100));
         setTotalSent((n) => n + 1);
@@ -427,6 +538,16 @@ export default function IngestSimulator() {
           <div className="text-center">
             <p className="text-2xl font-bold tabular-nums">{successRate}%</p>
             <p className="text-xs text-muted-foreground">Rate</p>
+          </div>
+          <div className="h-8 w-px bg-border" />
+          <div className="text-center">
+            <p className={cn("text-2xl font-bold tabular-nums", totalAlarmsTriggered > 0 ? "text-orange-500" : "text-muted-foreground/60")}>
+              {totalAlarmsTriggered}
+            </p>
+            <p className="text-xs text-muted-foreground flex items-center gap-1 justify-center">
+              <Bell className="w-3 h-3" />
+              Alarms
+            </p>
           </div>
         </div>
       </div>
@@ -626,7 +747,7 @@ export default function IngestSimulator() {
                 {log.length > 0 && (
                   <button
                     className="text-xs text-muted-foreground hover:text-destructive transition-colors"
-                    onClick={() => { setLog([]); setTotalSent(0); setTotalSuccess(0); }}
+                    onClick={() => { setLog([]); setTotalSent(0); setTotalSuccess(0); setTotalAlarmsTriggered(0); }}
                   >
                     Clear
                   </button>
