@@ -1,0 +1,144 @@
+import { Router, type IRouter } from "express";
+import { eq, isNull, sql, like } from "drizzle-orm";
+import { db, assetsTable, attributesTable } from "@workspace/db";
+import {
+  CreateAssetBody,
+  UpdateAssetBody,
+  GetAssetParams,
+  UpdateAssetParams,
+  DeleteAssetParams,
+  ListAssetsQueryParams,
+} from "@workspace/api-zod";
+
+const router: IRouter = Router();
+
+router.get("/assets", async (req, res): Promise<void> => {
+  const query = ListAssetsQueryParams.safeParse(req.query);
+  if (!query.success) {
+    res.status(400).json({ error: query.error.message });
+    return;
+  }
+
+  let conditions: ReturnType<typeof eq>[] = [];
+  if (query.data.parentId !== undefined) {
+    conditions.push(eq(assetsTable.parentId, query.data.parentId as string));
+  }
+
+  const assets = await db
+    .select()
+    .from(assetsTable)
+    .where(conditions.length > 0 ? conditions[0] : undefined)
+    .orderBy(assetsTable.name);
+
+  res.json(assets);
+});
+
+router.post("/assets", async (req, res): Promise<void> => {
+  const parsed = CreateAssetBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  const [asset] = await db
+    .insert(assetsTable)
+    .values({
+      name: parsed.data.name,
+      identifier: parsed.data.identifier,
+      parentId: parsed.data.parentId ?? null,
+      templateId: parsed.data.templateId ?? null,
+      description: parsed.data.description ?? null,
+      tags: parsed.data.tags ?? [],
+    })
+    .returning();
+
+  // Update parent childCount
+  if (asset.parentId) {
+    await db
+      .update(assetsTable)
+      .set({ childCount: sql`${assetsTable.childCount} + 1` })
+      .where(eq(assetsTable.id, asset.parentId));
+  }
+
+  res.status(201).json(asset);
+});
+
+router.get("/assets/:id", async (req, res): Promise<void> => {
+  const params = GetAssetParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+
+  const [asset] = await db
+    .select()
+    .from(assetsTable)
+    .where(eq(assetsTable.id, params.data.id));
+
+  if (!asset) {
+    res.status(404).json({ error: "Asset not found" });
+    return;
+  }
+
+  res.json(asset);
+});
+
+router.put("/assets/:id", async (req, res): Promise<void> => {
+  const params = UpdateAssetParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+
+  const parsed = UpdateAssetBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  const [asset] = await db
+    .update(assetsTable)
+    .set({
+      ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
+      ...(parsed.data.description !== undefined ? { description: parsed.data.description } : {}),
+      ...(parsed.data.tags !== undefined ? { tags: parsed.data.tags } : {}),
+    })
+    .where(eq(assetsTable.id, params.data.id))
+    .returning();
+
+  if (!asset) {
+    res.status(404).json({ error: "Asset not found" });
+    return;
+  }
+
+  res.json(asset);
+});
+
+router.delete("/assets/:id", async (req, res): Promise<void> => {
+  const params = DeleteAssetParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+
+  const [asset] = await db
+    .delete(assetsTable)
+    .where(eq(assetsTable.id, params.data.id))
+    .returning();
+
+  if (!asset) {
+    res.status(404).json({ error: "Asset not found" });
+    return;
+  }
+
+  if (asset.parentId) {
+    await db
+      .update(assetsTable)
+      .set({ childCount: sql`GREATEST(${assetsTable.childCount} - 1, 0)` })
+      .where(eq(assetsTable.id, asset.parentId));
+  }
+
+  res.sendStatus(204);
+});
+
+export default router;

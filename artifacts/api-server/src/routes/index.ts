@@ -1,8 +1,28 @@
 import { Router, type IRouter } from "express";
 import healthRouter from "./health";
+import assetsRouter from "./assets";
+import attributesRouter from "./attributes";
+import assetTemplatesRouter from "./asset_templates";
+import ingestRouter from "./ingest";
+import alarmsRouter from "./alarms";
+import alarmRulesRouter from "./alarm_rules";
+import usersRouter from "./users";
+import brokersRouter from "./brokers";
+import apiClientsRouter from "./api_clients";
+import dashboardRouter from "./dashboard";
 
 const router: IRouter = Router();
 
 router.use(healthRouter);
+router.use(assetsRouter);
+router.use(attributesRouter);
+router.use(assetTemplatesRouter);
+router.use(ingestRouter);
+router.use(alarmsRouter);
+router.use(alarmRulesRouter);
+router.use(usersRouter);
+router.use(brokersRouter);
+router.use(apiClientsRouter);
+router.use(dashboardRouter);
 
 export default router;

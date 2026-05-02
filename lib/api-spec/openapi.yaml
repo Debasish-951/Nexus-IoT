@@ -3,20 +3,40 @@ info:
   # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: IoT Data Acquisition Platform API
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: assets
+    description: Asset hierarchy management
+  - name: asset-templates
+    description: Asset template management
+  - name: attributes
+    description: Asset attribute management
+  - name: ingest
+    description: Data ingestion endpoints
+  - name: alarms
+    description: Alarm management
+  - name: alarm-rules
+    description: Alarm rule configuration
+  - name: users
+    description: User management
+  - name: brokers
+    description: Broker management
+  - name: api-clients
+    description: API client management
+  - name: dashboard
+    description: Dashboard summary data
+
 paths:
   /healthz:
     get:
       operationId: healthCheck
       tags: [health]
       summary: Health check
-      description: Returns server health status
       responses:
         "200":
           description: Healthy
@@ -24,6 +44,795 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  # ─── Assets ───────────────────────────────────────────────────────────────
+  /assets:
+    get:
+      operationId: listAssets
+      tags: [assets]
+      summary: List all assets
+      parameters:
+        - name: parentId
+          in: query
+          schema:
+            type: string
+          description: Filter by parent asset id (null for root)
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Asset"
+    post:
+      operationId: createAsset
+      tags: [assets]
+      summary: Create an asset
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAssetBody"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Asset"
+
+  /assets/{id}:
+    get:
+      operationId: getAsset
+      tags: [assets]
+      summary: Get asset by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Asset"
+    put:
+      operationId: updateAsset
+      tags: [assets]
+      summary: Update an asset
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateAssetBody"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Asset"
+    delete:
+      operationId: deleteAsset
+      tags: [assets]
+      summary: Delete an asset
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+
+  /assets/{id}/attributes:
+    get:
+      operationId: listAssetAttributes
+      tags: [attributes]
+      summary: List attributes for an asset
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Attribute"
+    post:
+      operationId: createAssetAttribute
+      tags: [attributes]
+      summary: Add attribute to an asset
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAttributeBody"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Attribute"
+
+  /attributes/{id}:
+    put:
+      operationId: updateAttribute
+      tags: [attributes]
+      summary: Update an attribute
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateAttributeBody"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Attribute"
+    delete:
+      operationId: deleteAttribute
+      tags: [attributes]
+      summary: Delete an attribute
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+
+  # ─── Asset Templates ───────────────────────────────────────────────────────
+  /asset-templates:
+    get:
+      operationId: listAssetTemplates
+      tags: [asset-templates]
+      summary: List asset templates
+      parameters:
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AssetTemplate"
+    post:
+      operationId: createAssetTemplate
+      tags: [asset-templates]
+      summary: Create asset template
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAssetTemplateBody"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssetTemplate"
+
+  /asset-templates/{id}:
+    get:
+      operationId: getAssetTemplate
+      tags: [asset-templates]
+      summary: Get asset template by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssetTemplate"
+    put:
+      operationId: updateAssetTemplate
+      tags: [asset-templates]
+      summary: Update asset template
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateAssetTemplateBody"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssetTemplate"
+    delete:
+      operationId: deleteAssetTemplate
+      tags: [asset-templates]
+      summary: Delete asset template
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+
+  # ─── Data Ingestion ────────────────────────────────────────────────────────
+  /ingest/payload:
+    post:
+      operationId: ingestPayload
+      tags: [ingest]
+      summary: Ingest Node-RED or generic IoT payload
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IngestPayloadBody"
+      responses:
+        "200":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestResult"
+
+  /ingest/batch:
+    post:
+      operationId: ingestBatch
+      tags: [ingest]
+      summary: Ingest batch of telemetry records
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: "#/components/schemas/IngestPayloadBody"
+      responses:
+        "200":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestBatchResult"
+
+  /telemetry/{assetId}:
+    get:
+      operationId: getTelemetry
+      tags: [ingest]
+      summary: Get telemetry history for an asset
+      parameters:
+        - name: assetId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: metric
+          in: query
+          schema:
+            type: string
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TelemetryRecord"
+
+  # ─── Alarms ────────────────────────────────────────────────────────────────
+  /alarms:
+    get:
+      operationId: listAlarms
+      tags: [alarms]
+      summary: List active alarms
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, acknowledged, cleared]
+        - name: severity
+          in: query
+          schema:
+            type: string
+            enum: [critical, high, medium, low, info]
+        - name: search
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Alarm"
+
+  /alarms/{id}/acknowledge:
+    post:
+      operationId: acknowledgeAlarm
+      tags: [alarms]
+      summary: Acknowledge an alarm
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Alarm"
+
+  /alarms/history:
+    get:
+      operationId: listAlarmHistory
+      tags: [alarms]
+      summary: List alarm history
+      parameters:
+        - name: assetId
+          in: query
+          schema:
+            type: string
+        - name: from
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AlarmHistory"
+
+  # ─── Alarm Rules ───────────────────────────────────────────────────────────
+  /alarm-rules:
+    get:
+      operationId: listAlarmRules
+      tags: [alarm-rules]
+      summary: List alarm rules
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AlarmRule"
+    post:
+      operationId: createAlarmRule
+      tags: [alarm-rules]
+      summary: Create alarm rule
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAlarmRuleBody"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AlarmRule"
+
+  /alarm-rules/{id}:
+    put:
+      operationId: updateAlarmRule
+      tags: [alarm-rules]
+      summary: Update alarm rule
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateAlarmRuleBody"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AlarmRule"
+    delete:
+      operationId: deleteAlarmRule
+      tags: [alarm-rules]
+      summary: Delete alarm rule
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+
+  # ─── Users ─────────────────────────────────────────────────────────────────
+  /users:
+    get:
+      operationId: listUsers
+      tags: [users]
+      summary: List users
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/User"
+    post:
+      operationId: createUser
+      tags: [users]
+      summary: Create user
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateUserBody"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+
+  /users/{id}:
+    get:
+      operationId: getUser
+      tags: [users]
+      summary: Get user by ID
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+    put:
+      operationId: updateUser
+      tags: [users]
+      summary: Update user
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateUserBody"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+    delete:
+      operationId: deleteUser
+      tags: [users]
+      summary: Delete user
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+
+  # ─── Brokers ───────────────────────────────────────────────────────────────
+  /brokers:
+    get:
+      operationId: listBrokers
+      tags: [brokers]
+      summary: List brokers
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Broker"
+    post:
+      operationId: createBroker
+      tags: [brokers]
+      summary: Create broker
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateBrokerBody"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Broker"
+
+  /brokers/{id}:
+    put:
+      operationId: updateBroker
+      tags: [brokers]
+      summary: Update broker
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateBrokerBody"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Broker"
+    delete:
+      operationId: deleteBroker
+      tags: [brokers]
+      summary: Delete broker
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+
+  # ─── API Clients ───────────────────────────────────────────────────────────
+  /api-clients:
+    get:
+      operationId: listApiClients
+      tags: [api-clients]
+      summary: List API clients
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ApiClient"
+    post:
+      operationId: createApiClient
+      tags: [api-clients]
+      summary: Create API client
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateApiClientBody"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiClient"
+
+  /api-clients/{id}:
+    put:
+      operationId: updateApiClient
+      tags: [api-clients]
+      summary: Update API client
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateApiClientBody"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiClient"
+    delete:
+      operationId: deleteApiClient
+      tags: [api-clients]
+      summary: Delete API client
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Deleted
+
+  # ─── Dashboard Summary ─────────────────────────────────────────────────────
+  /dashboard/summary:
+    get:
+      operationId: getDashboardSummary
+      tags: [dashboard]
+      summary: Get dashboard summary stats
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSummary"
+
+  /dashboard/recent-telemetry:
+    get:
+      operationId: getRecentTelemetry
+      tags: [dashboard]
+      summary: Get recent telemetry across all assets
+      parameters:
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 20
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TelemetryRecord"
+
+  /dashboard/alarm-stats:
+    get:
+      operationId: getAlarmStats
+      tags: [dashboard]
+      summary: Get alarm statistics by severity
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AlarmStats"
+
 components:
   schemas:
     HealthStatus:
@@ -31,6 +840,683 @@ components:
       properties:
         status:
           type: string
-      required:
-        - status
+      required: [status]
 
+    # ─── Asset ───────────────────────────────────────────────────────────────
+    Asset:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        identifier:
+          type: string
+        parentId:
+          type: string
+          nullable: true
+        templateId:
+          type: string
+          nullable: true
+        templateName:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        tags:
+          type: array
+          items:
+            type: string
+        childCount:
+          type: integer
+        attributeCount:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required: [id, name, identifier, tags, childCount, attributeCount, createdAt, updatedAt]
+
+    CreateAssetBody:
+      type: object
+      properties:
+        name:
+          type: string
+        identifier:
+          type: string
+        parentId:
+          type: string
+          nullable: true
+        templateId:
+          type: string
+          nullable: true
+        description:
+          type: string
+          nullable: true
+        tags:
+          type: array
+          items:
+            type: string
+      required: [name, identifier]
+
+    UpdateAssetBody:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        tags:
+          type: array
+          items:
+            type: string
+
+    # ─── Attribute ────────────────────────────────────────────────────────────
+    Attribute:
+      type: object
+      properties:
+        id:
+          type: string
+        assetId:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+          enum: [static, dynamic, metric]
+        dataType:
+          type: string
+          enum: [text, number, boolean, timestamp, double]
+        value:
+          nullable: true
+        tagName:
+          type: string
+          nullable: true
+        uom:
+          type: string
+          nullable: true
+        quality:
+          type: string
+          nullable: true
+        expression:
+          type: string
+          nullable: true
+        timestamp:
+          type: string
+          format: date-time
+          nullable: true
+        updatedAt:
+          type: string
+          format: date-time
+      required: [id, assetId, name, type, dataType, updatedAt]
+
+    CreateAttributeBody:
+      type: object
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+          enum: [static, dynamic, metric]
+        dataType:
+          type: string
+          enum: [text, number, boolean, timestamp, double]
+        value:
+          nullable: true
+        tagName:
+          type: string
+          nullable: true
+        uom:
+          type: string
+          nullable: true
+        expression:
+          type: string
+          nullable: true
+      required: [name, type, dataType]
+
+    UpdateAttributeBody:
+      type: object
+      properties:
+        name:
+          type: string
+        value:
+          nullable: true
+        uom:
+          type: string
+          nullable: true
+        expression:
+          type: string
+          nullable: true
+
+    # ─── Asset Template ────────────────────────────────────────────────────────
+    AssetTemplate:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        attributeCount:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required: [id, name, tags, attributeCount, createdAt, updatedAt]
+
+    CreateAssetTemplateBody:
+      type: object
+      properties:
+        name:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+      required: [name]
+
+    UpdateAssetTemplateBody:
+      type: object
+      properties:
+        name:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+
+    # ─── Ingest ────────────────────────────────────────────────────────────────
+    IngestPayloadBody:
+      type: object
+      properties:
+        deviceId:
+          type: string
+        assetId:
+          type: string
+          nullable: true
+        timestamp:
+          type: string
+          format: date-time
+          nullable: true
+        timestampUnix:
+          type: number
+          nullable: true
+        metrics:
+          type: object
+          additionalProperties: true
+      required: [deviceId]
+
+    IngestResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        recordsWritten:
+          type: integer
+        assetId:
+          type: string
+          nullable: true
+        message:
+          type: string
+      required: [success, recordsWritten, message]
+
+    IngestBatchResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        totalRecords:
+          type: integer
+        successCount:
+          type: integer
+        failureCount:
+          type: integer
+      required: [success, totalRecords, successCount, failureCount]
+
+    TelemetryRecord:
+      type: object
+      properties:
+        id:
+          type: string
+        assetId:
+          type: string
+        deviceId:
+          type: string
+          nullable: true
+        metric:
+          type: string
+        value:
+          nullable: true
+        timestamp:
+          type: string
+          format: date-time
+        quality:
+          type: string
+          nullable: true
+      required: [id, assetId, metric, timestamp]
+
+    # ─── Alarm ─────────────────────────────────────────────────────────────────
+    Alarm:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        assetId:
+          type: string
+        assetName:
+          type: string
+        ruleId:
+          type: string
+          nullable: true
+        severity:
+          type: string
+          enum: [critical, high, medium, low, info]
+        status:
+          type: string
+          enum: [active, acknowledged, cleared]
+        alarmClass:
+          type: string
+          nullable: true
+        message:
+          type: string
+          nullable: true
+        triggerValue:
+          nullable: true
+        triggeredAt:
+          type: string
+          format: date-time
+        acknowledgedAt:
+          type: string
+          format: date-time
+          nullable: true
+        clearedAt:
+          type: string
+          format: date-time
+          nullable: true
+      required: [id, name, assetId, assetName, severity, status, triggeredAt]
+
+    AlarmHistory:
+      type: object
+      properties:
+        id:
+          type: string
+        alarmId:
+          type: string
+        assetId:
+          type: string
+        assetName:
+          type: string
+        name:
+          type: string
+        severity:
+          type: string
+          enum: [critical, high, medium, low, info]
+        status:
+          type: string
+          enum: [active, acknowledged, cleared]
+        triggeredAt:
+          type: string
+          format: date-time
+        clearedAt:
+          type: string
+          format: date-time
+          nullable: true
+      required: [id, alarmId, assetId, assetName, name, severity, status, triggeredAt]
+
+    # ─── Alarm Rule ────────────────────────────────────────────────────────────
+    AlarmRule:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        assetId:
+          type: string
+          nullable: true
+        alarmType:
+          type: string
+          enum: [threshold, deviation, rate_of_change, heartbeat]
+        severity:
+          type: string
+          enum: [critical, high, medium, low, info]
+        metric:
+          type: string
+          nullable: true
+        operator:
+          type: string
+          enum: [gt, lt, gte, lte, eq, ne]
+          nullable: true
+        threshold:
+          type: number
+          nullable: true
+        deadband:
+          type: number
+          nullable: true
+        onDelay:
+          type: integer
+          nullable: true
+        offDelay:
+          type: integer
+          nullable: true
+        scanRate:
+          type: integer
+          nullable: true
+        enabled:
+          type: boolean
+        requireAcknowledge:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required: [id, name, alarmType, severity, enabled, requireAcknowledge, createdAt, updatedAt]
+
+    CreateAlarmRuleBody:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        assetId:
+          type: string
+          nullable: true
+        alarmType:
+          type: string
+          enum: [threshold, deviation, rate_of_change, heartbeat]
+        severity:
+          type: string
+          enum: [critical, high, medium, low, info]
+        metric:
+          type: string
+          nullable: true
+        operator:
+          type: string
+          enum: [gt, lt, gte, lte, eq, ne]
+          nullable: true
+        threshold:
+          type: number
+          nullable: true
+        deadband:
+          type: number
+          nullable: true
+        onDelay:
+          type: integer
+          nullable: true
+        offDelay:
+          type: integer
+          nullable: true
+        scanRate:
+          type: integer
+          nullable: true
+        enabled:
+          type: boolean
+        requireAcknowledge:
+          type: boolean
+      required: [name, alarmType, severity, enabled, requireAcknowledge]
+
+    UpdateAlarmRuleBody:
+      type: object
+      properties:
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        severity:
+          type: string
+          enum: [critical, high, medium, low, info]
+        threshold:
+          type: number
+          nullable: true
+        deadband:
+          type: number
+          nullable: true
+        onDelay:
+          type: integer
+          nullable: true
+        offDelay:
+          type: integer
+          nullable: true
+        enabled:
+          type: boolean
+        requireAcknowledge:
+          type: boolean
+
+    # ─── User ──────────────────────────────────────────────────────────────────
+    User:
+      type: object
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        email:
+          type: string
+        fullName:
+          type: string
+        role:
+          type: string
+          enum: [admin, operator, viewer, engineer]
+        status:
+          type: string
+          enum: [active, inactive, suspended]
+        lastLogin:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, username, email, fullName, role, status, createdAt]
+
+    CreateUserBody:
+      type: object
+      properties:
+        username:
+          type: string
+        email:
+          type: string
+        fullName:
+          type: string
+        role:
+          type: string
+          enum: [admin, operator, viewer, engineer]
+        password:
+          type: string
+      required: [username, email, fullName, role, password]
+
+    UpdateUserBody:
+      type: object
+      properties:
+        email:
+          type: string
+        fullName:
+          type: string
+        role:
+          type: string
+          enum: [admin, operator, viewer, engineer]
+        status:
+          type: string
+          enum: [active, inactive, suspended]
+
+    # ─── Broker ────────────────────────────────────────────────────────────────
+    Broker:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          type: string
+          enum: [mqtt, rest_api, azure_iot, azure_event_hub]
+        endpoint:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [connected, disconnected, error]
+        connectedDevices:
+          type: integer
+        totalRequests:
+          type: integer
+        tags:
+          type: array
+          items:
+            type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required: [id, name, type, status, connectedDevices, totalRequests, tags, createdAt, updatedAt]
+
+    CreateBrokerBody:
+      type: object
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+          enum: [mqtt, rest_api, azure_iot, azure_event_hub]
+        endpoint:
+          type: string
+          nullable: true
+        tags:
+          type: array
+          items:
+            type: string
+      required: [name, type]
+
+    UpdateBrokerBody:
+      type: object
+      properties:
+        name:
+          type: string
+        endpoint:
+          type: string
+          nullable: true
+        tags:
+          type: array
+          items:
+            type: string
+
+    # ─── API Client ────────────────────────────────────────────────────────────
+    ApiClient:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        clientId:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        scopes:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+          enum: [active, inactive]
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required: [id, name, clientId, tags, scopes, status, createdAt, updatedAt]
+
+    CreateApiClientBody:
+      type: object
+      properties:
+        name:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        scopes:
+          type: array
+          items:
+            type: string
+      required: [name]
+
+    UpdateApiClientBody:
+      type: object
+      properties:
+        name:
+          type: string
+        tags:
+          type: array
+          items:
+            type: string
+        scopes:
+          type: array
+          items:
+            type: string
+        status:
+          type: string
+          enum: [active, inactive]
+
+    # ─── Dashboard ─────────────────────────────────────────────────────────────
+    DashboardSummary:
+      type: object
+      properties:
+        totalAssets:
+          type: integer
+        activeAlarms:
+          type: integer
+        criticalAlarms:
+          type: integer
+        connectedBrokers:
+          type: integer
+        totalUsers:
+          type: integer
+        telemetryRate:
+          type: number
+          description: Records per minute (last 5 min)
+        lastIngestionAt:
+          type: string
+          format: date-time
+          nullable: true
+      required: [totalAssets, activeAlarms, criticalAlarms, connectedBrokers, totalUsers, telemetryRate]
+
+    AlarmStats:
+      type: object
+      properties:
+        critical:
+          type: integer
+        high:
+          type: integer
+        medium:
+          type: integer
+        low:
+          type: integer
+        info:
+          type: integer
+      required: [critical, high, medium, low, info]
