@@ -1,5 +1,5 @@
 import { Router, type IRouter } from "express";
-import { eq } from "drizzle-orm";
+import { eq, sql } from "drizzle-orm";
 import { db, assetTemplatesTable } from "@workspace/db";
 import {
   CreateAssetTemplateBody,
@@ -16,23 +16,16 @@ router.get("/asset-templates", async (req, res): Promise<void> => {
     .select()
     .from(assetTemplatesTable)
     .orderBy(assetTemplatesTable.name);
-
   res.json(templates);
 });
 
 router.post("/asset-templates", async (req, res): Promise<void> => {
   const parsed = CreateAssetTemplateBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
-    return;
-  }
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
 
   const [template] = await db
     .insert(assetTemplatesTable)
-    .values({
-      name: parsed.data.name,
-      tags: parsed.data.tags ?? [],
-    })
+    .values({ name: parsed.data.name, tags: parsed.data.tags ?? [] })
     .returning();
 
   res.status(201).json(template);
@@ -40,71 +33,61 @@ router.post("/asset-templates", async (req, res): Promise<void> => {
 
 router.get("/asset-templates/:id", async (req, res): Promise<void> => {
   const params = GetAssetTemplateParams.safeParse(req.params);
-  if (!params.success) {
-    res.status(400).json({ error: params.error.message });
-    return;
-  }
+  if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
 
   const [template] = await db
     .select()
     .from(assetTemplatesTable)
     .where(eq(assetTemplatesTable.id, params.data.id));
 
-  if (!template) {
-    res.status(404).json({ error: "Template not found" });
-    return;
-  }
-
+  if (!template) { res.status(404).json({ error: "Template not found" }); return; }
   res.json(template);
 });
 
 router.put("/asset-templates/:id", async (req, res): Promise<void> => {
   const params = UpdateAssetTemplateParams.safeParse(req.params);
-  if (!params.success) {
-    res.status(400).json({ error: params.error.message });
-    return;
-  }
+  if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
 
   const parsed = UpdateAssetTemplateBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+
+  // attributeDefinitions comes through as raw JSON (not in Zod schema — accept directly from body)
+  const attributeDefinitions = (req.body as any)?.attributeDefinitions;
+
+  const updatePayload: Record<string, unknown> = {};
+  if (parsed.data.name !== undefined) updatePayload.name = parsed.data.name;
+  if (parsed.data.tags !== undefined) updatePayload.tags = parsed.data.tags;
+  if (attributeDefinitions !== undefined) {
+    updatePayload.attributeDefinitions = JSON.stringify(attributeDefinitions);
+    updatePayload.attributeCount = Array.isArray(attributeDefinitions) ? attributeDefinitions.length : 0;
+  }
+
+  if (Object.keys(updatePayload).length === 0) {
+    const [tmpl] = await db.select().from(assetTemplatesTable).where(eq(assetTemplatesTable.id, params.data.id));
+    res.json(tmpl);
     return;
   }
 
   const [template] = await db
     .update(assetTemplatesTable)
-    .set({
-      ...(parsed.data.name !== undefined ? { name: parsed.data.name } : {}),
-      ...(parsed.data.tags !== undefined ? { tags: parsed.data.tags } : {}),
-    })
+    .set(updatePayload as any)
     .where(eq(assetTemplatesTable.id, params.data.id))
     .returning();
 
-  if (!template) {
-    res.status(404).json({ error: "Template not found" });
-    return;
-  }
-
+  if (!template) { res.status(404).json({ error: "Template not found" }); return; }
   res.json(template);
 });
 
 router.delete("/asset-templates/:id", async (req, res): Promise<void> => {
   const params = DeleteAssetTemplateParams.safeParse(req.params);
-  if (!params.success) {
-    res.status(400).json({ error: params.error.message });
-    return;
-  }
+  if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
 
   const [template] = await db
     .delete(assetTemplatesTable)
     .where(eq(assetTemplatesTable.id, params.data.id))
     .returning();
 
-  if (!template) {
-    res.status(404).json({ error: "Template not found" });
-    return;
-  }
-
+  if (!template) { res.status(404).json({ error: "Template not found" }); return; }
   res.sendStatus(204);
 });
 

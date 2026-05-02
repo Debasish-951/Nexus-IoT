@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { eq, isNull, sql, like } from "drizzle-orm";
-import { db, assetsTable, attributesTable } from "@workspace/db";
+import { db, assetsTable, attributesTable, assetTemplatesTable } from "@workspace/db";
 import {
   CreateAssetBody,
   UpdateAssetBody,
@@ -52,7 +52,6 @@ router.post("/assets", async (req, res): Promise<void> => {
     })
     .returning();
 
-  // Update parent childCount
   if (asset.parentId) {
     await db
       .update(assetsTable)
@@ -70,31 +69,17 @@ router.get("/assets/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  const [asset] = await db
-    .select()
-    .from(assetsTable)
-    .where(eq(assetsTable.id, params.data.id));
-
-  if (!asset) {
-    res.status(404).json({ error: "Asset not found" });
-    return;
-  }
-
+  const [asset] = await db.select().from(assetsTable).where(eq(assetsTable.id, params.data.id));
+  if (!asset) { res.status(404).json({ error: "Asset not found" }); return; }
   res.json(asset);
 });
 
 router.put("/assets/:id", async (req, res): Promise<void> => {
   const params = UpdateAssetParams.safeParse(req.params);
-  if (!params.success) {
-    res.status(400).json({ error: params.error.message });
-    return;
-  }
+  if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
 
   const parsed = UpdateAssetBody.safeParse(req.body);
-  if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
-    return;
-  }
+  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
 
   const [asset] = await db
     .update(assetsTable)
@@ -106,30 +91,16 @@ router.put("/assets/:id", async (req, res): Promise<void> => {
     .where(eq(assetsTable.id, params.data.id))
     .returning();
 
-  if (!asset) {
-    res.status(404).json({ error: "Asset not found" });
-    return;
-  }
-
+  if (!asset) { res.status(404).json({ error: "Asset not found" }); return; }
   res.json(asset);
 });
 
 router.delete("/assets/:id", async (req, res): Promise<void> => {
   const params = DeleteAssetParams.safeParse(req.params);
-  if (!params.success) {
-    res.status(400).json({ error: params.error.message });
-    return;
-  }
+  if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
 
-  const [asset] = await db
-    .delete(assetsTable)
-    .where(eq(assetsTable.id, params.data.id))
-    .returning();
-
-  if (!asset) {
-    res.status(404).json({ error: "Asset not found" });
-    return;
-  }
+  const [asset] = await db.delete(assetsTable).where(eq(assetsTable.id, params.data.id)).returning();
+  if (!asset) { res.status(404).json({ error: "Asset not found" }); return; }
 
   if (asset.parentId) {
     await db
@@ -139,6 +110,124 @@ router.delete("/assets/:id", async (req, res): Promise<void> => {
   }
 
   res.sendStatus(204);
+});
+
+// ── Bulk attribute import ─────────────────────────────────────────────────────
+router.post("/assets/:id/attributes/bulk", async (req, res): Promise<void> => {
+  const { id } = req.params;
+
+  const [asset] = await db.select().from(assetsTable).where(eq(assetsTable.id, id));
+  if (!asset) { res.status(404).json({ error: "Asset not found" }); return; }
+
+  const items: any[] = req.body?.attributes ?? [];
+  if (!Array.isArray(items) || items.length === 0) {
+    res.status(400).json({ error: "attributes must be a non-empty array" });
+    return;
+  }
+
+  const validTypes    = ["static", "dynamic", "metric"];
+  const validDataTypes = ["text", "number", "double", "boolean", "timestamp"];
+
+  let created = 0;
+  let skipped = 0;
+  const errors: string[] = [];
+
+  for (const item of items) {
+    if (!item.name || typeof item.name !== "string") { skipped++; errors.push(`Skipped: missing name`); continue; }
+    const type     = validTypes.includes(item.type)     ? item.type     : "static";
+    const dataType = validDataTypes.includes(item.dataType) ? item.dataType : "text";
+
+    try {
+      await db.insert(attributesTable).values({
+        assetId:  id,
+        name:     item.name.trim(),
+        type,
+        dataType,
+        value:    item.value != null ? item.value : null,
+        tagName:  item.tagName  ? item.tagName.trim()  : null,
+        uom:      item.uom      ? item.uom.trim()      : null,
+      });
+      created++;
+    } catch (err: any) {
+      skipped++;
+      errors.push(`Skipped "${item.name}": ${err?.message ?? "db error"}`);
+    }
+  }
+
+  // update attributeCount
+  await db
+    .update(assetsTable)
+    .set({ attributeCount: sql`${assetsTable.attributeCount} + ${created}` })
+    .where(eq(assetsTable.id, id));
+
+  res.json({ created, skipped, errors });
+});
+
+// ── Apply template → bulk-create attributes from template definitions ─────────
+router.post("/assets/:id/apply-template", async (req, res): Promise<void> => {
+  const { id } = req.params;
+
+  const [asset] = await db.select().from(assetsTable).where(eq(assetsTable.id, id));
+  if (!asset) { res.status(404).json({ error: "Asset not found" }); return; }
+
+  const templateId: string | null = (req.body?.templateId as string | null) ?? asset.templateId ?? null;
+  if (!templateId) {
+    res.status(400).json({ error: "Asset has no template assigned and no templateId provided" });
+    return;
+  }
+
+  const [template] = await db
+    .select()
+    .from(assetTemplatesTable)
+    .where(eq(assetTemplatesTable.id, templateId));
+
+  if (!template) { res.status(404).json({ error: "Template not found" }); return; }
+
+  const defs: any[] = (template as any).attributeDefinitions ?? [];
+  if (defs.length === 0) {
+    res.json({ created: 0, skipped: 0, message: "Template has no attribute definitions" });
+    return;
+  }
+
+  // Build attributes — prepend asset identifier to tagName so "temperature" → "sensorgrow.temperature"
+  const prefix = asset.identifier ? `${asset.identifier}.` : "";
+
+  let created = 0;
+  let skipped = 0;
+
+  for (const def of defs) {
+    if (!def.name) { skipped++; continue; }
+    try {
+      const resolvedTagName = def.tagName
+        ? `${prefix}${def.tagName}`
+        : null;
+
+      await db.insert(attributesTable).values({
+        assetId:  id,
+        name:     def.name,
+        type:     def.type     ?? "static",
+        dataType: def.dataType ?? "text",
+        value:    def.value    ?? null,
+        tagName:  resolvedTagName,
+        uom:      def.uom      ?? null,
+      });
+      created++;
+    } catch {
+      skipped++;
+    }
+  }
+
+  // update attributeCount + templateName on asset
+  await db
+    .update(assetsTable)
+    .set({
+      attributeCount: sql`${assetsTable.attributeCount} + ${created}`,
+      templateId,
+      templateName: template.name,
+    })
+    .where(eq(assetsTable.id, id));
+
+  res.json({ created, skipped, templateName: template.name });
 });
 
 export default router;
