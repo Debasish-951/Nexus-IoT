@@ -24,6 +24,8 @@ import {
 } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
+import { useCurrentUser } from "@/contexts/UserContext";
+import { ReadOnlyBanner } from "@/components/RoleGuard";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface AttributeDefinition {
@@ -176,6 +178,7 @@ const JSON_SCHEMA_EXAMPLE = JSON.stringify([
 export default function AssetTemplates() {
   const { toast } = useToast();
   const qc = useQueryClient();
+  const { can } = useCurrentUser();
 
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
@@ -322,9 +325,11 @@ export default function AssetTemplates() {
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
             <Input placeholder="Search templates…" value={search} onChange={(e) => setSearch(e.target.value)} className="pl-8 h-8 text-xs" />
           </div>
-          <Button size="sm" className="h-8 shrink-0" onClick={() => setCreateOpen(true)}>
-            <Plus className="w-3.5 h-3.5" />
-          </Button>
+          {can("manage_templates") && (
+            <Button size="sm" className="h-8 shrink-0" onClick={() => setCreateOpen(true)}>
+              <Plus className="w-3.5 h-3.5" />
+            </Button>
+          )}
         </div>
 
         <div className="flex-1 overflow-auto">
@@ -334,9 +339,11 @@ export default function AssetTemplates() {
             <div className="p-8 text-center text-muted-foreground">
               <LayoutTemplate className="w-8 h-8 mx-auto mb-2 opacity-30" />
               <p className="text-sm">No templates yet</p>
-              <Button size="sm" variant="outline" className="mt-3 text-xs" onClick={() => setCreateOpen(true)}>
-                <Plus className="w-3.5 h-3.5 mr-1" /> Create template
-              </Button>
+              {can("manage_templates") && (
+                <Button size="sm" variant="outline" className="mt-3 text-xs" onClick={() => setCreateOpen(true)}>
+                  <Plus className="w-3.5 h-3.5 mr-1" /> Create template
+                </Button>
+              )}
             </div>
           ) : (
             <div className="p-2 space-y-1">
@@ -382,19 +389,25 @@ export default function AssetTemplates() {
                   title="Download this template's attribute schema as JSON — useful for sharing between platforms or re-importing later">
                   <Download className="w-3 h-3 mr-1" /> Export Schema
                 </Button>
-                <Button size="sm" variant="outline" className="h-7 text-xs"
-                  onClick={() => { setImportOpen(true); setImportTab("payload"); setImportText(""); setImportPreview([]); setImportError(null); }}>
-                  <Zap className="w-3 h-3 mr-1" /> Import / Parse
-                </Button>
-                <Button size="sm" className="h-7 text-xs" onClick={saveDefs} disabled={!defsDirty || savingDefs}>
-                  <Save className="w-3 h-3 mr-1" />{savingDefs ? "Saving…" : "Save"}
-                </Button>
-                <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive hover:text-destructive"
-                  onClick={() => deleteTemplate.mutate({ id: selected.id }, {
-                    onSuccess: () => { toast({ title: "Template deleted" }); qc.invalidateQueries({ queryKey: getListAssetTemplatesQueryKey() }); setSelected(null); }
-                  })}>
-                  <Trash2 className="w-3.5 h-3.5" />
-                </Button>
+                {can("manage_templates") && (
+                  <Button size="sm" variant="outline" className="h-7 text-xs"
+                    onClick={() => { setImportOpen(true); setImportTab("payload"); setImportText(""); setImportPreview([]); setImportError(null); }}>
+                    <Zap className="w-3 h-3 mr-1" /> Import / Parse
+                  </Button>
+                )}
+                {can("manage_templates") && (
+                  <Button size="sm" className="h-7 text-xs" onClick={saveDefs} disabled={!defsDirty || savingDefs}>
+                    <Save className="w-3 h-3 mr-1" />{savingDefs ? "Saving…" : "Save"}
+                  </Button>
+                )}
+                {can("manage_templates") && (
+                  <Button size="sm" variant="ghost" className="h-7 text-xs text-destructive hover:text-destructive"
+                    onClick={() => deleteTemplate.mutate({ id: selected.id }, {
+                      onSuccess: () => { toast({ title: "Template deleted" }); qc.invalidateQueries({ queryKey: getListAssetTemplatesQueryKey() }); setSelected(null); }
+                    })}>
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </Button>
+                )}
               </div>
             </div>
 

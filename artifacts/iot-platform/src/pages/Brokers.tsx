@@ -15,6 +15,8 @@ import { useToast } from "@/hooks/use-toast";
 import { Plus, Trash2, CheckCircle2, XCircle, AlertCircle, Wifi, Copy, Info } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
+import { useCurrentUser } from "@/contexts/UserContext";
+import { ReadOnlyBanner } from "@/components/RoleGuard";
 
 const TYPE_LABELS: Record<string, string> = {
   mqtt:             "MQTT",
@@ -81,6 +83,7 @@ export default function Brokers() {
   const { toast } = useToast();
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
+  const { can } = useCurrentUser();
 
   const { data: brokers } = useListBrokers();
   const createBroker = useCreateBroker();
@@ -124,11 +127,14 @@ export default function Brokers() {
         </div>
         <div className="flex gap-2">
           <Button size="sm" variant="outline">Refresh</Button>
-          <Button size="sm" onClick={() => setOpen(true)} data-testid="add-broker-btn">
-            <Plus className="w-4 h-4 mr-1.5" /> Add
-          </Button>
+          {can("manage_brokers") && (
+            <Button size="sm" onClick={() => setOpen(true)} data-testid="add-broker-btn">
+              <Plus className="w-4 h-4 mr-1.5" /> Add
+            </Button>
+          )}
         </div>
       </div>
+      <ReadOnlyBanner permission="manage_brokers" message="cannot add or remove brokers." />
 
       {/* HTTP Ingest Panel */}
       <IngestEndpointPanel />
@@ -197,13 +203,15 @@ export default function Brokers() {
                     {format(new Date(broker.updatedAt), "yyyy-MM-dd HH:mm:ss.SSS")}
                   </td>
                   <td className="px-4 py-3">
-                    <button className="text-muted-foreground hover:text-destructive transition-colors"
-                      onClick={() => deleteBroker.mutate({ id: broker.id }, {
-                        onSuccess: () => { toast({ title: "Broker deleted" }); qc.invalidateQueries({ queryKey: getListBrokersQueryKey() }); },
-                      })}
-                      data-testid={`delete-broker-${broker.id}`}>
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
+                    {can("manage_brokers") && (
+                      <button className="text-muted-foreground hover:text-destructive transition-colors"
+                        onClick={() => deleteBroker.mutate({ id: broker.id }, {
+                          onSuccess: () => { toast({ title: "Broker deleted" }); qc.invalidateQueries({ queryKey: getListBrokersQueryKey() }); },
+                        })}
+                        data-testid={`delete-broker-${broker.id}`}>
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    )}
                   </td>
                 </tr>
               ))

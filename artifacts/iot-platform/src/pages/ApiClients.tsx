@@ -16,11 +16,14 @@ import { useToast } from "@/hooks/use-toast";
 import { KeyRound, Plus, Trash2, Copy } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
+import { useCurrentUser } from "@/contexts/UserContext";
+import { ReadOnlyBanner } from "@/components/RoleGuard";
 
 export default function ApiClients() {
   const { toast } = useToast();
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
+  const { can } = useCurrentUser();
 
   const { data: clients } = useListApiClients();
   const createClient = useCreateApiClient();
@@ -56,8 +59,9 @@ export default function ApiClients() {
           <h1 className="text-xl font-semibold flex items-center gap-2"><KeyRound className="w-5 h-5 text-primary" />API Clients</h1>
           <p className="text-sm text-muted-foreground">Third-party application credentials and access scopes</p>
         </div>
-        <Button onClick={() => setOpen(true)} size="sm" data-testid="add-client-btn"><Plus className="w-4 h-4 mr-1.5" /> Add Client</Button>
+        {can("manage_api_clients") && <Button onClick={() => setOpen(true)} size="sm" data-testid="add-client-btn"><Plus className="w-4 h-4 mr-1.5" /> Add Client</Button>}
       </div>
+      <ReadOnlyBanner permission="manage_api_clients" message="cannot create or delete API clients." />
 
       <div className="rounded-lg border border-border bg-card overflow-hidden shadow-sm">
         <table className="w-full text-sm">
@@ -102,10 +106,12 @@ export default function ApiClients() {
                   </td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">{format(new Date(client.createdAt), "yyyy-MM-dd")}</td>
                   <td className="px-4 py-3">
-                    <button className="text-muted-foreground hover:text-destructive transition-colors"
-                      onClick={() => deleteClient.mutate({ id: client.id }, { onSuccess: () => { toast({ title: "Client deleted" }); qc.invalidateQueries({ queryKey: getListApiClientsQueryKey() }); } })}
-                      data-testid={`delete-client-${client.id}`}
-                    ><Trash2 className="w-3.5 h-3.5" /></button>
+                    {can("manage_api_clients") && (
+                      <button className="text-muted-foreground hover:text-destructive transition-colors"
+                        onClick={() => deleteClient.mutate({ id: client.id }, { onSuccess: () => { toast({ title: "Client deleted" }); qc.invalidateQueries({ queryKey: getListApiClientsQueryKey() }); } })}
+                        data-testid={`delete-client-${client.id}`}
+                      ><Trash2 className="w-3.5 h-3.5" /></button>
+                    )}
                   </td>
                 </tr>
               ))

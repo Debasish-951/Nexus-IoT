@@ -218,13 +218,13 @@ function UserProfileSection({ collapsed }: { collapsed: boolean }) {
               {userList.map((u: any) => (
                 u.id !== currentUser.id && (
                   <button key={u.id}
-                    onClick={() => { setCurrentUser({ id: u.id, name: u.name, email: u.email, role: u.role }); setOpen(false); }}
+                    onClick={() => { setCurrentUser({ id: u.id, fullName: u.fullName, email: u.email, role: u.role }); setOpen(false); }}
                     className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs hover:bg-muted transition-colors text-left">
                     <div className="w-5 h-5 rounded-full bg-muted-foreground/20 flex items-center justify-center text-[10px] font-bold shrink-0">
-                      {u.name.split(" ").map((w: string) => w[0]).join("").slice(0, 2).toUpperCase()}
+                      {(u.fullName || u.username || "?").split(" ").map((w: string) => w[0]).join("").slice(0, 2).toUpperCase()}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <span className="truncate block">{u.name}</span>
+                      <span className="truncate block">{u.fullName || u.username}</span>
                     </div>
                     <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full capitalize", ROLE_COLORS[u.role])}>
                       {u.role}

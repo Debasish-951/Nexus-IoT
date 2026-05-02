@@ -17,6 +17,8 @@ import { useToast } from "@/hooks/use-toast";
 import { Users as UsersIcon, Plus, Trash2 } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
+import { useCurrentUser } from "@/contexts/UserContext";
+import { ReadOnlyBanner } from "@/components/RoleGuard";
 
 const ROLE_STYLES: Record<string, string> = {
   admin: "bg-purple-100 text-purple-700",
@@ -35,6 +37,7 @@ export default function Users() {
   const { toast } = useToast();
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
+  const { can } = useCurrentUser();
 
   const { data: users } = useListUsers();
   const createUser = useCreateUser();
@@ -65,8 +68,9 @@ export default function Users() {
           <h1 className="text-xl font-semibold flex items-center gap-2"><UsersIcon className="w-5 h-5 text-primary" />User Management</h1>
           <p className="text-sm text-muted-foreground">Manage platform users and roles</p>
         </div>
-        <Button onClick={() => setOpen(true)} size="sm" data-testid="add-user-btn"><Plus className="w-4 h-4 mr-1.5" /> Add User</Button>
+        {can("manage_users") && <Button onClick={() => setOpen(true)} size="sm" data-testid="add-user-btn"><Plus className="w-4 h-4 mr-1.5" /> Add User</Button>}
       </div>
+      <ReadOnlyBanner permission="manage_users" message="cannot create or delete users. Administrator role is required." />
 
       <div className="rounded-lg border border-border bg-card overflow-hidden shadow-sm">
         <table className="w-full text-sm">
@@ -100,10 +104,12 @@ export default function Users() {
                   <td className="px-4 py-3"><span className={cn("text-xs px-2 py-0.5 rounded-full font-medium", STATUS_STYLES[user.status] ?? "bg-muted")}>{user.status}</span></td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">{user.lastLogin ? format(new Date(user.lastLogin), "yyyy-MM-dd HH:mm") : "Never"}</td>
                   <td className="px-4 py-3">
-                    <button className="text-muted-foreground hover:text-destructive transition-colors"
-                      onClick={() => deleteUser.mutate({ id: user.id }, { onSuccess: () => { toast({ title: "User deleted" }); qc.invalidateQueries({ queryKey: getListUsersQueryKey() }); } })}
-                      data-testid={`delete-user-${user.id}`}
-                    ><Trash2 className="w-3.5 h-3.5" /></button>
+                    {can("manage_users") && (
+                      <button className="text-muted-foreground hover:text-destructive transition-colors"
+                        onClick={() => deleteUser.mutate({ id: user.id }, { onSuccess: () => { toast({ title: "User deleted" }); qc.invalidateQueries({ queryKey: getListUsersQueryKey() }); } })}
+                        data-testid={`delete-user-${user.id}`}
+                      ><Trash2 className="w-3.5 h-3.5" /></button>
+                    )}
                   </td>
                 </tr>
               ))

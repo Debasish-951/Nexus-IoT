@@ -37,7 +37,7 @@ export default function DataExplorer() {
   const [selMetric, setSelMetric] = useState("");
 
   const { data: assets } = useListAssets();
-  const { data: attributes } = useListAssetAttributes(selAsset, { query: { enabled: !!selAsset } });
+  const { data: attributes } = useListAssetAttributes(selAsset, { query: { enabled: !!selAsset, queryKey: ["asset-attributes", selAsset] } });
 
   const assetList = (assets as any[] | undefined) ?? [];
   const attrList  = (attributes as any[] | undefined) ?? [];

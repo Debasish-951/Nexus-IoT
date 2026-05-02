@@ -13,6 +13,8 @@ import { useToast } from "@/hooks/use-toast";
 import { Bell, CheckCircle2, Search, Filter } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
+import { useCurrentUser } from "@/contexts/UserContext";
+import { ReadOnlyBanner } from "@/components/RoleGuard";
 
 const SEVERITY_STYLES: Record<string, string> = {
   critical: "bg-red-100 text-red-700 border-red-200",
@@ -31,6 +33,7 @@ const STATUS_STYLES: Record<string, string> = {
 export default function Alarms() {
   const { toast } = useToast();
   const qc = useQueryClient();
+  const { can } = useCurrentUser();
   const [severity, setSeverity] = useState("");
   const [status, setStatus] = useState("");
   const [search, setSearch] = useState("");
@@ -55,6 +58,7 @@ export default function Alarms() {
           <p className="text-sm text-muted-foreground">{filtered.length} alarm(s)</p>
         </div>
       </div>
+      <ReadOnlyBanner permission="acknowledge_alarms" message="cannot acknowledge alarms. Operator role or higher is required." />
 
       <div className="flex items-center gap-3 flex-wrap">
         <div className="relative">
@@ -119,7 +123,7 @@ export default function Alarms() {
                   <td className="px-4 py-3 text-xs text-muted-foreground">{format(new Date(alarm.triggeredAt), "MM/dd HH:mm:ss")}</td>
                   <td className="px-4 py-3 text-xs text-muted-foreground max-w-xs truncate">{alarm.message ?? "-"}</td>
                   <td className="px-4 py-3">
-                    {alarm.status === "active" && (
+                    {alarm.status === "active" && can("acknowledge_alarms") && (
                       <Button size="sm" variant="outline" className="h-6 text-xs"
                         onClick={() => acknowledge.mutate({ id: alarm.id }, { onSuccess: () => { toast({ title: "Alarm acknowledged" }); qc.invalidateQueries({ queryKey: getListAlarmsQueryKey() }); } })}
                         data-testid={`ack-alarm-${alarm.id}`}

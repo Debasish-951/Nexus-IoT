@@ -37,6 +37,8 @@ import {
 } from "recharts";
 import { cn } from "@/lib/utils";
 import { format, subHours, subDays } from "date-fns";
+import { useCurrentUser } from "@/contexts/UserContext";
+import { ReadOnlyBanner } from "@/components/RoleGuard";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface Asset {
@@ -68,9 +70,10 @@ function AttributeType({ type }: { type: string }) {
 }
 
 // ── Asset tree node ───────────────────────────────────────────────────────────
-function AssetTreeNode({ asset, allAssets, selectedId, onSelect, onAddChild, depth }: {
+function AssetTreeNode({ asset, allAssets, selectedId, onSelect, onAddChild, canManage, depth }: {
   asset: Asset; allAssets: Asset[]; selectedId: string | null;
-  onSelect: (a: Asset) => void; onAddChild: (parentId: string) => void; depth: number;
+  onSelect: (a: Asset) => void; onAddChild: (parentId: string) => void;
+  canManage: boolean; depth: number;
 }) {
   const children   = allAssets.filter((a) => a.parentId === asset.id);
   const [expanded, setExpanded] = useState(depth < 2);
@@ -97,15 +100,18 @@ function AssetTreeNode({ asset, allAssets, selectedId, onSelect, onAddChild, dep
           : <Blocks className="w-3.5 h-3.5 shrink-0 text-primary/60" />
         }
         <span className="truncate flex-1 text-xs">{asset.name}</span>
-        <button title="Add child asset"
-          onClick={(e) => { e.stopPropagation(); onAddChild(asset.id); }}
-          className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all shrink-0">
-          <Plus className="w-3 h-3" />
-        </button>
+        {canManage && (
+          <button title="Add child asset"
+            onClick={(e) => { e.stopPropagation(); onAddChild(asset.id); }}
+            className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary transition-all shrink-0">
+            <Plus className="w-3 h-3" />
+          </button>
+        )}
       </div>
       {expanded && children.map((child) => (
         <AssetTreeNode key={child.id} asset={child} allAssets={allAssets}
-          selectedId={selectedId} onSelect={onSelect} onAddChild={onAddChild} depth={depth + 1} />
+          selectedId={selectedId} onSelect={onSelect} onAddChild={onAddChild}
+          canManage={canManage} depth={depth + 1} />
       ))}
     </div>
   );
@@ -357,6 +363,7 @@ function TrendsPanel({ assetId, attrList }: { assetId: string; attrList: any[] }
 export default function Assets() {
   const { toast } = useToast();
   const qc = useQueryClient();
+  const { can } = useCurrentUser();
 
   const [search, setSearch]             = useState("");
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
@@ -606,26 +613,31 @@ export default function Assets() {
               <div className="px-3 py-8 text-center text-muted-foreground">
                 <Blocks className="w-8 h-8 mx-auto mb-2 opacity-20" />
                 <p className="text-xs">No assets yet</p>
-                <Button size="sm" variant="outline" className="mt-2 text-xs h-7" onClick={() => openAddAsset(null)}>
-                  <Plus className="w-3 h-3 mr-1" /> Add first asset
-                </Button>
+                {can("manage_assets") && (
+                  <Button size="sm" variant="outline" className="mt-2 text-xs h-7" onClick={() => openAddAsset(null)}>
+                    <Plus className="w-3 h-3 mr-1" /> Add first asset
+                  </Button>
+                )}
               </div>
             ) : (
               rootAssets.map((a) => (
                 <AssetTreeNode key={a.id} asset={a} allAssets={allAssets}
                   selectedId={selectedAsset?.id ?? null}
                   onSelect={setSelectedAsset}
-                  onAddChild={(pid) => openAddAsset(pid)}
+                  onAddChild={openAddAsset}
+                  canManage={can("manage_assets")}
                   depth={0} />
               ))
             )}
           </div>
         </ScrollArea>
-        <div className="p-2 border-t border-border">
-          <Button size="sm" variant="outline" className="w-full text-xs h-7" onClick={() => openAddAsset(null)}>
-            <Plus className="w-3.5 h-3.5 mr-1" /> Add Root Asset
-          </Button>
-        </div>
+        {can("manage_assets") && (
+          <div className="p-2 border-t border-border">
+            <Button size="sm" variant="outline" className="w-full text-xs h-7" onClick={() => openAddAsset(null)}>
+              <Plus className="w-3.5 h-3.5 mr-1" /> Add Root Asset
+            </Button>
+          </div>
+        )}
       </div>
 
       {/* ── Detail panel ───────────────────────────────────────────────── */}
@@ -639,15 +651,19 @@ export default function Assets() {
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 {selectedAsset.templateName && <Badge variant="secondary" className="text-xs">{selectedAsset.templateName}</Badge>}
-                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => openAddAsset(selectedAsset.id)}>
-                  <Plus className="w-3 h-3 mr-1" /> Add Child
-                </Button>
-                <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive h-7 text-xs"
-                  onClick={() => deleteAsset.mutate({ id: selectedAsset.id }, {
-                    onSuccess: () => { toast({ title: "Asset deleted" }); qc.invalidateQueries({ queryKey: getListAssetsQueryKey() }); setSelectedAsset(null); }
-                  })}>
-                  <Trash2 className="w-3.5 h-3.5" />
-                </Button>
+                {can("manage_assets") && (
+                  <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => openAddAsset(selectedAsset.id)}>
+                    <Plus className="w-3 h-3 mr-1" /> Add Child
+                  </Button>
+                )}
+                {can("manage_assets") && (
+                  <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive h-7 text-xs"
+                    onClick={() => deleteAsset.mutate({ id: selectedAsset.id }, {
+                      onSuccess: () => { toast({ title: "Asset deleted" }); qc.invalidateQueries({ queryKey: getListAssetsQueryKey() }); setSelectedAsset(null); }
+                    })}>
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </Button>
+                )}
               </div>
             </div>
 
@@ -664,22 +680,30 @@ export default function Assets() {
               <TabsContent value="attributes" className="flex-1 overflow-auto m-0">
                 {/* Toolbar */}
                 <div className="p-3 flex items-center gap-2 border-b border-border bg-muted/30 flex-wrap">
-                  <Button size="sm" className="h-7 text-xs" onClick={() => { attrForm.reset(); setAttrUseExpr(false); setAddAttrOpen(true); }}>
-                    <Plus className="w-3.5 h-3.5 mr-1" /> Add
-                  </Button>
-                  <div className="h-5 w-px bg-border" />
-                  <Button size="sm" variant="outline" className="h-7 text-xs"
-                    onClick={() => { setImportTab("template"); setImportOpen(true); setPreviewRows([]); }}>
-                    <LayoutTemplate className="w-3.5 h-3.5 mr-1" /> Apply Template
-                  </Button>
-                  <Button size="sm" variant="outline" className="h-7 text-xs"
-                    onClick={() => { setImportTab("csv"); setImportOpen(true); setPreviewRows([]); setCsvText(""); }}>
-                    <FileSpreadsheet className="w-3.5 h-3.5 mr-1" /> Import CSV
-                  </Button>
-                  <Button size="sm" variant="outline" className="h-7 text-xs"
-                    onClick={() => { setImportTab("json"); setImportOpen(true); setPreviewRows([]); setJsonText(""); }}>
-                    <Braces className="w-3.5 h-3.5 mr-1" /> Import JSON
-                  </Button>
+                  {can("manage_assets") && (
+                    <Button size="sm" className="h-7 text-xs" onClick={() => { attrForm.reset(); setAttrUseExpr(false); setAddAttrOpen(true); }}>
+                      <Plus className="w-3.5 h-3.5 mr-1" /> Add
+                    </Button>
+                  )}
+                  {can("manage_assets") && <div className="h-5 w-px bg-border" />}
+                  {can("manage_assets") && (
+                    <Button size="sm" variant="outline" className="h-7 text-xs"
+                      onClick={() => { setImportTab("template"); setImportOpen(true); setPreviewRows([]); }}>
+                      <LayoutTemplate className="w-3.5 h-3.5 mr-1" /> Apply Template
+                    </Button>
+                  )}
+                  {can("manage_assets") && (
+                    <Button size="sm" variant="outline" className="h-7 text-xs"
+                      onClick={() => { setImportTab("csv"); setImportOpen(true); setPreviewRows([]); setCsvText(""); }}>
+                      <FileSpreadsheet className="w-3.5 h-3.5 mr-1" /> Import CSV
+                    </Button>
+                  )}
+                  {can("manage_assets") && (
+                    <Button size="sm" variant="outline" className="h-7 text-xs"
+                      onClick={() => { setImportTab("json"); setImportOpen(true); setPreviewRows([]); setJsonText(""); }}>
+                      <Braces className="w-3.5 h-3.5 mr-1" /> Import JSON
+                    </Button>
+                  )}
                   <div className="flex-1" />
                   <Button size="sm" variant="ghost" className="h-7 text-xs text-muted-foreground"
                     onClick={handleExportCsv} disabled={attrList.length === 0}>
@@ -729,10 +753,12 @@ export default function Assets() {
                           className={cn("border-b border-border/50 hover:bg-muted/30 transition-colors group",
                             attr.type === "runtime" && "bg-orange-50/30 dark:bg-orange-950/10")}>
                           <td className="px-3 py-2">
-                            <button className="text-muted-foreground hover:text-primary opacity-0 group-hover:opacity-100"
-                              onClick={() => openEditAttr(attr)}>
-                              <Edit2 className="w-3 h-3" />
-                            </button>
+                            {can("manage_assets") && (
+                              <button className="text-muted-foreground hover:text-primary opacity-0 group-hover:opacity-100"
+                                onClick={() => openEditAttr(attr)}>
+                                <Edit2 className="w-3 h-3" />
+                              </button>
+                            )}
                           </td>
                           <td className="px-3 py-2"><AttributeType type={attr.type} /></td>
                           <td className="px-3 py-2 font-medium">{attr.name}</td>
@@ -767,12 +793,14 @@ export default function Assets() {
                             {attr.timestamp ? format(new Date(attr.timestamp), "MM/dd HH:mm:ss") : <span className="text-muted-foreground/40">—</span>}
                           </td>
                           <td className="px-3 py-2">
-                            <button className="text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100"
-                              onClick={() => deleteAttr.mutate({ id: attr.id }, {
-                                onSuccess: () => { toast({ title: "Deleted" }); qc.invalidateQueries({ queryKey: getListAssetAttributesQueryKey(selectedAsset.id) }); }
-                              })}>
-                              <Trash2 className="w-3 h-3" />
-                            </button>
+                            {can("manage_assets") && (
+                              <button className="text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100"
+                                onClick={() => deleteAttr.mutate({ id: attr.id }, {
+                                  onSuccess: () => { toast({ title: "Deleted" }); qc.invalidateQueries({ queryKey: getListAssetAttributesQueryKey(selectedAsset.id) }); }
+                                })}>
+                                <Trash2 className="w-3 h-3" />
+                              </button>
+                            )}
                           </td>
                         </tr>
                       ))

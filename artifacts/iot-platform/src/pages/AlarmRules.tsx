@@ -21,6 +21,8 @@ import {
   CheckCircle2, Loader2, ExternalLink,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useCurrentUser } from "@/contexts/UserContext";
+import { ReadOnlyBanner } from "@/components/RoleGuard";
 
 const SEVERITY_STYLES: Record<string, string> = {
   critical: "bg-red-100 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-400",
@@ -42,6 +44,7 @@ export default function AlarmRules() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [testingWebhook, setTestingWebhook] = useState<string | null>(null);
+  const { can } = useCurrentUser();
 
   const { data: rules } = useListAlarmRules();
   const createRule = useCreateAlarmRule();
@@ -111,8 +114,9 @@ export default function AlarmRules() {
           </h1>
           <p className="text-sm text-muted-foreground">Configure threshold, rate-of-change, and event-based alarm conditions</p>
         </div>
-        <Button onClick={() => setOpen(true)} size="sm"><Plus className="w-4 h-4 mr-1.5" /> Add Rule</Button>
+        {can("manage_alarms") && <Button onClick={() => setOpen(true)} size="sm"><Plus className="w-4 h-4 mr-1.5" /> Add Rule</Button>}
       </div>
+      <ReadOnlyBanner permission="manage_alarms" message="cannot create, edit, or delete alarm rules." />
 
       <div className="rounded-lg border border-border bg-card overflow-hidden shadow-sm">
         <table className="w-full text-sm">
@@ -178,7 +182,7 @@ export default function AlarmRules() {
                   )}
                 </td>
                 <td className="px-4 py-3">
-                  <Switch checked={rule.enabled}
+                  <Switch checked={rule.enabled} disabled={!can("manage_alarms")}
                     onCheckedChange={(checked) => updateRule.mutate({ id: rule.id, data: { enabled: checked } as any },
                       { onSuccess: () => qc.invalidateQueries({ queryKey: getListAlarmRulesQueryKey() }) })}
                   />
@@ -196,12 +200,14 @@ export default function AlarmRules() {
                         : <Webhook className="w-3.5 h-3.5" />}
                     </button>
                   )}
-                  <button className="text-muted-foreground hover:text-destructive transition-colors opacity-0 group-hover:opacity-100"
-                    onClick={() => deleteRule.mutate({ id: rule.id }, {
-                      onSuccess: () => { toast({ title: "Rule deleted" }); qc.invalidateQueries({ queryKey: getListAlarmRulesQueryKey() }); }
-                    })}>
-                    <Trash2 className="w-3.5 h-3.5" />
-                  </button>
+                  {can("manage_alarms") && (
+                    <button className="text-muted-foreground hover:text-destructive transition-colors opacity-0 group-hover:opacity-100"
+                      onClick={() => deleteRule.mutate({ id: rule.id }, {
+                        onSuccess: () => { toast({ title: "Rule deleted" }); qc.invalidateQueries({ queryKey: getListAlarmRulesQueryKey() }); }
+                      })}>
+                      <Trash2 className="w-3.5 h-3.5" />
+                    </button>
+                  )}
                 </td>
               </tr>
             ))}

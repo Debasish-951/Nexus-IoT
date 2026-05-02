@@ -18,6 +18,8 @@ import {
 } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
+import { useCurrentUser } from "@/contexts/UserContext";
+import { ReadOnlyBanner } from "@/components/RoleGuard";
 
 const DEST_QUERY_KEY = ["destinations"];
 
@@ -42,6 +44,7 @@ export default function Destinations() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [testing, setTesting] = useState<string | null>(null);
+  const { can } = useCurrentUser();
 
   const { data: destinations, isLoading } = useQuery({ queryKey: DEST_QUERY_KEY, queryFn: fetchDestinations });
 
@@ -105,8 +108,9 @@ export default function Destinations() {
           </h1>
           <p className="text-sm text-muted-foreground">Forward alarm and telemetry events to external systems via HTTP POST</p>
         </div>
-        <Button size="sm" onClick={() => setOpen(true)}><Plus className="w-4 h-4 mr-1.5" /> Add Destination</Button>
+        {can("manage_destinations") && <Button size="sm" onClick={() => setOpen(true)}><Plus className="w-4 h-4 mr-1.5" /> Add Destination</Button>}
       </div>
+      <ReadOnlyBanner permission="manage_destinations" message="cannot add, edit, or delete data destinations." />
 
       {/* Info Banner */}
       <div className="rounded-md bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/40 p-3 text-xs text-blue-800 dark:text-blue-300">
@@ -155,12 +159,14 @@ export default function Destinations() {
                   {testing === d.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Webhook className="w-3 h-3" />}
                   Test
                 </button>
-                <Switch checked={d.enabled}
+                <Switch checked={d.enabled} disabled={!can("manage_destinations")}
                   onCheckedChange={(enabled) => toggleDest.mutate({ id: d.id, enabled })} />
-                <button className="text-muted-foreground hover:text-destructive transition-colors"
-                  onClick={() => deleteDest.mutate(d.id)}>
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                {can("manage_destinations") && (
+                  <button className="text-muted-foreground hover:text-destructive transition-colors"
+                    onClick={() => deleteDest.mutate(d.id)}>
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                )}
               </div>
             </div>
           );
