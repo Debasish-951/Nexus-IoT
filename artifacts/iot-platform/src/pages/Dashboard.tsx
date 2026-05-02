@@ -182,7 +182,12 @@ export default function Dashboard() {
     void qc.invalidateQueries({ queryKey: getGetAlarmStatsQueryKey() });
   }, [qc]);
 
-  const wsStatus = useWsEvents({ telemetry: handleTelemetry });
+  const handleBrokerStatus = useCallback(() => {
+    setLastRefresh(new Date());
+    void qc.invalidateQueries({ queryKey: getGetDashboardSummaryQueryKey() });
+  }, [qc]);
+
+  const wsStatus = useWsEvents({ telemetry: handleTelemetry, broker_status: handleBrokerStatus });
 
   const alarmChartData = alarmStats ? [
     { name: "Critical", count: (alarmStats as any).critical ?? 0, fill: SEVERITY_COLORS.critical },

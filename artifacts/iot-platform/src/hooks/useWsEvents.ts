@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-export type WsEventType = "activity_log" | "telemetry" | "alarm" | "connected";
+export type WsEventType = "activity_log" | "telemetry" | "alarm" | "broker_status" | "connected";
 
 export type WsStatus = "connecting" | "connected" | "reconnecting";
 

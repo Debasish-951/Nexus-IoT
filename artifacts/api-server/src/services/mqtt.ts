@@ -7,6 +7,7 @@ import mqtt from "mqtt";
 import { db, brokersTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { normalise, processNormalised } from "../routes/ingest.js";
+import { broadcast } from "../lib/ws-broadcast.js";
 
 const activeClients: Map<string, ReturnType<typeof mqtt.connect>> = new Map();
 
@@ -30,6 +31,7 @@ export async function startMqttSubscribers(): Promise<void> {
 
       client.on("connect", async () => {
         await db.update(brokersTable).set({ status: "connected" }).where(eq(brokersTable.id, broker.id));
+        broadcast("broker_status", { brokerId: broker.id, brokerName: broker.name, status: "connected", timestamp: new Date().toISOString() });
         client.subscribe(broker.mqttTopic!, (err) => {
           if (err) console.error(`[MQTT] Subscribe error on ${broker.name}:`, err.message);
         });
@@ -62,10 +64,12 @@ export async function startMqttSubscribers(): Promise<void> {
       client.on("error", async (err) => {
         console.error(`[MQTT] Connection error on ${broker.name}:`, err.message);
         await db.update(brokersTable).set({ status: "error" }).where(eq(brokersTable.id, broker.id));
+        broadcast("broker_status", { brokerId: broker.id, brokerName: broker.name, status: "error", timestamp: new Date().toISOString() });
       });
 
       client.on("close", async () => {
         await db.update(brokersTable).set({ status: "disconnected" }).where(eq(brokersTable.id, broker.id));
+        broadcast("broker_status", { brokerId: broker.id, brokerName: broker.name, status: "disconnected", timestamp: new Date().toISOString() });
       });
 
     } catch (err: any) {

@@ -12,6 +12,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { useCurrentUser } from "@/contexts/UserContext";
 import NotificationBell from "@/components/NotificationBell";
 import UserProfileTopMenu from "@/components/UserProfileTopMenu";
+import BrokerStatusBar from "@/components/BrokerStatusBar";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -234,8 +235,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Top bar */}
         <header className="h-12 shrink-0 border-b border-border bg-background/95 backdrop-blur-sm flex items-center justify-end px-4 gap-2">
+          <BrokerStatusBar />
+          <div className="w-px h-5 bg-border" />
           <NotificationBell />
-          <div className="w-px h-5 bg-border mx-1" />
+          <div className="w-px h-5 bg-border" />
           <UserProfileTopMenu />
         </header>
 

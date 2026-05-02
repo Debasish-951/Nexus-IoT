@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import {
   useListBrokers, useCreateBroker, useDeleteBroker, getListBrokersQueryKey,
 } from "@workspace/api-client-react";
@@ -13,10 +13,11 @@ import { useForm } from "react-hook-form";
 import { Form, FormField, FormItem, FormLabel, FormControl, FormDescription } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
 import { Plus, Trash2, CheckCircle2, XCircle, AlertCircle, Wifi, Copy, Info } from "lucide-react";
-import { format } from "date-fns";
+import { format, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { ReadOnlyBanner } from "@/components/RoleGuard";
+import { useWsEvents } from "@/hooks/useWsEvents";
 
 const TYPE_LABELS: Record<string, string> = {
   mqtt:             "MQTT",
@@ -88,6 +89,15 @@ export default function Brokers() {
   const { data: brokers } = useListBrokers();
   const createBroker = useCreateBroker();
   const deleteBroker = useDeleteBroker();
+
+  const [statusOverrides, setStatusOverrides] = useState<Record<string, { status: string; timestamp: string }>>({});
+
+  const handleBrokerStatus = useCallback((raw: unknown) => {
+    const ev = raw as { brokerId: string; status: string; timestamp: string };
+    setStatusOverrides((prev) => ({ ...prev, [ev.brokerId]: { status: ev.status, timestamp: ev.timestamp } }));
+  }, []);
+
+  useWsEvents({ broker_status: handleBrokerStatus });
 
   const form = useForm({
     defaultValues: {
@@ -191,16 +201,28 @@ export default function Brokers() {
                   <td className="px-4 py-3">{broker.connectedDevices}</td>
                   <td className="px-4 py-3">{Number(broker.totalRequests).toLocaleString()}</td>
                   <td className="px-4 py-3">
-                    <div className="flex items-center gap-1.5">
-                      <StatusIcon status={broker.status} />
-                      <span className={cn("text-xs capitalize",
-                        broker.status === "connected" ? "text-green-600" : "text-muted-foreground")}>
-                        {broker.status === "connected" ? "Connected" : broker.status}
-                      </span>
-                    </div>
+                    {(() => {
+                      const ov = statusOverrides[broker.id];
+                      const liveStatus = ov?.status ?? broker.status;
+                      const isLive = !!ov;
+                      return (
+                        <div className="flex items-center gap-1.5">
+                          <StatusIcon status={liveStatus} />
+                          <span className={cn("text-xs capitalize",
+                            liveStatus === "connected" ? "text-green-600" : "text-muted-foreground")}>
+                            {liveStatus === "connected" ? "Connected" : liveStatus}
+                          </span>
+                          {isLive && (
+                            <span className="text-[9px] font-medium text-primary/60 bg-primary/10 px-1 rounded">live</span>
+                          )}
+                        </div>
+                      );
+                    })()}
                   </td>
                   <td className="px-4 py-3 text-xs text-muted-foreground">
-                    {format(new Date(broker.updatedAt), "yyyy-MM-dd HH:mm:ss.SSS")}
+                    {statusOverrides[broker.id]
+                      ? <span className="text-primary/70">{formatDistanceToNow(new Date(statusOverrides[broker.id].timestamp), { addSuffix: true })}</span>
+                      : format(new Date(broker.updatedAt), "yyyy-MM-dd HH:mm:ss.SSS")}
                   </td>
                   <td className="px-4 py-3">
                     {can("manage_brokers") && (
