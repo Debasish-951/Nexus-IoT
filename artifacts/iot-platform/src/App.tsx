@@ -1,9 +1,11 @@
 import { Switch, Route, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
+import { Toaster as SonnerToaster } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import Layout from "@/components/Layout";
 import { UserProvider } from "@/contexts/UserContext";
+import AlarmToastListener from "@/components/AlarmToastListener";
 import NotFound from "@/pages/not-found";
 import Dashboard from "@/pages/Dashboard";
 import Assets from "@/pages/Assets";
@@ -63,7 +65,9 @@ function App() {
           <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
             <AppRouter />
           </WouterRouter>
+          <AlarmToastListener />
           <Toaster />
+          <SonnerToaster position="top-right" richColors={false} closeButton />
         </TooltipProvider>
       </UserProvider>
     </QueryClientProvider>

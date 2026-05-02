@@ -268,6 +268,22 @@ export async function processNormalised(n: NormalisedPayload, assetIdHint?: stri
     timestamp: ts.toISOString(),
   });
 
+  for (const ev of alarmEvents) {
+    broadcast("alarm", {
+      event:     ev.event,
+      alarmId:   ev.alarmId,
+      ruleName:  ev.ruleName,
+      metric:    ev.metric,
+      value:     ev.value,
+      threshold: ev.threshold,
+      operator:  ev.operator,
+      severity:  ev.severity,
+      assetId,
+      assetName,
+      timestamp: ts.toISOString(),
+    });
+  }
+
   return { recordsWritten: records.length, assetId, assetName, alarmEvents };
 }
 
