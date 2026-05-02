@@ -7,6 +7,7 @@ import {
   UpdateBrokerParams,
   DeleteBrokerParams,
 } from "@workspace/api-zod";
+import { logActivity } from "./activity_log";
 
 const router: IRouter = Router();
 
@@ -37,6 +38,7 @@ router.post("/brokers", async (req, res): Promise<void> => {
     })
     .returning();
 
+  void logActivity("broker.created", "broker", broker.id, broker.name, `type=${broker.type}`, req);
   res.status(201).json(broker);
 });
 
@@ -89,6 +91,7 @@ router.delete("/brokers/:id", async (req, res): Promise<void> => {
     return;
   }
 
+  void logActivity("broker.deleted", "broker", broker.id, broker.name, null, req);
   res.sendStatus(204);
 });
 

@@ -26,6 +26,8 @@ scripts/                  — Utility scripts
 - `users` — platform users with roles (admin/engineer/operator/viewer)
 - `brokers` — MQTT/REST/Azure IoT broker configurations + mqttUsername, mqttPassword, mqttTopic, mqttClientId, mappingRules (JSONB)
 - `api_clients` — OAuth client credentials with scopes
+- `destinations` — webhook/HTTP forward destinations with auth, enabled toggle, eventTypes filter
+- `activity_logs` — audit trail: action, category, actorName, actorRole, actorUsername, targetId, targetName, detail, timestamp
 
 ### API Routes (all under /api)
 - `GET/POST /api/assets` — list/create assets
@@ -52,6 +54,12 @@ scripts/                  — Utility scripts
 - `GET /api/dashboard/summary` — stat cards
 - `GET /api/dashboard/recent-telemetry` — latest records
 - `GET /api/dashboard/alarm-stats` — alarm counts by severity
+- `GET /api/activity-log` — paginated audit trail (category, actorName, limit, offset filters)
+
+### Activity Logging
+- `logActivity(action, category, targetId, targetName, detail, req)` — internal helper in `activity_log.ts`
+- Instrumented routes: alarm acknowledge, asset create/delete, user create/delete, broker create/delete, api_client create/delete, destination create/delete
+- Actor identity sent via `X-Actor-Name`, `X-Actor-Role`, `X-Actor-Username` headers (set automatically by `setActorHeaders()` in `custom-fetch.ts` when user switches profile)
 
 ### Frontend Pages
 - `/` — Dashboard (stat cards + **asset health grid** auto-refreshing every 30s, recent telemetry table, alarm severity bar chart)
@@ -63,6 +71,7 @@ scripts/                  — Utility scripts
 - `/users` — User management with roles
 - `/brokers` — Broker management (MQTT, REST API, Azure IoT, with payload mapping rules)
 - `/api-clients` — API client credentials with scope management
+- `/activity-log` — Audit trail table (filter by category, search by actor/target/action, paginated 25/page, 30s auto-refresh)
 
 ### Services
 - `artifacts/api-server/src/services/mqtt.ts` — MQTT subscriber service: reads broker configs, subscribes to topics, applies mapping rules, calls processNormalised
@@ -102,6 +111,12 @@ cd lib/api-spec && pnpm exec orval --config ./orval.config.ts
 - Use `res.status(200).json(data); return;` pattern in async handlers
 - Wildcard routes: `/{*splat}`
 - All async route handlers typed as `Promise<void>`
+
+### RBAC (Role-Based Access Control)
+- `UserContext.tsx` — `can(permission)` checks against `ROLE_PERMISSIONS` map; `setActorHeaders()` called automatically on profile switch
+- `RoleGuard` component — mode="hide" removes element, mode="disable" grays it out
+- `ReadOnlyBanner` — amber banner shown on pages where active role cannot make changes
+- Permissions: admin=all; engineer=view+assets+templates+alarms+ack+brokers+destinations; operator=view+ack; viewer=view
 
 ### DB Schema Notes
 - `alarm_rules`: added `webhook_url TEXT`, `webhook_enabled BOOLEAN DEFAULT false`, `roc_window INTEGER DEFAULT 60`

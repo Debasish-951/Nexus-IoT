@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback } from "react";
-import { useListUsers } from "@workspace/api-client-react";
+import { useListUsers, setActorHeaders } from "@workspace/api-client-react";
 
 export interface CurrentUser {
   id: string;
@@ -52,10 +52,23 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     }
   }, [users, currentUser]);
 
+  useEffect(() => {
+    if (currentUser) {
+      setActorHeaders(currentUser.fullName, currentUser.role, currentUser.email.split("@")[0]);
+    } else {
+      setActorHeaders(null, null);
+    }
+  }, [currentUser]);
+
   const setCurrentUser = useCallback((u: CurrentUser | null) => {
     setCurrentUserState(u);
-    if (u) localStorage.setItem("iot_current_user", JSON.stringify(u));
-    else localStorage.removeItem("iot_current_user");
+    if (u) {
+      localStorage.setItem("iot_current_user", JSON.stringify(u));
+      setActorHeaders(u.fullName, u.role, u.email.split("@")[0]);
+    } else {
+      localStorage.removeItem("iot_current_user");
+      setActorHeaders(null, null);
+    }
   }, []);
 
   const can = useCallback((permission: string) => {

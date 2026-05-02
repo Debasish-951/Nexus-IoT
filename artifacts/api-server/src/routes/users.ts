@@ -8,6 +8,7 @@ import {
   UpdateUserParams,
   DeleteUserParams,
 } from "@workspace/api-zod";
+import { logActivity } from "./activity_log";
 
 const router: IRouter = Router();
 
@@ -43,6 +44,7 @@ router.post("/users", async (req, res): Promise<void> => {
     })
     .returning();
 
+  void logActivity("user.created", "user", user.id, user.fullName, `role=${user.role}`, req);
   res.status(201).json(sanitizeUser(user));
 });
 
@@ -116,6 +118,7 @@ router.delete("/users/:id", async (req, res): Promise<void> => {
     return;
   }
 
+  void logActivity("user.deleted", "user", user.id, user.fullName, `role=${user.role}`, req);
   res.sendStatus(204);
 });
 

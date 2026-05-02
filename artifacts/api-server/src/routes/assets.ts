@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq, isNull, sql, and, or, inArray } from "drizzle-orm";
 import { db, assetsTable, attributesTable, assetTemplatesTable } from "@workspace/db";
+import { logActivity } from "./activity_log";
 import {
   CreateAssetBody,
   UpdateAssetBody,
@@ -53,6 +54,7 @@ router.post("/assets", async (req, res): Promise<void> => {
       .where(eq(assetsTable.id, asset.parentId));
   }
 
+  void logActivity("asset.created", "asset", asset.id, asset.name, asset.parentId ? `parentId=${asset.parentId}` : null, req);
   res.status(201).json(asset);
 });
 
@@ -100,6 +102,7 @@ router.delete("/assets/:id", async (req, res): Promise<void> => {
       .where(eq(assetsTable.id, asset.parentId));
   }
 
+  void logActivity("asset.deleted", "asset", asset.id, asset.name, null, req);
   res.sendStatus(204);
 });
 

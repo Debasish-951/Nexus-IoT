@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { eq, sql } from "drizzle-orm";
 import { db, destinationsTable } from "@workspace/db";
+import { logActivity } from "./activity_log";
 
 const router: IRouter = Router();
 
@@ -27,6 +28,7 @@ router.post("/destinations", async (req, res): Promise<void> => {
     eventTypes: Array.isArray(body.eventTypes) ? (body.eventTypes as string[]) : ["alarm"],
     enabled: typeof body.enabled === "boolean" ? body.enabled : true,
   }).returning();
+  void logActivity("destination.created", "destination", row.id, row.name, null, req);
   res.status(201).json(row);
 });
 
@@ -54,6 +56,7 @@ router.delete("/destinations/:id", async (req, res): Promise<void> => {
   const { id } = req.params;
   const [row] = await db.delete(destinationsTable).where(eq(destinationsTable.id, id)).returning();
   if (!row) { res.status(404).json({ error: "Not found" }); return; }
+  void logActivity("destination.deleted", "destination", row.id, row.name, null, req);
   res.sendStatus(204);
 });
 

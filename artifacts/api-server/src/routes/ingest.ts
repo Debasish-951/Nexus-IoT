@@ -302,8 +302,8 @@ router.get("/telemetry/:assetId", async (req, res): Promise<void> => {
   if (!query.success) { res.status(400).json({ error: query.error.message }); return; }
   const conditions = [eq(telemetryTable.assetId, params.data.assetId)];
   if (query.data.metric) conditions.push(eq(telemetryTable.metric, query.data.metric));
-  if (query.data.from) conditions.push(gte(telemetryTable.timestamp, new Date(query.data.from as string)));
-  if (query.data.to)   conditions.push(lte(telemetryTable.timestamp, new Date(query.data.to as string)));
+  if (query.data.from) conditions.push(gte(telemetryTable.timestamp, query.data.from as unknown as Date));
+  if (query.data.to)   conditions.push(lte(telemetryTable.timestamp, query.data.to as unknown as Date));
   const records = await db.select().from(telemetryTable).where(and(...conditions))
     .orderBy(desc(telemetryTable.timestamp)).limit(query.data.limit ?? 100);
   res.json(records);

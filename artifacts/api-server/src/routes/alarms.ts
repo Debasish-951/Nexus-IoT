@@ -6,6 +6,7 @@ import {
   AcknowledgeAlarmParams,
   ListAlarmHistoryQueryParams,
 } from "@workspace/api-zod";
+import { logActivity } from "./activity_log";
 
 const router: IRouter = Router();
 
@@ -51,6 +52,7 @@ router.post("/alarms/:id/acknowledge", async (req, res): Promise<void> => {
     return;
   }
 
+  void logActivity("alarm.acknowledged", "alarm", alarm.id, alarm.name, null, req);
   res.json(alarm);
 });
 
@@ -66,10 +68,10 @@ router.get("/alarms/history", async (req, res): Promise<void> => {
     conditions.push(eq(alarmHistoryTable.assetId, query.data.assetId));
   }
   if (query.data.from) {
-    conditions.push(gte(alarmHistoryTable.triggeredAt, new Date(query.data.from as string)));
+    conditions.push(gte(alarmHistoryTable.triggeredAt, query.data.from as unknown as Date));
   }
   if (query.data.to) {
-    conditions.push(lte(alarmHistoryTable.triggeredAt, new Date(query.data.to as string)));
+    conditions.push(lte(alarmHistoryTable.triggeredAt, query.data.to as unknown as Date));
   }
 
   const history = await db

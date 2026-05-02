@@ -8,6 +8,7 @@ import {
   DeleteApiClientParams,
 } from "@workspace/api-zod";
 import { randomUUID } from "crypto";
+import { logActivity } from "./activity_log";
 
 const router: IRouter = Router();
 
@@ -39,6 +40,7 @@ router.post("/api-clients", async (req, res): Promise<void> => {
     })
     .returning();
 
+  void logActivity("api_client.created", "api_client", client.id, client.name, null, req);
   res.status(201).json(client);
 });
 
@@ -92,6 +94,7 @@ router.delete("/api-clients/:id", async (req, res): Promise<void> => {
     return;
   }
 
+  void logActivity("api_client.deleted", "api_client", client.id, client.name, null, req);
   res.sendStatus(204);
 });
 

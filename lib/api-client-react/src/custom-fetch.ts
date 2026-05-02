@@ -17,6 +17,23 @@ const DEFAULT_JSON_ACCEPT = "application/json, application/problem+json";
 
 let _baseUrl: string | null = null;
 let _authTokenGetter: AuthTokenGetter | null = null;
+let _actorName: string | null = null;
+let _actorRole: string | null = null;
+let _actorUsername: string | null = null;
+
+/**
+ * Set the current actor identity to be included on every mutating request
+ * as X-Actor-* headers, enabling server-side activity logging.
+ */
+export function setActorHeaders(
+  name: string | null,
+  role: string | null,
+  username?: string | null,
+): void {
+  _actorName = name;
+  _actorRole = role;
+  _actorUsername = username ?? null;
+}
 
 /**
  * Set a base URL that is prepended to every relative request URL
@@ -348,6 +365,11 @@ export async function customFetch<T = unknown>(
   if (responseType === "json" && !headers.has("accept")) {
     headers.set("accept", DEFAULT_JSON_ACCEPT);
   }
+
+  // Attach actor identity headers so the server can log who made the change.
+  if (_actorName) headers.set("x-actor-name", _actorName);
+  if (_actorRole) headers.set("x-actor-role", _actorRole);
+  if (_actorUsername) headers.set("x-actor-username", _actorUsername);
 
   // Attach bearer token when an auth getter is configured and no
   // Authorization header has been explicitly provided.

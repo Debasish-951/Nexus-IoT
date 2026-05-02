@@ -67,7 +67,7 @@ const navItems: NavItem[] = [
       { label: "API Client", href: "/api-clients", icon: KeyRound },
     ],
   },
-  { label: "Activity Log",      href: "/settings?v=activity", icon: Activity },
+  { label: "Activity Log",      href: "/activity-log", icon: Activity },
   { label: "Payload Simulator", href: "/simulator",           icon: Zap },
 ];
 
