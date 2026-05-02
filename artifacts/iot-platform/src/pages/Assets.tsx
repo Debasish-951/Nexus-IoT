@@ -760,57 +760,65 @@ export default function Assets() {
                 <FormItem><FormLabel>Name *</FormLabel><FormControl><Input {...field} /></FormControl></FormItem>
               )} />
 
-              {/* Use Expression toggle */}
-              <div className="flex items-center justify-between rounded-lg border border-border p-3">
-                <div className="space-y-0.5">
-                  <Label className="text-sm font-medium flex items-center gap-1.5">
-                    <Calculator className="w-3.5 h-3.5 text-orange-500" /> Use Expression (Runtime)
-                  </Label>
-                  <p className="text-xs text-muted-foreground">Calculate from other attribute values on ingest</p>
-                </div>
-                <Switch checked={editAttrUseExpr} onCheckedChange={setEditAttrUseExpr} />
-              </div>
-
-              {editAttrUseExpr ? (
-                <ExpressionEditor control={editAttrForm.control} attrNames={attrNames.filter((n) => n !== editAttr?.name)} />
+              {editAttr?.type === "runtime" ? (
+                /* Runtime attribute — only edit the expression and UoM */
+                <>
+                  <div className="flex items-center gap-2 rounded-lg bg-orange-50 dark:bg-orange-950/20 border border-orange-200 dark:border-orange-800/40 px-3 py-2">
+                    <Calculator className="w-3.5 h-3.5 text-orange-500 shrink-0" />
+                    <p className="text-xs text-orange-800 dark:text-orange-300">
+                      This is a <strong>computed attribute</strong>. Its value is recalculated on every payload ingest.
+                    </p>
+                  </div>
+                  <ExpressionEditor control={editAttrForm.control} attrNames={attrNames.filter((n) => n !== editAttr?.name)} />
+                  <FormField control={editAttrForm.control} name="uom" render={({ field }) => (
+                    <FormItem><FormLabel>UoM</FormLabel><FormControl><Input placeholder="°C, mm/s, V" {...field} /></FormControl></FormItem>
+                  )} />
+                </>
               ) : (
-                <div className="grid grid-cols-2 gap-3">
-                  <FormField control={editAttrForm.control} name="type" render={({ field }) => (
-                    <FormItem><FormLabel>Type</FormLabel>
-                      <Select value={field.value} onValueChange={field.onChange}>
-                        <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-                        <SelectContent>
-                          <SelectItem value="static">Static</SelectItem>
-                          <SelectItem value="dynamic">Dynamic</SelectItem>
-                          <SelectItem value="metric">Metric</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </FormItem>
-                  )} />
-                  <FormField control={editAttrForm.control} name="dataType" render={({ field }) => (
-                    <FormItem><FormLabel>Data Type</FormLabel>
-                      <Select value={field.value} onValueChange={field.onChange}>
-                        <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-                        <SelectContent>
-                          <SelectItem value="text">Text</SelectItem><SelectItem value="number">Number</SelectItem>
-                          <SelectItem value="double">Double</SelectItem><SelectItem value="boolean">Boolean</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </FormItem>
-                  )} />
-                </div>
+                /* Normal attribute — edit type, dataType, tagName, uom, value */
+                <>
+                  <div className="grid grid-cols-2 gap-3">
+                    <FormField control={editAttrForm.control} name="type" render={({ field }) => (
+                      <FormItem><FormLabel>Type</FormLabel>
+                        <Select value={field.value} onValueChange={field.onChange}>
+                          <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                          <SelectContent>
+                            <SelectItem value="static">Static</SelectItem>
+                            <SelectItem value="dynamic">Dynamic</SelectItem>
+                            <SelectItem value="metric">Metric</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </FormItem>
+                    )} />
+                    <FormField control={editAttrForm.control} name="dataType" render={({ field }) => (
+                      <FormItem><FormLabel>Data Type</FormLabel>
+                        <Select value={field.value} onValueChange={field.onChange}>
+                          <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
+                          <SelectContent>
+                            <SelectItem value="text">Text</SelectItem>
+                            <SelectItem value="number">Number</SelectItem>
+                            <SelectItem value="double">Double</SelectItem>
+                            <SelectItem value="boolean">Boolean</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </FormItem>
+                    )} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <FormField control={editAttrForm.control} name="tagName" render={({ field }) => (
+                      <FormItem><FormLabel>Tag Name</FormLabel>
+                        <FormControl><Input className="font-mono text-xs" {...field} /></FormControl>
+                      </FormItem>
+                    )} />
+                    <FormField control={editAttrForm.control} name="uom" render={({ field }) => (
+                      <FormItem><FormLabel>UoM</FormLabel><FormControl><Input {...field} /></FormControl></FormItem>
+                    )} />
+                  </div>
+                  <div className="rounded-md bg-muted/40 border border-border/60 px-3 py-2 text-xs text-muted-foreground">
+                    To add a <strong>computed attribute</strong> using this value, click <strong>Add</strong> and enable "Use Expression".
+                  </div>
+                </>
               )}
-
-              <div className="grid grid-cols-2 gap-3">
-                <FormField control={editAttrForm.control} name="tagName" render={({ field }) => (
-                  <FormItem><FormLabel>Tag Name</FormLabel>
-                    <FormControl><Input className="font-mono text-xs" {...field} /></FormControl>
-                  </FormItem>
-                )} />
-                <FormField control={editAttrForm.control} name="uom" render={({ field }) => (
-                  <FormItem><FormLabel>UoM</FormLabel><FormControl><Input {...field} /></FormControl></FormItem>
-                )} />
-              </div>
 
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => { setEditAttr(null); editAttrForm.reset(); }}>Cancel</Button>
