@@ -13,11 +13,33 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useQueryClient } from "@tanstack/react-query";
 import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  Legend,
+  ResponsiveContainer,
+} from "recharts";
+import {
   Play, Square, Send, RefreshCw, Zap, ChevronRight,
-  CheckCircle2, XCircle, Clock, Activity, Cpu,
+  CheckCircle2, XCircle, Clock, Activity, Cpu, TrendingUp,
 } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
+
+// ── Chart colour palette ──────────────────────────────────────────────────────
+const CHART_COLORS = [
+  "#3b82f6", // blue
+  "#10b981", // emerald
+  "#f59e0b", // amber
+  "#ef4444", // red
+  "#8b5cf6", // violet
+  "#06b6d4", // cyan
+  "#f97316", // orange
+  "#84cc16", // lime
+];
 
 // ── Preset payloads ──────────────────────────────────────────────────────────
 const PRESETS = [
@@ -105,6 +127,7 @@ const PRESETS = [
   },
 ];
 
+// ── Types ────────────────────────────────────────────────────────────────────
 interface LogEntry {
   id: string;
   ts: Date;
@@ -115,6 +138,9 @@ interface LogEntry {
   durationMs: number;
 }
 
+type ChartPoint = Record<string, number | string>;
+
+// ── Sub-components ───────────────────────────────────────────────────────────
 function JsonEditor({
   value,
   onChange,
@@ -187,6 +213,24 @@ function LogRow({ entry }: { entry: LogEntry }) {
   );
 }
 
+// Custom tooltip for the chart
+function ChartTooltip({ active, payload, label }: any) {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="bg-popover border border-border rounded-md shadow-md p-2.5 text-xs">
+      <p className="font-mono text-muted-foreground mb-1.5">{label}</p>
+      {payload.map((p: any) => (
+        <div key={p.dataKey} className="flex items-center gap-2 py-0.5">
+          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: p.color }} />
+          <span className="text-muted-foreground">{p.dataKey}:</span>
+          <span className="font-semibold tabular-nums">{typeof p.value === "number" ? p.value.toLocaleString(undefined, { maximumFractionDigits: 3 }) : p.value}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
 export default function IngestSimulator() {
   const qc = useQueryClient();
 
@@ -202,6 +246,11 @@ export default function IngestSimulator() {
   const [totalSuccess, setTotalSuccess] = useState(0);
   const intervalRef = useRef<number | null>(null);
 
+  // Chart state
+  const [chartData, setChartData] = useState<ChartPoint[]>([]);
+  const [hiddenLines, setHiddenLines] = useState<Set<string>>(new Set());
+  const MAX_CHART_POINTS = 40;
+
   const { data: recentTelemetry } = useGetRecentTelemetry({ limit: 12 });
 
   // Rebuild JSON whenever preset or metrics change (only when not auto-sending)
@@ -216,8 +265,13 @@ export default function IngestSimulator() {
     setJsonError(null);
   }, [selectedPreset, currentMetrics, autoSend]);
 
+  const addChartPoint = useCallback((metrics: Record<string, number>) => {
+    const point: ChartPoint = { time: format(new Date(), "HH:mm:ss"), ...metrics };
+    setChartData((prev) => [...prev, point].slice(-MAX_CHART_POINTS));
+  }, []);
+
   const sendPayload = useCallback(
-    async (payloadOverride?: object) => {
+    async (payloadOverride?: object, metricsForChart?: Record<string, number>) => {
       let payload: object;
       if (payloadOverride) {
         payload = payloadOverride;
@@ -254,11 +308,17 @@ export default function IngestSimulator() {
 
         setLog((l) => [entry, ...l].slice(0, 100));
         setTotalSent((n) => n + 1);
-        if (res.ok) setTotalSuccess((n) => n + 1);
+        if (res.ok) {
+          setTotalSuccess((n) => n + 1);
+          // Add point to chart (use provided metrics, or parse from payload)
+          const chartMetrics = metricsForChart ?? (payload as any).metrics;
+          if (chartMetrics && typeof chartMetrics === "object") {
+            addChartPoint(chartMetrics as Record<string, number>);
+          }
+        }
 
         qc.invalidateQueries({ queryKey: getGetRecentTelemetryQueryKey({ limit: 12 }) });
       } catch (err: unknown) {
-        const start2 = performance.now();
         const entry: LogEntry = {
           id: crypto.randomUUID(),
           ts: new Date(),
@@ -266,7 +326,7 @@ export default function IngestSimulator() {
           payload,
           status: "error",
           response: { error: err instanceof Error ? err.message : String(err) },
-          durationMs: Math.round(performance.now() - start2),
+          durationMs: Math.round(performance.now() - start),
         };
         setLog((l) => [entry, ...l].slice(0, 100));
         setTotalSent((n) => n + 1);
@@ -274,7 +334,7 @@ export default function IngestSimulator() {
         setSending(false);
       }
     },
-    [rawJson, selectedPreset, qc]
+    [rawJson, selectedPreset, qc, addChartPoint]
   );
 
   // Auto-send loop
@@ -287,7 +347,6 @@ export default function IngestSimulator() {
       return;
     }
 
-    // Capture latest metrics in closure via ref trick — use a local variable
     const runTick = (metricsSnapshot: Record<string, number>) => {
       const newMetrics = selectedPreset.randomize(metricsSnapshot);
       setCurrentMetrics(newMetrics);
@@ -296,11 +355,10 @@ export default function IngestSimulator() {
         timestamp: new Date().toISOString(),
         metrics: newMetrics,
       };
-      sendPayload(payload);
+      sendPayload(payload, newMetrics);
       return newMetrics;
     };
 
-    // Kick off immediately
     let latest = { ...currentMetrics };
     latest = runTick(latest);
 
@@ -322,6 +380,8 @@ export default function IngestSimulator() {
     setSelectedPreset(preset);
     setCurrentMetrics({ ...preset.metrics });
     setAutoSend(false);
+    setChartData([]);
+    setHiddenLines(new Set());
   }
 
   function handleRandomize() {
@@ -329,12 +389,22 @@ export default function IngestSimulator() {
     setCurrentMetrics(newMetrics);
   }
 
+  function toggleLine(key: string) {
+    setHiddenLines((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  const metricKeys = Object.keys(selectedPreset.metrics);
   const successRate = totalSent > 0 ? Math.round((totalSuccess / totalSent) * 100) : 100;
   const telemetryList = (recentTelemetry as any[] | undefined) ?? [];
 
   return (
     <div className="p-6 space-y-4">
-      {/* Header */}
+      {/* ── Header ── */}
       <div className="flex items-start justify-between gap-4">
         <div>
           <h1 className="text-xl font-semibold flex items-center gap-2">
@@ -345,8 +415,6 @@ export default function IngestSimulator() {
             Send test Node-RED payloads to the ingest API and watch telemetry update live
           </p>
         </div>
-
-        {/* Stats */}
         <div className="flex items-center gap-6 shrink-0">
           <div className="text-center">
             <p className="text-2xl font-bold tabular-nums">{totalSent}</p>
@@ -363,8 +431,9 @@ export default function IngestSimulator() {
         </div>
       </div>
 
+      {/* ── Main 2-panel grid ── */}
       <div className="grid grid-cols-1 xl:grid-cols-5 gap-4">
-        {/* ── Left panel ─────────────────────────────────────── */}
+        {/* Left */}
         <div className="xl:col-span-3 space-y-3">
           {/* Preset + metric chips */}
           <Card className="shadow-sm">
@@ -386,25 +455,22 @@ export default function IngestSimulator() {
                     </SelectContent>
                   </Select>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={handleRandomize}
-                  disabled={autoSend}
-                >
+                <Button variant="outline" size="sm" onClick={handleRandomize} disabled={autoSend}>
                   <RefreshCw className="w-3.5 h-3.5 mr-1.5" />
                   Randomize
                 </Button>
               </div>
-
               <p className="text-xs text-muted-foreground">{selectedPreset.description}</p>
-
               <div className="flex flex-wrap gap-1.5">
-                {Object.entries(currentMetrics).map(([k, v]) => (
+                {Object.entries(currentMetrics).map(([k, v], i) => (
                   <div
                     key={k}
                     className="flex items-center gap-1.5 bg-muted/60 rounded px-2 py-1 text-xs font-mono border border-border/60"
                   >
+                    <span
+                      className="w-1.5 h-1.5 rounded-full shrink-0"
+                      style={{ backgroundColor: CHART_COLORS[i % CHART_COLORS.length] }}
+                    />
                     <span className="text-muted-foreground">{k}:</span>
                     <span className="font-semibold text-primary">{v}</span>
                   </div>
@@ -425,12 +491,8 @@ export default function IngestSimulator() {
                 value={rawJson}
                 onChange={(v) => {
                   setRawJson(v);
-                  try {
-                    JSON.parse(v);
-                    setJsonError(null);
-                  } catch (e: unknown) {
-                    setJsonError(e instanceof Error ? e.message : String(e));
-                  }
+                  try { JSON.parse(v); setJsonError(null); }
+                  catch (e: unknown) { setJsonError(e instanceof Error ? e.message : String(e)); }
                 }}
                 error={jsonError}
               />
@@ -446,21 +508,16 @@ export default function IngestSimulator() {
                   disabled={sending || autoSend || !!jsonError}
                   className="min-w-28"
                 >
-                  {sending ? (
-                    <><RefreshCw className="w-4 h-4 mr-2 animate-spin" />Sending…</>
-                  ) : (
-                    <><Send className="w-4 h-4 mr-2" />Send Once</>
-                  )}
+                  {sending
+                    ? <><RefreshCw className="w-4 h-4 mr-2 animate-spin" />Sending…</>
+                    : <><Send className="w-4 h-4 mr-2" />Send Once</>
+                  }
                 </Button>
 
                 <div className="h-6 w-px bg-border" />
 
                 <div className="flex items-center gap-2">
-                  <Switch
-                    checked={autoSend}
-                    onCheckedChange={setAutoSend}
-                    id="auto-send"
-                  />
+                  <Switch checked={autoSend} onCheckedChange={setAutoSend} id="auto-send" />
                   <Label htmlFor="auto-send" className="text-sm cursor-pointer select-none">
                     {autoSend ? (
                       <span className="flex items-center gap-1.5 text-primary font-medium">
@@ -478,9 +535,7 @@ export default function IngestSimulator() {
                   <Slider
                     value={[intervalSecs]}
                     onValueChange={([v]) => setIntervalSecs(v)}
-                    min={1}
-                    max={30}
-                    step={1}
+                    min={1} max={30} step={1}
                     disabled={autoSend}
                     className="flex-1"
                   />
@@ -488,11 +543,7 @@ export default function IngestSimulator() {
                 </div>
 
                 {autoSend && (
-                  <Button
-                    variant="destructive"
-                    size="sm"
-                    onClick={() => setAutoSend(false)}
-                  >
+                  <Button variant="destructive" size="sm" onClick={() => setAutoSend(false)}>
                     <Square className="w-3.5 h-3.5 mr-1.5" />
                     Stop
                   </Button>
@@ -502,9 +553,9 @@ export default function IngestSimulator() {
           </Card>
         </div>
 
-        {/* ── Right panel ────────────────────────────────────── */}
+        {/* Right */}
         <div className="xl:col-span-2 space-y-3">
-          {/* Live telemetry */}
+          {/* Live telemetry feed */}
           <Card className="shadow-sm">
             <CardHeader className="pb-2 pt-3 px-4">
               <CardTitle className="text-sm font-semibold flex items-center gap-2">
@@ -534,9 +585,7 @@ export default function IngestSimulator() {
                       Array.from({ length: 5 }).map((_, i) => (
                         <tr key={i} className="border-b border-border/50">
                           {Array.from({ length: 4 }).map((__, j) => (
-                            <td key={j} className="px-3 py-2">
-                              <Skeleton className="h-3 w-full" />
-                            </td>
+                            <td key={j} className="px-3 py-2"><Skeleton className="h-3 w-full" /></td>
                           ))}
                         </tr>
                       ))
@@ -548,16 +597,11 @@ export default function IngestSimulator() {
                       </tr>
                     ) : (
                       telemetryList.map((rec: any) => (
-                        <tr
-                          key={rec.id}
-                          className="border-b border-border/50 hover:bg-muted/30 transition-colors"
-                        >
+                        <tr key={rec.id} className="border-b border-border/50 hover:bg-muted/30 transition-colors">
                           <td className="px-3 py-2 font-mono text-foreground/60">{rec.deviceId ?? "—"}</td>
                           <td className="px-3 py-2 font-medium">{rec.metric}</td>
                           <td className="px-3 py-2 font-mono text-primary">
-                            {typeof rec.value === "object"
-                              ? JSON.stringify(rec.value)
-                              : String(rec.value ?? "—")}
+                            {typeof rec.value === "object" ? JSON.stringify(rec.value) : String(rec.value ?? "—")}
                           </td>
                           <td className="px-3 py-2 text-muted-foreground">
                             {format(new Date(rec.timestamp), "HH:mm:ss")}
@@ -604,7 +648,106 @@ export default function IngestSimulator() {
         </div>
       </div>
 
-      {/* Reference snippets */}
+      {/* ── Live Trend Chart ── */}
+      <Card className="shadow-sm">
+        <CardHeader className="pb-0 pt-3 px-4">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <TrendingUp className="w-3.5 h-3.5 text-primary" />
+              Live Trend Chart
+              {autoSend && (
+                <span className="text-xs text-primary font-normal flex items-center gap-1.5">
+                  <span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />
+                  Streaming
+                </span>
+              )}
+              {chartData.length > 0 && (
+                <span className="text-xs text-muted-foreground font-normal">
+                  — last {chartData.length} readings
+                </span>
+              )}
+            </CardTitle>
+            <div className="flex items-center gap-3">
+              {/* Metric toggles */}
+              <div className="flex flex-wrap gap-1.5">
+                {metricKeys.map((k, i) => (
+                  <button
+                    key={k}
+                    onClick={() => toggleLine(k)}
+                    className={cn(
+                      "flex items-center gap-1 text-xs px-2 py-0.5 rounded border transition-all",
+                      hiddenLines.has(k)
+                        ? "border-border/40 text-muted-foreground/50 bg-muted/20 line-through"
+                        : "border-border text-foreground bg-muted/40"
+                    )}
+                  >
+                    <span
+                      className="w-2 h-2 rounded-full shrink-0"
+                      style={{ backgroundColor: hiddenLines.has(k) ? "#94a3b8" : CHART_COLORS[i % CHART_COLORS.length] }}
+                    />
+                    {k}
+                  </button>
+                ))}
+              </div>
+              {chartData.length > 0 && (
+                <button
+                  className="text-xs text-muted-foreground hover:text-destructive transition-colors shrink-0"
+                  onClick={() => setChartData([])}
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="px-4 pb-4 pt-3">
+          {chartData.length === 0 ? (
+            <div className="h-48 flex flex-col items-center justify-center gap-2 text-muted-foreground border-2 border-dashed border-border/40 rounded-lg">
+              <TrendingUp className="w-8 h-8 opacity-20" />
+              <p className="text-sm">Chart will appear here once you start sending payloads</p>
+              <p className="text-xs opacity-60">Use Auto-send to see the data stream in real time</p>
+            </div>
+          ) : (
+            <ResponsiveContainer width="100%" height={260}>
+              <LineChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.5} />
+                <XAxis
+                  dataKey="time"
+                  tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                  tickLine={false}
+                  axisLine={{ stroke: "hsl(var(--border))" }}
+                  interval="preserveStartEnd"
+                />
+                <YAxis
+                  tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }}
+                  tickLine={false}
+                  axisLine={false}
+                  width={50}
+                  tickFormatter={(v: number) =>
+                    Math.abs(v) >= 1000 ? `${(v / 1000).toFixed(1)}k` : String(v)
+                  }
+                />
+                <Tooltip content={<ChartTooltip />} />
+                {metricKeys.map((k, i) => (
+                  <Line
+                    key={k}
+                    type="monotone"
+                    dataKey={k}
+                    stroke={CHART_COLORS[i % CHART_COLORS.length]}
+                    strokeWidth={hiddenLines.has(k) ? 0 : 2}
+                    dot={false}
+                    activeDot={hiddenLines.has(k) ? false : { r: 3, strokeWidth: 0 }}
+                    isAnimationActive={false}
+                    hide={hiddenLines.has(k)}
+                  />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── API Reference ── */}
       <Card className="shadow-sm">
         <CardHeader className="pb-2 pt-3 px-4">
           <CardTitle className="text-sm font-semibold">API Reference &amp; Examples</CardTitle>
@@ -662,12 +805,10 @@ Content-Type: application/json
 const deviceId = msg.topic || "device-001";
 const metrics = {};
 
-// Map incoming keys to metric names
 if (msg.payload.energy_kwh !== undefined)
   metrics.energy_meter_kwh = msg.payload.energy_kwh;
 if (msg.payload.temp !== undefined)
   metrics.temperature = msg.payload.temp;
-// Add more mappings as needed
 
 msg.payload = {
   deviceId,
