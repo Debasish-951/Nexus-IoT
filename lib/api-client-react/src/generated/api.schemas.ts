@@ -541,6 +541,24 @@ export interface AlarmStats {
   info: number;
 }
 
+export type BrokerEventStatus =
+  (typeof BrokerEventStatus)[keyof typeof BrokerEventStatus];
+
+export const BrokerEventStatus = {
+  connected: "connected",
+  disconnected: "disconnected",
+  error: "error",
+} as const;
+
+export interface BrokerEvent {
+  id: string;
+  brokerId: string;
+  brokerName: string;
+  status: BrokerEventStatus;
+  message?: string | null;
+  timestamp: string;
+}
+
 export type ListAssetsParams = {
   /**
    * Filter by parent asset id (null for root)
@@ -590,6 +608,10 @@ export type ListAlarmHistoryParams = {
   assetId?: string;
   from?: string;
   to?: string;
+  limit?: number;
+};
+
+export type GetBrokerHistoryParams = {
   limit?: number;
 };
 

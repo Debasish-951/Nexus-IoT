@@ -12,12 +12,13 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useForm } from "react-hook-form";
 import { Form, FormField, FormItem, FormLabel, FormControl, FormDescription } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Trash2, CheckCircle2, XCircle, AlertCircle, Wifi, Copy, Info } from "lucide-react";
+import { Plus, Trash2, CheckCircle2, XCircle, AlertCircle, Wifi, Copy, Info, History, ChevronDown } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { ReadOnlyBanner } from "@/components/RoleGuard";
 import { useWsEvents } from "@/hooks/useWsEvents";
+import BrokerHistoryTimeline from "@/components/BrokerHistoryTimeline";
 
 const TYPE_LABELS: Record<string, string> = {
   mqtt:             "MQTT",
@@ -91,6 +92,7 @@ export default function Brokers() {
   const deleteBroker = useDeleteBroker();
 
   const [statusOverrides, setStatusOverrides] = useState<Record<string, { status: string; timestamp: string }>>({});
+  const [expandedHistory, setExpandedHistory] = useState<string | null>(null);
 
   const handleBrokerStatus = useCallback((raw: unknown) => {
     const ev = raw as { brokerId: string; status: string; timestamp: string };
@@ -184,59 +186,89 @@ export default function Brokers() {
                 </td>
               </tr>
             ) : (
-              brokerList.map((broker: any) => (
-                <tr key={broker.id}
-                  className="border-b border-border/50 hover:bg-muted/30 transition-colors"
-                  data-testid={`broker-row-${broker.id}`}>
-                  <td className="px-4 py-3"><input type="checkbox" className="rounded" /></td>
-                  <td className="px-4 py-3 font-medium text-primary">{broker.name}</td>
-                  <td className="px-4 py-3">
-                    <span className="text-xs bg-muted px-2 py-0.5 rounded font-mono">
-                      {TYPE_LABELS[broker.type] ?? broker.type}
-                    </span>
-                  </td>
-                  <td className="px-4 py-3 text-xs text-muted-foreground truncate max-w-[160px]">
-                    {broker.endpoint ?? "—"}
-                  </td>
-                  <td className="px-4 py-3">{broker.connectedDevices}</td>
-                  <td className="px-4 py-3">{Number(broker.totalRequests).toLocaleString()}</td>
-                  <td className="px-4 py-3">
-                    {(() => {
-                      const ov = statusOverrides[broker.id];
-                      const liveStatus = ov?.status ?? broker.status;
-                      const isLive = !!ov;
-                      return (
-                        <div className="flex items-center gap-1.5">
-                          <StatusIcon status={liveStatus} />
-                          <span className={cn("text-xs capitalize",
-                            liveStatus === "connected" ? "text-green-600" : "text-muted-foreground")}>
-                            {liveStatus === "connected" ? "Connected" : liveStatus}
-                          </span>
-                          {isLive && (
-                            <span className="text-[9px] font-medium text-primary/60 bg-primary/10 px-1 rounded">live</span>
+              brokerList.flatMap((broker: any) => {
+                const isExpanded = expandedHistory === broker.id;
+                return [
+                  <tr key={broker.id}
+                    className={cn("border-b border-border/50 hover:bg-muted/30 transition-colors", isExpanded && "bg-muted/20")}
+                    data-testid={`broker-row-${broker.id}`}>
+                    <td className="px-4 py-3"><input type="checkbox" className="rounded" /></td>
+                    <td className="px-4 py-3 font-medium text-primary">{broker.name}</td>
+                    <td className="px-4 py-3">
+                      <span className="text-xs bg-muted px-2 py-0.5 rounded font-mono">
+                        {TYPE_LABELS[broker.type] ?? broker.type}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground truncate max-w-[160px]">
+                      {broker.endpoint ?? "—"}
+                    </td>
+                    <td className="px-4 py-3">{broker.connectedDevices}</td>
+                    <td className="px-4 py-3">{Number(broker.totalRequests).toLocaleString()}</td>
+                    <td className="px-4 py-3">
+                      {(() => {
+                        const ov = statusOverrides[broker.id];
+                        const liveStatus = ov?.status ?? broker.status;
+                        const isLive = !!ov;
+                        return (
+                          <div className="flex items-center gap-1.5">
+                            <StatusIcon status={liveStatus} />
+                            <span className={cn("text-xs capitalize",
+                              liveStatus === "connected" ? "text-green-600" : "text-muted-foreground")}>
+                              {liveStatus === "connected" ? "Connected" : liveStatus}
+                            </span>
+                            {isLive && (
+                              <span className="text-[9px] font-medium text-primary/60 bg-primary/10 px-1 rounded">live</span>
+                            )}
+                          </div>
+                        );
+                      })()}
+                    </td>
+                    <td className="px-4 py-3 text-xs text-muted-foreground">
+                      {statusOverrides[broker.id]
+                        ? <span className="text-primary/70">{formatDistanceToNow(new Date(statusOverrides[broker.id].timestamp), { addSuffix: true })}</span>
+                        : format(new Date(broker.updatedAt), "yyyy-MM-dd HH:mm:ss.SSS")}
+                    </td>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center gap-2">
+                        <button
+                          onClick={() => setExpandedHistory(isExpanded ? null : broker.id)}
+                          className={cn(
+                            "flex items-center gap-1 text-xs px-2 py-1 rounded transition-colors",
+                            isExpanded
+                              ? "bg-primary/10 text-primary"
+                              : "text-muted-foreground hover:text-foreground hover:bg-muted"
                           )}
+                          title="Connection history"
+                        >
+                          <History className="w-3.5 h-3.5" />
+                          <ChevronDown className={cn("w-3 h-3 transition-transform", isExpanded && "rotate-180")} />
+                        </button>
+                        {can("manage_brokers") && (
+                          <button className="text-muted-foreground hover:text-destructive transition-colors"
+                            onClick={() => deleteBroker.mutate({ id: broker.id }, {
+                              onSuccess: () => { toast({ title: "Broker deleted" }); qc.invalidateQueries({ queryKey: getListBrokersQueryKey() }); },
+                            })}
+                            data-testid={`delete-broker-${broker.id}`}>
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>,
+                  isExpanded && (
+                    <tr key={`${broker.id}-history`} className="border-b border-border/50 bg-muted/10">
+                      <td colSpan={9} className="px-6 py-4">
+                        <div className="flex items-center gap-2 mb-3">
+                          <History className="w-4 h-4 text-primary" />
+                          <h3 className="text-sm font-semibold">Connection History — {broker.name}</h3>
+                          <span className="text-xs text-muted-foreground">(last 50 events)</span>
                         </div>
-                      );
-                    })()}
-                  </td>
-                  <td className="px-4 py-3 text-xs text-muted-foreground">
-                    {statusOverrides[broker.id]
-                      ? <span className="text-primary/70">{formatDistanceToNow(new Date(statusOverrides[broker.id].timestamp), { addSuffix: true })}</span>
-                      : format(new Date(broker.updatedAt), "yyyy-MM-dd HH:mm:ss.SSS")}
-                  </td>
-                  <td className="px-4 py-3">
-                    {can("manage_brokers") && (
-                      <button className="text-muted-foreground hover:text-destructive transition-colors"
-                        onClick={() => deleteBroker.mutate({ id: broker.id }, {
-                          onSuccess: () => { toast({ title: "Broker deleted" }); qc.invalidateQueries({ queryKey: getListBrokersQueryKey() }); },
-                        })}
-                        data-testid={`delete-broker-${broker.id}`}>
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))
+                        <BrokerHistoryTimeline brokerId={broker.id} brokerName={broker.name} />
+                      </td>
+                    </tr>
+                  ),
+                ].filter(Boolean);
+              })
             )}
           </tbody>
         </table>

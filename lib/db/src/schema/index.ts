@@ -9,3 +9,4 @@ export * from "./brokers";
 export * from "./api_clients";
 export * from "./destinations";
 export * from "./activity_logs";
+export * from "./broker_events";

@@ -26,6 +26,7 @@ import type {
   AssetTemplate,
   Attribute,
   Broker,
+  BrokerEvent,
   CreateAlarmRuleBody,
   CreateApiClientBody,
   CreateAssetBody,
@@ -34,6 +35,7 @@ import type {
   CreateBrokerBody,
   CreateUserBody,
   DashboardSummary,
+  GetBrokerHistoryParams,
   GetRecentTelemetryParams,
   GetTelemetryParams,
   HealthStatus,
@@ -2806,6 +2808,116 @@ export const useCreateBroker = <
 > => {
   return useMutation(getCreateBrokerMutationOptions(options));
 };
+
+/**
+ * @summary Get broker connection history
+ */
+export const getGetBrokerHistoryUrl = (
+  id: string,
+  params?: GetBrokerHistoryParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/brokers/${id}/history?${stringifiedParams}`
+    : `/api/brokers/${id}/history`;
+};
+
+export const getBrokerHistory = async (
+  id: string,
+  params?: GetBrokerHistoryParams,
+  options?: RequestInit,
+): Promise<BrokerEvent[]> => {
+  return customFetch<BrokerEvent[]>(getGetBrokerHistoryUrl(id, params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetBrokerHistoryQueryKey = (
+  id: string,
+  params?: GetBrokerHistoryParams,
+) => {
+  return [`/api/brokers/${id}/history`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetBrokerHistoryQueryOptions = <
+  TData = Awaited<ReturnType<typeof getBrokerHistory>>,
+  TError = ErrorType<unknown>,
+>(
+  id: string,
+  params?: GetBrokerHistoryParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getBrokerHistory>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetBrokerHistoryQueryKey(id, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getBrokerHistory>>
+  > = ({ signal }) =>
+    getBrokerHistory(id, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getBrokerHistory>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetBrokerHistoryQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getBrokerHistory>>
+>;
+export type GetBrokerHistoryQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Get broker connection history
+ */
+
+export function useGetBrokerHistory<
+  TData = Awaited<ReturnType<typeof getBrokerHistory>>,
+  TError = ErrorType<unknown>,
+>(
+  id: string,
+  params?: GetBrokerHistoryParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getBrokerHistory>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetBrokerHistoryQueryOptions(id, params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
 
 /**
  * @summary Update broker

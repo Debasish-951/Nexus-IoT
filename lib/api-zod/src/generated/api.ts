@@ -121,7 +121,7 @@ export const ListAssetAttributesResponseItem = zod.object({
   id: zod.string(),
   assetId: zod.string(),
   name: zod.string(),
-  type: zod.enum(["static", "dynamic", "metric", "runtime"]),
+  type: zod.enum(["static", "dynamic", "metric"]),
   dataType: zod.enum(["text", "number", "boolean", "timestamp", "double"]),
   value: zod.unknown().nullish(),
   tagName: zod.string().nullish(),
@@ -144,7 +144,7 @@ export const CreateAssetAttributeParams = zod.object({
 
 export const CreateAssetAttributeBody = zod.object({
   name: zod.string(),
-  type: zod.enum(["static", "dynamic", "metric", "runtime"]),
+  type: zod.enum(["static", "dynamic", "metric"]),
   dataType: zod.enum(["text", "number", "boolean", "timestamp", "double"]),
   value: zod.unknown().nullish(),
   tagName: zod.string().nullish(),
@@ -170,7 +170,7 @@ export const UpdateAttributeResponse = zod.object({
   id: zod.string(),
   assetId: zod.string(),
   name: zod.string(),
-  type: zod.enum(["static", "dynamic", "metric", "runtime"]),
+  type: zod.enum(["static", "dynamic", "metric"]),
   dataType: zod.enum(["text", "number", "boolean", "timestamp", "double"]),
   value: zod.unknown().nullish(),
   tagName: zod.string().nullish(),
@@ -604,6 +604,29 @@ export const CreateBrokerBody = zod.object({
   endpoint: zod.string().nullish(),
   tags: zod.array(zod.string()).optional(),
 });
+
+/**
+ * @summary Get broker connection history
+ */
+export const GetBrokerHistoryParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const getBrokerHistoryQueryLimitDefault = 100;
+
+export const GetBrokerHistoryQueryParams = zod.object({
+  limit: zod.coerce.number().default(getBrokerHistoryQueryLimitDefault),
+});
+
+export const GetBrokerHistoryResponseItem = zod.object({
+  id: zod.string(),
+  brokerId: zod.string(),
+  brokerName: zod.string(),
+  status: zod.enum(["connected", "disconnected", "error"]),
+  message: zod.string().nullish(),
+  timestamp: zod.coerce.date(),
+});
+export const GetBrokerHistoryResponse = zod.array(GetBrokerHistoryResponseItem);
 
 /**
  * @summary Update broker

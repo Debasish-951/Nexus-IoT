@@ -25,6 +25,7 @@ scripts/                  — Utility scripts
 - `alarm_rules` — threshold/deviation/rate_of_change/heartbeat rule definitions + webhookUrl, webhookEnabled, rocWindow
 - `users` — platform users with roles (admin/engineer/operator/viewer)
 - `brokers` — MQTT/REST/Azure IoT broker configurations + mqttUsername, mqttPassword, mqttTopic, mqttClientId, mappingRules (JSONB)
+- `broker_events` — immutable connection history log: brokerId, brokerName, status (connected/disconnected/error), message, timestamp
 - `api_clients` — OAuth client credentials with scopes
 - `destinations` — webhook/HTTP forward destinations with auth, enabled toggle, eventTypes filter
 - `activity_logs` — audit trail: action, category, actorName, actorRole, actorUsername, targetId, targetName, detail, timestamp
@@ -50,6 +51,7 @@ scripts/                  — Utility scripts
 - `POST /api/alarm-rules/:id/test-webhook` — fire a test webhook POST
 - `GET/POST /api/users` — list/create users
 - `GET/POST /api/brokers` — list/create brokers
+- `GET /api/brokers/:id/history` — broker connection event history (newest-first, limit up to 500)
 - `GET/POST /api/api-clients` — list/create API clients
 - `GET /api/dashboard/summary` — stat cards
 - `GET /api/dashboard/recent-telemetry` — latest records
@@ -69,12 +71,12 @@ scripts/                  — Utility scripts
 - `/alarm-history` — Historical alarm log
 - `/alarm-rules` — Rule config with webhook URL, rate-of-change window, test-webhook button, enable toggle
 - `/users` — User management with roles
-- `/brokers` — Broker management (MQTT, REST API, Azure IoT, with payload mapping rules)
+- `/brokers` — Broker management (MQTT, REST API, Azure IoT, with payload mapping rules) + expandable per-broker connection history timeline
 - `/api-clients` — API client credentials with scope management
 - `/activity-log` — Audit trail table (filter by category, search by actor/target/action, paginated 25/page, 30s auto-refresh)
 
 ### Services
-- `artifacts/api-server/src/services/mqtt.ts` — MQTT subscriber service: reads broker configs, subscribes to topics, applies mapping rules, calls processNormalised
+- `artifacts/api-server/src/services/mqtt.ts` — MQTT subscriber service: reads broker configs, subscribes to topics, applies mapping rules, calls processNormalised; broadcasts `broker_status` WS events and inserts `broker_events` rows on connect/error/close
 
 ## Key Technical Notes
 
