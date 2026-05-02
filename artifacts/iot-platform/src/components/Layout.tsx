@@ -24,6 +24,7 @@ import {
   Menu,
   X,
   Wifi,
+  Zap,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -78,6 +79,7 @@ const navItems: NavItem[] = [
     ],
   },
   { label: "Activity Log", href: "/settings?v=activity", icon: Activity },
+  { label: "Payload Simulator", href: "/simulator", icon: Zap },
 ];
 
 function NavGroup({ item, collapsed }: { item: NavItem; collapsed: boolean }) {

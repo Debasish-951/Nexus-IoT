@@ -14,6 +14,7 @@ import Users from "@/pages/Users";
 import Brokers from "@/pages/Brokers";
 import ApiClients from "@/pages/ApiClients";
 import Settings from "@/pages/Settings";
+import IngestSimulator from "@/pages/IngestSimulator";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -38,6 +39,7 @@ function AppRouter() {
         <Route path="/brokers" component={Brokers} />
         <Route path="/api-clients" component={ApiClients} />
         <Route path="/settings" component={Settings} />
+        <Route path="/simulator" component={IngestSimulator} />
         <Route component={NotFound} />
       </Switch>
     </Layout>
