@@ -101,6 +101,31 @@ router.put("/users/:id", async (req, res): Promise<void> => {
   res.json(sanitizeUser(user));
 });
 
+router.patch("/users/:id/change-password", async (req, res): Promise<void> => {
+  const { id } = req.params;
+  const { currentPassword, newPassword } = req.body as Record<string, unknown>;
+
+  if (typeof currentPassword !== "string" || typeof newPassword !== "string") {
+    res.status(400).json({ error: "currentPassword and newPassword are required" });
+    return;
+  }
+  if (newPassword.length < 6) {
+    res.status(400).json({ error: "New password must be at least 6 characters" });
+    return;
+  }
+
+  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, id));
+  if (!user) { res.status(404).json({ error: "User not found" }); return; }
+  if (user.passwordHash !== currentPassword) {
+    res.status(401).json({ error: "Current password is incorrect" });
+    return;
+  }
+
+  await db.update(usersTable).set({ passwordHash: newPassword }).where(eq(usersTable.id, id));
+  void logActivity("user.password_changed", "user", user.id, user.fullName, null, req);
+  res.json({ ok: true });
+});
+
 router.delete("/users/:id", async (req, res): Promise<void> => {
   const params = DeleteUserParams.safeParse(req.params);
   if (!params.success) {

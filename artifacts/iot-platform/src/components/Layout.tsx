@@ -1,17 +1,17 @@
 import { useState } from "react";
 import { Link, useLocation } from "wouter";
 import {
-  Home, ChevronDown, ChevronRight, LayoutDashboard,
+  ChevronDown, ChevronRight, Home, LayoutDashboard,
   FileText, Image, BarChart2, Blocks, Cpu, Bell,
   AlarmClock, BookOpen, Settings2, Router, Plug,
   Shield, Users, KeyRound, Activity, Menu, X,
-  Wifi, Zap, Send, LogOut, ChevronUp, User2,
+  Wifi, Zap, Send,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
-import { Badge } from "@/components/ui/badge";
 import { useCurrentUser } from "@/contexts/UserContext";
-import { useListUsers } from "@workspace/api-client-react";
+import NotificationBell from "@/components/NotificationBell";
+import UserProfileTopMenu from "@/components/UserProfileTopMenu";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -53,10 +53,10 @@ const navItems: NavItem[] = [
     label: "Broker Management",
     icon: Router,
     children: [
-      { label: "Broker",        href: "/brokers",          icon: Wifi },
-      { label: "Destinations",  href: "/destinations",     icon: Send },
-      { label: "Node-RED API",  href: "/node-red-docs",    icon: Zap },
-      { label: "Integration",   href: "/settings?v=integration", icon: Plug },
+      { label: "Broker",       href: "/brokers",               icon: Wifi },
+      { label: "Destinations", href: "/destinations",          icon: Send },
+      { label: "Node-RED API", href: "/node-red-docs",         icon: Zap },
+      { label: "Integration",  href: "/settings?v=integration", icon: Plug },
     ],
   },
   {
@@ -68,7 +68,7 @@ const navItems: NavItem[] = [
     ],
   },
   { label: "Activity Log",      href: "/activity-log", icon: Activity },
-  { label: "Payload Simulator", href: "/simulator",           icon: Zap },
+  { label: "Payload Simulator", href: "/simulator",    icon: Zap },
 ];
 
 const ROLE_COLORS: Record<string, string> = {
@@ -155,12 +155,8 @@ function NavGroup({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
   );
 }
 
-function UserProfileSection({ collapsed }: { collapsed: boolean }) {
-  const { currentUser, setCurrentUser } = useCurrentUser();
-  const { data: users } = useListUsers();
-  const [open, setOpen] = useState(false);
-  const userList = (users as any[] | undefined) ?? [];
-
+function SidebarUserChip({ collapsed }: { collapsed: boolean }) {
+  const { currentUser } = useCurrentUser();
   if (!currentUser) return null;
 
   const displayName = currentUser.fullName ?? currentUser.email ?? "User";
@@ -168,78 +164,22 @@ function UserProfileSection({ collapsed }: { collapsed: boolean }) {
     .split(" ").map((w: string) => w[0] ?? "").join("").toUpperCase().slice(0, 2) || "U";
 
   return (
-    <div className="relative border-t border-sidebar-border">
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className={cn(
-          "w-full flex items-center gap-2.5 px-3 py-2.5 hover:bg-sidebar-accent transition-colors",
-          collapsed && "justify-center"
-        )}
-        title={collapsed ? `${displayName} (${currentUser.role})` : undefined}
-      >
-        {/* Avatar */}
-        <div className="w-7 h-7 rounded-full bg-sidebar-primary flex items-center justify-center shrink-0 text-white text-xs font-bold">
-          {initials}
-        </div>
-        {!collapsed && (
-          <>
-            <div className="flex-1 min-w-0 text-left">
-              <p className="text-xs font-medium text-sidebar-foreground truncate">{displayName}</p>
-              <p className="text-[10px] text-sidebar-foreground/60 truncate">{currentUser.email}</p>
-            </div>
-            <ChevronUp className={cn("w-3 h-3 text-sidebar-foreground/60 transition-transform", open && "rotate-180")} />
-          </>
-        )}
-      </button>
-
-      {/* Dropdown */}
-      {open && !collapsed && (
-        <div className="absolute bottom-full left-0 right-0 mb-1 mx-2 rounded-lg border border-border bg-popover shadow-lg z-50 overflow-hidden">
-          {/* Current user info */}
-          <div className="px-3 py-2.5 border-b border-border bg-muted/30">
-            <div className="flex items-center gap-2">
-              <div className="w-8 h-8 rounded-full bg-primary flex items-center justify-center text-white text-xs font-bold shrink-0">
-                {initials}
-              </div>
-              <div>
-                <p className="text-xs font-semibold">{displayName}</p>
-                <p className="text-[10px] text-muted-foreground">{currentUser.email}</p>
-              </div>
-            </div>
-            <span className={cn("mt-2 inline-block text-[10px] px-2 py-0.5 rounded-full font-medium capitalize", ROLE_COLORS[currentUser.role])}>
-              {currentUser.role}
-            </span>
-          </div>
-
-          {/* Switch user */}
-          {userList.length > 1 && (
-            <div className="py-1">
-              <p className="px-3 py-1 text-[10px] text-muted-foreground font-medium uppercase tracking-wide">Switch Profile</p>
-              {userList.map((u: any) => (
-                u.id !== currentUser.id && (
-                  <button key={u.id}
-                    onClick={() => { setCurrentUser({ id: u.id, fullName: u.fullName, email: u.email, role: u.role }); setOpen(false); }}
-                    className="w-full flex items-center gap-2.5 px-3 py-1.5 text-xs hover:bg-muted transition-colors text-left">
-                    <div className="w-5 h-5 rounded-full bg-muted-foreground/20 flex items-center justify-center text-[10px] font-bold shrink-0">
-                      {(u.fullName || u.username || "?").split(" ").map((w: string) => w[0]).join("").slice(0, 2).toUpperCase()}
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <span className="truncate block">{u.fullName || u.username}</span>
-                    </div>
-                    <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full capitalize", ROLE_COLORS[u.role])}>
-                      {u.role}
-                    </span>
-                  </button>
-                )
-              ))}
-            </div>
-          )}
-
-          <div className="border-t border-border">
-            <button className="w-full flex items-center gap-2 px-3 py-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors">
-              <User2 className="w-3.5 h-3.5" /> View Profile
-            </button>
-          </div>
+    <div className={cn(
+      "border-t border-sidebar-border px-3 py-2.5 flex items-center gap-2.5",
+      collapsed && "justify-center px-0"
+    )}>
+      <div className="w-7 h-7 rounded-full bg-sidebar-primary flex items-center justify-center shrink-0 text-white text-xs font-bold">
+        {initials}
+      </div>
+      {!collapsed && (
+        <div className="flex-1 min-w-0">
+          <p className="text-xs font-medium text-sidebar-foreground truncate">{displayName}</p>
+          <span className={cn(
+            "inline-block text-[10px] px-1.5 py-px rounded-full font-medium capitalize mt-0.5",
+            ROLE_COLORS[currentUser.role]
+          )}>
+            {currentUser.role}
+          </span>
         </div>
       )}
     </div>
@@ -286,14 +226,24 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </div>
         </ScrollArea>
 
-        {/* User Profile */}
-        <UserProfileSection collapsed={collapsed} />
+        {/* Compact user chip */}
+        <SidebarUserChip collapsed={collapsed} />
       </aside>
 
-      {/* Main */}
-      <main className="flex-1 overflow-auto">
-        {children}
-      </main>
+      {/* Main content column */}
+      <div className="flex-1 flex flex-col overflow-hidden">
+        {/* Top bar */}
+        <header className="h-12 shrink-0 border-b border-border bg-background/95 backdrop-blur-sm flex items-center justify-end px-4 gap-2">
+          <NotificationBell />
+          <div className="w-px h-5 bg-border mx-1" />
+          <UserProfileTopMenu />
+        </header>
+
+        {/* Page content */}
+        <main className="flex-1 overflow-auto">
+          {children}
+        </main>
+      </div>
     </div>
   );
 }
