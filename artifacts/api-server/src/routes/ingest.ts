@@ -6,6 +6,7 @@ import {
 } from "@workspace/db";
 import { GetTelemetryParams, GetTelemetryQueryParams } from "@workspace/api-zod";
 import { Parser } from "expr-eval";
+import { broadcast } from "../lib/ws-broadcast";
 
 const router: IRouter = Router();
 
@@ -259,6 +260,13 @@ export async function processNormalised(n: NormalisedPayload, assetIdHint?: stri
 
   // Evaluate alarm rules (threshold + rate-of-change)
   const alarmEvents = await evaluateAlarmRules(assetId as string, assetName, n.metrics, prevMetrics, ts);
+
+  broadcast("telemetry", {
+    assetId,
+    assetName,
+    metrics: n.metrics,
+    timestamp: ts.toISOString(),
+  });
 
   return { recordsWritten: records.length, assetId, assetName, alarmEvents };
 }

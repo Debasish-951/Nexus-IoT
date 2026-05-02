@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { desc, eq, and, count } from "drizzle-orm";
 import { db, activityLogsTable } from "@workspace/db";
 import type { Request } from "express";
+import { broadcast } from "../lib/ws-broadcast";
 
 const router: IRouter = Router();
 
@@ -14,7 +15,7 @@ export async function logActivity(
   req?: Request,
 ): Promise<void> {
   try {
-    await db.insert(activityLogsTable).values({
+    const [entry] = await db.insert(activityLogsTable).values({
       action,
       category,
       actorName: (req?.headers["x-actor-name"] as string) ?? "system",
@@ -23,7 +24,14 @@ export async function logActivity(
       targetId,
       targetName,
       detail,
-    });
+    }).returning();
+
+    if (entry) {
+      broadcast("activity_log", {
+        ...entry,
+        timestamp: entry.timestamp.toISOString(),
+      });
+    }
   } catch {
   }
 }

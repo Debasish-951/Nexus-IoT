@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Activity, User2, Clock, Tag, ChevronLeft, ChevronRight, RefreshCw } from "lucide-react";
+import { useState, useCallback } from "react";
+import { Activity, ChevronLeft, ChevronRight, RefreshCw, Wifi } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -7,6 +7,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { format, formatDistanceToNow } from "date-fns";
 import { useQuery } from "@tanstack/react-query";
 import { cn } from "@/lib/utils";
+import { useWsEvents } from "@/hooks/useWsEvents";
 
 interface ActivityLogEntry {
   id: string;
@@ -82,10 +83,76 @@ function actionVerb(action: string): string {
   return "created";
 }
 
+function EntryRow({ entry, isNew }: { entry: ActivityLogEntry; isNew?: boolean }) {
+  const verb = actionVerb(entry.action);
+  const iconColor = ACTION_ICON_COLORS[verb] ?? "text-gray-500";
+
+  return (
+    <tr className={cn(
+      "border-b transition-colors",
+      isNew ? "bg-primary/5 animate-pulse-once" : "hover:bg-muted/30",
+    )}>
+      <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
+        <div title={format(new Date(entry.timestamp), "PPpp")} className="flex flex-col gap-0.5">
+          <span className="text-xs font-medium text-foreground">
+            {format(new Date(entry.timestamp), "MMM d, HH:mm:ss")}
+          </span>
+          <span className="text-xs">
+            {formatDistanceToNow(new Date(entry.timestamp), { addSuffix: true })}
+          </span>
+        </div>
+      </td>
+      <td className="px-4 py-3">
+        <span className={cn(
+          "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border",
+          CATEGORY_COLORS[entry.category] ?? CATEGORY_COLORS.system,
+        )}>
+          {CATEGORY_LABELS[entry.category] ?? entry.category}
+        </span>
+      </td>
+      <td className="px-4 py-3">
+        <span className={cn("font-medium", iconColor)}>
+          {ACTION_LABELS[entry.action] ?? entry.action}
+        </span>
+      </td>
+      <td className="px-4 py-3">
+        {entry.targetName ? (
+          <span className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded">
+            {entry.targetName}
+          </span>
+        ) : (
+          <span className="text-muted-foreground text-xs">—</span>
+        )}
+      </td>
+      <td className="px-4 py-3">
+        <div className="flex items-center gap-2">
+          <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-primary font-semibold text-xs">
+            {entry.actorName.charAt(0).toUpperCase()}
+          </div>
+          <div className="flex flex-col gap-0.5">
+            <span className="text-xs font-medium">{entry.actorName}</span>
+            <span className={cn(
+              "inline-flex items-center px-1.5 py-px rounded text-[10px] font-medium",
+              ROLE_COLORS[entry.actorRole] ?? ROLE_COLORS.system,
+            )}>
+              {entry.actorRole}
+            </span>
+          </div>
+        </div>
+      </td>
+      <td className="px-4 py-3 text-xs text-muted-foreground font-mono">
+        {entry.detail ?? "—"}
+      </td>
+    </tr>
+  );
+}
+
 export default function ActivityLog() {
   const [page, setPage] = useState(0);
   const [category, setCategory] = useState("all");
   const [search, setSearch] = useState("");
+  const [liveEntries, setLiveEntries] = useState<ActivityLogEntry[]>([]);
+  const [liveCount, setLiveCount] = useState(0);
 
   const params = new URLSearchParams();
   if (category && category !== "all") params.set("category", category);
@@ -97,23 +164,44 @@ export default function ActivityLog() {
     queryFn: async () => {
       const res = await fetch(`/api/activity-log?${params.toString()}`);
       if (!res.ok) throw new Error("Failed to fetch activity log");
-      return res.json();
+      const result = await res.json();
+      setLiveEntries([]);
+      setLiveCount(0);
+      return result;
     },
-    refetchInterval: 30_000,
+    refetchInterval: 60_000,
   });
 
+  const handleActivityLog = useCallback((raw: unknown) => {
+    const entry = raw as ActivityLogEntry;
+    const matchesCategory = category === "all" || entry.category === category;
+    if (page === 0 && matchesCategory) {
+      setLiveEntries((prev) => {
+        if (prev.some((e) => e.id === entry.id)) return prev;
+        return [entry, ...prev];
+      });
+      setLiveCount((c) => c + 1);
+    }
+  }, [page, category]);
+
+  const wsStatus = useWsEvents({ activity_log: handleActivityLog });
+
   const entries = data?.entries ?? [];
-  const total = data?.total ?? 0;
+  const total = (data?.total ?? 0) + liveCount;
   const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
 
-  const filtered = search.trim()
-    ? entries.filter(
-        (e) =>
-          e.actorName.toLowerCase().includes(search.toLowerCase()) ||
-          (e.targetName ?? "").toLowerCase().includes(search.toLowerCase()) ||
-          (ACTION_LABELS[e.action] ?? e.action).toLowerCase().includes(search.toLowerCase()),
-      )
+  const seenIds = new Set(liveEntries.map((e) => e.id));
+  const combined = page === 0
+    ? [...liveEntries, ...entries.filter((e) => !seenIds.has(e.id))]
     : entries;
+
+  const filtered = search.trim()
+    ? combined.filter((e) =>
+        e.actorName.toLowerCase().includes(search.toLowerCase()) ||
+        (e.targetName ?? "").toLowerCase().includes(search.toLowerCase()) ||
+        (ACTION_LABELS[e.action] ?? e.action).toLowerCase().includes(search.toLowerCase()),
+      )
+    : combined;
 
   return (
     <div className="p-6 space-y-4">
@@ -128,10 +216,27 @@ export default function ActivityLog() {
             Audit trail of platform actions — {total.toLocaleString()} event{total !== 1 ? "s" : ""}
           </p>
         </div>
-        <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
-          <RefreshCw className={cn("w-4 h-4 mr-2", isFetching && "animate-spin")} />
-          Refresh
-        </Button>
+        <div className="flex items-center gap-2">
+          <span className={cn(
+            "inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full border",
+            wsStatus === "connected"
+              ? "bg-green-50 text-green-700 border-green-200"
+              : wsStatus === "reconnecting"
+              ? "bg-yellow-50 text-yellow-700 border-yellow-200"
+              : "bg-muted text-muted-foreground border-border",
+          )}>
+            <span className={cn(
+              "w-1.5 h-1.5 rounded-full",
+              wsStatus === "connected" ? "bg-green-500 animate-pulse" :
+              wsStatus === "reconnecting" ? "bg-yellow-500" : "bg-gray-400",
+            )} />
+            {wsStatus === "connected" ? "Live" : wsStatus === "reconnecting" ? "Reconnecting…" : "Connecting…"}
+          </span>
+          <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
+            <RefreshCw className={cn("w-4 h-4 mr-2", isFetching && "animate-spin")} />
+            Refresh
+          </Button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -146,7 +251,7 @@ export default function ActivityLog() {
         </div>
         <Select
           value={category}
-          onValueChange={(v) => { setCategory(v); setPage(0); }}
+          onValueChange={(v) => { setCategory(v); setPage(0); setLiveEntries([]); setLiveCount(0); }}
         >
           <SelectTrigger className="w-44 h-9">
             <SelectValue placeholder="All Categories" />
@@ -159,6 +264,14 @@ export default function ActivityLog() {
           </SelectContent>
         </Select>
       </div>
+
+      {/* New live events banner */}
+      {liveCount > 0 && page !== 0 && (
+        <div className="text-xs text-primary font-medium flex items-center gap-2 cursor-pointer" onClick={() => setPage(0)}>
+          <Wifi className="w-3.5 h-3.5" />
+          {liveCount} new event{liveCount !== 1 ? "s" : ""} received — click to go to page 1
+        </div>
+      )}
 
       {/* Table */}
       <div className="rounded-md border bg-card overflow-hidden">
@@ -178,9 +291,7 @@ export default function ActivityLog() {
               ? Array.from({ length: 8 }).map((_, i) => (
                   <tr key={i} className="border-b">
                     {Array.from({ length: 6 }).map((_, j) => (
-                      <td key={j} className="px-4 py-3">
-                        <Skeleton className="h-4 w-full" />
-                      </td>
+                      <td key={j} className="px-4 py-3"><Skeleton className="h-4 w-full" /></td>
                     ))}
                   </tr>
                 ))
@@ -194,72 +305,13 @@ export default function ActivityLog() {
                     </td>
                   </tr>
                 )
-              : filtered.map((entry) => {
-                  const verb = actionVerb(entry.action);
-                  const iconColor = ACTION_ICON_COLORS[verb] ?? "text-gray-500";
-                  return (
-                    <tr key={entry.id} className="border-b hover:bg-muted/30 transition-colors">
-                      {/* Time */}
-                      <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
-                        <div title={format(new Date(entry.timestamp), "PPpp")} className="flex flex-col gap-0.5">
-                          <span className="text-xs font-medium text-foreground">
-                            {format(new Date(entry.timestamp), "MMM d, HH:mm:ss")}
-                          </span>
-                          <span className="text-xs">
-                            {formatDistanceToNow(new Date(entry.timestamp), { addSuffix: true })}
-                          </span>
-                        </div>
-                      </td>
-                      {/* Category */}
-                      <td className="px-4 py-3">
-                        <span className={cn(
-                          "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border",
-                          CATEGORY_COLORS[entry.category] ?? CATEGORY_COLORS.system,
-                        )}>
-                          <Tag className="w-3 h-3 mr-1" />
-                          {CATEGORY_LABELS[entry.category] ?? entry.category}
-                        </span>
-                      </td>
-                      {/* Action */}
-                      <td className="px-4 py-3">
-                        <span className={cn("font-medium", iconColor)}>
-                          {ACTION_LABELS[entry.action] ?? entry.action}
-                        </span>
-                      </td>
-                      {/* Target */}
-                      <td className="px-4 py-3">
-                        {entry.targetName ? (
-                          <span className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded">
-                            {entry.targetName}
-                          </span>
-                        ) : (
-                          <span className="text-muted-foreground text-xs">—</span>
-                        )}
-                      </td>
-                      {/* Actor */}
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2">
-                          <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-primary font-semibold text-xs">
-                            {entry.actorName.charAt(0).toUpperCase()}
-                          </div>
-                          <div className="flex flex-col gap-0.5">
-                            <span className="text-xs font-medium">{entry.actorName}</span>
-                            <span className={cn(
-                              "inline-flex items-center px-1.5 py-px rounded text-[10px] font-medium",
-                              ROLE_COLORS[entry.actorRole] ?? ROLE_COLORS.system,
-                            )}>
-                              {entry.actorRole}
-                            </span>
-                          </div>
-                        </div>
-                      </td>
-                      {/* Detail */}
-                      <td className="px-4 py-3 text-xs text-muted-foreground font-mono">
-                        {entry.detail ?? "—"}
-                      </td>
-                    </tr>
-                  );
-                })}
+              : filtered.map((entry) => (
+                  <EntryRow
+                    key={entry.id}
+                    entry={entry}
+                    isNew={liveEntries.some((e) => e.id === entry.id)}
+                  />
+                ))}
           </tbody>
         </table>
       </div>
