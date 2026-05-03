@@ -125,6 +125,15 @@ function rangeLabelOf(w: Widget) {
 }
 function supportsOverlay(ct: ChartType) { return CHART_TYPE_OPTS.find(o => o.value === ct)?.supportsOverlay ?? false; }
 
+function pickDefaultMetric(attrs: any[]) {
+  const numeric = attrs.filter((a: any) =>
+    ["dynamic", "metric", "runtime"].includes(a.type) &&
+    ["double", "number", "float"].includes(a.dataType?.toLowerCase?.() ?? "")
+  );
+  const first = numeric[0];
+  return first ? (first.tagName?.split(".").pop() ?? first.name) : "";
+}
+
 const darkAxis    = { stroke: D.muted, fontSize: 10, tickLine: false, axisLine: false };
 const darkGrid    = { strokeDasharray: "3 3", stroke: D.border2, vertical: false };
 const darkTooltip = {

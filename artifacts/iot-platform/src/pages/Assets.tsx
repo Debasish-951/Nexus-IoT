@@ -162,10 +162,18 @@ const JSON_EXAMPLE = JSON.stringify([
 ], null, 2);
 
 const TIME_RANGES = [
-  { label: "1 h",  hours: 1 },
-  { label: "6 h",  hours: 6 },
+  { label: "1 min", hours: 1 / 60 },
+  { label: "5 min", hours: 5 / 60 },
+  { label: "15 min", hours: 15 / 60 },
+  { label: "30 min", hours: 30 / 60 },
+  { label: "1 h", hours: 1 },
+  { label: "6 h", hours: 6 },
   { label: "24 h", hours: 24 },
-  { label: "7 d",  hours: 24 * 7 },
+  { label: "7 d", hours: 24 * 7 },
+  { label: "30 d", hours: 24 * 30 },
+  { label: "1 month", hours: 24 * 30 },
+  { label: "1 year", hours: 24 * 365 },
+  { label: "Custom", hours: -1 },
 ];
 
 const CHART_COLORS = [
@@ -181,6 +189,8 @@ function TrendsPanel({ assetId, attrList }: { assetId: string; attrList: any[] }
 
   const [selectedMetrics, setSelectedMetrics] = useState<string[]>([]);
   const [rangeHours, setRangeHours] = useState(1);
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
   const [telemetry, setTelemetry] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
   const [lastFetch, setLastFetch] = useState<Date | null>(null);
@@ -198,7 +208,9 @@ function TrendsPanel({ assetId, attrList }: { assetId: string; attrList: any[] }
     if (selectedMetrics.length === 0) return;
     setLoading(true);
     try {
-      const from = (rangeHours <= 24 ? subHours(new Date(), rangeHours) : subDays(new Date(), rangeHours / 24)).toISOString();
+      const from = rangeHours === -1 && customFrom
+        ? new Date(customFrom).toISOString()
+        : (rangeHours <= 24 ? subHours(new Date(), rangeHours) : subDays(new Date(), rangeHours / 24)).toISOString();
       const allRows: any[] = [];
       for (const metric of selectedMetrics) {
         const params = new URLSearchParams({ metric, from, limit: "1000" });
@@ -220,7 +232,7 @@ function TrendsPanel({ assetId, attrList }: { assetId: string; attrList: any[] }
       setTelemetry(sorted);
       setLastFetch(new Date());
     } finally { setLoading(false); }
-  }, [assetId, selectedMetrics, rangeHours]);
+  }, [assetId, selectedMetrics, rangeHours, customFrom, customTo]);
 
   useEffect(() => { fetchTelemetry(); }, [fetchTelemetry]);
 
@@ -232,7 +244,9 @@ function TrendsPanel({ assetId, attrList }: { assetId: string; attrList: any[] }
 
   function exportTelemetryCsv() {
     const metric = selectedMetrics[0];
-    const from = (rangeHours <= 24 ? subHours(new Date(), rangeHours) : subDays(new Date(), rangeHours / 24)).toISOString();
+    const from = rangeHours === -1 && customFrom
+      ? new Date(customFrom).toISOString()
+      : (rangeHours <= 24 ? subHours(new Date(), rangeHours) : subDays(new Date(), rangeHours / 24)).toISOString();
     const params = new URLSearchParams(metric ? { metric, from } : { from });
     const url = `/api/telemetry/${assetId}/export?${params}`;
     const a = document.createElement("a");
@@ -275,16 +289,21 @@ function TrendsPanel({ assetId, attrList }: { assetId: string; attrList: any[] }
         <div className="flex-1" />
 
         {/* Time range */}
-        <div className="flex items-center bg-muted rounded-md p-0.5">
-          {TIME_RANGES.map(({ label, hours }) => (
-            <button key={hours}
-              onClick={() => setRangeHours(hours)}
-              className={cn("text-xs px-2.5 py-1 rounded transition-colors",
-                rangeHours === hours ? "bg-background shadow-sm font-medium" : "text-muted-foreground hover:text-foreground"
-              )}>
-              {label}
-            </button>
-          ))}
+        <div className="flex items-center gap-2">
+          <Select value={String(rangeHours)} onValueChange={(v) => setRangeHours(Number(v))}>
+            <SelectTrigger className="h-8 text-xs w-36"><SelectValue placeholder="Range" /></SelectTrigger>
+            <SelectContent>
+              {TIME_RANGES.map(({ label, hours }) => (
+                <SelectItem key={label} value={String(hours)}>{label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {rangeHours === -1 && (
+            <>
+              <Input type="datetime-local" className="h-8 text-xs w-44" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} />
+              <Input type="datetime-local" className="h-8 text-xs w-44" value={customTo} onChange={(e) => setCustomTo(e.target.value)} />
+            </>
+          )}
         </div>
 
         <button onClick={fetchTelemetry} disabled={loading}

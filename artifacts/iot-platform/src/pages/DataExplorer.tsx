@@ -9,16 +9,21 @@ import {
   ResponsiveContainer, Legend, Brush,
 } from "recharts";
 import { BarChart2, Download, RefreshCw, Plus, X, TrendingUp } from "lucide-react";
-import { format, subHours, subDays } from "date-fns";
+import { format, subMinutes, subHours, subDays } from "date-fns";
 import { cn } from "@/lib/utils";
 
 const TIME_RANGES = [
-  { label: "15 min", hours: 0.25 },
-  { label: "1 h",   hours: 1 },
-  { label: "6 h",   hours: 6 },
-  { label: "24 h",  hours: 24 },
-  { label: "7 d",   hours: 168 },
-  { label: "30 d",  hours: 720 },
+  { label: "1 min", hours: 1 / 60 },
+  { label: "5 min", hours: 5 / 60 },
+  { label: "15 min", hours: 15 / 60 },
+  { label: "30 min", hours: 30 / 60 },
+  { label: "1 h", hours: 1 },
+  { label: "6 h", hours: 6 },
+  { label: "24 h", hours: 24 },
+  { label: "7 d", hours: 24 * 7 },
+  { label: "30 d", hours: 24 * 30 },
+  { label: "1 year", hours: 24 * 365 },
+  { label: "Custom", hours: -1 },
 ];
 
 const COLORS = ["#3b82f6","#22c55e","#f97316","#a855f7","#ef4444","#14b8a6","#eab308","#6366f1","#ec4899","#84cc16"];
@@ -27,6 +32,8 @@ interface Series { assetId: string; assetName: string; metric: string; label: st
 
 export default function DataExplorer() {
   const [rangeHours, setRangeHours] = useState(1);
+  const [customFrom, setCustomFrom] = useState("");
+  const [customTo, setCustomTo] = useState("");
   const [series, setSeries] = useState<Series[]>([]);
   const [chartData, setChartData] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
@@ -50,16 +57,18 @@ export default function DataExplorer() {
     if (series.length === 0) return;
     setLoading(true);
     try {
-      const from = rangeHours <= 24
-        ? subHours(new Date(), rangeHours).toISOString()
-        : subDays(new Date(), rangeHours / 24).toISOString();
+      const from = rangeHours === -1 && customFrom
+        ? new Date(customFrom).toISOString()
+        : (rangeHours < 1 ? subMinutes(new Date(), rangeHours * 60).toISOString() : rangeHours <= 24
+          ? subHours(new Date(), rangeHours).toISOString()
+          : subDays(new Date(), rangeHours / 24).toISOString());
       const allRows: any[] = [];
       for (const s of series) {
         const params = new URLSearchParams({ metric: s.metric, from, limit: "2000" });
         const res = await fetch(`/api/telemetry/${s.assetId}?${params}`);
         if (res.ok) {
           const rows: any[] = await res.json();
-          allRows.push(...rows.map((r) => ({ ...r, _key: s.label })));
+          allRows.push(...rows.map((r) => ({ ...r, _key: `${s.assetId}::${s.metric}` })));
         }
       }
       const byTs: Record<number, any> = {};
@@ -78,7 +87,7 @@ export default function DataExplorer() {
       setChartData(Object.values(byTs).sort((a, b) => a.ts - b.ts));
       setLastFetch(new Date());
     } finally { setLoading(false); }
-  }, [series, rangeHours]);
+  }, [series, rangeHours, customFrom, customTo]);
 
   useEffect(() => { fetchSeries(); }, [fetchSeries]);
 
@@ -97,7 +106,7 @@ export default function DataExplorer() {
 
   function exportCsv() {
     if (chartData.length === 0) return;
-    const keys = series.map((s) => s.label);
+    const keys = series.map((s) => `${s.assetId}::${s.metric}`);
     const header = ["time", ...keys].join(",");
     const rows = chartData.map((row) => [row.time, ...keys.map((k) => row[k] ?? "")].join(","));
     const blob = new Blob([[header, ...rows].join("\n")], { type: "text/csv" });
@@ -156,7 +165,7 @@ export default function DataExplorer() {
         {series.length > 0 && (
           <div className="flex flex-wrap gap-2 pt-1">
             {series.map((s) => (
-              <div key={s.label} className="flex items-center gap-1.5 rounded-full border border-border bg-muted/50 pl-2 pr-1 py-0.5 text-xs">
+              <div key={`${s.assetId}::${s.metric}`} className="flex items-center gap-1.5 rounded-full border border-border bg-muted/50 pl-2 pr-1 py-0.5 text-xs">
                 <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: s.color }} />
                 <span>{s.label}</span>
                 <button onClick={() => removeSeries(s.label)} className="text-muted-foreground hover:text-destructive ml-0.5">
@@ -170,14 +179,21 @@ export default function DataExplorer() {
 
       {/* Time range + controls */}
       <div className="flex items-center gap-3 justify-between">
-        <div className="flex items-center bg-muted rounded-md p-0.5">
-          {TIME_RANGES.map(({ label, hours }) => (
-            <button key={hours} onClick={() => setRangeHours(hours)}
-              className={cn("text-xs px-2.5 py-1 rounded transition-colors",
-                rangeHours === hours ? "bg-background shadow-sm font-medium" : "text-muted-foreground hover:text-foreground")}>
-              {label}
-            </button>
-          ))}
+        <div className="flex items-center gap-2">
+          <Select value={String(rangeHours)} onValueChange={(v) => setRangeHours(Number(v))}>
+            <SelectTrigger className="h-8 text-xs w-36"><SelectValue placeholder="Range" /></SelectTrigger>
+            <SelectContent>
+              {TIME_RANGES.map(({ label, hours }) => (
+                <SelectItem key={label} value={String(hours)}>{label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {rangeHours === -1 && (
+            <>
+              <Input type="datetime-local" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className="h-8 text-xs w-44" />
+              <Input type="datetime-local" value={customTo} onChange={(e) => setCustomTo(e.target.value)} className="h-8 text-xs w-44" />
+            </>
+          )}
         </div>
         <div className="flex items-center gap-2">
           <button onClick={fetchSeries} disabled={loading || series.length === 0}
@@ -232,10 +248,11 @@ export default function DataExplorer() {
       {chartData.length > 0 && series.length > 0 && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {series.map((s) => {
-            const vals = chartData.map((r) => r[s.label]).filter((v) => v != null) as number[];
+            const key = `${s.assetId}::${s.metric}`;
+            const vals = chartData.map((r) => r[key]).filter((v) => v != null) as number[];
             if (vals.length === 0) return null;
             return (
-              <div key={s.label} className="rounded-lg border border-border bg-muted/30 p-3" style={{ borderLeftColor: s.color, borderLeftWidth: 3 }}>
+              <div key={key} className="rounded-lg border border-border bg-muted/30 p-3" style={{ borderLeftColor: s.color, borderLeftWidth: 3 }}>
                 <p className="text-xs font-medium truncate mb-1.5">{s.label}</p>
                 <div className="grid grid-cols-2 gap-y-0.5 text-xs">
                   <span className="text-muted-foreground">Last</span><span className="font-mono">{vals[vals.length-1].toFixed(3)}</span>
