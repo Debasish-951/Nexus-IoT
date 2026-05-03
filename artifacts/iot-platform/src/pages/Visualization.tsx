@@ -137,7 +137,11 @@ function metricValueOf(a: any) {
   return a.tagName?.trim() || a.sourceMetric?.trim() || a.name;
 }
 function widgetSeriesKeys(widget: Widget) {
-  const keys = [widget.metric, widget.metric?.split(".").pop()].filter(Boolean) as string[];
+  const keys = [
+    widget.metric,
+    widget.metric?.split(".").pop(),
+    widget.assetId && widget.metric ? `${widget.assetId}::${widget.metric}` : "",
+  ].filter(Boolean) as string[];
   return [...new Set(keys)];
 }
 function seriesMatchesMetric(rowMetric: string | undefined, widgetMetric: string) {
@@ -149,6 +153,12 @@ function seriesMatchesMetric(rowMetric: string | undefined, widgetMetric: string
 function getWidgetRows(widget: Widget, data: Record<string, any[]>) {
   for (const key of widgetSeriesKeys(widget)) {
     if (data[key]?.length) return data[key];
+  }
+  const allRows = Object.values(data).flat();
+  if (allRows.length) {
+    const matched = allRows.filter((row: any) => seriesMatchesMetric(row?.metric ?? row?.name ?? row?.tagName, widget.metric));
+    if (matched.length) return matched;
+    return allRows;
   }
   return data[widget.metric] ?? [];
 }
