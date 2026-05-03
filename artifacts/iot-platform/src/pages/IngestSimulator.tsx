@@ -30,7 +30,7 @@ import {
 import {
   Play, Square, Send, RefreshCw, Zap, ChevronRight,
   CheckCircle2, XCircle, Clock, Activity, Cpu, TrendingUp,
-  Bell, BellOff,
+  Bell, BellOff, History, AlertTriangle,
 } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -183,6 +183,19 @@ interface AlarmEvent {
   alarmId: string;
 }
 
+interface ValidateResult {
+  valid: boolean;
+  deviceId: string;
+  assetId: string | null;
+  assetName: string | null;
+  assetMatched: boolean;
+  timestamp: string;
+  payloadFormat: "flat" | "nested-data" | "nested-metrics" | "unknown";
+  extractedMetrics: Record<string, unknown>;
+  metricCount: number;
+  warnings: string[];
+}
+
 interface LogEntry {
   id: string;
   ts: Date;
@@ -190,6 +203,7 @@ interface LogEntry {
   payload: object;
   status: "success" | "error";
   response: object;
+  validateResult: ValidateResult | null;
   durationMs: number;
   alarmEvents: AlarmEvent[];
 }
@@ -235,10 +249,26 @@ const SEVERITY_COLORS: Record<string, string> = {
   info: "bg-slate-400",
 };
 
+const FORMAT_STYLES: Record<string, string> = {
+  flat:            "bg-blue-100 text-blue-700 dark:bg-blue-950/60 dark:text-blue-300 border-blue-200 dark:border-blue-800",
+  "nested-data":   "bg-violet-100 text-violet-700 dark:bg-violet-950/60 dark:text-violet-300 border-violet-200 dark:border-violet-800",
+  "nested-metrics":"bg-teal-100 text-teal-700 dark:bg-teal-950/60 dark:text-teal-300 border-teal-200 dark:border-teal-800",
+  unknown:         "bg-muted text-muted-foreground border-border",
+};
+
+function FormatBadge({ fmt }: { fmt: string }) {
+  return (
+    <span className={cn("inline-flex items-center px-1.5 py-0 rounded border font-mono text-[10px] leading-4", FORMAT_STYLES[fmt] ?? FORMAT_STYLES.unknown)}>
+      {fmt}
+    </span>
+  );
+}
+
 function LogRow({ entry }: { entry: LogEntry }) {
   const [expanded, setExpanded] = useState(false);
   const triggered = entry.alarmEvents.filter((e) => e.event === "triggered");
   const cleared   = entry.alarmEvents.filter((e) => e.event === "cleared");
+  const vr = entry.validateResult;
   return (
     <div className={cn(
       "border-b border-border/50 text-xs",
@@ -253,30 +283,72 @@ function LogRow({ entry }: { entry: LogEntry }) {
         {entry.status === "success"
           ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-green-500" />
           : <XCircle className="w-3.5 h-3.5 shrink-0 text-red-500" />}
-        <span className="font-mono text-muted-foreground">{format(entry.ts, "HH:mm:ss.SSS")}</span>
-        <span className="font-medium text-foreground flex-1 truncate">{entry.preset}</span>
+        <span className="font-mono text-muted-foreground shrink-0">{format(entry.ts, "HH:mm:ss.SSS")}</span>
+        {vr && <FormatBadge fmt={vr.payloadFormat} />}
+        {vr && (
+          <span className={cn("shrink-0 text-[10px] font-mono", vr.assetMatched ? "text-green-600 dark:text-green-400" : "text-muted-foreground/60")}>
+            {vr.assetMatched ? `✓ ${vr.assetName}` : "no asset"}
+          </span>
+        )}
+        {vr && <span className="text-muted-foreground/60 text-[10px] shrink-0">{vr.metricCount}M</span>}
+        <span className="font-medium text-foreground flex-1 truncate min-w-0">{entry.preset}</span>
         {triggered.length > 0 && (
           <span className="flex items-center gap-1 text-orange-600 dark:text-orange-400 font-medium shrink-0">
             <Bell className="w-3 h-3" />
-            {triggered.length} alarm{triggered.length > 1 ? "s" : ""}
+            {triggered.length}
           </span>
         )}
         {cleared.length > 0 && (
           <span className="flex items-center gap-1 text-muted-foreground shrink-0">
             <BellOff className="w-3 h-3" />
-            {cleared.length} cleared
+            {cleared.length}
           </span>
         )}
-        <span className="text-muted-foreground">{entry.durationMs}ms</span>
+        <span className="text-muted-foreground shrink-0">{entry.durationMs}ms</span>
         <Badge
           variant={entry.status === "success" ? "outline" : "destructive"}
-          className="text-xs h-4 px-1"
+          className="text-xs h-4 px-1 shrink-0"
         >
           {entry.status}
         </Badge>
       </button>
       {expanded && (
         <div className="px-3 pb-3 space-y-2">
+          {/* Validate result */}
+          {vr && (
+            <div className="rounded-md border border-border/60 bg-muted/30 p-2.5 space-y-2">
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Validate Result</p>
+              <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
+                <span><span className="text-muted-foreground">Format:</span> <FormatBadge fmt={vr.payloadFormat} /></span>
+                <span><span className="text-muted-foreground">Metrics:</span> <span className="font-mono font-semibold">{vr.metricCount}</span></span>
+                <span><span className="text-muted-foreground">Asset:</span>{" "}
+                  {vr.assetMatched
+                    ? <span className="text-green-600 dark:text-green-400 font-medium">✓ {vr.assetName}</span>
+                    : <span className="text-muted-foreground/60">not matched</span>}
+                </span>
+                <span><span className="text-muted-foreground">Timestamp:</span> <span className="font-mono text-[10px]">{vr.timestamp}</span></span>
+              </div>
+              {vr.warnings.length > 0 && (
+                <div className="space-y-0.5">
+                  {vr.warnings.map((w, i) => (
+                    <p key={i} className="text-[10px] text-amber-600 dark:text-amber-400 flex items-start gap-1">
+                      <span className="shrink-0 mt-0.5">⚠</span>{w}
+                    </p>
+                  ))}
+                </div>
+              )}
+              <div>
+                <p className="text-[10px] text-muted-foreground mb-1">Extracted metrics</p>
+                <div className="flex flex-wrap gap-1">
+                  {Object.entries(vr.extractedMetrics).map(([k, v]) => (
+                    <span key={k} className="font-mono text-[10px] bg-background border border-border/60 rounded px-1.5 py-0.5">
+                      <span className="text-muted-foreground">{k}:</span> <span className="font-semibold">{String(v)}</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
           {/* Alarm events */}
           {entry.alarmEvents.length > 0 && (
             <div>
@@ -295,9 +367,7 @@ function LogRow({ entry }: { entry: LogEntry }) {
                     {ae.event === "triggered"
                       ? <Bell className="w-3 h-3 text-orange-500 shrink-0" />
                       : <BellOff className="w-3 h-3 text-muted-foreground shrink-0" />}
-                    <span
-                      className={cn("w-1.5 h-1.5 rounded-full shrink-0", SEVERITY_COLORS[ae.severity] ?? "bg-slate-400")}
-                    />
+                    <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", SEVERITY_COLORS[ae.severity] ?? "bg-slate-400")} />
                     <span className="font-medium">{ae.ruleName}</span>
                     <span className="text-muted-foreground">—</span>
                     <span className="font-mono">{ae.metric}</span>
@@ -308,10 +378,7 @@ function LogRow({ entry }: { entry: LogEntry }) {
                       {ae.value}
                     </span>
                     <span className="text-muted-foreground">)</span>
-                    <Badge
-                      variant="outline"
-                      className={cn("ml-auto h-4 px-1 text-xs capitalize", ae.severity === "critical" ? "border-red-400 text-red-500" : ae.severity === "high" ? "border-orange-400 text-orange-500" : "")}
-                    >
+                    <Badge variant="outline" className={cn("ml-auto h-4 px-1 text-xs capitalize", ae.severity === "critical" ? "border-red-400 text-red-500" : ae.severity === "high" ? "border-orange-400 text-orange-500" : "")}>
                       {ae.severity}
                     </Badge>
                   </div>
@@ -327,7 +394,7 @@ function LogRow({ entry }: { entry: LogEntry }) {
               </pre>
             </div>
             <div>
-              <p className="text-muted-foreground font-medium mb-1">Response</p>
+              <p className="text-muted-foreground font-medium mb-1">Ingest Response</p>
               <pre className="bg-muted/60 rounded p-2 text-xs overflow-auto max-h-40 whitespace-pre-wrap">
                 {JSON.stringify(entry.response, null, 2)}
               </pre>
@@ -336,6 +403,166 @@ function LogRow({ entry }: { entry: LogEntry }) {
         </div>
       )}
     </div>
+  );
+}
+
+// ── HistoryRow — expandable row in the full-width Payload History table ──────
+function HistoryRow({
+  entry,
+  vr,
+  resp,
+  triggered,
+  cleared,
+}: {
+  entry: LogEntry;
+  vr: ValidateResult | null;
+  resp: any;
+  triggered: AlarmEvent[];
+  cleared: AlarmEvent[];
+}) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <tr
+        className={cn(
+          "border-b border-border/50 hover:bg-muted/30 transition-colors cursor-pointer select-none",
+          entry.status === "error" ? "bg-red-50/20 dark:bg-red-950/10" : "",
+          triggered.length > 0 ? "bg-orange-50/20 dark:bg-orange-950/10" : "",
+        )}
+        onClick={() => setOpen((o) => !o)}
+      >
+        {/* Time */}
+        <td className="px-3 py-2 font-mono text-muted-foreground whitespace-nowrap">
+          {format(entry.ts, "HH:mm:ss.SSS")}
+        </td>
+        {/* Preset / Device */}
+        <td className="px-3 py-2">
+          <span className="font-medium truncate block max-w-[200px]">{entry.preset}</span>
+          {vr && <span className="font-mono text-[10px] text-muted-foreground">{vr.deviceId}</span>}
+        </td>
+        {/* Format */}
+        <td className="px-3 py-2">
+          {vr
+            ? <FormatBadge fmt={vr.payloadFormat} />
+            : <span className="text-muted-foreground/40">—</span>}
+        </td>
+        {/* Metrics */}
+        <td className="px-3 py-2 font-mono text-center">
+          {vr
+            ? <span className="font-semibold">{vr.metricCount}</span>
+            : <span className="text-muted-foreground/40">—</span>}
+        </td>
+        {/* Asset */}
+        <td className="px-3 py-2">
+          {vr
+            ? vr.assetMatched
+              ? <span className="text-green-600 dark:text-green-400 flex items-center gap-1 font-medium">
+                  <CheckCircle2 className="w-3 h-3 shrink-0" />
+                  <span className="truncate max-w-[110px]">{vr.assetName}</span>
+                </span>
+              : <span className="text-muted-foreground/50 flex items-center gap-1 text-[10px]">
+                  <XCircle className="w-3 h-3 shrink-0" />
+                  no asset
+                </span>
+            : <span className="text-muted-foreground/40">—</span>}
+        </td>
+        {/* Records written */}
+        <td className="px-3 py-2 font-mono text-center">
+          {resp?.recordsWritten != null
+            ? <span className={cn("font-semibold", resp.recordsWritten > 0 ? "text-primary" : "text-muted-foreground/40")}>
+                {resp.recordsWritten}
+              </span>
+            : <span className="text-muted-foreground/40">—</span>}
+        </td>
+        {/* Alarms */}
+        <td className="px-3 py-2">
+          <div className="flex items-center gap-2">
+            {triggered.length > 0 && (
+              <span className="flex items-center gap-1 text-orange-600 dark:text-orange-400 font-medium">
+                <Bell className="w-3 h-3" />{triggered.length}
+              </span>
+            )}
+            {cleared.length > 0 && (
+              <span className="flex items-center gap-1 text-muted-foreground text-[10px]">
+                <BellOff className="w-3 h-3" />{cleared.length}
+              </span>
+            )}
+            {triggered.length === 0 && cleared.length === 0 && (
+              <span className="text-muted-foreground/30">—</span>
+            )}
+          </div>
+        </td>
+        {/* Duration */}
+        <td className="px-3 py-2 font-mono text-muted-foreground text-right">
+          {entry.durationMs}ms
+        </td>
+        {/* Status */}
+        <td className="px-3 py-2">
+          <Badge
+            variant={entry.status === "success" ? "outline" : "destructive"}
+            className="text-xs h-4 px-1"
+          >
+            {entry.status}
+          </Badge>
+        </td>
+        {/* Expand chevron */}
+        <td className="px-3 py-2 text-muted-foreground">
+          <ChevronRight className={cn("w-3 h-3 transition-transform", open && "rotate-90")} />
+        </td>
+      </tr>
+      {/* Expanded detail row */}
+      {open && (
+        <tr className="border-b border-border/50 bg-muted/10">
+          <td colSpan={10} className="px-4 py-3">
+            <div className="grid grid-cols-1 xl:grid-cols-3 gap-3">
+              {/* Validate detail */}
+              {vr && (
+                <div className="xl:col-span-1 space-y-2">
+                  <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">Validate Detail</p>
+                  {vr.warnings.length > 0 && (
+                    <div className="space-y-0.5">
+                      {vr.warnings.map((w, i) => (
+                        <p key={i} className="text-[10px] text-amber-600 dark:text-amber-400 flex items-start gap-1">
+                          <AlertTriangle className="w-3 h-3 shrink-0 mt-0.5" />{w}
+                        </p>
+                      ))}
+                    </div>
+                  )}
+                  <div>
+                    <p className="text-[10px] text-muted-foreground mb-1">Extracted metrics ({vr.metricCount})</p>
+                    <div className="flex flex-wrap gap-1">
+                      {Object.entries(vr.extractedMetrics).map(([k, v]) => (
+                        <span key={k} className="font-mono text-[10px] bg-background border border-border/60 rounded px-1.5 py-0.5">
+                          <span className="text-muted-foreground">{k}:</span>{" "}
+                          <span className="font-semibold">{String(v)}</span>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-muted-foreground">
+                    Normalised ts: <span className="font-mono">{vr.timestamp}</span>
+                  </p>
+                </div>
+              )}
+              {/* Payload JSON */}
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">Payload</p>
+                <pre className="bg-muted/60 rounded p-2 text-[10px] overflow-auto max-h-36 whitespace-pre-wrap leading-relaxed">
+                  {JSON.stringify(entry.payload, null, 2)}
+                </pre>
+              </div>
+              {/* Ingest response */}
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground mb-1">Ingest Response</p>
+                <pre className="bg-muted/60 rounded p-2 text-[10px] overflow-auto max-h-36 whitespace-pre-wrap leading-relaxed">
+                  {JSON.stringify(entry.response, null, 2)}
+                </pre>
+              </div>
+            </div>
+          </td>
+        </tr>
+      )}
+    </>
   );
 }
 
@@ -414,14 +641,26 @@ export default function IngestSimulator() {
       const start = performance.now();
       setSending(true);
       try {
-        const res = await fetch("/api/ingest/payload", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify(payload),
-        });
-        const data = await res.json();
-        const durationMs = Math.round(performance.now() - start);
+        // Fire validate + ingest in parallel
+        const [ingestRes, validateRes] = await Promise.all([
+          fetch("/api/ingest/payload", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          }),
+          fetch("/api/ingest/validate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+          }),
+        ]);
 
+        const [data, validateData] = await Promise.all([
+          ingestRes.json(),
+          validateRes.json(),
+        ]);
+
+        const durationMs = Math.round(performance.now() - start);
         const alarmEvents: AlarmEvent[] = data?.alarmEvents ?? [];
         const newlyTriggered = alarmEvents.filter((e: AlarmEvent) => e.event === "triggered");
 
@@ -430,28 +669,24 @@ export default function IngestSimulator() {
           ts: new Date(),
           preset: selectedPreset.label,
           payload,
-          status: res.ok ? "success" : "error",
+          status: ingestRes.ok ? "success" : "error",
           response: data,
+          validateResult: validateRes.ok ? (validateData as ValidateResult) : null,
           durationMs,
           alarmEvents,
         };
 
         setLog((l) => [entry, ...l].slice(0, 100));
         setTotalSent((n) => n + 1);
-        if (res.ok) {
+        if (ingestRes.ok) {
           setTotalSuccess((n) => n + 1);
-          // Add point to chart — try metricsForChart, then .metrics, then .data
           const rawPayload = payload as any;
-          const chartMetrics = metricsForChart
-            ?? rawPayload.metrics
-            ?? rawPayload.data;
+          const chartMetrics = metricsForChart ?? rawPayload.metrics ?? rawPayload.data;
           if (chartMetrics && typeof chartMetrics === "object") {
             addChartPoint(chartMetrics as Record<string, number>);
           }
-          // Handle alarm events
           if (newlyTriggered.length > 0) {
             setTotalAlarmsTriggered((n) => n + newlyTriggered.length);
-            // Toast for each triggered alarm (max 3 to avoid spam)
             newlyTriggered.slice(0, 3).forEach((ae: AlarmEvent) => {
               toast({
                 title: `🔔 Alarm triggered: ${ae.ruleName}`,
@@ -459,7 +694,6 @@ export default function IngestSimulator() {
                 variant: "destructive",
               });
             });
-            // Refresh alarms list so the Alarms page shows the new entry
             qc.invalidateQueries({ queryKey: getListAlarmsQueryKey() });
             qc.invalidateQueries({ queryKey: getGetAlarmStatsQueryKey() });
           }
@@ -474,6 +708,7 @@ export default function IngestSimulator() {
           payload,
           status: "error",
           response: { error: err instanceof Error ? err.message : String(err) },
+          validateResult: null,
           durationMs: Math.round(performance.now() - start),
           alarmEvents: [],
         };
@@ -900,6 +1135,74 @@ export default function IngestSimulator() {
                 ))}
               </LineChart>
             </ResponsiveContainer>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* ── Payload History ── */}
+      <Card className="shadow-sm">
+        <CardHeader className="pb-2 pt-3 px-4">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <History className="w-3.5 h-3.5 text-primary" />
+              Payload History
+              {log.length > 0 && (
+                <span className="text-xs text-muted-foreground font-normal">— last {log.length} sends</span>
+              )}
+            </CardTitle>
+            <div className="flex items-center gap-3">
+              {/* Format legend */}
+              <div className="hidden sm:flex items-center gap-2">
+                {(["flat", "nested-data", "nested-metrics"] as const).map((f) => (
+                  <FormatBadge key={f} fmt={f} />
+                ))}
+              </div>
+              {log.length > 0 && (
+                <button
+                  className="text-xs text-muted-foreground hover:text-destructive transition-colors"
+                  onClick={() => { setLog([]); setTotalSent(0); setTotalSuccess(0); setTotalAlarmsTriggered(0); }}
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          {log.length === 0 ? (
+            <div className="px-4 py-10 text-center text-xs text-muted-foreground">
+              No payloads sent yet — press <span className="font-medium text-foreground">Send Once</span> or enable <span className="font-medium text-foreground">Auto-send</span>
+            </div>
+          ) : (
+            <div className="overflow-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr className="border-b border-border bg-muted/50 sticky top-0 z-10">
+                    <th className="text-left px-3 py-2 font-medium text-muted-foreground w-24">Time</th>
+                    <th className="text-left px-3 py-2 font-medium text-muted-foreground">Preset / Device</th>
+                    <th className="text-left px-3 py-2 font-medium text-muted-foreground w-32">Format</th>
+                    <th className="text-left px-3 py-2 font-medium text-muted-foreground w-16">Metrics</th>
+                    <th className="text-left px-3 py-2 font-medium text-muted-foreground w-36">Asset</th>
+                    <th className="text-left px-3 py-2 font-medium text-muted-foreground w-20">Written</th>
+                    <th className="text-left px-3 py-2 font-medium text-muted-foreground w-20">Alarms</th>
+                    <th className="text-left px-3 py-2 font-medium text-muted-foreground w-16">Dur.</th>
+                    <th className="text-left px-3 py-2 font-medium text-muted-foreground w-16">Status</th>
+                    <th className="px-3 py-2 w-8"></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {log.map((entry) => {
+                    const vr = entry.validateResult;
+                    const resp = entry.response as any;
+                    const triggered = entry.alarmEvents.filter((e) => e.event === "triggered");
+                    const cleared   = entry.alarmEvents.filter((e) => e.event === "cleared");
+                    return (
+                      <HistoryRow key={entry.id} entry={entry} vr={vr} resp={resp} triggered={triggered} cleared={cleared} />
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           )}
         </CardContent>
       </Card>
