@@ -38,7 +38,7 @@ const ENVELOPE_FIELDS = new Set([
 export interface NormalisedPayload {
   deviceId: string; timestamp?: Date;
   metrics: Record<string, unknown>;
-  payloadFormat: "nested-data" | "nested-metrics" | "flat" | "unknown";
+  payloadFormat: "nested-data" | "nested-metrics" | "flat" | "nested-root" | "unknown";
   sensorSerial?: string; externalAssetName?: string; measurementPoint?: string;
 }
 
@@ -74,17 +74,30 @@ export function normalise(body: Record<string, unknown>): NormalisedPayload | nu
       metrics: body.metrics as Record<string, unknown> };
   }
 
-  // ── Flat payload: all metrics at root level (Yokogawa/Siemens/rf-dryer style)
-  // Extract every root-level field that isn't an envelope field.
+  // ── Flat / AHI-style nested-root payload ──────────────────────────────────
+  // Extracts root-level primitives AND dot-flattens nested objects one level deep.
+  // AHI / WS-Integrated Suite style:
+  //   { deviceId, timestamp, chiller: { energy_kWh: 15.2, load_percent: 82 }, lighting: { ... } }
+  // becomes: { "chiller.energy_kWh": 15.2, "chiller.load_percent": 82, ... }
   const flatMetrics: Record<string, unknown> = {};
+  let hasNestedRoot = false;
   for (const [k, v] of Object.entries(body)) {
     if (ENVELOPE_FIELDS.has(k)) continue;
     if (typeof v === "number" || typeof v === "string" || typeof v === "boolean") {
       flatMetrics[k] = v;
+    } else if (v && typeof v === "object" && !Array.isArray(v)) {
+      // Dot-flatten one level: chiller.energy_kWh, lighting.power_factor, etc.
+      for (const [k2, v2] of Object.entries(v as Record<string, unknown>)) {
+        if (typeof v2 === "number" || typeof v2 === "string" || typeof v2 === "boolean") {
+          flatMetrics[`${k}.${k2}`] = v2;
+          hasNestedRoot = true;
+        }
+      }
     }
   }
   if (Object.keys(flatMetrics).length > 0) {
-    return { deviceId: body.deviceId, timestamp: ts, payloadFormat: "flat", metrics: flatMetrics };
+    return { deviceId: body.deviceId, timestamp: ts,
+      payloadFormat: hasNestedRoot ? "nested-root" : "flat", metrics: flatMetrics };
   }
 
   return { deviceId: body.deviceId, timestamp: ts, payloadFormat: "unknown", metrics: {} };
@@ -373,6 +386,19 @@ router.post("/ingest/payload", async (req, res): Promise<void> => {
   if (!normalised) { res.status(400).json({ error: "Missing required field: deviceId" }); return; }
   const assetIdHint = typeof body.assetId === "string" ? body.assetId : undefined;
   const result = await processNormalised(normalised, assetIdHint);
+
+  // Strict deviceId validation — return 422 if no asset is matched
+  if (!result.assetId) {
+    res.status(422).json({
+      success: false,
+      error: `Unknown deviceId: "${normalised.deviceId}"`,
+      hint: `No asset has identifier="${normalised.deviceId}". Set this identifier on the asset in Asset Management, or check for a typo in your Node-RED Device Id node.`,
+      deviceId: normalised.deviceId,
+      recordsWritten: 0,
+    });
+    return;
+  }
+
   const triggered = result.alarmEvents.filter((e) => e.event === "triggered");
   const cleared   = result.alarmEvents.filter((e) => e.event === "cleared");
   res.json({ success: true, recordsWritten: result.recordsWritten, assetId: result.assetId,
