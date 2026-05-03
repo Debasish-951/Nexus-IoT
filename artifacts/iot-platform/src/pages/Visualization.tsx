@@ -131,7 +131,10 @@ function pickDefaultMetric(attrs: any[]) {
   return first ? metricKeyOf(first) : "";
 }
 function metricKeyOf(a: any) {
-  return a.tagName?.split(".").pop() ?? a.sourceMetric?.split(".").pop() ?? a.name;
+  return a.tagName?.trim() || a.sourceMetric?.trim() || a.name;
+}
+function metricValueOf(a: any) {
+  return a.tagName?.trim() || a.sourceMetric?.trim() || a.name;
 }
 function widgetSeriesKeys(widget: Widget) {
   const keys = [widget.metric, widget.metric?.split(".").pop()].filter(Boolean) as string[];
@@ -200,7 +203,7 @@ function KpiWidget({ widget, data }: { widget: Widget; data: Record<string, any[
   const latest = rows[0], prev = rows[1];
   const val = latest ? Number(latest.value) : null, prevV = prev ? Number(prev.value) : null;
   const delta = val !== null && prevV !== null ? val - prevV : null;
-  const pct   = delta !== null && prevV !== 0 ? (delta / prevV) * 100 : null;
+  const pct   = delta !== null && prevV !== null && prevV !== 0 ? (delta / prevV) * 100 : null;
   const TIcon = delta === null ? Minus : delta > 0 ? TrendingUp : TrendingDown;
   const tc    = delta === null ? D.muted : delta > 0 ? D.green : D.red;
   const spark = rows.slice(0, 20).reverse().map((r, i) => ({ i, v: Number(r.value) }));
@@ -647,7 +650,7 @@ function AssetManageDialog({ open, onOpenChange, parentId, editAsset, allAssets,
     try {
       const resolvedIdentifier = (identifier.trim() || safeIdentifier(name)).trim();
       if (editAsset) {
-        await updateAsset.mutateAsync({ id: editAsset.id, data: { name, identifier: resolvedIdentifier } });
+        await updateAsset.mutateAsync({ id: editAsset.id, data: { name } });
       } else {
         await createAsset.mutateAsync({ data: { name, identifier: resolvedIdentifier, parentId: parentId ?? null } });
       }
@@ -773,7 +776,7 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
   const [overlayMetrics, setOverlayMetrics] = useState<OverlayMetric[]>(initial?.overlayMetrics ?? []);
 
   const { data: assets }     = useListAssets();
-  const { data: attributes } = useListAssetAttributes(assetId, { query: { enabled: !!assetId } });
+  const { data: attributes } = useListAssetAttributes(assetId, { query: { enabled: !!assetId, queryKey: ["asset-attributes", assetId] } });
   const assetList   = (assets as any[] | undefined) ?? [];
   const metricAttrs = ((attributes as any[] | undefined) ?? []).filter((a: any) => metricKeyOf(a));
   const assetName   = assetList.find((a: any) => a.id === assetId)?.name ?? "";
@@ -856,7 +859,7 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
             <select value={metric} onChange={e => setMetric(e.target.value)} disabled={!assetId}
               className="w-full h-8 rounded border border-border bg-background px-2 text-xs disabled:opacity-50">
               <option value="">{assetId ? "Select metric…" : "Select asset first"}</option>
-              {metricAttrs.map((a: any) => <option key={metricKeyOf(a)} value={metricKeyOf(a)}>{a.name}</option>)}
+              {metricAttrs.map((a: any) => <option key={metricValueOf(a)} value={metricValueOf(a)}>{a.name}</option>)}
             </select>
           </div>
           {canOverlay && (
@@ -1384,7 +1387,7 @@ export default function Visualization() {
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4 auto-rows-auto">
                   {displayWidgets.map(w => (
-                    <div key={w.id} className={sizeClass(w)}>
+                    <div key={w.id}>
                       <WidgetCard widget={w}
                         onDelete={() => removeWidget(w.id)}
                         onEdit={() => { setEditWidget(w); setDialogOpen(true); }}
