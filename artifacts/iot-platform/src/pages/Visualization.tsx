@@ -1212,15 +1212,8 @@ export default function Visualization() {
             </div>
 
             {roots.length === 0 ? (
-              <div className="px-3 py-6 text-center">
-                <Blocks className="w-8 h-8 mx-auto mb-2 opacity-20" style={{ color: D.muted }} />
-                <p className="text-[10px]" style={{ color: D.muted }}>No projects yet</p>
-                {canManage && (
-                  <button onClick={() => { setAssetDialogEdit(null); setAssetDialogParent(null); setAssetDialogOpen(true); }}
-                    className="mt-2 text-[10px] px-2 py-1 rounded" style={{ background:`${D.green}22`, color:D.green, border:`1px solid ${D.green}44` }}>
-                    + Create first project
-                  </button>
-                )}
+              <div className="px-3 py-4 text-center">
+                <p className="text-[10px]" style={{ color: D.muted }}>No assets — create one above</p>
               </div>
             ) : assetListWithTelemetry.filter(a => !a.parentId).map(root => (
               <AssetTreeNode key={root.id} asset={root} allAssets={assetListWithTelemetry}
@@ -1261,15 +1254,22 @@ export default function Visualization() {
           {/* Dashboard selector */}
           <div className="flex items-center gap-1 min-w-0">
             <BookOpen className="w-3.5 h-3.5 shrink-0" style={{ color: D.accent }} />
-            <select
-              value={activeDash?.id ?? ""}
-              onChange={e => setActiveDashId(e.target.value || null)}
-              className="h-7 rounded px-2 text-xs font-semibold border max-w-[200px]"
-              style={{ background: D.card, color: D.text, borderColor: D.border2 }}>
-              {visibleDashboards.length === 0
-                ? <option value="">No dashboards — create one</option>
-                : visibleDashboards.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-            </select>
+            {visibleDashboards.length === 0 ? (
+              <button
+                onClick={() => { setEditDashboard(null); setDbDialogOpen(true); }}
+                className="h-7 rounded px-3 text-xs font-semibold border flex items-center gap-1.5"
+                style={{ background: D.card, color: D.accent, borderColor: D.accent, borderStyle: "dashed" }}>
+                <Plus className="w-3 h-3" /> New Dashboard
+              </button>
+            ) : (
+              <select
+                value={activeDash?.id ?? ""}
+                onChange={e => setActiveDashId(e.target.value || null)}
+                className="h-7 rounded px-2 text-xs font-semibold border max-w-[200px]"
+                style={{ background: D.card, color: D.text, borderColor: D.border2 }}>
+                {visibleDashboards.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+              </select>
+            )}
 
             {/* Dashboard actions dropdown */}
             <DropdownMenu>
@@ -1347,44 +1347,121 @@ export default function Visualization() {
           )}
         </div>
 
-        {/* ── No Dashboard state ── */}
-        {!activeDash ? (
-          <div className="flex-1 flex flex-col items-center justify-center text-center">
-            <BookOpen className="w-14 h-14 mb-4" style={{ color: D.border2 }} />
-            <p className="text-sm font-semibold mb-1" style={{ color: D.text }}>No dashboards yet</p>
-            <p className="text-xs mb-5 max-w-xs" style={{ color: D.muted }}>
-              Create a dashboard to start adding widgets. Each dashboard can be scoped to specific roles and assets.
-            </p>
-            <button onClick={() => { setEditDashboard(null); setDbDialogOpen(true); }}
-              className="flex items-center gap-2 px-4 py-2 rounded text-sm font-semibold"
-              style={{ background:D.accent, color:"#000", boxShadow:`0 0 14px ${D.accent}55` }}>
-              <Plus className="w-4 h-4" /> Create First Dashboard
-            </button>
-          </div>
-        ) : (
-          <>
-            {activeDash.description && (
-              <div className="px-4 py-1.5 shrink-0" style={{ background:D.card, borderBottom:`1px solid ${D.border}` }}>
-                <p className="text-[10px]" style={{ color: D.muted }}>{activeDash.description}</p>
-              </div>
-            )}
-            <div className="flex-1 overflow-auto p-4">
-              {displayWidgets.length === 0 ? (
-                <div className="flex flex-col items-center justify-center h-full text-center">
-                  <LayoutDashboard className="w-14 h-14 mb-4" style={{ color: D.border2 }} />
-                  <p className="text-sm font-semibold mb-1" style={{ color: D.text }}>
-                    {selectedAssetId ? "No widgets for this asset" : "No widgets yet"}
-                  </p>
-                  <p className="text-xs mb-5 max-w-xs" style={{ color: D.muted }}>
-                    Click "Add Widget" or select an asset in the tree and add a widget for it.
-                  </p>
-                  <button onClick={() => { setEditWidget(null); setDialogOpen(true); }}
-                    className="flex items-center gap-2 px-4 py-2 rounded text-sm font-semibold"
-                    style={{ background:D.accent, color:"#000", boxShadow:`0 0 16px ${D.accent}55` }}>
-                    <Plus className="w-4 h-4" /> Add First Widget
+        {/* ── Main content ── */}
+        {(() => {
+          const hasAssets = assetList.length > 0;
+          const hasDash   = !!activeDash;
+          const hasWidgets = displayWidgets.length > 0;
+
+          // Unified 3-step guide — shown whenever any step is incomplete
+          if (!hasAssets || !hasDash || !hasWidgets) {
+            const steps = [
+              {
+                num: 1,
+                done: hasAssets,
+                title: "Create an Asset",
+                desc: "Assets represent your physical devices or equipment.",
+                action: canManage ? (
+                  <button
+                    onClick={() => { setAssetDialogEdit(null); setAssetDialogParent(null); setAssetDialogOpen(true); }}
+                    className="mt-3 flex items-center gap-1.5 px-4 py-2 rounded text-xs font-semibold"
+                    style={{ background: D.green, color: "#000" }}>
+                    <Plus className="w-3.5 h-3.5" /> Add Asset
                   </button>
+                ) : null,
+              },
+              {
+                num: 2,
+                done: hasDash,
+                title: "Create a Dashboard",
+                desc: "Dashboards hold your charts and KPI widgets.",
+                action: hasAssets ? (
+                  <button
+                    onClick={() => { setEditDashboard(null); setDbDialogOpen(true); }}
+                    className="mt-3 flex items-center gap-1.5 px-4 py-2 rounded text-xs font-semibold"
+                    style={{ background: D.accent, color: "#000" }}>
+                    <Plus className="w-3.5 h-3.5" /> New Dashboard
+                  </button>
+                ) : null,
+              },
+              {
+                num: 3,
+                done: hasWidgets,
+                title: "Add a Widget",
+                desc: "Pick a chart type, select an asset and metric.",
+                action: hasDash ? (
+                  <button
+                    onClick={() => { setEditWidget(null); setDialogOpen(true); }}
+                    className="mt-3 flex items-center gap-1.5 px-4 py-2 rounded text-xs font-semibold"
+                    style={{ background: D.accent2, color: "#fff" }}>
+                    <Plus className="w-3.5 h-3.5" /> Add Widget
+                  </button>
+                ) : null,
+              },
+            ];
+
+            const activeStep = !hasAssets ? 1 : !hasDash ? 2 : 3;
+
+            return (
+              <div className="flex-1 flex flex-col items-center justify-center px-6">
+                <LayoutDashboard className="w-10 h-10 mb-4 opacity-20" style={{ color: D.accent }} />
+                <p className="text-sm font-semibold mb-1" style={{ color: D.text }}>Get started with Visualization</p>
+                <p className="text-xs mb-8" style={{ color: D.muted }}>Follow the steps below to build your first live dashboard.</p>
+
+                <div className="flex items-start gap-0 w-full max-w-xl">
+                  {steps.map((step, idx) => {
+                    const isActive = step.num === activeStep;
+                    const isDone   = step.done;
+                    const isFuture = step.num > activeStep;
+                    return (
+                      <div key={step.num} className="flex items-start flex-1">
+                        {/* Step card */}
+                        <div className="flex flex-col items-center flex-1 text-center">
+                          {/* Circle */}
+                          <div className="w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold mb-3 shrink-0"
+                            style={{
+                              background: isDone ? D.green : isActive ? D.accent : D.border,
+                              color: isDone || isActive ? "#000" : D.muted,
+                              boxShadow: isActive ? `0 0 14px ${D.accent}66` : undefined,
+                            }}>
+                            {isDone ? "✓" : step.num}
+                          </div>
+                          {/* Card */}
+                          <div className="w-full rounded-lg p-4 text-left"
+                            style={{
+                              background: isActive ? D.card : "transparent",
+                              border: `1px solid ${isActive ? D.border2 : isFuture ? D.border + "60" : D.green + "44"}`,
+                              opacity: isFuture ? 0.45 : 1,
+                            }}>
+                            <p className="text-xs font-semibold mb-1" style={{ color: isDone ? D.green : isActive ? D.text : D.muted }}>
+                              {step.title}
+                            </p>
+                            <p className="text-[11px]" style={{ color: D.muted }}>{step.desc}</p>
+                            {isActive && step.action}
+                          </div>
+                        </div>
+
+                        {/* Connector line (not after last) */}
+                        {idx < steps.length - 1 && (
+                          <div className="w-8 shrink-0 mt-4" style={{ height: 1, background: step.done ? D.green : D.border }} />
+                        )}
+                      </div>
+                    );
+                  })}
                 </div>
-              ) : (
+              </div>
+            );
+          }
+
+          // Normal dashboard view
+          return (
+            <>
+              {activeDash.description && (
+                <div className="px-4 py-1.5 shrink-0" style={{ background:D.card, borderBottom:`1px solid ${D.border}` }}>
+                  <p className="text-[10px]" style={{ color: D.muted }}>{activeDash.description}</p>
+                </div>
+              )}
+              <div className="flex-1 overflow-auto p-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4 auto-rows-auto">
                   {displayWidgets.map(w => (
                     <div key={w.id}>
@@ -1399,10 +1476,10 @@ export default function Visualization() {
                     </div>
                   ))}
                 </div>
-              )}
-            </div>
-          </>
-        )}
+              </div>
+            </>
+          );
+        })()}
 
         {/* Status bar */}
         <div className="px-4 py-1.5 flex items-center gap-3 shrink-0"
