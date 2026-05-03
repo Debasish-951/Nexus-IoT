@@ -5,7 +5,7 @@ import {
   FileText, Image, BarChart2, Blocks, Cpu, Bell,
   AlarmClock, BookOpen, Settings2, Router, Plug,
   Shield, Users, KeyRound, Activity, Menu, X,
-  Wifi, Zap, Send, Database,
+  Wifi, Zap, Send, Database, PieChart, ClipboardList,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -38,7 +38,8 @@ const navItems: NavItem[] = [
     label: "Data Explorer",
     icon: BarChart2,
     children: [
-      { label: "Explorer", href: "/data-explorer", icon: BarChart2 },
+      { label: "Explorer",       href: "/data-explorer",  icon: BarChart2 },
+      { label: "Visualization",  href: "/visualization",  icon: PieChart },
     ],
   },
   {
@@ -73,6 +74,7 @@ const navItems: NavItem[] = [
     icon: Database,
     children: [
       { label: "Data Management", href: "/data-management", icon: Database },
+      { label: "Reports",         href: "/reports",         icon: ClipboardList },
     ],
   },
   { label: "Activity Log",      href: "/activity-log", icon: Activity },
@@ -213,7 +215,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </div>
           {!collapsed && (
             <span className="text-sidebar-foreground font-semibold text-sm tracking-tight">
-              IoT Platform
+              WS-Integrated Suite
             </span>
           )}
           <button

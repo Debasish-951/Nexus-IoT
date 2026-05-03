@@ -23,6 +23,8 @@ import DataExplorer from "@/pages/DataExplorer";
 import NodeRedDocs from "@/pages/NodeRedDocs";
 import ActivityLog from "@/pages/ActivityLog";
 import DataManagement from "@/pages/DataManagement";
+import Reports from "@/pages/Reports";
+import Visualization from "@/pages/Visualization";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -51,6 +53,8 @@ function AppRouter() {
         <Route path="/node-red-docs" component={NodeRedDocs} />
         <Route path="/activity-log" component={ActivityLog} />
         <Route path="/data-management" component={DataManagement} />
+        <Route path="/reports" component={Reports} />
+        <Route path="/visualization" component={Visualization} />
         <Route path="/settings" component={Settings} />
         <Route path="/simulator" component={IngestSimulator} />
         <Route component={NotFound} />

@@ -1,4 +1,4 @@
-# IoT Data Acquisition Platform
+# WS-Integrated Suite (formerly IoT Data Acquisition Platform)
 
 A full-stack industrial IoT platform inspired by Yokogawa AHI / Siemens MindSphere.
 
@@ -84,6 +84,8 @@ scripts/                  — Utility scripts
 - `/api-clients` — API client credentials with scope management
 - `/activity-log` — Audit trail table (filter by category, search by actor/target/action, paginated 25/page, 30s auto-refresh)
 - `/data-management` — Storage overview (total rows, table size, oldest/newest), per-asset breakdown, retention policy CRUD, manual pruning trigger, storage architecture notes
+- `/reports` — On-demand report generation: Telemetry Summary (aggregated min/avg/max per bucket), Alarm Report (date-range filtered), Asset Status Snapshot; quick range buttons, download as CSV or JSON
+- `/visualization` — Widget-based dashboard: configurable Line/Area/Bar/KPI widgets per asset+metric, time range selector, 30s auto-refresh, widget config persisted to localStorage
 
 ### Services
 - `artifacts/api-server/src/services/mqtt.ts` — MQTT subscriber service: reads broker configs, subscribes to topics, applies mapping rules, calls processNormalised; broadcasts `broker_status` WS events and inserts `broker_events` rows on connect/error/close
