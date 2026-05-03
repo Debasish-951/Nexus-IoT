@@ -633,6 +633,15 @@ export default function Assets() {
 
       {/* ── Asset tree ──────────────────────────────────────────────────── */}
       <div className="w-64 border-r border-border flex flex-col shrink-0 bg-card">
+        {/* Header with title + Add New button */}
+        <div className="px-3 py-2 border-b border-border flex items-center justify-between gap-2">
+          <span className="text-xs font-semibold text-foreground/80">Projects &amp; Assets</span>
+          {can("manage_assets") && (
+            <Button size="sm" className="h-7 text-xs gap-1 px-2" onClick={() => openAddAsset(null)}>
+              <Plus className="w-3.5 h-3.5" /> Add New
+            </Button>
+          )}
+        </div>
         <div className="p-3 border-b border-border">
           <div className="relative">
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
@@ -678,7 +687,7 @@ export default function Assets() {
         {can("manage_assets") && (
           <div className="p-2 border-t border-border">
             <Button size="sm" variant="outline" className="w-full text-xs h-7" onClick={() => openAddAsset(null)}>
-              <Plus className="w-3.5 h-3.5 mr-1" /> Add Root Asset
+              <Plus className="w-3.5 h-3.5 mr-1" /> New Root Project
             </Button>
           </div>
         )}
@@ -915,11 +924,13 @@ export default function Assets() {
       <Dialog open={addAssetOpen} onOpenChange={(v) => { if (!v) { setAddAssetOpen(false); assetForm.reset(); } }}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Add Asset</DialogTitle>
+            <DialogTitle>
+              {addAssetParentId ? "Add Child Asset" : "New Root Project"}
+            </DialogTitle>
             <DialogDescription>
               {addAssetParentId
-                ? `Adding a child under "${allAssets.find((a) => a.id === addAssetParentId)?.name ?? "selected asset"}"`
-                : "Adding a new root-level asset (e.g. a plant, site, or facility)"}
+                ? `Adding a child asset under "${allAssets.find((a) => a.id === addAssetParentId)?.name ?? "selected asset"}". Use this to model sub-systems, equipment, or devices.`
+                : "Create a top-level project or site (e.g. Plant 1, Site A, Factory). You can then add child assets beneath it to build your hierarchy."}
             </DialogDescription>
           </DialogHeader>
           <Form {...assetForm}>

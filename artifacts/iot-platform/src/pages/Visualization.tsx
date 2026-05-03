@@ -4,46 +4,41 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
+import { Textarea } from "@/components/ui/textarea";
 import {
-  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
+  Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription,
 } from "@/components/ui/dialog";
+import {
+  DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import {
   LineChart, Line, AreaChart, Area, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
-  PieChart, Pie, Cell, ScatterChart, Scatter, RadialBarChart, RadialBar,
+  PieChart, Pie, Cell, ScatterChart, Scatter,
 } from "recharts";
 import {
   Plus, Trash2, RefreshCw, Settings2, TrendingUp, TrendingDown,
   Minus, Activity, LayoutDashboard, ChevronRight, ChevronDown,
   Folder, FolderOpen, Blocks, PanelLeftOpen, PanelLeftClose,
-  Gauge, BarChart2, PieChart as PieIcon, Zap, Grid3X3,
-  ScatterChart as ScatterIcon, Layers, Clock, Calendar,
-  Maximize2, Minimize2, RotateCcw,
+  BarChart2, PieChart as PieIcon, Zap, Grid3X3,
+  Layers, Clock, Maximize2, Minimize2, RotateCcw,
+  ChevronDown as ChevDown, Edit2, Copy, Shield, MoreVertical,
+  BookOpen, Gauge,
 } from "lucide-react";
-import { format, subMinutes, subHours, subDays, parseISO } from "date-fns";
+import { format, subMinutes, parseISO } from "date-fns";
 import { cn } from "@/lib/utils";
+import { useCurrentUser } from "@/contexts/UserContext";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
-const STORAGE_KEY = "ws-viz-widgets-v2";
+const DASHBOARDS_KEY = "ws-dashboards-v1";
 
 // ── Dark theme palette ─────────────────────────────────────────────────────────
 const D = {
-  bg:       "#0b0f1a",
-  panel:    "#111827",
-  card:     "#161e2e",
-  cardHov:  "#1e293b",
-  border:   "#1f2d45",
-  border2:  "#2d3f5a",
-  text:     "#e2e8f0",
-  muted:    "#64748b",
-  accent:   "#06b6d4",   // cyan
-  accent2:  "#818cf8",   // indigo
-  green:    "#10b981",
-  amber:    "#f59e0b",
-  red:      "#ef4444",
-  purple:   "#a855f7",
-  pink:     "#ec4899",
-  orange:   "#f97316",
+  bg:      "#0b0f1a", panel:   "#111827", card:    "#161e2e",
+  border:  "#1f2d45", border2: "#2d3f5a", text:    "#e2e8f0",
+  muted:   "#64748b", accent:  "#06b6d4", accent2: "#818cf8",
+  green:   "#10b981", amber:   "#f59e0b", red:     "#ef4444",
+  purple:  "#a855f7", pink:    "#ec4899", orange:  "#f97316",
 };
 
 const NEON_PALETTE = [
@@ -54,35 +49,48 @@ const NEON_PALETTE = [
 
 // ── Time ranges ────────────────────────────────────────────────────────────────
 const RANGES = [
-  { label: "1 m",  minutes: 1 },
-  { label: "5 m",  minutes: 5 },
-  { label: "15 m", minutes: 15 },
-  { label: "30 m", minutes: 30 },
-  { label: "1 h",  minutes: 60 },
-  { label: "6 h",  minutes: 360 },
-  { label: "12 h", minutes: 720 },
-  { label: "24 h", minutes: 1440 },
-  { label: "3 d",  minutes: 4320 },
-  { label: "7 d",  minutes: 10080 },
-  { label: "30 d", minutes: 43200 },
+  { label: "Last 1 min",   minutes: 1 },
+  { label: "Last 5 min",   minutes: 5 },
+  { label: "Last 15 min",  minutes: 15 },
+  { label: "Last 30 min",  minutes: 30 },
+  { label: "Last 1 hour",  minutes: 60 },
+  { label: "Last 6 hours", minutes: 360 },
+  { label: "Last 12 hours",minutes: 720 },
+  { label: "Last 24 hours",minutes: 1440 },
+  { label: "Last 3 days",  minutes: 4320 },
+  { label: "Last 7 days",  minutes: 10080 },
+  { label: "Last 30 days", minutes: 43200 },
+  { label: "Custom range", minutes: -1 },
 ];
 
 // ── Widget types ───────────────────────────────────────────────────────────────
 type ChartType = "line" | "area" | "bar" | "stackbar" | "kpi" | "gauge" | "pie" | "donut" | "scatter" | "heatmap" | "statetimeline";
 
-const CHART_TYPES: { type: ChartType; label: string; icon: React.ElementType; desc: string }[] = [
-  { type: "line",          label: "Line",          icon: Activity,   desc: "Continuous time-series trend" },
-  { type: "area",          label: "Area",          icon: LayoutDashboard, desc: "Filled area under trend" },
-  { type: "bar",           label: "Bar",           icon: BarChart2,  desc: "Discrete value bars" },
-  { type: "stackbar",      label: "Stack Bar",     icon: Layers,     desc: "Stacked multi-metric bars" },
-  { type: "kpi",           label: "KPI Card",      icon: Zap,        desc: "Latest value + trend" },
-  { type: "gauge",         label: "Gauge",         icon: Gauge,      desc: "Radial gauge meter" },
-  { type: "pie",           label: "Pie",           icon: PieIcon,    desc: "Distribution breakdown" },
-  { type: "donut",         label: "Donut",         icon: PieIcon,    desc: "Ring chart with center value" },
-  { type: "scatter",       label: "Scatter",       icon: ScatterIcon, desc: "Value distribution scatter" },
-  { type: "heatmap",       label: "Heatmap",       icon: Grid3X3,    desc: "Hour-of-day intensity grid" },
-  { type: "statetimeline", label: "State Timeline",icon: Layers,     desc: "High/normal/low state bands" },
+const CHART_TYPE_OPTS: { value: ChartType; label: string; supportsOverlay: boolean }[] = [
+  { value: "line",           label: "Line Chart",       supportsOverlay: true },
+  { value: "area",           label: "Area Chart",       supportsOverlay: true },
+  { value: "bar",            label: "Bar Chart",        supportsOverlay: true },
+  { value: "stackbar",       label: "Stack Bar Chart",  supportsOverlay: true },
+  { value: "kpi",            label: "KPI Card",         supportsOverlay: false },
+  { value: "gauge",          label: "Gauge Meter",      supportsOverlay: false },
+  { value: "pie",            label: "Pie Chart",        supportsOverlay: false },
+  { value: "donut",          label: "Donut Chart",      supportsOverlay: false },
+  { value: "scatter",        label: "Scatter Plot",     supportsOverlay: false },
+  { value: "heatmap",        label: "Hour Heatmap",     supportsOverlay: false },
+  { value: "statetimeline",  label: "State Timeline",   supportsOverlay: false },
 ];
+
+// ── Roles ──────────────────────────────────────────────────────────────────────
+const ALL_ROLES = ["admin", "engineer", "operator", "viewer"] as const;
+type Role = typeof ALL_ROLES[number];
+
+// ── Data types ─────────────────────────────────────────────────────────────────
+interface OverlayMetric {
+  assetId:   string;
+  assetName: string;
+  metric:    string;
+  color:     string;
+}
 
 interface Widget {
   id: string;
@@ -99,320 +107,244 @@ interface Widget {
   customFrom?: string;
   customTo?: string;
   size?: "sm" | "md" | "lg";
+  overlayMetrics?: OverlayMetric[];
+}
+
+interface Dashboard {
+  id: string;
+  name: string;
+  description?: string;
+  roleAccess: Role[];
+  widgets: Widget[];
+  createdAt: string;
 }
 
 // ── helpers ────────────────────────────────────────────────────────────────────
 function fmtTs(ts: string, rangeMinutes: number): string {
   const d = parseISO(ts);
-  if (rangeMinutes <= 60)  return format(d, "HH:mm:ss");
+  if (rangeMinutes <= 60)   return format(d, "HH:mm:ss");
   if (rangeMinutes <= 1440) return format(d, "HH:mm");
   return format(d, "MM/dd HH:mm");
 }
-
 function getFrom(w: Widget): string {
   if (w.customFrom) return new Date(w.customFrom).toISOString();
-  return subMinutes(new Date(), w.rangeMinutes).toISOString();
+  return subMinutes(new Date(), w.rangeMinutes > 0 ? w.rangeMinutes : 60).toISOString();
 }
 function getTo(w: Widget): string {
-  if (w.customTo) return new Date(w.customTo).toISOString();
-  return new Date().toISOString();
+  return w.customTo ? new Date(w.customTo).toISOString() : new Date().toISOString();
 }
-
 function rangeLabelOf(w: Widget): string {
-  if (w.customFrom && w.customTo) {
+  if (w.customFrom && w.customTo)
     return `${format(new Date(w.customFrom), "MM/dd HH:mm")} → ${format(new Date(w.customTo), "MM/dd HH:mm")}`;
-  }
   return RANGES.find(r => r.minutes === w.rangeMinutes)?.label ?? `${w.rangeMinutes}m`;
 }
+function supportsOverlay(ct: ChartType) {
+  return CHART_TYPE_OPTS.find(o => o.value === ct)?.supportsOverlay ?? false;
+}
 
-// ── Dark chart axis/tooltip defaults ──────────────────────────────────────────
-const darkAxis = { stroke: D.muted, fontSize: 10, tickLine: false, axisLine: false };
-const darkGrid = { strokeDasharray: "3 3", stroke: D.border2, vertical: false };
+// ── Dark chart defaults ────────────────────────────────────────────────────────
+const darkAxis   = { stroke: D.muted, fontSize: 10, tickLine: false, axisLine: false };
+const darkGrid   = { strokeDasharray: "3 3", stroke: D.border2, vertical: false };
 const darkTooltip = {
-  contentStyle: {
-    background: D.card, border: `1px solid ${D.border2}`,
-    borderRadius: 6, fontSize: 11, padding: "4px 10px", color: D.text,
-  },
-  labelStyle:   { color: D.muted, fontSize: 10 },
-  cursor:       { stroke: D.border2 },
+  contentStyle: { background: D.card, border: `1px solid ${D.border2}`, borderRadius: 6, fontSize: 11, padding: "4px 10px", color: D.text },
+  labelStyle: { color: D.muted, fontSize: 10 },
+  cursor: { stroke: D.border2 },
 };
 
+function EmptyState() {
+  return (
+    <div className="flex items-center justify-center h-full">
+      <p style={{ fontSize: 11, color: D.muted }}>No data in range</p>
+    </div>
+  );
+}
+
 // ══════════════════════════════════════════════════════════════════════════════
-// ── Gauge Widget ──────────────────────────────────────────────────────────────
-function GaugeWidget({ widget, data }: { widget: Widget; data: any[] }) {
-  const latest = data.length > 0 ? Number(data[data.length - 1]?.value) : null;
+// ── SVG Gauge ─────────────────────────────────────────────────────────────────
+function GaugeWidget({ widget, data }: { widget: Widget; data: Record<string, any[]> }) {
+  const rows   = data[widget.metric] ?? [];
+  const latest = rows.length > 0 ? Number(rows[rows.length - 1]?.value) : null;
   const min = widget.minVal ?? 0;
   const max = widget.maxVal ?? 100;
   const pct = latest !== null ? Math.min(1, Math.max(0, (latest - min) / (max - min))) : 0;
 
-  const W = 180, H = 110, cx = 90, cy = 96, R = 72;
-  const startAngle = Math.PI * 1.15;
-  const endAngle   = Math.PI * 1.85;
-  const sweep      = endAngle - startAngle;
-  const valAngle   = startAngle + sweep * pct;
+  const cx = 90, cy = 92, R = 68;
+  const startA = Math.PI * 1.15, endA = Math.PI * 1.85, sweep = endA - startA;
   const arc = (a: number) => ({ x: cx + R * Math.cos(a), y: cy + R * Math.sin(a) });
-  const bg1 = arc(startAngle); const bg2 = arc(endAngle);
-  const v1  = arc(startAngle); const v2  = arc(valAngle);
-  const needleX = cx + (R - 10) * Math.cos(valAngle);
-  const needleY = cy + (R - 10) * Math.sin(valAngle);
+  const a1 = arc(startA), a2 = arc(endA), av = arc(startA + sweep * pct);
+  const needleX = cx + (R - 12) * Math.cos(startA + sweep * pct);
+  const needleY = cy + (R - 12) * Math.sin(startA + sweep * pct);
 
-  const zones = [
-    { from: 0, to: 0.33, color: D.green },
-    { from: 0.33, to: 0.66, color: D.amber },
-    { from: 0.66, to: 1, color: D.red },
-  ];
-
+  const zones = [{ f: 0, t: 0.33, c: D.green }, { f: 0.33, t: 0.66, c: D.amber }, { f: 0.66, t: 1, c: D.red }];
   return (
-    <div className="flex flex-col items-center justify-center h-full gap-1">
-      <svg width={W} height={H} viewBox={`0 0 ${W} ${H}`}>
-        {/* Background arc */}
-        <path d={`M ${bg1.x} ${bg1.y} A ${R} ${R} 0 ${sweep > Math.PI ? 1 : 0} 1 ${bg2.x} ${bg2.y}`}
-          stroke={D.border2} strokeWidth={12} fill="none" strokeLinecap="round" />
-        {/* Zone arcs */}
+    <div className="flex flex-col items-center justify-center h-full">
+      <svg width={180} height={105} viewBox="0 0 180 105">
+        <path d={`M ${a1.x} ${a1.y} A ${R} ${R} 0 1 1 ${a2.x} ${a2.y}`} stroke={D.border2} strokeWidth={12} fill="none" strokeLinecap="round" />
         {zones.map((z, i) => {
-          const a1 = startAngle + sweep * z.from;
-          const a2 = startAngle + sweep * z.to;
-          const p1 = arc(a1); const p2 = arc(a2);
-          const lg = (a2 - a1) > Math.PI ? 1 : 0;
-          return <path key={i} d={`M ${p1.x} ${p1.y} A ${R} ${R} 0 ${lg} 1 ${p2.x} ${p2.y}`}
-            stroke={z.color} strokeWidth={8} fill="none" strokeLinecap="round" opacity={0.35} />;
+          const p1 = arc(startA + sweep * z.f), p2 = arc(startA + sweep * z.t);
+          return <path key={i} d={`M ${p1.x} ${p1.y} A ${R} ${R} 0 ${(sweep * (z.t - z.f)) > Math.PI ? 1 : 0} 1 ${p2.x} ${p2.y}`}
+            stroke={z.c} strokeWidth={8} fill="none" strokeLinecap="round" opacity={0.3} />;
         })}
-        {/* Value arc */}
-        {latest !== null && pct > 0 && (
-          <path d={`M ${v1.x} ${v1.y} A ${R} ${R} 0 ${(sweep * pct) > Math.PI ? 1 : 0} 1 ${v2.x} ${v2.y}`}
+        {latest !== null && pct > 0.01 && (
+          <path d={`M ${a1.x} ${a1.y} A ${R} ${R} 0 ${(sweep * pct) > Math.PI ? 1 : 0} 1 ${av.x} ${av.y}`}
             stroke={widget.color} strokeWidth={10} fill="none" strokeLinecap="round" />
         )}
-        {/* Needle */}
-        {latest !== null && (
-          <line x1={cx} y1={cy} x2={needleX} y2={needleY}
-            stroke={D.text} strokeWidth={2} strokeLinecap="round" />
-        )}
-        <circle cx={cx} cy={cy} r={5} fill={D.text} />
-        {/* Min/Max labels */}
-        <text x={bg1.x - 4} y={bg1.y + 4} fill={D.muted} fontSize={9} textAnchor="middle">{min}</text>
-        <text x={bg2.x + 4} y={bg2.y + 4} fill={D.muted} fontSize={9} textAnchor="middle">{max}</text>
-        {/* Value label */}
-        <text x={cx} y={cy - 14} fill={D.text} fontSize={18} fontWeight={700} textAnchor="middle">
+        {latest !== null && <line x1={cx} y1={cy} x2={needleX} y2={needleY} stroke={D.text} strokeWidth={2} strokeLinecap="round" />}
+        <circle cx={cx} cy={cy} r={4} fill={D.text} />
+        <text x={a1.x - 2} y={a1.y + 4} fill={D.muted} fontSize={9} textAnchor="end">{min}</text>
+        <text x={a2.x + 2} y={a2.y + 4} fill={D.muted} fontSize={9} textAnchor="start">{max}</text>
+        <text x={cx} y={cy - 16} fill={D.text} fontSize={18} fontWeight={700} textAnchor="middle">
           {latest !== null ? latest.toLocaleString(undefined, { maximumFractionDigits: 2 }) : "—"}
         </text>
-        {widget.unit && (
-          <text x={cx} y={cy - 2} fill={D.muted} fontSize={10} textAnchor="middle">{widget.unit}</text>
-        )}
+        {widget.unit && <text x={cx} y={cy - 3} fill={D.muted} fontSize={9} textAnchor="middle">{widget.unit}</text>}
       </svg>
-      <div className="text-[10px]" style={{ color: D.muted }}>
-        {pct !== null ? `${(pct * 100).toFixed(1)}%` : ""}
-      </div>
+      <span style={{ fontSize: 9, color: D.muted }}>{pct > 0 ? `${(pct * 100).toFixed(1)}%` : ""}</span>
     </div>
   );
 }
 
 // ── KPI Card ──────────────────────────────────────────────────────────────────
-function KpiWidget({ widget, data }: { widget: Widget; data: any[] }) {
-  const sorted = [...data].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
-  const latest = sorted[0];
-  const prev   = sorted[1];
+function KpiWidget({ widget, data }: { widget: Widget; data: Record<string, any[]> }) {
+  const rows   = [...(data[widget.metric] ?? [])].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  const latest = rows[0]; const prev = rows[1];
   const val    = latest ? Number(latest.value) : null;
   const prevV  = prev   ? Number(prev.value)   : null;
   const delta  = val !== null && prevV !== null ? val - prevV : null;
-  const pctChange = delta !== null && prevV !== 0 ? ((delta / prevV) * 100) : null;
-  const TrendIcon = delta === null ? Minus : delta > 0 ? TrendingUp : delta < 0 ? TrendingDown : Minus;
-  const trendColor = delta === null ? D.muted : delta > 0 ? D.green : delta < 0 ? D.red : D.muted;
-
-  // mini sparkline last 20 points
-  const sparkData = sorted.slice(0, 20).reverse().map((r, i) => ({ i, v: Number(r.value) }));
-
+  const pct    = delta !== null && prevV !== 0  ? (delta / prevV) * 100 : null;
+  const TIcon  = delta === null ? Minus : delta > 0 ? TrendingUp : TrendingDown;
+  const tc     = delta === null ? D.muted : delta > 0 ? D.green : D.red;
+  const spark  = rows.slice(0, 20).reverse().map((r, i) => ({ i, v: Number(r.value) }));
   return (
     <div className="flex flex-col h-full p-2 gap-1">
-      <div className="flex items-end justify-between gap-2 flex-1 min-h-0">
+      <div className="flex items-end justify-between gap-2 flex-1">
         <div>
           <div className="text-3xl font-bold tabular-nums" style={{ color: widget.color }}>
             {val !== null ? val.toLocaleString(undefined, { maximumFractionDigits: 3 }) : "—"}
-            {widget.unit && <span className="text-base ml-1" style={{ color: D.muted }}>{widget.unit}</span>}
+            {widget.unit && <span className="text-sm ml-1" style={{ color: D.muted }}>{widget.unit}</span>}
           </div>
           {delta !== null && (
-            <div className="flex items-center gap-1 mt-1" style={{ color: trendColor }}>
-              <TrendIcon className="w-3.5 h-3.5" />
+            <div className="flex items-center gap-1 mt-1" style={{ color: tc }}>
+              <TIcon className="w-3.5 h-3.5" />
               <span className="text-xs font-medium">
                 {delta > 0 ? "+" : ""}{delta.toLocaleString(undefined, { maximumFractionDigits: 3 })}
-                {pctChange !== null && <span className="ml-1 opacity-70">({pctChange > 0 ? "+" : ""}{pctChange.toFixed(1)}%)</span>}
+                {pct !== null && <span className="ml-1 opacity-70">({pct > 0 ? "+" : ""}{pct.toFixed(1)}%)</span>}
               </span>
             </div>
           )}
-          {latest && (
-            <p className="text-[10px] mt-1" style={{ color: D.muted }}>
-              {format(new Date(latest.timestamp), "HH:mm:ss dd/MM")}
-            </p>
-          )}
+          {latest && <p className="text-[10px] mt-1" style={{ color: D.muted }}>{format(new Date(latest.timestamp), "HH:mm:ss dd/MM")}</p>}
         </div>
-        {/* Mini sparkline */}
-        {sparkData.length > 2 && (
-          <div style={{ width: 80, height: 48 }}>
+        {spark.length > 2 && (
+          <div style={{ width: 80, height: 44 }}>
             <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={sparkData} margin={{ top: 2, right: 2, bottom: 2, left: 2 }}>
+              <LineChart data={spark} margin={{ top: 2, right: 2, bottom: 2, left: 2 }}>
                 <Line dataKey="v" stroke={widget.color} strokeWidth={1.5} dot={false} />
               </LineChart>
             </ResponsiveContainer>
           </div>
         )}
       </div>
-      {data.length === 0 && <p className="text-xs" style={{ color: D.muted }}>No data</p>}
     </div>
   );
 }
 
 // ── Pie / Donut ───────────────────────────────────────────────────────────────
-function PieWidget({ widget, data, donut }: { widget: Widget; data: any[]; donut?: boolean }) {
-  // Bucket by value ranges for distribution
-  const values = data.map(d => Number(d.value)).filter(v => !isNaN(v));
+function PieWidget({ widget, data, donut }: { widget: Widget; data: Record<string, any[]>; donut?: boolean }) {
+  const values = (data[widget.metric] ?? []).map(d => Number(d.value)).filter(v => !isNaN(v));
   if (values.length === 0) return <EmptyState />;
-  const min = Math.min(...values), max = Math.max(...values);
-  const range = max - min || 1;
-  const BUCKETS = 6;
-  const buckets = Array.from({ length: BUCKETS }, (_, i) => {
-    const lo = min + (range / BUCKETS) * i;
-    const hi = min + (range / BUCKETS) * (i + 1);
-    const count = values.filter(v => i === BUCKETS - 1 ? v >= lo && v <= hi : v >= lo && v < hi).length;
-    return { name: `${lo.toFixed(1)}–${hi.toFixed(1)}`, value: count };
+  const min = Math.min(...values), max = Math.max(...values), range = max - min || 1;
+  const B = 6;
+  const buckets = Array.from({ length: B }, (_, i) => {
+    const lo = min + (range / B) * i, hi = min + (range / B) * (i + 1);
+    return { name: `${lo.toFixed(1)}–${hi.toFixed(1)}`, value: values.filter(v => i === B - 1 ? v >= lo && v <= hi : v >= lo && v < hi).length };
   }).filter(b => b.value > 0);
-
-  const COLORS = NEON_PALETTE.slice(0, buckets.length);
-
   return (
-    <div style={{ width: "100%", height: "100%" }}>
-      <ResponsiveContainer width="100%" height="100%">
-        <PieChart>
-          <Pie data={buckets} cx="50%" cy="50%"
-            innerRadius={donut ? "48%" : 0} outerRadius="72%"
-            paddingAngle={2} dataKey="value"
-            label={({ name, percent }) => `${(percent * 100).toFixed(0)}%`}
-            labelLine={false}
-          >
-            {buckets.map((_, i) => <Cell key={i} fill={COLORS[i]} opacity={0.85} />)}
-          </Pie>
-          <Tooltip
-            contentStyle={{ background: D.card, border: `1px solid ${D.border2}`, borderRadius: 6, fontSize: 11, color: D.text }}
-            formatter={(v: number, name: string) => [v + " pts", name]}
-          />
-          <Legend wrapperStyle={{ fontSize: 10, color: D.muted }} />
-        </PieChart>
-      </ResponsiveContainer>
-    </div>
+    <ResponsiveContainer width="100%" height="100%">
+      <PieChart>
+        <Pie data={buckets} cx="50%" cy="50%" innerRadius={donut ? "48%" : 0} outerRadius="70%"
+          paddingAngle={2} dataKey="value" label={({ percent }) => `${(percent * 100).toFixed(0)}%`} labelLine={false}>
+          {buckets.map((_, i) => <Cell key={i} fill={NEON_PALETTE[i % NEON_PALETTE.length]} opacity={0.85} />)}
+        </Pie>
+        <Tooltip contentStyle={{ background: D.card, border: `1px solid ${D.border2}`, borderRadius: 6, fontSize: 11, color: D.text }} />
+        <Legend wrapperStyle={{ fontSize: 10, color: D.muted }} />
+      </PieChart>
+    </ResponsiveContainer>
   );
 }
 
 // ── Scatter ────────────────────────────────────────────────────────────────────
-function ScatterWidget({ widget, data }: { widget: Widget; data: any[] }) {
-  const points = data.map((d, i) => ({ x: i, y: Number(d.value) })).filter(p => !isNaN(p.y));
+function ScatterWidget({ widget, data }: { widget: Widget; data: Record<string, any[]> }) {
+  const points = (data[widget.metric] ?? []).map((d, i) => ({ x: i, y: Number(d.value) })).filter(p => !isNaN(p.y));
   if (points.length === 0) return <EmptyState />;
   return (
     <ResponsiveContainer width="100%" height="100%">
       <ScatterChart margin={{ top: 4, right: 8, bottom: 4, left: 0 }}>
         <CartesianGrid {...darkGrid} />
-        <XAxis dataKey="x" {...darkAxis} name="Index" hide />
+        <XAxis dataKey="x" {...darkAxis} hide />
         <YAxis dataKey="y" {...darkAxis} width={36} />
         <Tooltip {...darkTooltip} cursor={{ strokeDasharray: "3 3" }} />
-        <Scatter data={points} fill={widget.color} opacity={0.7} />
+        <Scatter data={points} fill={widget.color} opacity={0.75} />
       </ScatterChart>
     </ResponsiveContainer>
   );
 }
 
-// ── Heatmap (hour-of-day × value) ─────────────────────────────────────────────
-function HeatmapWidget({ data }: { data: any[] }) {
-  if (data.length === 0) return <EmptyState />;
-  // Grid: hours 0-23
-  const buckets: Record<number, number[]> = {};
-  for (let h = 0; h < 24; h++) buckets[h] = [];
-  data.forEach(d => {
-    const h = new Date(d.timestamp).getHours();
-    buckets[h].push(Number(d.value));
-  });
-  const avgs = Array.from({ length: 24 }, (_, h) => {
-    const vals = buckets[h];
-    return vals.length > 0 ? vals.reduce((a, b) => a + b, 0) / vals.length : null;
-  });
-  const defined = avgs.filter(v => v !== null) as number[];
-  const minV = defined.length ? Math.min(...defined) : 0;
-  const maxV = defined.length ? Math.max(...defined) : 1;
+// ── Heatmap ───────────────────────────────────────────────────────────────────
+function HeatmapWidget({ widget, data }: { widget: Widget; data: Record<string, any[]> }) {
+  const rows = data[widget.metric] ?? [];
+  if (rows.length === 0) return <EmptyState />;
+  const buckets: number[][] = Array.from({ length: 24 }, () => []);
+  rows.forEach(d => buckets[new Date(d.timestamp).getHours()].push(Number(d.value)));
+  const avgs = buckets.map(b => b.length ? b.reduce((a, x) => a + x, 0) / b.length : null);
+  const def = avgs.filter(v => v !== null) as number[];
+  const minV = def.length ? Math.min(...def) : 0, maxV = def.length ? Math.max(...def) : 1;
   const norm = (v: number | null) => v === null ? 0 : (v - minV) / (maxV - minV || 1);
-
-  function heatColor(n: number) {
-    // Deep blue → cyan → green → amber → red
+  const heatColor = (n: number) => {
     const stops = ["#1e3a5f","#0891b2","#10b981","#f59e0b","#dc2626"];
-    const idx = n * (stops.length - 1);
-    const lo = Math.floor(idx); const hi = Math.min(lo + 1, stops.length - 1);
-    const t = idx - lo;
-    const hex = (s: string) => [parseInt(s.slice(1, 3), 16), parseInt(s.slice(3, 5), 16), parseInt(s.slice(5, 7), 16)];
-    const c1 = hex(stops[lo]); const c2 = hex(stops[hi]);
-    const r = Math.round(c1[0] + t * (c2[0] - c1[0]));
-    const g = Math.round(c1[1] + t * (c2[1] - c1[1]));
-    const b = Math.round(c1[2] + t * (c2[2] - c1[2]));
-    return `rgb(${r},${g},${b})`;
-  }
-
+    const idx = n * (stops.length - 1), lo = Math.floor(idx), hi = Math.min(lo + 1, stops.length - 1), t = idx - lo;
+    const hex = (s: string) => [parseInt(s.slice(1,3),16),parseInt(s.slice(3,5),16),parseInt(s.slice(5,7),16)];
+    const c1 = hex(stops[lo]), c2 = hex(stops[hi]);
+    return `rgb(${Math.round(c1[0]+t*(c2[0]-c1[0]))},${Math.round(c1[1]+t*(c2[1]-c1[1]))},${Math.round(c1[2]+t*(c2[2]-c1[2]))})`;
+  };
   return (
     <div className="p-2 h-full flex flex-col gap-1">
       <div className="flex gap-0.5 flex-1">
         {avgs.map((v, h) => (
           <div key={h} className="flex-1 flex flex-col gap-0.5 items-center">
-            <div className="flex-1 w-full rounded-sm transition-all"
-              style={{ background: heatColor(norm(v)), opacity: v === null ? 0.15 : 1, minHeight: 4 }}
-              title={v !== null ? `${h}:00 — ${v.toFixed(2)}` : `${h}:00 — no data`} />
+            <div className="flex-1 w-full rounded-sm" style={{ background: heatColor(norm(v)), opacity: v === null ? 0.1 : 1, minHeight: 4 }}
+              title={v !== null ? `${h}:00 → ${v.toFixed(2)}` : `${h}:00 → no data`} />
             {h % 4 === 0 && <span style={{ fontSize: 8, color: D.muted }}>{h}</span>}
           </div>
         ))}
       </div>
       <div className="flex justify-between" style={{ fontSize: 9, color: D.muted }}>
-        <span>Hour of day (0–23)</span>
-        <span>avg intensity</span>
+        <span>Hour of day (0–23)</span><span>avg intensity</span>
       </div>
     </div>
   );
 }
 
 // ── State Timeline ─────────────────────────────────────────────────────────────
-function StateTimelineWidget({ widget, data }: { widget: Widget; data: any[] }) {
-  if (data.length === 0) return <EmptyState />;
-  const sorted = [...data].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
-  const values = sorted.map(d => Number(d.value));
-  const minV = Math.min(...values), maxV = Math.max(...values);
-  const range = maxV - minV || 1;
-  const lo = minV + range * 0.33;
-  const hi = minV + range * 0.67;
-
-  function stateColor(v: number) {
-    if (v >= hi) return D.red;
-    if (v >= lo) return D.amber;
-    return D.green;
-  }
-  function stateLabel(v: number) {
-    if (v >= hi) return "HIGH";
-    if (v >= lo) return "NORM";
-    return "LOW";
-  }
-
+function StateTimelineWidget({ widget, data }: { widget: Widget; data: Record<string, any[]> }) {
+  const sorted = [...(data[widget.metric] ?? [])].sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime());
+  if (sorted.length === 0) return <EmptyState />;
+  const vals = sorted.map(d => Number(d.value));
+  const minV = Math.min(...vals), maxV = Math.max(...vals), range = maxV - minV || 1;
+  const lo = minV + range * 0.33, hi = minV + range * 0.67;
+  const sc = (v: number) => v >= hi ? D.red : v >= lo ? D.amber : D.green;
   const total = sorted.length;
   return (
     <div className="flex flex-col h-full p-2 gap-2">
-      {/* State strip */}
-      <div className="flex h-8 rounded overflow-hidden border" style={{ borderColor: D.border }}>
-        {sorted.map((d, i) => (
-          <div key={i} className="flex-1" style={{ background: stateColor(Number(d.value)) }}
-            title={`${fmtTs(d.timestamp, widget.rangeMinutes)}: ${Number(d.value).toFixed(2)}`} />
-        ))}
+      <div className="flex h-8 rounded overflow-hidden" style={{ border: `1px solid ${D.border}` }}>
+        {sorted.map((d, i) => <div key={i} className="flex-1" style={{ background: sc(Number(d.value)) }}
+          title={`${fmtTs(d.timestamp, widget.rangeMinutes)}: ${Number(d.value).toFixed(2)}`} />)}
       </div>
-      {/* Distribution counts */}
       <div className="grid grid-cols-3 gap-1 flex-1">
-        {[
-          { label: "LOW",  color: D.green, count: values.filter(v => v < lo).length },
-          { label: "NORM", color: D.amber, count: values.filter(v => v >= lo && v < hi).length },
-          { label: "HIGH", color: D.red,   count: values.filter(v => v >= hi).length },
-        ].map(s => (
+        {[{label:"LOW",c:D.green,n:vals.filter(v=>v<lo).length},{label:"NORM",c:D.amber,n:vals.filter(v=>v>=lo&&v<hi).length},{label:"HIGH",c:D.red,n:vals.filter(v=>v>=hi).length}].map(s=>(
           <div key={s.label} className="flex flex-col items-center justify-center rounded p-1"
-            style={{ background: s.color + "22", border: `1px solid ${s.color}44` }}>
-            <span className="text-xs font-bold" style={{ color: s.color }}>{s.label}</span>
-            <span className="text-lg font-bold tabular-nums" style={{ color: s.color }}>{s.count}</span>
-            <span style={{ fontSize: 9, color: D.muted }}>{total > 0 ? ((s.count / total) * 100).toFixed(0) : 0}%</span>
+            style={{ background: s.c + "22", border: `1px solid ${s.c}44` }}>
+            <span className="text-xs font-bold" style={{ color: s.c }}>{s.label}</span>
+            <span className="text-lg font-bold tabular-nums" style={{ color: s.c }}>{s.n}</span>
+            <span style={{ fontSize: 9, color: D.muted }}>{total > 0 ? ((s.n/total)*100).toFixed(0) : 0}%</span>
           </div>
         ))}
       </div>
@@ -420,17 +352,33 @@ function StateTimelineWidget({ widget, data }: { widget: Widget; data: any[] }) 
   );
 }
 
-// ── Line / Area / Bar / StackBar ──────────────────────────────────────────────
-function ChartWidget({ widget, data }: { widget: Widget; data: any[] }) {
-  const chartData = [...data]
-    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
-    .map(r => ({ t: fmtTs(r.timestamp, widget.rangeMinutes), value: Number(r.value) }));
+// ── Multi-series overlay chart ─────────────────────────────────────────────────
+function ChartWidget({ widget, data }: { widget: Widget; data: Record<string, any[]> }) {
+  const allSeries = [
+    { metric: widget.metric, color: widget.color, label: widget.metric },
+    ...(widget.overlayMetrics ?? []).map(o => ({ metric: `${o.assetId}::${o.metric}`, color: o.color, label: `${o.assetName}/${o.metric}` })),
+  ];
+
+  // Merge all timestamps and build unified chart rows
+  const tsBuckets: Record<string, Record<string, number>> = {};
+  allSeries.forEach(s => {
+    const rows = data[s.metric] ?? [];
+    rows.forEach(r => {
+      const t = fmtTs(r.timestamp, widget.rangeMinutes);
+      if (!tsBuckets[t]) tsBuckets[t] = {};
+      tsBuckets[t][s.metric] = Number(r.value);
+    });
+  });
+  const chartData = Object.entries(tsBuckets)
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([t, vals]) => ({ t, ...vals }));
 
   if (chartData.length === 0) return <EmptyState />;
 
   const commonProps = { data: chartData, margin: { top: 4, right: 8, bottom: 0, left: 0 } };
 
   if (widget.chartType === "bar" || widget.chartType === "stackbar") {
+    const stacked = widget.chartType === "stackbar";
     return (
       <ResponsiveContainer width="100%" height="100%">
         <BarChart {...commonProps}>
@@ -438,7 +386,11 @@ function ChartWidget({ widget, data }: { widget: Widget; data: any[] }) {
           <XAxis dataKey="t" {...darkAxis} />
           <YAxis {...darkAxis} width={36} />
           <Tooltip {...darkTooltip} />
-          <Bar dataKey="value" fill={widget.color} radius={[2, 2, 0, 0]} maxBarSize={20} />
+          {allSeries.length > 1 && <Legend wrapperStyle={{ fontSize: 9, color: D.muted }} />}
+          {allSeries.map(s => (
+            <Bar key={s.metric} dataKey={s.metric} name={s.label} fill={s.color}
+              stackId={stacked ? "stack" : undefined} radius={stacked ? undefined : [2,2,0,0]} maxBarSize={20} />
+          ))}
         </BarChart>
       </ResponsiveContainer>
     );
@@ -448,16 +400,22 @@ function ChartWidget({ widget, data }: { widget: Widget; data: any[] }) {
       <ResponsiveContainer width="100%" height="100%">
         <AreaChart {...commonProps}>
           <defs>
-            <linearGradient id={`grad-${widget.id}`} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="5%"  stopColor={widget.color} stopOpacity={0.35} />
-              <stop offset="95%" stopColor={widget.color} stopOpacity={0} />
-            </linearGradient>
+            {allSeries.map(s => (
+              <linearGradient key={s.metric} id={`grad-${widget.id}-${s.metric}`} x1="0" y1="0" x2="0" y2="1">
+                <stop offset="5%"  stopColor={s.color} stopOpacity={0.3} />
+                <stop offset="95%" stopColor={s.color} stopOpacity={0} />
+              </linearGradient>
+            ))}
           </defs>
           <CartesianGrid {...darkGrid} />
           <XAxis dataKey="t" {...darkAxis} />
           <YAxis {...darkAxis} width={36} />
           <Tooltip {...darkTooltip} />
-          <Area dataKey="value" stroke={widget.color} fill={`url(#grad-${widget.id})`} strokeWidth={1.5} dot={false} />
+          {allSeries.length > 1 && <Legend wrapperStyle={{ fontSize: 9, color: D.muted }} />}
+          {allSeries.map(s => (
+            <Area key={s.metric} dataKey={s.metric} name={s.label} stroke={s.color}
+              fill={`url(#grad-${widget.id}-${s.metric})`} strokeWidth={1.5} dot={false} />
+          ))}
         </AreaChart>
       </ResponsiveContainer>
     );
@@ -469,29 +427,23 @@ function ChartWidget({ widget, data }: { widget: Widget; data: any[] }) {
         <XAxis dataKey="t" {...darkAxis} />
         <YAxis {...darkAxis} width={36} />
         <Tooltip {...darkTooltip} />
-        <Line dataKey="value" stroke={widget.color} strokeWidth={2} dot={false} activeDot={{ r: 3, fill: widget.color }} />
+        {allSeries.length > 1 && <Legend wrapperStyle={{ fontSize: 9, color: D.muted }} />}
+        {allSeries.map(s => (
+          <Line key={s.metric} dataKey={s.metric} name={s.label} stroke={s.color}
+            strokeWidth={2} dot={false} activeDot={{ r: 3, fill: s.color }} />
+        ))}
       </LineChart>
     </ResponsiveContainer>
   );
 }
 
-function EmptyState() {
-  return (
-    <div className="flex items-center justify-center h-full">
-      <p style={{ fontSize: 11, color: D.muted }}>No data in range</p>
-    </div>
-  );
-}
-
 // ══════════════════════════════════════════════════════════════════════════════
 // ── Widget Card ───────────────────────────────────────────────────────────────
-function WidgetCard({
-  widget, onDelete, onEdit, fullscreen, onFullscreen,
-}: {
+function WidgetCard({ widget, onDelete, onEdit, fullscreen, onFullscreen }: {
   widget: Widget; onDelete: () => void; onEdit: () => void;
   fullscreen: boolean; onFullscreen: () => void;
 }) {
-  const [data, setData]           = useState<any[]>([]);
+  const [data, setData]           = useState<Record<string, any[]>>({});
   const [loading, setLoading]     = useState(true);
   const [lastFetch, setLastFetch] = useState<Date | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
@@ -499,14 +451,27 @@ function WidgetCard({
 
   const fetchData = useCallback(async () => {
     setLoading(true);
+    const from = getFrom(widget), to = getTo(widget);
     try {
-      const from = getFrom(widget);
-      const to   = getTo(widget);
-      const params = new URLSearchParams({ metric: widget.metric, from, to, limit: "2000" });
-      const r = await fetch(`${BASE}/api/telemetry/${widget.assetId}?${params}`, { credentials: "include" });
-      if (r.ok) { setData(await r.json()); setLastFetch(new Date()); }
+      // Primary metric
+      const primaryKey = widget.metric;
+      const p = new URLSearchParams({ metric: widget.metric, from, to, limit: "2000" });
+      const r = await fetch(`${BASE}/api/telemetry/${widget.assetId}?${p}`, { credentials: "include" });
+      const result: Record<string, any[]> = {};
+      if (r.ok) result[primaryKey] = await r.json();
+
+      // Overlay metrics
+      for (const ov of (widget.overlayMetrics ?? [])) {
+        const key = `${ov.assetId}::${ov.metric}`;
+        const op = new URLSearchParams({ metric: ov.metric, from, to, limit: "2000" });
+        const or2 = await fetch(`${BASE}/api/telemetry/${ov.assetId}?${op}`, { credentials: "include" });
+        if (or2.ok) result[key] = await or2.json();
+      }
+      setData(result);
+      setLastFetch(new Date());
     } finally { setLoading(false); }
-  }, [widget.assetId, widget.metric, widget.rangeMinutes, widget.customFrom, widget.customTo]);
+  }, [widget.assetId, widget.metric, widget.rangeMinutes, widget.customFrom, widget.customTo,
+      JSON.stringify(widget.overlayMetrics)]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
   useEffect(() => {
@@ -515,35 +480,27 @@ function WidgetCard({
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [autoRefresh, fetchData]);
 
+  const overlayCount = widget.overlayMetrics?.length ?? 0;
   const chartH = widget.chartType === "kpi" ? 110 : widget.chartType === "gauge" ? 150 : widget.size === "lg" ? 240 : 180;
 
   function renderContent() {
-    if (loading && data.length === 0) return (
-      <div className="flex items-center justify-center h-full">
-        <RefreshCw className="w-4 h-4 animate-spin" style={{ color: D.muted }} />
-      </div>
-    );
+    if (loading && Object.keys(data).length === 0)
+      return <div className="flex items-center justify-center h-full"><RefreshCw className="w-4 h-4 animate-spin" style={{ color: D.muted }} /></div>;
     switch (widget.chartType) {
-      case "kpi":          return <KpiWidget widget={widget} data={data} />;
-      case "gauge":        return <GaugeWidget widget={widget} data={data} />;
-      case "pie":          return <PieWidget widget={widget} data={data} />;
-      case "donut":        return <PieWidget widget={widget} data={data} donut />;
-      case "scatter":      return <ScatterWidget widget={widget} data={data} />;
-      case "heatmap":      return <HeatmapWidget data={data} />;
-      case "statetimeline":return <StateTimelineWidget widget={widget} data={data} />;
-      default:             return <ChartWidget widget={widget} data={data} />;
+      case "kpi":           return <KpiWidget widget={widget} data={data} />;
+      case "gauge":         return <GaugeWidget widget={widget} data={data} />;
+      case "pie":           return <PieWidget widget={widget} data={data} />;
+      case "donut":         return <PieWidget widget={widget} data={data} donut />;
+      case "scatter":       return <ScatterWidget widget={widget} data={data} />;
+      case "heatmap":       return <HeatmapWidget widget={widget} data={data} />;
+      case "statetimeline": return <StateTimelineWidget widget={widget} data={data} />;
+      default:              return <ChartWidget widget={widget} data={data} />;
     }
   }
 
   return (
-    <div
-      className="flex flex-col rounded-lg overflow-hidden transition-all"
-      style={{
-        background: D.card,
-        border: `1px solid ${D.border}`,
-        boxShadow: `0 2px 12px rgba(0,0,0,0.4)`,
-      }}
-    >
+    <div className="flex flex-col rounded-lg overflow-hidden transition-all"
+      style={{ background: D.card, border: `1px solid ${D.border}`, boxShadow: "0 2px 12px rgba(0,0,0,0.4)" }}>
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2 shrink-0"
         style={{ borderBottom: `1px solid ${D.border}`, background: D.panel }}>
@@ -553,6 +510,7 @@ function WidgetCard({
             <span className="text-xs font-semibold truncate max-w-[130px]" style={{ color: D.text }}>{widget.title}</span>
             <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: D.border2, color: D.accent }}>{widget.assetName}</span>
             <span className="text-[9px] px-1.5 py-0.5 rounded font-mono" style={{ background: D.border2, color: D.accent2 }}>{widget.metric}</span>
+            {overlayCount > 0 && <span className="text-[9px] px-1 rounded" style={{ background: D.purple + "33", color: D.purple }}>+{overlayCount} overlay</span>}
           </div>
           <div className="flex items-center gap-2 mt-px">
             <Clock className="w-2.5 h-2.5" style={{ color: D.muted }} />
@@ -561,39 +519,33 @@ function WidgetCard({
           </div>
         </div>
         <div className="flex items-center gap-0.5 shrink-0">
-          <button className="p-1 rounded hover:bg-white/5 transition-colors" onClick={fetchData} disabled={loading}>
+          <button className="p-1 rounded hover:bg-white/5" onClick={fetchData} disabled={loading}>
             <RefreshCw className={`w-3 h-3 ${loading ? "animate-spin" : ""}`} style={{ color: D.muted }} />
           </button>
-          <button className="p-1 rounded hover:bg-white/5 transition-colors" onClick={onFullscreen}>
+          <button className="p-1 rounded hover:bg-white/5" onClick={onFullscreen}>
             {fullscreen ? <Minimize2 className="w-3 h-3" style={{ color: D.muted }} /> : <Maximize2 className="w-3 h-3" style={{ color: D.muted }} />}
           </button>
-          <button className="p-1 rounded hover:bg-white/5 transition-colors" onClick={onEdit}>
+          <button className="p-1 rounded hover:bg-white/5" onClick={onEdit}>
             <Settings2 className="w-3 h-3" style={{ color: D.muted }} />
           </button>
-          <button className="p-1 rounded hover:bg-red-500/20 transition-colors" onClick={onDelete}>
+          <button className="p-1 rounded hover:bg-red-500/20" onClick={onDelete}>
             <Trash2 className="w-3 h-3" style={{ color: D.red }} />
           </button>
         </div>
       </div>
 
-      {/* Chart body */}
-      <div className="p-2" style={{ height: fullscreen ? 420 : chartH }}>
-        {renderContent()}
-      </div>
+      {/* Body */}
+      <div className="p-2" style={{ height: fullscreen ? 420 : chartH }}>{renderContent()}</div>
 
       {/* Footer */}
       <div className="px-3 py-1 flex items-center justify-between shrink-0"
         style={{ borderTop: `1px solid ${D.border}`, background: D.panel }}>
         <span style={{ fontSize: 9, color: D.muted }}>
-          {data.length} pts · {CHART_TYPES.find(c => c.type === widget.chartType)?.label}
+          {Object.values(data).reduce((s, a) => s + a.length, 0)} pts · {CHART_TYPE_OPTS.find(c => c.value === widget.chartType)?.label}
         </span>
         <div className="flex items-center gap-1">
           <span style={{ fontSize: 9, color: D.muted }}>Auto</span>
-          <Switch
-            checked={autoRefresh}
-            onCheckedChange={setAutoRefresh}
-            className="scale-50 origin-right"
-          />
+          <Switch checked={autoRefresh} onCheckedChange={setAutoRefresh} className="scale-50 origin-right" />
         </div>
       </div>
     </div>
@@ -602,45 +554,30 @@ function WidgetCard({
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ── Asset Hierarchy Tree ──────────────────────────────────────────────────────
-interface AssetNode {
-  id: string; name: string; parentId?: string | null; childCount: number;
-}
+interface AssetNode { id: string; name: string; parentId?: string | null; childCount: number; }
 
-function AssetTreeNode({
-  asset, allAssets, selectedId, onSelect, depth,
-}: {
+function AssetTreeNode({ asset, allAssets, selectedId, onSelect, depth }: {
   asset: AssetNode; allAssets: AssetNode[]; selectedId: string | null;
   onSelect: (a: AssetNode) => void; depth: number;
 }) {
   const children = allAssets.filter(a => a.parentId === asset.id);
   const [expanded, setExpanded] = useState(depth < 2);
-  const hasChildren = children.length > 0;
   const isSelected = selectedId === asset.id;
-
   return (
     <div>
-      <div
-        className="flex items-center gap-1 py-1 rounded cursor-pointer group transition-all"
-        style={{
-          paddingLeft: `${8 + depth * 14}px`,
-          paddingRight: 8,
-          background: isSelected ? `${D.accent}18` : "transparent",
-          color: isSelected ? D.accent : D.text,
-        }}
-        onClick={() => onSelect(asset)}
-      >
-        {hasChildren ? (
-          <button onClick={e => { e.stopPropagation(); setExpanded(o => !o); }}
-            className="shrink-0 p-0.5 rounded hover:bg-white/5">
-            {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-          </button>
-        ) : <span className="w-4 shrink-0" />}
-        {hasChildren || asset.childCount > 0
-          ? expanded
-            ? <FolderOpen className="w-3 h-3 shrink-0" style={{ color: "#f59e0b" }} />
-            : <Folder className="w-3 h-3 shrink-0" style={{ color: "#f59e0b" }} />
-          : <Blocks className="w-3 h-3 shrink-0" style={{ color: D.accent }} />
-        }
+      <div className="flex items-center gap-1 py-1 rounded cursor-pointer transition-all"
+        style={{ paddingLeft: `${8 + depth * 14}px`, paddingRight: 8,
+          background: isSelected ? `${D.accent}18` : "transparent", color: isSelected ? D.accent : D.text }}
+        onClick={() => onSelect(asset)}>
+        {children.length > 0
+          ? <button onClick={e => { e.stopPropagation(); setExpanded(o => !o); }} className="shrink-0 p-0.5 rounded hover:bg-white/5">
+              {expanded ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+            </button>
+          : <span className="w-4 shrink-0" />}
+        {children.length > 0 || asset.childCount > 0
+          ? expanded ? <FolderOpen className="w-3 h-3 shrink-0" style={{ color: "#f59e0b" }} />
+                     : <Folder     className="w-3 h-3 shrink-0" style={{ color: "#f59e0b" }} />
+          : <Blocks className="w-3 h-3 shrink-0" style={{ color: D.accent }} />}
         <span className="truncate flex-1" style={{ fontSize: 11 }}>{asset.name}</span>
       </div>
       {expanded && children.map(child => (
@@ -653,96 +590,92 @@ function AssetTreeNode({
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ── Widget Dialog ─────────────────────────────────────────────────────────────
-function WidgetDialog({
-  open, onOpenChange, initial, onSave, usedColors, preselectedAssetId,
-}: {
+function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId }: {
   open: boolean; onOpenChange: (v: boolean) => void;
-  initial?: Widget | null; onSave: (w: Widget) => void;
-  usedColors: string[]; preselectedAssetId?: string;
+  initial?: Widget | null; onSave: (w: Widget) => void; preselectedAssetId?: string;
 }) {
+  const usedColors: string[] = [];
   const nextColor = NEON_PALETTE.find(c => !usedColors.includes(c)) ?? NEON_PALETTE[0];
 
-  const [title, setTitle]         = useState(initial?.title ?? "");
-  const [chartType, setChartType] = useState<ChartType>(initial?.chartType ?? "line");
-  const [assetId, setAssetId]     = useState(initial?.assetId ?? preselectedAssetId ?? "");
-  const [metric, setMetric]       = useState(initial?.metric ?? "");
-  const [rangeMinutes, setRangeMinutes] = useState(initial?.rangeMinutes ?? 60);
-  const [color, setColor]         = useState(initial?.color ?? nextColor);
-  const [minVal, setMinVal]       = useState(String(initial?.minVal ?? "0"));
-  const [maxVal, setMaxVal]       = useState(String(initial?.maxVal ?? "100"));
-  const [unit, setUnit]           = useState(initial?.unit ?? "");
-  const [size, setSize]           = useState<"sm"|"md"|"lg">(initial?.size ?? "md");
-  const [useCustom, setUseCustom] = useState(!!(initial?.customFrom));
-  const [customFrom, setCustomFrom] = useState(initial?.customFrom ?? "");
-  const [customTo, setCustomTo]   = useState(initial?.customTo ?? "");
+  const [title,       setTitle]       = useState(initial?.title ?? "");
+  const [chartType,   setChartType]   = useState<ChartType>(initial?.chartType ?? "line");
+  const [assetId,     setAssetId]     = useState(initial?.assetId ?? preselectedAssetId ?? "");
+  const [metric,      setMetric]      = useState(initial?.metric ?? "");
+  const [rangeMinutes,setRangeMinutes]= useState(initial?.rangeMinutes ?? 60);
+  const [color,       setColor]       = useState(initial?.color ?? nextColor);
+  const [minVal,      setMinVal]      = useState(String(initial?.minVal ?? "0"));
+  const [maxVal,      setMaxVal]      = useState(String(initial?.maxVal ?? "100"));
+  const [unit,        setUnit]        = useState(initial?.unit ?? "");
+  const [size,        setSize]        = useState<"sm"|"md"|"lg">(initial?.size ?? "md");
+  const [useCustom,   setUseCustom]   = useState(!!(initial?.customFrom));
+  const [customFrom,  setCustomFrom]  = useState(initial?.customFrom ?? "");
+  const [customTo,    setCustomTo]    = useState(initial?.customTo ?? "");
+  const [overlayMetrics, setOverlayMetrics] = useState<OverlayMetric[]>(initial?.overlayMetrics ?? []);
 
-  const { data: assets } = useListAssets();
+  const { data: assets }     = useListAssets();
   const { data: attributes } = useListAssetAttributes(assetId, {
     query: { enabled: !!assetId, queryKey: ["viz-attrs", assetId] },
   });
+  const assetList   = (assets as any[] | undefined) ?? [];
+  const attrList    = (attributes as any[] | undefined) ?? [];
+  const metricAttrs = attrList.filter((a: any) => ["dynamic","metric","runtime"].includes(a.type));
+  const assetName   = assetList.find((a: any) => a.id === assetId)?.name ?? "";
+  const canOverlay  = supportsOverlay(chartType);
 
-  const assetList = (assets as any[] | undefined) ?? [];
-  const attrList  = (attributes as any[] | undefined) ?? [];
-  const metricAttrs = attrList.filter((a: any) =>
-    ["dynamic", "metric", "runtime"].includes(a.type)
-  );
-  const assetName = assetList.find((a: any) => a.id === assetId)?.name ?? "";
+  useEffect(() => { if (preselectedAssetId && !initial) setAssetId(preselectedAssetId); }, [preselectedAssetId]);
 
-  useEffect(() => {
-    if (preselectedAssetId && !initial) setAssetId(preselectedAssetId);
-  }, [preselectedAssetId]);
+  function addOverlay() {
+    setOverlayMetrics(prev => [...prev, { assetId: "", assetName: "", metric: "", color: NEON_PALETTE[(prev.length + 1) % NEON_PALETTE.length] }]);
+  }
+  function removeOverlay(i: number) { setOverlayMetrics(prev => prev.filter((_, idx) => idx !== i)); }
+  function updateOverlay(i: number, field: keyof OverlayMetric, value: string) {
+    setOverlayMetrics(prev => prev.map((o, idx) => {
+      if (idx !== i) return o;
+      const updated = { ...o, [field]: value };
+      if (field === "assetId") {
+        updated.assetName = assetList.find((a: any) => a.id === value)?.name ?? "";
+        updated.metric = "";
+      }
+      return updated;
+    }));
+  }
 
   function handleSave() {
     if (!assetId || !metric) return;
     onSave({
-      id:       initial?.id ?? crypto.randomUUID(),
-      title:    title || `${assetName} / ${metric}`,
+      id: initial?.id ?? crypto.randomUUID(),
+      title: title || `${assetName} / ${metric}`,
       chartType, assetId, assetName, metric, rangeMinutes, color,
-      minVal:   Number(minVal),
-      maxVal:   Number(maxVal),
-      unit,     size,
+      minVal: Number(minVal), maxVal: Number(maxVal), unit, size,
       customFrom: useCustom ? customFrom : undefined,
       customTo:   useCustom ? customTo   : undefined,
+      overlayMetrics: canOverlay ? overlayMetrics.filter(o => o.assetId && o.metric) : [],
     });
     onOpenChange(false);
   }
-
-  const needsMinMax = chartType === "gauge";
-  const needsUnit   = ["gauge", "kpi"].includes(chartType);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{initial ? "Edit Widget" : "Add Widget"}</DialogTitle>
+          <DialogDescription>Configure your visualization widget</DialogDescription>
         </DialogHeader>
-
         <div className="space-y-4 py-1">
-          {/* Widget type grid */}
-          <div className="space-y-1.5">
+
+          {/* Widget Type — dropdown */}
+          <div className="space-y-1">
             <Label className="text-xs font-medium">Widget Type</Label>
-            <div className="grid grid-cols-3 gap-1.5">
-              {CHART_TYPES.map(ct => (
-                <button key={ct.type} onClick={() => setChartType(ct.type)}
-                  title={ct.desc}
-                  className={cn(
-                    "flex items-center gap-1.5 rounded border px-2 py-2 text-xs font-medium transition-colors",
-                    chartType === ct.type
-                      ? "border-primary bg-primary/10 text-primary"
-                      : "border-border hover:bg-muted/60 text-muted-foreground"
-                  )}>
-                  <ct.icon className="w-3.5 h-3.5 shrink-0" />
-                  <span className="truncate">{ct.label}</span>
-                </button>
-              ))}
-            </div>
+            <select value={chartType} onChange={e => setChartType(e.target.value as ChartType)}
+              className="w-full h-9 rounded border border-border bg-background px-2 text-sm">
+              {CHART_TYPE_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
           </div>
 
           {/* Title */}
           <div className="space-y-1">
             <Label className="text-xs">Title (optional)</Label>
-            <Input className="h-8 text-xs" value={title}
-              onChange={e => setTitle(e.target.value)} placeholder="Auto-generated if blank" />
+            <Input className="h-8 text-xs" value={title} onChange={e => setTitle(e.target.value)} placeholder="Auto-generated if blank" />
           </div>
 
           {/* Asset */}
@@ -755,76 +688,73 @@ function WidgetDialog({
             </select>
           </div>
 
-          {/* Metric */}
+          {/* Primary Metric */}
           <div className="space-y-1">
-            <Label className="text-xs">Metric</Label>
-            <select value={metric} onChange={e => setMetric(e.target.value)}
-              disabled={!assetId}
+            <Label className="text-xs">Primary Metric</Label>
+            <select value={metric} onChange={e => setMetric(e.target.value)} disabled={!assetId}
               className="w-full h-8 rounded border border-border bg-background px-2 text-xs disabled:opacity-50">
               <option value="">{assetId ? "Select metric…" : "Select asset first"}</option>
               {metricAttrs.map((a: any) => <option key={a.name} value={a.name}>{a.name}</option>)}
             </select>
           </div>
 
-          {/* Time range */}
-          <div className="space-y-1.5">
-            <div className="flex items-center justify-between">
-              <Label className="text-xs">Time Range</Label>
-              <div className="flex items-center gap-1.5">
-                <Switch checked={useCustom} onCheckedChange={setUseCustom} className="scale-75 origin-right" />
-                <span className="text-[10px] text-muted-foreground">Custom</span>
+          {/* Overlay Metrics — only for line/area/bar/stackbar */}
+          {canOverlay && (
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label className="text-xs font-medium">Overlay Metrics</Label>
+                <button onClick={addOverlay}
+                  className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded"
+                  style={{ background: `${D.accent}22`, color: D.accent, border: `1px solid ${D.accent}44` }}>
+                  <Plus className="w-2.5 h-2.5" /> Add Series
+                </button>
               </div>
+              {overlayMetrics.map((ov, i) => (
+                <OverlayRow key={i} overlay={ov} assetList={assetList} index={i}
+                  onChange={(field, val) => updateOverlay(i, field, val)}
+                  onRemove={() => removeOverlay(i)} />
+              ))}
+              {overlayMetrics.length === 0 && (
+                <p className="text-[10px]" style={{ color: D.muted }}>Add up to 4 extra series to overlay on the same chart.</p>
+              )}
             </div>
-            {useCustom ? (
-              <div className="grid grid-cols-2 gap-2">
+          )}
+
+          {/* Time Range — dropdown */}
+          <div className="space-y-1.5">
+            <Label className="text-xs">Time Range</Label>
+            <select value={useCustom ? -1 : rangeMinutes}
+              onChange={e => {
+                const v = Number(e.target.value);
+                if (v === -1) { setUseCustom(true); } else { setUseCustom(false); setRangeMinutes(v); }
+              }}
+              className="w-full h-8 rounded border border-border bg-background px-2 text-xs">
+              {RANGES.map(r => <option key={r.minutes} value={r.minutes}>{r.label}</option>)}
+            </select>
+            {useCustom && (
+              <div className="grid grid-cols-2 gap-2 mt-1">
                 <div className="space-y-0.5">
                   <Label className="text-[10px] text-muted-foreground">From</Label>
-                  <Input type="datetime-local" className="h-8 text-xs" value={customFrom}
-                    onChange={e => setCustomFrom(e.target.value)} />
+                  <Input type="datetime-local" className="h-8 text-xs" value={customFrom} onChange={e => setCustomFrom(e.target.value)} />
                 </div>
                 <div className="space-y-0.5">
                   <Label className="text-[10px] text-muted-foreground">To</Label>
-                  <Input type="datetime-local" className="h-8 text-xs" value={customTo}
-                    onChange={e => setCustomTo(e.target.value)} />
+                  <Input type="datetime-local" className="h-8 text-xs" value={customTo} onChange={e => setCustomTo(e.target.value)} />
                 </div>
-              </div>
-            ) : (
-              <div className="flex flex-wrap gap-1.5">
-                {RANGES.map(r => (
-                  <button key={r.minutes} onClick={() => setRangeMinutes(r.minutes)}
-                    className={cn(
-                      "px-2.5 py-1 rounded text-xs border transition-colors",
-                      rangeMinutes === r.minutes
-                        ? "border-primary bg-primary/10 text-primary"
-                        : "border-border hover:bg-muted/60"
-                    )}>
-                    {r.label}
-                  </button>
-                ))}
               </div>
             )}
           </div>
 
           {/* Gauge options */}
-          {needsMinMax && (
-            <div className="grid grid-cols-2 gap-2">
-              <div className="space-y-1">
-                <Label className="text-xs">Min Value</Label>
-                <Input className="h-8 text-xs" type="number" value={minVal} onChange={e => setMinVal(e.target.value)} />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs">Max Value</Label>
-                <Input className="h-8 text-xs" type="number" value={maxVal} onChange={e => setMaxVal(e.target.value)} />
-              </div>
+          {chartType === "gauge" && (
+            <div className="grid grid-cols-3 gap-2">
+              <div className="space-y-1"><Label className="text-xs">Min</Label><Input className="h-8 text-xs" type="number" value={minVal} onChange={e => setMinVal(e.target.value)} /></div>
+              <div className="space-y-1"><Label className="text-xs">Max</Label><Input className="h-8 text-xs" type="number" value={maxVal} onChange={e => setMaxVal(e.target.value)} /></div>
+              <div className="space-y-1"><Label className="text-xs">Unit</Label><Input className="h-8 text-xs" value={unit} onChange={e => setUnit(e.target.value)} placeholder="°C" /></div>
             </div>
           )}
-
-          {/* Unit */}
-          {needsUnit && (
-            <div className="space-y-1">
-              <Label className="text-xs">Unit (optional)</Label>
-              <Input className="h-8 text-xs" value={unit} onChange={e => setUnit(e.target.value)} placeholder="e.g. °C, kWh, rpm" />
-            </div>
+          {chartType === "kpi" && (
+            <div className="space-y-1"><Label className="text-xs">Unit (optional)</Label><Input className="h-8 text-xs" value={unit} onChange={e => setUnit(e.target.value)} placeholder="e.g. kWh, rpm" /></div>
           )}
 
           {/* Size */}
@@ -833,10 +763,8 @@ function WidgetDialog({
             <div className="flex gap-2">
               {(["sm","md","lg"] as const).map(s => (
                 <button key={s} onClick={() => setSize(s)}
-                  className={cn(
-                    "flex-1 rounded border py-1.5 text-xs font-medium capitalize transition-colors",
-                    size === s ? "border-primary bg-primary/5 text-primary" : "border-border hover:bg-muted/60"
-                  )}>
+                  className={cn("flex-1 rounded border py-1.5 text-xs font-medium capitalize transition-colors",
+                    size === s ? "border-primary bg-primary/5 text-primary" : "border-border hover:bg-muted/60")}>
                   {s === "sm" ? "Small" : s === "md" ? "Medium" : "Large"}
                 </button>
               ))}
@@ -845,12 +773,11 @@ function WidgetDialog({
 
           {/* Color */}
           <div className="space-y-1">
-            <Label className="text-xs">Color</Label>
+            <Label className="text-xs">Primary Color</Label>
             <div className="flex gap-2 flex-wrap">
               {NEON_PALETTE.map(c => (
                 <button key={c} onClick={() => setColor(c)}
-                  className={cn("w-6 h-6 rounded-full border-2 transition-all",
-                    color === c ? "border-white scale-125" : "border-transparent")}
+                  className={cn("w-6 h-6 rounded-full border-2 transition-all", color === c ? "border-white scale-125" : "border-transparent")}
                   style={{ background: c, boxShadow: color === c ? `0 0 8px ${c}` : "none" }} />
               ))}
             </div>
@@ -859,8 +786,112 @@ function WidgetDialog({
 
         <DialogFooter>
           <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button size="sm" onClick={handleSave} disabled={!assetId || !metric}>
-            {initial ? "Update Widget" : "Add Widget"}
+          <Button size="sm" onClick={handleSave} disabled={!assetId || !metric}>{initial ? "Update Widget" : "Add Widget"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// Overlay row sub-component (needs its own attribute fetch per overlay asset)
+function OverlayRow({ overlay, assetList, index, onChange, onRemove }: {
+  overlay: OverlayMetric; assetList: any[]; index: number;
+  onChange: (field: keyof OverlayMetric, val: string) => void;
+  onRemove: () => void;
+}) {
+  const { data: attributes } = useListAssetAttributes(overlay.assetId, {
+    query: { enabled: !!overlay.assetId, queryKey: ["viz-ov-attrs", overlay.assetId, index] },
+  });
+  const attrList    = (attributes as any[] | undefined) ?? [];
+  const metricAttrs = attrList.filter((a: any) => ["dynamic","metric","runtime"].includes(a.type));
+  return (
+    <div className="flex items-center gap-2 p-2 rounded" style={{ background: D.panel, border: `1px solid ${D.border}` }}>
+      <div className="w-3 h-3 rounded-full shrink-0" style={{ background: overlay.color }} />
+      <select value={overlay.assetId} onChange={e => onChange("assetId", e.target.value)}
+        className="flex-1 h-7 rounded border border-border bg-background px-1.5 text-[11px]">
+        <option value="">Asset…</option>
+        {assetList.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
+      </select>
+      <select value={overlay.metric} onChange={e => onChange("metric", e.target.value)}
+        disabled={!overlay.assetId}
+        className="flex-1 h-7 rounded border border-border bg-background px-1.5 text-[11px] disabled:opacity-40">
+        <option value="">Metric…</option>
+        {metricAttrs.map((a: any) => <option key={a.name} value={a.name}>{a.name}</option>)}
+      </select>
+      <div className="flex gap-1 shrink-0">
+        {NEON_PALETTE.slice(0, 6).map(c => (
+          <button key={c} onClick={() => onChange("color", c)}
+            className={cn("w-4 h-4 rounded-full border", overlay.color === c ? "border-white" : "border-transparent")}
+            style={{ background: c }} />
+        ))}
+      </div>
+      <button onClick={onRemove} className="p-0.5 rounded hover:bg-red-500/20">
+        <Trash2 className="w-3 h-3" style={{ color: D.red }} />
+      </button>
+    </div>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ── Dashboard Edit Dialog ─────────────────────────────────────────────────────
+function DashboardDialog({ open, onOpenChange, initial, onSave }: {
+  open: boolean; onOpenChange: (v: boolean) => void;
+  initial?: Dashboard | null; onSave: (d: Partial<Dashboard>) => void;
+}) {
+  const [name,        setName]       = useState(initial?.name ?? "");
+  const [description, setDesc]       = useState(initial?.description ?? "");
+  const [roleAccess,  setRoleAccess] = useState<Role[]>(initial?.roleAccess ?? [...ALL_ROLES]);
+
+  useEffect(() => {
+    if (open) { setName(initial?.name ?? ""); setDesc(initial?.description ?? ""); setRoleAccess(initial?.roleAccess ?? [...ALL_ROLES]); }
+  }, [open, initial]);
+
+  function toggleRole(r: Role) {
+    setRoleAccess(prev => prev.includes(r) ? prev.filter(x => x !== r) : [...prev, r]);
+  }
+
+  const ROLE_COLORS: Record<Role, string> = { admin: D.purple, engineer: D.accent, operator: D.green, viewer: D.muted };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>{initial ? "Edit Dashboard" : "New Dashboard"}</DialogTitle>
+          <DialogDescription>Configure dashboard name, description, and who can access it.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-1">
+          <div className="space-y-1">
+            <Label className="text-xs font-medium">Dashboard Name</Label>
+            <Input className="h-9" value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Plant 1 Overview" />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs font-medium">Description (optional)</Label>
+            <Textarea className="text-xs resize-none h-16" value={description} onChange={e => setDesc(e.target.value)} placeholder="What this dashboard shows…" />
+          </div>
+          <div className="space-y-2">
+            <Label className="text-xs font-medium flex items-center gap-1.5">
+              <Shield className="w-3.5 h-3.5" /> Access Control
+            </Label>
+            <p className="text-[10px]" style={{ color: D.muted }}>Select which roles can view this dashboard.</p>
+            <div className="flex gap-2 flex-wrap">
+              {ALL_ROLES.map(r => (
+                <button key={r} onClick={() => toggleRole(r)}
+                  className={cn("px-3 py-1.5 rounded-full text-xs font-medium border capitalize transition-all",
+                    roleAccess.includes(r) ? "border-current" : "border-border opacity-40")}
+                  style={{ color: ROLE_COLORS[r], borderColor: roleAccess.includes(r) ? ROLE_COLORS[r] : undefined,
+                    background: roleAccess.includes(r) ? ROLE_COLORS[r] + "22" : "transparent" }}>
+                  {r}
+                </button>
+              ))}
+            </div>
+            {roleAccess.length === 0 && <p className="text-[10px] text-destructive">At least one role required.</p>}
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button size="sm" onClick={() => { if (name && roleAccess.length) { onSave({ name, description, roleAccess }); onOpenChange(false); } }}
+            disabled={!name || !roleAccess.length}>
+            {initial ? "Save Changes" : "Create Dashboard"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -870,105 +901,142 @@ function WidgetDialog({
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ── Main Visualization Page ───────────────────────────────────────────────────
+function loadDashboards(): Dashboard[] {
+  try { return JSON.parse(localStorage.getItem(DASHBOARDS_KEY) ?? "[]"); } catch { return []; }
+}
+function saveDashboards(dbs: Dashboard[]) { localStorage.setItem(DASHBOARDS_KEY, JSON.stringify(dbs)); }
+
 export default function Visualization() {
-  const [widgets, setWidgets] = useState<Widget[]>(() => {
-    try { return JSON.parse(localStorage.getItem(STORAGE_KEY) ?? "[]"); } catch { return []; }
-  });
-  const [dialogOpen, setDialogOpen]     = useState(false);
-  const [editWidget, setEditWidget]     = useState<Widget | null>(null);
-  const [fullscreenId, setFullscreenId] = useState<string | null>(null);
-  const [treeOpen, setTreeOpen]         = useState(true);
+  const { currentUser } = useCurrentUser();
+  const userRole = currentUser?.role ?? "viewer";
+
+  const [dashboards,  setDashboards]  = useState<Dashboard[]>(loadDashboards);
+  const [activeDashId,setActiveDashId]= useState<string | null>(null);
+  const [dialogOpen,  setDialogOpen]  = useState(false);
+  const [editWidget,  setEditWidget]  = useState<Widget | null>(null);
+  const [fullscreenId,setFullscreenId]= useState<string | null>(null);
+  const [treeOpen,    setTreeOpen]    = useState(true);
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
-  const [globalRange, setGlobalRange]   = useState<number | null>(null);
+  const [globalRange, setGlobalRange] = useState<number | null>(null);
+
+  // Dashboard dialogs
+  const [dbDialogOpen, setDbDialogOpen] = useState(false);
+  const [editDashboard, setEditDashboard] = useState<Dashboard | null>(null);
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null);
 
   const { data: assets } = useListAssets();
   const assetList = (assets as any[] | undefined) ?? [];
-  const roots = assetList.filter(a => !a.parentId);
+  const roots     = assetList.filter(a => !a.parentId);
+
+  // Persist dashboards
+  useEffect(() => { saveDashboards(dashboards); }, [dashboards]);
+
+  // Filter dashboards by role
+  const visibleDashboards = useMemo(() =>
+    dashboards.filter(d => d.roleAccess.includes(userRole as Role)),
+    [dashboards, userRole]
+  );
+
+  const activeDash = visibleDashboards.find(d => d.id === activeDashId)
+    ?? visibleDashboards[0]
+    ?? null;
 
   useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(widgets));
-  }, [widgets]);
+    if (activeDash && activeDashId !== activeDash.id) setActiveDashId(activeDash.id);
+  }, [activeDash]);
 
-  function addOrUpdate(w: Widget) {
-    setWidgets(prev => {
-      const idx = prev.findIndex(x => x.id === w.id);
-      return idx >= 0 ? prev.map((x, i) => i === idx ? w : x) : [...prev, w];
-    });
+  // ── Dashboard CRUD ──────────────────────────────────────────────────────────
+  function createDashboard(fields: Partial<Dashboard>) {
+    const d: Dashboard = {
+      id: crypto.randomUUID(), widgets: [],
+      name: fields.name ?? "New Dashboard",
+      description: fields.description,
+      roleAccess: fields.roleAccess ?? [...ALL_ROLES],
+      createdAt: new Date().toISOString(),
+    };
+    setDashboards(prev => [...prev, d]);
+    setActiveDashId(d.id);
   }
-  function removeWidget(id: string) { setWidgets(prev => prev.filter(w => w.id !== id)); }
+  function updateDashboard(id: string, fields: Partial<Dashboard>) {
+    setDashboards(prev => prev.map(d => d.id === id ? { ...d, ...fields } : d));
+  }
+  function cloneDashboard(d: Dashboard) {
+    const clone: Dashboard = { ...d, id: crypto.randomUUID(), name: `${d.name} (Copy)`, createdAt: new Date().toISOString(),
+      widgets: d.widgets.map(w => ({ ...w, id: crypto.randomUUID() })) };
+    setDashboards(prev => [...prev, clone]);
+    setActiveDashId(clone.id);
+  }
+  function deleteDashboard(id: string) {
+    setDashboards(prev => prev.filter(d => d.id !== id));
+    if (activeDashId === id) setActiveDashId(null);
+  }
 
-  // Apply global range to all widgets
+  // ── Widget CRUD on active dashboard ────────────────────────────────────────
+  function addOrUpdateWidget(w: Widget) {
+    if (!activeDash) { createDashboard({ name: "My Dashboard" }); return; }
+    setDashboards(prev => prev.map(d => {
+      if (d.id !== activeDash.id) return d;
+      const idx = d.widgets.findIndex(x => x.id === w.id);
+      return { ...d, widgets: idx >= 0 ? d.widgets.map((x, i) => i === idx ? w : x) : [...d.widgets, w] };
+    }));
+  }
+  function removeWidget(id: string) {
+    if (!activeDash) return;
+    setDashboards(prev => prev.map(d => d.id !== activeDash.id ? d : { ...d, widgets: d.widgets.filter(w => w.id !== id) }));
+  }
   function applyGlobalRange(minutes: number) {
     setGlobalRange(minutes);
-    setWidgets(prev => prev.map(w => ({ ...w, rangeMinutes: minutes, customFrom: undefined, customTo: undefined })));
+    if (!activeDash) return;
+    setDashboards(prev => prev.map(d => d.id !== activeDash.id ? d : {
+      ...d, widgets: d.widgets.map(w => ({ ...w, rangeMinutes: minutes, customFrom: undefined, customTo: undefined }))
+    }));
   }
 
-  const usedColors = widgets.map(w => w.color);
-
-  // Filtered widgets by selected asset
+  const widgets        = activeDash?.widgets ?? [];
   const displayWidgets = useMemo(() => {
     if (!selectedAssetId) return widgets;
-    return widgets.filter(w => w.assetId === selectedAssetId);
+    return widgets.filter(w => w.assetId === selectedAssetId || (w.overlayMetrics ?? []).some(o => o.assetId === selectedAssetId));
   }, [widgets, selectedAssetId]);
 
-  // Grid cols per size
   function sizeClass(w: Widget) {
-    return w.chartType === "kpi"
-      ? "col-span-1"
-      : w.size === "lg" ? "col-span-2" : "col-span-1";
+    return w.chartType === "kpi" ? "col-span-1" : w.size === "lg" ? "col-span-2" : "col-span-1";
   }
+
+  const canManage = ["admin","engineer"].includes(userRole);
 
   return (
     <div className="flex h-full overflow-hidden" style={{ background: D.bg }}>
 
-      {/* ── Asset Hierarchy Tree Panel ── */}
+      {/* ── Asset Hierarchy Panel ── */}
       {treeOpen && (
         <div className="w-56 flex-shrink-0 flex flex-col overflow-hidden"
           style={{ background: D.panel, borderRight: `1px solid ${D.border}` }}>
           <div className="px-3 py-2.5 flex items-center justify-between shrink-0"
             style={{ borderBottom: `1px solid ${D.border}` }}>
             <span className="text-xs font-semibold" style={{ color: D.accent }}>Asset Hierarchy</span>
-            <button onClick={() => setSelectedAssetId(null)}
-              title="Clear filter"
-              className="p-0.5 rounded hover:bg-white/5 transition-colors">
+            <button onClick={() => setSelectedAssetId(null)} title="Clear filter" className="p-0.5 rounded hover:bg-white/5">
               <RotateCcw className="w-3 h-3" style={{ color: D.muted }} />
             </button>
           </div>
           <div className="flex-1 overflow-y-auto py-1">
-            {/* "All" entry */}
-            <div
-              className="flex items-center gap-2 px-3 py-1.5 cursor-pointer rounded mx-1 transition-all"
-              style={{
-                background: selectedAssetId === null ? `${D.accent}18` : "transparent",
-                color: selectedAssetId === null ? D.accent : D.muted,
-              }}
-              onClick={() => setSelectedAssetId(null)}
-            >
+            <div className="flex items-center gap-2 px-3 py-1.5 cursor-pointer rounded mx-1 transition-all"
+              style={{ background: selectedAssetId === null ? `${D.accent}18` : "transparent", color: selectedAssetId === null ? D.accent : D.muted }}
+              onClick={() => setSelectedAssetId(null)}>
               <LayoutDashboard className="w-3 h-3 shrink-0" />
               <span style={{ fontSize: 11 }}>All Assets</span>
-              <span className="ml-auto text-[9px] px-1 rounded" style={{ background: D.border2, color: D.muted }}>
-                {widgets.length}
-              </span>
+              <span className="ml-auto text-[9px] px-1 rounded" style={{ background: D.border2, color: D.muted }}>{widgets.length}</span>
             </div>
             {roots.map(root => (
-              <AssetTreeNode
-                key={root.id}
-                asset={root}
-                allAssets={assetList}
-                selectedId={selectedAssetId}
-                onSelect={a => setSelectedAssetId(prev => prev === a.id ? null : a.id)}
-                depth={0}
-              />
+              <AssetTreeNode key={root.id} asset={root} allAssets={assetList}
+                selectedId={selectedAssetId} depth={0}
+                onSelect={a => setSelectedAssetId(prev => prev === a.id ? null : a.id)} />
             ))}
           </div>
-          {/* Add widget for selected asset */}
           {selectedAssetId && (
             <div className="p-2 shrink-0" style={{ borderTop: `1px solid ${D.border}` }}>
-              <button
-                onClick={() => { setEditWidget(null); setDialogOpen(true); }}
-                className="w-full flex items-center justify-center gap-1.5 rounded py-1.5 text-xs font-medium transition-colors"
-                style={{ background: `${D.accent}22`, color: D.accent, border: `1px solid ${D.accent}44` }}
-              >
+              <button onClick={() => { setEditWidget(null); setDialogOpen(true); }}
+                className="w-full flex items-center justify-center gap-1.5 rounded py-1.5 text-xs font-medium"
+                style={{ background: `${D.accent}22`, color: D.accent, border: `1px solid ${D.accent}44` }}>
                 <Plus className="w-3 h-3" /> Add Widget
               </button>
             </div>
@@ -979,119 +1047,205 @@ export default function Visualization() {
       {/* ── Main Canvas ── */}
       <div className="flex-1 flex flex-col overflow-hidden">
 
-        {/* Toolbar */}
-        <div className="flex items-center gap-2 px-4 py-2.5 shrink-0 flex-wrap"
+        {/* ── Toolbar ── */}
+        <div className="flex items-center gap-2 px-3 py-2 shrink-0 flex-wrap"
           style={{ background: D.panel, borderBottom: `1px solid ${D.border}` }}>
-          <button
-            onClick={() => setTreeOpen(o => !o)}
-            className="p-1.5 rounded transition-colors hover:bg-white/5"
-            title={treeOpen ? "Hide tree" : "Show tree"}
-          >
-            {treeOpen
-              ? <PanelLeftClose className="w-4 h-4" style={{ color: D.accent }} />
-              : <PanelLeftOpen  className="w-4 h-4" style={{ color: D.accent }} />}
+
+          {/* Tree toggle */}
+          <button onClick={() => setTreeOpen(o => !o)} className="p-1.5 rounded hover:bg-white/5">
+            {treeOpen ? <PanelLeftClose className="w-4 h-4" style={{ color: D.accent }} />
+                      : <PanelLeftOpen  className="w-4 h-4" style={{ color: D.accent }} />}
           </button>
 
-          <div className="flex items-center gap-1 px-2 py-1 rounded" style={{ background: D.card, border: `1px solid ${D.border}` }}>
-            <LayoutDashboard className="w-3.5 h-3.5" style={{ color: D.accent }} />
-            <span className="text-xs font-semibold" style={{ color: D.text }}>
-              {selectedAssetId
-                ? (assetList.find((a: any) => a.id === selectedAssetId)?.name ?? "Asset")
-                : "All Assets"}
-            </span>
-            {selectedAssetId && (
-              <span className="text-[9px] ml-1 px-1 rounded" style={{ background: `${D.accent}22`, color: D.accent }}>
-                filtered
-              </span>
-            )}
+          {/* Dashboard selector dropdown */}
+          <div className="flex items-center gap-1.5 min-w-0">
+            <BookOpen className="w-3.5 h-3.5 shrink-0" style={{ color: D.accent }} />
+            <select
+              value={activeDashId ?? ""}
+              onChange={e => setActiveDashId(e.target.value || null)}
+              className="h-7 rounded px-2 text-xs font-semibold border max-w-[180px]"
+              style={{ background: D.card, color: D.text, borderColor: D.border2 }}>
+              {visibleDashboards.length === 0
+                ? <option value="">No dashboards yet</option>
+                : visibleDashboards.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
+            </select>
+
+            {/* Dashboard action menu */}
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button className="p-1 rounded hover:bg-white/5" style={{ color: D.muted }}>
+                  <MoreVertical className="w-3.5 h-3.5" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-48">
+                <DropdownMenuItem onClick={() => { setEditDashboard(null); setDbDialogOpen(true); }}>
+                  <Plus className="w-3.5 h-3.5 mr-2" /> New Dashboard
+                </DropdownMenuItem>
+                {activeDash && canManage && <>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => { setEditDashboard(activeDash); setDbDialogOpen(true); }}>
+                    <Edit2 className="w-3.5 h-3.5 mr-2" /> Edit Dashboard
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={() => cloneDashboard(activeDash)}>
+                    <Copy className="w-3.5 h-3.5 mr-2" /> Clone Dashboard
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem onClick={() => { setEditDashboard(activeDash); setDbDialogOpen(true); }}>
+                    <Shield className="w-3.5 h-3.5 mr-2" /> Access Control
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem className="text-destructive focus:text-destructive"
+                    onClick={() => setDeleteConfirmId(activeDash.id)}>
+                    <Trash2 className="w-3.5 h-3.5 mr-2" /> Delete Dashboard
+                  </DropdownMenuItem>
+                </>}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+
+          {/* Role badge */}
+          <div className="px-2 py-0.5 rounded-full text-[10px] font-medium capitalize"
+            style={{ background: D.border2, color: D.muted }}>
+            <Shield className="w-2.5 h-2.5 inline mr-1" style={{ color: D.accent }} />
+            {userRole}
           </div>
 
           <div className="flex-1" />
 
-          {/* Global time range quick-set */}
-          <div className="flex items-center gap-1 flex-wrap">
+          {/* Global time range — dropdown */}
+          <div className="flex items-center gap-1.5">
             <Clock className="w-3.5 h-3.5 shrink-0" style={{ color: D.muted }} />
-            {RANGES.map(r => (
-              <button key={r.minutes}
-                onClick={() => applyGlobalRange(r.minutes)}
-                className="px-2 py-0.5 rounded text-[10px] font-medium transition-colors"
-                style={{
-                  background: globalRange === r.minutes ? D.accent : D.border,
-                  color: globalRange === r.minutes ? "#000" : D.muted,
-                  border: `1px solid ${globalRange === r.minutes ? D.accent : D.border2}`,
-                }}>
-                {r.label}
-              </button>
-            ))}
+            <select
+              value={globalRange ?? ""}
+              onChange={e => { if (e.target.value) applyGlobalRange(Number(e.target.value)); }}
+              className="h-7 rounded px-2 text-xs border"
+              style={{ background: D.card, color: D.text, borderColor: D.border2 }}>
+              <option value="">Set all ranges…</option>
+              {RANGES.filter(r => r.minutes > 0).map(r => (
+                <option key={r.minutes} value={r.minutes}>{r.label}</option>
+              ))}
+            </select>
           </div>
 
-          <button
-            onClick={() => { setEditWidget(null); setDialogOpen(true); }}
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold transition-all"
-            style={{ background: D.accent, color: "#000", boxShadow: `0 0 12px ${D.accent}44` }}>
-            <Plus className="w-3.5 h-3.5" /> Add Widget
-          </button>
-        </div>
-
-        {/* Widget grid */}
-        <div className="flex-1 overflow-auto p-4">
-          {displayWidgets.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-full text-center">
-              <LayoutDashboard className="w-14 h-14 mb-4" style={{ color: D.border2 }} />
-              <p className="text-sm font-semibold mb-1" style={{ color: D.text }}>
-                {selectedAssetId ? "No widgets for this asset" : "No widgets yet"}
-              </p>
-              <p className="text-xs mb-5 max-w-xs" style={{ color: D.muted }}>
-                {selectedAssetId
-                  ? "Click \"Add Widget\" to create a visualization for the selected asset."
-                  : "Add a widget to start visualizing your telemetry data. Supports 11 chart types, live auto-refresh, and custom time ranges."}
-              </p>
-              <button
-                onClick={() => { setEditWidget(null); setDialogOpen(true); }}
-                className="flex items-center gap-2 px-4 py-2 rounded text-sm font-semibold transition-all"
-                style={{ background: D.accent, color: "#000", boxShadow: `0 0 16px ${D.accent}55` }}>
-                <Plus className="w-4 h-4" /> Add First Widget
-              </button>
-            </div>
-          ) : (
-            <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4 auto-rows-auto">
-              {displayWidgets.map(w => (
-                <div key={w.id} className={sizeClass(w)}>
-                  <WidgetCard
-                    widget={w}
-                    onDelete={() => removeWidget(w.id)}
-                    onEdit={() => { setEditWidget(w); setDialogOpen(true); }}
-                    fullscreen={fullscreenId === w.id}
-                    onFullscreen={() => setFullscreenId(prev => prev === w.id ? null : w.id)}
-                  />
-                </div>
-              ))}
-            </div>
+          {/* Add Widget button */}
+          {(canManage || activeDash) && (
+            <button onClick={() => { setEditWidget(null); setDialogOpen(true); }}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-semibold"
+              style={{ background: D.accent, color: "#000", boxShadow: `0 0 10px ${D.accent}44` }}>
+              <Plus className="w-3.5 h-3.5" /> Add Widget
+            </button>
           )}
         </div>
+
+        {/* ── No Dashboard State ── */}
+        {!activeDash ? (
+          <div className="flex-1 flex flex-col items-center justify-center text-center">
+            <BookOpen className="w-14 h-14 mb-4" style={{ color: D.border2 }} />
+            <p className="text-sm font-semibold mb-1" style={{ color: D.text }}>No dashboards yet</p>
+            <p className="text-xs mb-5 max-w-xs" style={{ color: D.muted }}>
+              Create your first dashboard to start organizing widgets for your project or asset hierarchy.
+            </p>
+            <button onClick={() => { setEditDashboard(null); setDbDialogOpen(true); }}
+              className="flex items-center gap-2 px-4 py-2 rounded text-sm font-semibold"
+              style={{ background: D.accent, color: "#000", boxShadow: `0 0 14px ${D.accent}55` }}>
+              <Plus className="w-4 h-4" /> Create First Dashboard
+            </button>
+          </div>
+        ) : (
+          <>
+            {/* Dashboard header strip */}
+            {activeDash.description && (
+              <div className="px-4 py-1.5 shrink-0" style={{ background: D.card, borderBottom: `1px solid ${D.border}` }}>
+                <p className="text-[10px]" style={{ color: D.muted }}>{activeDash.description}</p>
+              </div>
+            )}
+
+            {/* Widget grid */}
+            <div className="flex-1 overflow-auto p-4">
+              {displayWidgets.length === 0 ? (
+                <div className="flex flex-col items-center justify-center h-full text-center">
+                  <LayoutDashboard className="w-14 h-14 mb-4" style={{ color: D.border2 }} />
+                  <p className="text-sm font-semibold mb-1" style={{ color: D.text }}>
+                    {selectedAssetId ? "No widgets for this asset" : "No widgets yet"}
+                  </p>
+                  <p className="text-xs mb-5 max-w-xs" style={{ color: D.muted }}>
+                    Click "Add Widget" to add your first visualization to this dashboard.
+                  </p>
+                  <button onClick={() => { setEditWidget(null); setDialogOpen(true); }}
+                    className="flex items-center gap-2 px-4 py-2 rounded text-sm font-semibold"
+                    style={{ background: D.accent, color: "#000", boxShadow: `0 0 16px ${D.accent}55` }}>
+                    <Plus className="w-4 h-4" /> Add First Widget
+                  </button>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4 auto-rows-auto">
+                  {displayWidgets.map(w => (
+                    <div key={w.id} className={sizeClass(w)}>
+                      <WidgetCard widget={w}
+                        onDelete={() => removeWidget(w.id)}
+                        onEdit={() => { setEditWidget(w); setDialogOpen(true); }}
+                        fullscreen={fullscreenId === w.id}
+                        onFullscreen={() => setFullscreenId(prev => prev === w.id ? null : w.id)} />
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        )}
 
         {/* Status bar */}
         <div className="px-4 py-1.5 flex items-center gap-3 shrink-0"
           style={{ background: D.panel, borderTop: `1px solid ${D.border}` }}>
           <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: D.green }} />
           <span style={{ fontSize: 10, color: D.muted }}>
-            {displayWidgets.length} widget{displayWidgets.length !== 1 ? "s" : ""} · Auto-refresh 30 s
+            {displayWidgets.length} widget{displayWidgets.length !== 1 ? "s" : ""}
+            {activeDash && ` in "${activeDash.name}"`}
+            {" · "}Auto-refresh 30 s
           </span>
           <span style={{ fontSize: 10, color: D.border2 }}>·</span>
-          <span style={{ fontSize: 10, color: D.muted }}>
-            {assetList.length} asset{assetList.length !== 1 ? "s" : ""} in hierarchy
-          </span>
+          <span style={{ fontSize: 10, color: D.muted }}>{assetList.length} assets</span>
+          <span style={{ fontSize: 10, color: D.border2 }}>·</span>
+          <span style={{ fontSize: 10, color: D.muted }}>{visibleDashboards.length} dashboard{visibleDashboards.length !== 1 ? "s" : ""} visible to you</span>
         </div>
       </div>
 
+      {/* ── Dialogs ── */}
       <WidgetDialog
         open={dialogOpen}
         onOpenChange={v => { setDialogOpen(v); if (!v) setEditWidget(null); }}
         initial={editWidget}
-        onSave={addOrUpdate}
-        usedColors={usedColors}
+        onSave={addOrUpdateWidget}
         preselectedAssetId={selectedAssetId ?? undefined}
       />
+
+      <DashboardDialog
+        open={dbDialogOpen}
+        onOpenChange={v => { setDbDialogOpen(v); if (!v) setEditDashboard(null); }}
+        initial={editDashboard}
+        onSave={fields => {
+          if (editDashboard) updateDashboard(editDashboard.id, fields);
+          else createDashboard(fields);
+        }}
+      />
+
+      {/* Delete confirmation */}
+      <Dialog open={!!deleteConfirmId} onOpenChange={open => { if (!open) setDeleteConfirmId(null); }}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Delete Dashboard</DialogTitle>
+            <DialogDescription>
+              This will permanently delete "{dashboards.find(d => d.id === deleteConfirmId)?.name}" and all its widgets. This cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" size="sm" onClick={() => setDeleteConfirmId(null)}>Cancel</Button>
+            <Button variant="destructive" size="sm" onClick={() => { if (deleteConfirmId) { deleteDashboard(deleteConfirmId); setDeleteConfirmId(null); } }}>
+              Delete
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
