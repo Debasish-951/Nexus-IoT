@@ -368,8 +368,8 @@ export const getTelemetryQueryLimitDefault = 100;
 
 export const GetTelemetryQueryParams = zod.object({
   metric: zod.coerce.string().optional(),
-  from: zod.date().optional(),
-  to: zod.date().optional(),
+  from: zod.coerce.date().optional(),
+  to: zod.coerce.date().optional(),
   limit: zod.coerce.number().default(getTelemetryQueryLimitDefault),
 });
 

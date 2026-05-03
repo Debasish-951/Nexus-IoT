@@ -736,6 +736,14 @@ function OverlayRow({ overlay, assetList, index, onChange, onRemove }: {
     query: { enabled: !!overlay.assetId, queryKey: ["viz-ov-attrs", overlay.assetId, index] },
   });
   const attrs = ((attributes as any[] | undefined) ?? []).filter((a: any) => metricKeyOf(a));
+  const [telemetryMetrics, setTelemetryMetrics] = useState<string[]>([]);
+  useEffect(() => {
+    if (!overlay.assetId || attrs.length > 0) { setTelemetryMetrics([]); return; }
+    fetch(`${BASE}/api/telemetry/${overlay.assetId}/metrics`, { credentials: "include" })
+      .then(r => r.ok ? r.json() : [])
+      .then((keys: string[]) => setTelemetryMetrics(keys))
+      .catch(() => setTelemetryMetrics([]));
+  }, [overlay.assetId, attrs.length]);
   return (
     <div className="flex items-center gap-2 p-2 rounded" style={{ background: D.panel, border: `1px solid ${D.border}` }}>
       <div className="w-3 h-3 rounded-full shrink-0" style={{ background: overlay.color }} />
@@ -748,7 +756,10 @@ function OverlayRow({ overlay, assetList, index, onChange, onRemove }: {
         disabled={!overlay.assetId}
         className="flex-1 h-7 rounded border border-border bg-background px-1.5 text-[11px] disabled:opacity-40">
         <option value="">Metric…</option>
-        {attrs.map((a: any) => <option key={metricKeyOf(a)} value={metricKeyOf(a)}>{a.name}</option>)}
+        {attrs.length > 0
+          ? attrs.map((a: any) => <option key={metricKeyOf(a)} value={metricKeyOf(a)}>{a.name}</option>)
+          : telemetryMetrics.map(k => <option key={k} value={k}>{k}</option>)
+        }
       </select>
       <div className="flex gap-1 shrink-0">
         {NEON_PALETTE.slice(0,6).map(c => (
@@ -784,6 +795,7 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
   const [customFrom,   setCustomFrom]   = useState(initial?.customFrom ?? "");
   const [customTo,     setCustomTo]     = useState(initial?.customTo ?? "");
   const [overlayMetrics, setOverlayMetrics] = useState<OverlayMetric[]>(initial?.overlayMetrics ?? []);
+  const [telemetryMetrics, setTelemetryMetrics] = useState<string[]>([]);
 
   const { data: assets }     = useListAssets();
   const { data: attributes } = useListAssetAttributes(assetId, { query: { enabled: !!assetId, queryKey: ["asset-attributes", assetId] } });
@@ -791,18 +803,28 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
   const metricAttrs = ((attributes as any[] | undefined) ?? []).filter((a: any) => metricKeyOf(a));
   const assetName   = assetList.find((a: any) => a.id === assetId)?.name ?? "";
   const canOverlay  = supportsOverlay(chartType);
+
+  // When no attributes exist for the asset, fall back to distinct telemetry metric keys from the DB
   useEffect(() => {
-    if (!open || initial) return;
-    if (assetId === "testing" && !metric && metricAttrs.length > 0) {
-      const preferred = metricAttrs.find((a: any) =>
-        /energy/i.test(metricValueOf(a)) ||
-        /energy/i.test(a.name ?? "") ||
-        /kwh/i.test(metricValueOf(a)) ||
-        /kwh/i.test(a.name ?? "")
-      );
-      setMetric(metricValueOf(preferred ?? metricAttrs[0]));
-    }
-  }, [open, initial, assetId, metric, metricAttrs]);
+    if (!assetId) { setTelemetryMetrics([]); return; }
+    if (metricAttrs.length > 0) { setTelemetryMetrics([]); return; }
+    fetch(`${BASE}/api/telemetry/${assetId}/metrics`, { credentials: "include" })
+      .then(r => r.ok ? r.json() : [])
+      .then((keys: string[]) => setTelemetryMetrics(keys))
+      .catch(() => setTelemetryMetrics([]));
+  }, [assetId, metricAttrs.length]);
+
+  // Auto-select first energy/kWh metric when dialog opens with no metric chosen
+  useEffect(() => {
+    if (!open || initial || metric) return;
+    const candidates = telemetryMetrics.length > 0 ? telemetryMetrics
+      : metricAttrs.map((a: any) => metricValueOf(a));
+    if (candidates.length === 0) return;
+    const preferred = candidates.find(k =>
+      /energy/i.test(k) || /kwh/i.test(k) || /kWh/.test(k)
+    ) ?? candidates[0];
+    setMetric(preferred);
+  }, [open, initial, metric, telemetryMetrics, metricAttrs]);
 
   useEffect(() => { if (preselectedAssetId && !initial) setAssetId(preselectedAssetId); }, [preselectedAssetId]);
   useEffect(() => {
@@ -822,6 +844,7 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
     setCustomFrom(initial?.customFrom ?? "");
     setCustomTo(initial?.customTo ?? "");
     setOverlayMetrics(initial?.overlayMetrics ?? []);
+    setTelemetryMetrics([]);
   }, [open, initial, preselectedAssetId, nextColor]);
 
   function addOverlay() { setOverlayMetrics(prev => [...prev, { assetId:"", assetName:"", metric:"", color: NEON_PALETTE[(prev.length+1)%NEON_PALETTE.length] }]); }
@@ -881,8 +904,17 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
             <select value={metric} onChange={e => setMetric(e.target.value)} disabled={!assetId}
               className="w-full h-8 rounded border border-border bg-background px-2 text-xs disabled:opacity-50">
               <option value="">{assetId ? "Select metric…" : "Select asset first"}</option>
-              {metricAttrs.map((a: any) => <option key={metricValueOf(a)} value={metricValueOf(a)}>{a.name}</option>)}
+              {metricAttrs.length > 0
+                ? metricAttrs.map((a: any) => <option key={metricValueOf(a)} value={metricValueOf(a)}>{a.name}</option>)
+                : telemetryMetrics.map(k => <option key={k} value={k}>{k}</option>)
+              }
             </select>
+            {assetId && metricAttrs.length === 0 && telemetryMetrics.length === 0 && (
+              <p className="text-[10px]" style={{ color: D.amber }}>No telemetry found — run the Simulator first to populate metrics.</p>
+            )}
+            {assetId && metricAttrs.length === 0 && telemetryMetrics.length > 0 && (
+              <p className="text-[10px]" style={{ color: D.muted }}>Showing live telemetry metrics (no attributes configured).</p>
+            )}
           </div>
           {canOverlay && (
             <div className="space-y-2">
@@ -1021,10 +1053,16 @@ function DashboardDialog({ open, onOpenChange, initial, onSave }: {
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ── Main Visualization Page ───────────────────────────────────────────────────
-function loadDashboards(): Dashboard[] {
-  try { return JSON.parse(localStorage.getItem(DASHBOARDS_KEY) ?? "[]"); } catch { return []; }
+
+async function apiDash(method: string, path: string, body?: unknown) {
+  const r = await fetch(`${BASE}/api${path}`, {
+    method, credentials: "include",
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  if (!r.ok) throw new Error(await r.text());
+  return r.json();
 }
-function saveDashboards(dbs: Dashboard[]) { localStorage.setItem(DASHBOARDS_KEY, JSON.stringify(dbs)); }
 
 export default function Visualization() {
   const { currentUser } = useCurrentUser();
@@ -1033,8 +1071,9 @@ export default function Visualization() {
   const qc = useQueryClient();
   const deleteAsset = useDeleteAsset();
 
-  const [dashboards,   setDashboards]   = useState<Dashboard[]>(loadDashboards);
-  const [activeDashId, setActiveDashId] = useState<string | null>(null);
+  const [dashboards,    setDashboards]    = useState<Dashboard[]>([]);
+  const [dashLoading,   setDashLoading]   = useState(true);
+  const [activeDashId,  setActiveDashId]  = useState<string | null>(null);
   const [dialogOpen,   setDialogOpen]   = useState(false);
   const [editWidget,   setEditWidget]   = useState<Widget | null>(null);
   const [fullscreenId, setFullscreenId] = useState<string | null>(null);
@@ -1068,8 +1107,40 @@ export default function Visualization() {
     }
   });
 
-  // Persist dashboards
-  useEffect(() => { saveDashboards(dashboards); }, [dashboards]);
+  // ── Load dashboards from API on mount; migrate localStorage if needed ────────
+  useEffect(() => {
+    apiDash("GET", "/viz-dashboards")
+      .then(async (rows: Dashboard[]) => {
+        if (rows.length === 0) {
+          // One-time migration of any localStorage dashboards
+          try {
+            const local: Dashboard[] = JSON.parse(localStorage.getItem(DASHBOARDS_KEY) ?? "[]");
+            if (local.length > 0) {
+              const migrated = await Promise.all(local.map(d =>
+                apiDash("POST", "/viz-dashboards", { name: d.name, roleAccess: d.roleAccess ?? ALL_ROLES, widgets: d.widgets ?? [] })
+              ));
+              localStorage.removeItem(DASHBOARDS_KEY);
+              setDashboards(migrated);
+              setActiveDashId(migrated[0]?.id ?? null);
+              return;
+            }
+          } catch { /* ignore migration errors */ }
+        }
+        setDashboards(rows);
+        setActiveDashId(prev => prev ?? rows[0]?.id ?? null);
+      })
+      .catch(() => setDashboards([]))
+      .finally(() => setDashLoading(false));
+  }, []);
+
+  // Debounced widget sync — pushes widget array to server 800ms after any widget change
+  const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const syncWidgets = useCallback((dashId: string, widgets: Widget[]) => {
+    if (syncTimer.current) clearTimeout(syncTimer.current);
+    syncTimer.current = setTimeout(() => {
+      apiDash("PUT", `/viz-dashboards/${dashId}`, { widgets }).catch(() => {});
+    }, 800);
+  }, []);
 
   // Visible dashboards (role-filtered)
   const visibleDashboards = useMemo(() =>
@@ -1090,63 +1161,72 @@ export default function Visualization() {
   }, [visibleDashboards, activeDashId]);
 
   // ── Dashboard CRUD ──────────────────────────────────────────────────────────
-  function createDashboard(fields: Partial<Dashboard>) {
-    const d: Dashboard = {
-      id: crypto.randomUUID(), widgets: [],
-      name: fields.name ?? "New Dashboard",
-      description: fields.description,
-      roleAccess: fields.roleAccess ?? [...ALL_ROLES],
-      createdAt: new Date().toISOString(),
-    };
-    setDashboards(prev => [...prev, d]);
-    setActiveDashId(d.id);
+  async function createDashboard(fields: Partial<Dashboard>) {
+    try {
+      const d: Dashboard = await apiDash("POST", "/viz-dashboards", {
+        name: fields.name ?? "New Dashboard",
+        roleAccess: fields.roleAccess ?? [...ALL_ROLES],
+        widgets: [],
+      });
+      setDashboards(prev => [...prev, d]);
+      setActiveDashId(d.id);
+    } catch { toast({ title: "Failed to create dashboard", variant: "destructive" }); }
   }
-  function updateDashboard(id: string, fields: Partial<Dashboard>) {
-    setDashboards(prev => prev.map(d => d.id === id ? { ...d, ...fields } : d));
+  async function updateDashboard(id: string, fields: Partial<Dashboard>) {
+    try {
+      const updated: Dashboard = await apiDash("PUT", `/viz-dashboards/${id}`, fields);
+      setDashboards(prev => prev.map(d => d.id === id ? { ...d, ...updated } : d));
+    } catch { toast({ title: "Failed to update dashboard", variant: "destructive" }); }
   }
-  function cloneDashboard(d: Dashboard) {
-    // Name: "Test Dashboard" → "Test Dashboard_clone", if "_clone" exists → "Test Dashboard_clone2"
+  async function cloneDashboard(d: Dashboard) {
     const baseName = `${d.name}_clone`;
     const existingNames = dashboards.map(x => x.name);
     let cloneName = baseName;
     let counter = 2;
     while (existingNames.includes(cloneName)) { cloneName = `${baseName}${counter++}`; }
-    const clone: Dashboard = {
-      ...d,
-      id: crypto.randomUUID(),
-      name: cloneName,
-      createdAt: new Date().toISOString(),
-      widgets: d.widgets.map(w => ({ ...w, id: crypto.randomUUID() })),
-    };
-    // Use functional update to guarantee clone is in state before activeDashId effect
-    setDashboards(prev => [...prev, clone]);
-    setActiveDashId(clone.id);
-    toast({ title: `Dashboard cloned as "${cloneName}"` });
+    try {
+      const clone: Dashboard = await apiDash("POST", "/viz-dashboards", {
+        name: cloneName,
+        roleAccess: d.roleAccess ?? [...ALL_ROLES],
+        widgets: d.widgets.map(w => ({ ...w, id: crypto.randomUUID() })),
+      });
+      setDashboards(prev => [...prev, clone]);
+      setActiveDashId(clone.id);
+      toast({ title: `Dashboard cloned as "${cloneName}"` });
+    } catch { toast({ title: "Failed to clone dashboard", variant: "destructive" }); }
   }
-  function deleteDashboard(id: string) {
+  async function deleteDashboard(id: string) {
     const name = dashboards.find(d => d.id === id)?.name;
     setDashboards(prev => prev.filter(d => d.id !== id));
     if (activeDashId === id) setActiveDashId(null);
-    toast({ title: `Dashboard "${name}" deleted` });
+    try {
+      await apiDash("DELETE", `/viz-dashboards/${id}`);
+      toast({ title: `Dashboard "${name}" deleted` });
+    } catch { toast({ title: "Failed to delete dashboard", variant: "destructive" }); }
   }
 
   // ── Widget CRUD ─────────────────────────────────────────────────────────────
+  function mutateWidgets(dashId: string, updater: (ws: Widget[]) => Widget[]) {
+    const current = dashboards.find(d => d.id === dashId);
+    const next = current ? updater(current.widgets) : [];
+    setDashboards(prev => prev.map(d => d.id !== dashId ? d : { ...d, widgets: next }));
+    syncWidgets(dashId, next);
+  }
   function addOrUpdateWidget(w: Widget) {
     if (!activeDash) { createDashboard({ name: "My Dashboard" }); return; }
-    setDashboards(prev => prev.map(d => {
-      if (d.id !== activeDash.id) return d;
-      const idx = d.widgets.findIndex(x => x.id === w.id);
-      return { ...d, widgets: idx >= 0 ? d.widgets.map((x,i) => i===idx ? w : x) : [...d.widgets, w] };
-    }));
+    mutateWidgets(activeDash.id, ws => {
+      const idx = ws.findIndex(x => x.id === w.id);
+      return idx >= 0 ? ws.map((x, i) => i === idx ? w : x) : [...ws, w];
+    });
   }
   function removeWidget(id: string) {
     if (!activeDash) return;
-    setDashboards(prev => prev.map(d => d.id !== activeDash.id ? d : { ...d, widgets: d.widgets.filter(w => w.id !== id) }));
+    mutateWidgets(activeDash.id, ws => ws.filter(w => w.id !== id));
   }
   function cloneWidget(w: Widget) {
     if (!activeDash) return;
     const cloned: Widget = { ...w, id: crypto.randomUUID(), title: `${w.title} (Copy)` };
-    setDashboards(prev => prev.map(d => d.id !== activeDash.id ? d : { ...d, widgets: [...d.widgets, cloned] }));
+    mutateWidgets(activeDash.id, ws => [...ws, cloned]);
     toast({ title: "Widget cloned" });
   }
   function copyWidget(w: Widget) {
@@ -1156,15 +1236,15 @@ export default function Visualization() {
   function pasteWidget() {
     if (!clipboard || !activeDash) return;
     const pasted: Widget = { ...clipboard, id: crypto.randomUUID(), title: `${clipboard.title} (Pasted)` };
-    setDashboards(prev => prev.map(d => d.id !== activeDash.id ? d : { ...d, widgets: [...d.widgets, pasted] }));
+    mutateWidgets(activeDash.id, ws => [...ws, pasted]);
     toast({ title: "Widget pasted" });
   }
   function applyGlobalRange(minutes: number) {
     setGlobalRange(minutes);
     if (!activeDash) return;
-    setDashboards(prev => prev.map(d => d.id !== activeDash.id ? d : {
-      ...d, widgets: d.widgets.map(w => ({ ...w, rangeMinutes: minutes, customFrom: undefined, customTo: undefined }))
-    }));
+    mutateWidgets(activeDash.id, ws =>
+      ws.map(w => ({ ...w, rangeMinutes: minutes, customFrom: undefined, customTo: undefined }))
+    );
   }
 
   // ── Asset management from tree ──────────────────────────────────────────────

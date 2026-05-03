@@ -20,6 +20,7 @@ scripts/                  — Utility scripts
 - `attributes` — asset attributes (static/dynamic/metric/runtime) with tagName, sourceMetric, UoM, decimalPlaces, thousandSeparator, quality, timestamp, expression
 - `asset_templates` — reusable attribute blueprints with expression support
 - `telemetry` — time-series sensor readings (assetId, deviceId, metric, value, quality, timestamp)
+- `viz_dashboards` — visualization dashboards (id, name, roleFilter, assetFilter, widgets JSON, createdAt, updatedAt)
 - `alarms` — active alarm instances with severity/status/class
 - `alarm_history` — historical alarm records
 - `alarm_rules` — threshold/deviation/rate_of_change/heartbeat rule definitions + webhookUrl, webhookEnabled, rocWindow
@@ -41,7 +42,8 @@ scripts/                  — Utility scripts
 - `POST /api/ingest/payload` — single payload ingest (normalise + write telemetry + evaluate runtime attrs + fire alarm rules + deliver webhooks)
 - `POST /api/ingest/validate` — dry-run: resolves deviceId, extracts metrics, checks asset match — does NOT write to DB
 - `POST /api/ingest/batch` — batch ingest array
-- `GET /api/telemetry/:assetId` — query telemetry (metric, from, to, limit filters)
+- `GET /api/telemetry/:assetId` — query telemetry (metric, from, to, limit filters); from/to coerced from ISO strings
+- `GET /api/telemetry/:assetId/metrics` — distinct metric keys for an asset (used by widget dialog when no attributes exist)
 - `GET /api/telemetry/:assetId/export` — CSV export of telemetry
 - `GET /api/assets/:assetId/health` — asset health score (freshness%, activeAlarms, lastSeen, keyMetrics)
 - `GET /api/alarms` — list alarms (filter by severity/status)
@@ -57,6 +59,10 @@ scripts/                  — Utility scripts
 - `GET /api/dashboard/summary` — stat cards
 - `GET /api/dashboard/recent-telemetry` — latest records
 - `GET /api/dashboard/alarm-stats` — alarm counts by severity
+- `GET /api/viz-dashboards` — list visualization dashboards (persisted in PostgreSQL)
+- `POST /api/viz-dashboards` — create dashboard
+- `PUT /api/viz-dashboards/:id` — update dashboard (name, roleAccess, widgets)
+- `DELETE /api/viz-dashboards/:id` — delete dashboard
 - `GET /api/activity-log` — paginated audit trail (category, actorName, limit, offset filters)
 - `POST /api/assets/:id/maintenance` — toggle maintenance mode (body: { enabled, note? })
 - `GET /api/system/storage` — storage stats (totalRows, tableSize, perAsset breakdown)

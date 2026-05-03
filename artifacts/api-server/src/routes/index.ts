@@ -15,6 +15,7 @@ import activityLogRouter from "./activity_log";
 import brokerHistoryRouter from "./broker_history";
 import exportRouter from "./export";
 import systemRouter from "./system";
+import vizDashboardsRouter from "./viz_dashboards";
 
 const router: IRouter = Router();
 
@@ -34,5 +35,6 @@ router.use(activityLogRouter);
 router.use(brokerHistoryRouter);
 router.use(exportRouter);
 router.use(systemRouter);
+router.use(vizDashboardsRouter);
 
 export default router;

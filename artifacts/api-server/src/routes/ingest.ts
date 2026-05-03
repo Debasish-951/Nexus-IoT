@@ -439,6 +439,17 @@ router.post("/ingest/batch", optionalApiKeyAuth("ingest:write"), async (req, res
     alarmsTriggered: totalTriggered, alarmsCleared: totalCleared });
 });
 
+// ── Distinct metrics for an asset (for widget dialog when no attributes exist) ─
+router.get("/telemetry/:assetId/metrics", async (req, res): Promise<void> => {
+  const { assetId } = req.params;
+  const rows = await db
+    .selectDistinct({ metric: telemetryTable.metric })
+    .from(telemetryTable)
+    .where(eq(telemetryTable.assetId, assetId))
+    .orderBy(telemetryTable.metric);
+  res.json(rows.map((r) => r.metric));
+});
+
 router.get("/telemetry/:assetId", async (req, res): Promise<void> => {
   const params = GetTelemetryParams.safeParse(req.params);
   if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
