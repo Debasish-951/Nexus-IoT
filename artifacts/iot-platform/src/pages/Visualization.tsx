@@ -415,9 +415,9 @@ function ChartWidget({ widget, data }: { widget: Widget; data: Record<string, an
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ── Widget Card ───────────────────────────────────────────────────────────────
-function WidgetCard({ widget, onDelete, onEdit, onClone, onCopy, fullscreen, onFullscreen, wsSignal }: {
+function WidgetCard({ widget, onDelete, onEdit, onClone, onDuplicate, onCopy, fullscreen, onFullscreen, wsSignal }: {
   widget: Widget; onDelete: () => void; onEdit: () => void;
-  onClone: () => void; onCopy: () => void;
+  onClone: () => void; onDuplicate: () => void; onCopy: () => void;
   fullscreen: boolean; onFullscreen: () => void;
   wsSignal?: number;
 }) {
@@ -526,6 +526,9 @@ function WidgetCard({ widget, onDelete, onEdit, onClone, onCopy, fullscreen, onF
             <DropdownMenuContent align="end" className="w-44">
               <DropdownMenuItem onClick={onEdit}>
                 <Settings2 className="w-3.5 h-3.5 mr-2" /> Edit Widget
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={onDuplicate}>
+                <Copy className="w-3.5 h-3.5 mr-2" /> Duplicate Widget
               </DropdownMenuItem>
               <DropdownMenuItem onClick={onClone}>
                 <Copy className="w-3.5 h-3.5 mr-2" /> Clone Widget
