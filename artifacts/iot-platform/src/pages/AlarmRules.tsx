@@ -2,6 +2,7 @@ import { useState } from "react";
 import {
   useListAlarmRules, useCreateAlarmRule, useDeleteAlarmRule,
   useUpdateAlarmRule, getListAlarmRulesQueryKey,
+  useListAssets, useListAssetAttributes,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -18,7 +19,7 @@ import { Form, FormField, FormItem, FormLabel, FormControl, FormDescription } fr
 import { useToast } from "@/hooks/use-toast";
 import {
   Settings2, Plus, Trash2, Webhook, AlertTriangle, TrendingUp,
-  CheckCircle2, Loader2, ExternalLink,
+  CheckCircle2, Loader2, ExternalLink, Mail, MessageCircle, MessageSquareText,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/contexts/UserContext";
@@ -47,6 +48,7 @@ export default function AlarmRules() {
   const { can } = useCurrentUser();
 
   const { data: rules } = useListAlarmRules();
+  const { data: assets } = useListAssets();
   const createRule = useCreateAlarmRule();
   const deleteRule = useDeleteAlarmRule();
   const updateRule = useUpdateAlarmRule();
@@ -59,17 +61,25 @@ export default function AlarmRules() {
       rocWindow: "60",
       enabled: true, requireAcknowledge: true,
       webhookUrl: "", webhookEnabled: false,
+      emailEnabled: false, whatsappEnabled: false, smsEnabled: false,
+      assetId: "",
     },
   });
 
   const watchAlarmType = form.watch("alarmType");
   const watchWebhookEnabled = form.watch("webhookEnabled");
+  const watchAssetId = form.watch("assetId" as any) as string;
+  const { data: assetAttributes } = useListAssetAttributes(watchAssetId ?? "", {
+    query: { enabled: !!watchAssetId, queryKey: ["alarm-rule-asset-attributes", watchAssetId] },
+  });
+  const attributeOptions = ((assetAttributes as any[] | undefined) ?? []).map((attr: any) => attr.tagName ?? attr.sourceMetric ?? attr.name).filter(Boolean);
 
   function onSubmit(data: any) {
     createRule.mutate({
       data: {
         name: data.name, description: data.description || null,
         alarmType: data.alarmType, severity: data.severity,
+        assetId: data.assetId || null,
         metric: data.metric || null, operator: data.operator || null,
         threshold: data.threshold ? Number(data.threshold) : null,
         deadband: data.deadband ? Number(data.deadband) : null,
@@ -81,6 +91,9 @@ export default function AlarmRules() {
         ...(data.rocWindow ? { rocWindow: Number(data.rocWindow) } : {}),
         ...(data.webhookUrl ? { webhookUrl: data.webhookUrl } : {}),
         webhookEnabled: data.webhookEnabled,
+        emailEnabled: data.emailEnabled,
+        whatsappEnabled: data.whatsappEnabled,
+        smsEnabled: data.smsEnabled,
       } as any,
     }, {
       onSuccess: () => {
@@ -219,7 +232,7 @@ export default function AlarmRules() {
         <DialogContent className="max-w-2xl">
           <DialogHeader>
             <DialogTitle>Add Alarm Rule</DialogTitle>
-            <DialogDescription>Configure when an alarm should trigger and optionally deliver a webhook notification.</DialogDescription>
+          <DialogDescription>Configure when an alarm should trigger and choose how notifications are delivered.</DialogDescription>
           </DialogHeader>
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
@@ -227,6 +240,19 @@ export default function AlarmRules() {
                 <TabsList><TabsTrigger value="alarm">Alarm</TabsTrigger><TabsTrigger value="message">Notifications</TabsTrigger></TabsList>
 
                 <TabsContent value="alarm" className="space-y-4 mt-4">
+                  <FormField control={form.control as any} name={"assetId" as any} render={({ field }) => (
+                    <FormItem>
+                      <FormLabel>Asset</FormLabel>
+                      <Select value={field.value} onValueChange={field.onChange}>
+                        <FormControl><SelectTrigger><SelectValue placeholder="Select asset" /></SelectTrigger></FormControl>
+                        <SelectContent>
+                          {(((assets as any[] | undefined) ?? [])).map((asset: any) => (
+                            <SelectItem key={asset.id} value={asset.id}>{asset.name}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </FormItem>
+                  )} />
                   <div className="grid grid-cols-2 gap-4">
                     <FormField control={form.control} name="name" render={({ field }) => (
                       <FormItem><FormLabel>Name *</FormLabel><FormControl><Input {...field} /></FormControl></FormItem>
@@ -262,7 +288,15 @@ export default function AlarmRules() {
                       </FormItem>
                     )} />
                     <FormField control={form.control} name="metric" render={({ field }) => (
-                      <FormItem><FormLabel>Signal / Metric</FormLabel><FormControl><Input placeholder="e.g. temperature" {...field} /></FormControl></FormItem>
+                      <FormItem>
+                        <FormLabel>Signal / Metric</FormLabel>
+                        <Select value={field.value} onValueChange={field.onChange}>
+                          <FormControl><SelectTrigger><SelectValue placeholder="Select attribute" /></SelectTrigger></FormControl>
+                          <SelectContent>
+                            {attributeOptions.map((metric: string) => <SelectItem key={metric} value={metric}>{metric}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </FormItem>
                     )} />
                   </div>
 
@@ -341,20 +375,27 @@ export default function AlarmRules() {
 
                 <TabsContent value="message" className="mt-4 space-y-4">
                   <div className="rounded-md bg-muted/50 border border-border p-3 text-xs text-muted-foreground">
-                    When an alarm triggers or clears, a POST request will be sent to the configured webhook URL with the alarm event details.
+                    Choose one or more delivery channels for alarm events.
                   </div>
 
-                  <div className="flex items-center justify-between rounded-lg border border-border p-3">
-                    <div className="space-y-0.5">
-                      <Label className="text-sm font-medium flex items-center gap-1.5">
-                        <Webhook className="w-3.5 h-3.5 text-primary" /> Enable Webhook
-                      </Label>
-                      <p className="text-xs text-muted-foreground">Deliver HTTP POST on alarm trigger and clear</p>
+                  {[
+                    { name: "webhookEnabled", label: "Webhook", icon: Webhook, desc: "Deliver HTTP POST on trigger and clear" },
+                    { name: "emailEnabled", label: "Email", icon: Mail, desc: "Send an email notification" },
+                    { name: "whatsappEnabled", label: "WhatsApp", icon: MessageCircle, desc: "Send a WhatsApp alert" },
+                    { name: "smsEnabled", label: "Text Message", icon: MessageSquareText, desc: "Send an SMS alert" },
+                  ].map(({ name, label, icon: Icon, desc }) => (
+                    <div key={name} className="flex items-center justify-between rounded-lg border border-border p-3">
+                      <div className="space-y-0.5">
+                        <Label className="text-sm font-medium flex items-center gap-1.5">
+                          <Icon className="w-3.5 h-3.5 text-primary" /> Enable {label}
+                        </Label>
+                        <p className="text-xs text-muted-foreground">{desc}</p>
+                      </div>
+                      <Controller control={form.control} name={name as any} render={({ field }) => (
+                        <Switch checked={field.value} onCheckedChange={field.onChange} />
+                      )} />
                     </div>
-                    <Controller control={form.control} name="webhookEnabled" render={({ field }) => (
-                      <Switch checked={field.value} onCheckedChange={field.onChange} />
-                    )} />
-                  </div>
+                  ))}
 
                   <FormField control={form.control} name="webhookUrl" render={({ field }) => (
                     <FormItem>

@@ -119,30 +119,6 @@ const ENERGY_METER_BASE_DATA: Record<string, number> = {
 
 const PRESETS: Preset[] = [
   {
-    id: "vibration-sensor",
-    label: "Vibration Sensor",
-    description: "Multi-metric vibration, temperature, and ultrasound payload using the nested-data format. Create an asset with identifier='vibration-sensor-01' to receive this data.",
-    deviceId: "vibration-sensor-01",
-    metrics: { ...SENSORGROW_BASE_DATA },
-    randomize: (base) => ({
-      ...base,
-      vibration_rms_velocity_x: +(base.vibration_rms_velocity_x + (Math.random() * 0.3 - 0.15)).toFixed(4),
-      vibration_rms_velocity_y: +(base.vibration_rms_velocity_y + (Math.random() * 0.2 - 0.1)).toFixed(4),
-      vibration_rms_velocity_z: +(base.vibration_rms_velocity_z + (Math.random() * 0.2 - 0.1)).toFixed(4),
-      vibration_max_velocity_x: +(base.vibration_max_velocity_x + (Math.random() * 0.4 - 0.2)).toFixed(4),
-      temperature: +(base.temperature + (Math.random() * 0.4 - 0.2)).toFixed(3),
-      ultrasound: +(base.ultrasound + (Math.random() * 1 - 0.5)).toFixed(3),
-      runhours: Math.round(base.runhours + 1),
-      battery: +(Math.min(3.1, Math.max(2.4, base.battery + (Math.random() * 0.02 - 0.01)))).toFixed(2),
-    }),
-    buildPayload: (data) => ({
-      deviceId: "vibration-sensor-01",
-      timestamp: new Date().toISOString(),
-      timestampUnix: Date.now(),
-      data,
-    }),
-  },
-  {
     id: "energy-meter",
     label: "Energy Meter (Flat Payload)",
     description: "Energy meter payload with cumulative and interval metrics at root level. Create an asset with identifier='energy-meter-01' to receive this data.",
