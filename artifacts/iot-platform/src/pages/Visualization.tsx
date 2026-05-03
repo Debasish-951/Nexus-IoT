@@ -904,15 +904,9 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
           )}
           <div className="space-y-1">
             <Label className="text-xs">Widget Size</Label>
-            <div className="flex gap-2">
-              {(["sm","md","lg"] as const).map(s => (
-                <button key={s} onClick={() => setSize(s)}
-                  className={cn("flex-1 rounded border py-1.5 text-xs font-medium capitalize transition-colors",
-                    size===s?"border-primary bg-primary/5 text-primary":"border-border hover:bg-muted/60")}>
-                  {s==="sm"?"Small":s==="md"?"Medium":"Large"}
-                </button>
-              ))}
-            </div>
+            <p className="text-[10px] text-muted-foreground">
+              Drag the bottom-right corner of a widget on the dashboard to resize it.
+            </p>
           </div>
           <div className="space-y-1">
             <Label className="text-xs">Primary Color</Label>
