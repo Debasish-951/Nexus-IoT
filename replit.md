@@ -1,6 +1,6 @@
-# WS-Integrated Suite (formerly IoT Data Acquisition Platform)
+# WS-Integrated Suite
 
-A full-stack industrial IoT platform inspired by Yokogawa AHI / Siemens MindSphere.
+A full-stack industrial IoT data acquisition and analytics platform.
 
 ## Architecture
 

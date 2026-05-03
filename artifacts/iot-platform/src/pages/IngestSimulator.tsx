@@ -107,8 +107,8 @@ const SENSORGROW_BASE_DATA: Record<string, number> = {
   vibration_rms_displacement_z: 0.000049,
 };
 
-// ── RF-Dryer base data (flat Yokogawa/Siemens style payload) ─────────────────
-const RF_DRYER_BASE_DATA: Record<string, number> = {
+// ── Energy meter flat payload ─────────────────────────────────────────────────
+const ENERGY_METER_BASE_DATA: Record<string, number> = {
   energy_meter_kwh: 4659.166,
   interval_kwh: 0.739,
   daily_cum_kwh: 32.16,
@@ -119,10 +119,10 @@ const RF_DRYER_BASE_DATA: Record<string, number> = {
 
 const PRESETS: Preset[] = [
   {
-    id: "sensorgrow-fan",
-    label: "Sensorgrow — Fan Drive End",
-    description: "Real Node-RED payload from Sensorgrow sensor S125010T1TA10 on Fan Drive End. 40+ vibration, ultrasound, temperature metrics. Triggers Temperature Warning and Ultrasound Alert on first send.",
-    deviceId: "sensorgrow",
+    id: "vibration-sensor",
+    label: "Vibration Sensor",
+    description: "Multi-metric vibration, temperature, and ultrasound payload using the nested-data format. Create an asset with identifier='vibration-sensor-01' to receive this data.",
+    deviceId: "vibration-sensor-01",
     metrics: { ...SENSORGROW_BASE_DATA },
     randomize: (base) => ({
       ...base,
@@ -136,23 +136,18 @@ const PRESETS: Preset[] = [
       battery: +(Math.min(3.1, Math.max(2.4, base.battery + (Math.random() * 0.02 - 0.01)))).toFixed(2),
     }),
     buildPayload: (data) => ({
-      deviceId: "sensorgrow",
+      deviceId: "vibration-sensor-01",
       timestamp: new Date().toISOString(),
       timestampUnix: Date.now(),
-      receivedAt: new Date().toISOString(),
-      capturedAt: new Date().toISOString(),
-      sensor: { serial: "S125010T1TA10", mac: "00:80:e1:11:00:2b" },
-      asset: { tag_id: null, name: "Fan", id: 4979 },
-      measurement_point: { name: "Fan Drive End", id: 9362 },
       data,
     }),
   },
   {
-    id: "rf-dryer",
-    label: "RF Dryer — Flat Payload (Yokogawa/Siemens style)",
-    description: "Energy meter flat payload — all metrics at root level alongside deviceId and timestamps. Matches the reference AHI/MindSphere format. Requires an asset with identifier='rf-dryer'.",
-    deviceId: "rf-dryer",
-    metrics: { ...RF_DRYER_BASE_DATA },
+    id: "energy-meter",
+    label: "Energy Meter (Flat Payload)",
+    description: "Energy meter payload with cumulative and interval metrics at root level. Create an asset with identifier='energy-meter-01' to receive this data.",
+    deviceId: "energy-meter-01",
+    metrics: { ...ENERGY_METER_BASE_DATA },
     randomize: (base) => ({
       ...base,
       energy_meter_kwh: +(base.energy_meter_kwh + Math.random() * 0.15 + 0.05).toFixed(3),
@@ -163,10 +158,9 @@ const PRESETS: Preset[] = [
       ytd_cum_kwh: +(base.ytd_cum_kwh + Math.random() * 0.15 + 0.05).toFixed(3),
     }),
     buildPayload: (metrics) => ({
-      deviceId: "rf-dryer",
+      deviceId: "energy-meter-01",
       timestamp: new Date().toISOString().replace("T", " ").replace("Z", "+00:00"),
       timestampUnix: Date.now(),
-      ts: new Date().toISOString(),
       ...metrics,
     }),
   },
@@ -1228,7 +1222,7 @@ export default function IngestSimulator() {
             Payload Simulator
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Send test Node-RED payloads to the ingest API and watch telemetry update live
+            Send test payloads to the ingest API and watch telemetry update live
           </p>
         </div>
         <div className="flex items-center gap-6 shrink-0">
@@ -1669,14 +1663,14 @@ export default function IngestSimulator() {
         </CardHeader>
         <CardContent className="px-4 pb-4">
           <p className="text-xs text-muted-foreground mb-3">
-            Use these snippets to wire real Node-RED flows or test from the command line.
+            Use these snippets to integrate any device or gateway via HTTP POST.
             Batch endpoint: <code className="bg-muted px-1 py-0.5 rounded font-mono">POST /api/ingest/batch</code>
           </p>
           <Tabs defaultValue="single">
             <TabsList className="h-7">
               <TabsTrigger value="single" className="text-xs h-6 px-3">Single Payload</TabsTrigger>
               <TabsTrigger value="batch" className="text-xs h-6 px-3">Batch Payload</TabsTrigger>
-              <TabsTrigger value="node-red" className="text-xs h-6 px-3">Node-RED Function</TabsTrigger>
+              <TabsTrigger value="python" className="text-xs h-6 px-3">Python</TabsTrigger>
               <TabsTrigger value="curl" className="text-xs h-6 px-3">curl</TabsTrigger>
             </TabsList>
 
@@ -1685,13 +1679,10 @@ export default function IngestSimulator() {
 Content-Type: application/json
 
 {
-  "deviceId": "rf-dryer",
-  "timestamp": "2025-11-14T10:30:00+05:30",
-  "metrics": {
-    "energy_meter_kwh": 4659.16,
-    "interval_kwh": 0.72,
-    "daily_cum_kwh": 52.49
-  }
+  "deviceId": "my-device-01",
+  "timestamp": "2025-05-03T10:30:00+05:30",
+  "chiller":  { "energy_kWh": 15.2, "load_percent": 82 },
+  "solar":    { "generated_kWh": 8.3, "irradiance_Wm2": 750 }
 }`}</pre>
             </TabsContent>
 
@@ -1701,55 +1692,55 @@ Content-Type: application/json
 
 [
   {
-    "deviceId": "rf-dryer",
-    "timestamp": "2025-11-14T10:30:00Z",
-    "metrics": { "energy_meter_kwh": 4659.16 }
+    "deviceId": "gateway-01",
+    "timestamp": "2025-05-03T10:30:00Z",
+    "metrics": { "energy_kwh": 145.7, "temperature": 72.4 }
   },
   {
-    "deviceId": "extrudr",
-    "timestamp": "2025-11-14T10:30:00Z",
-    "metrics": { "temperature": 185.4, "pressure": 12.3 }
+    "deviceId": "gateway-02",
+    "timestamp": "2025-05-03T10:30:00Z",
+    "metrics": { "pressure": 12.3, "flow_rate": 5.1 }
   }
 ]`}</pre>
             </TabsContent>
 
-            <TabsContent value="node-red" className="mt-3">
-              <pre className="bg-muted rounded-md p-3 text-xs overflow-auto leading-relaxed">{`// Node-RED — Function Node
-// Place before an HTTP Request node pointed at POST /api/ingest/payload
+            <TabsContent value="python" className="mt-3">
+              <pre className="bg-muted rounded-md p-3 text-xs overflow-auto leading-relaxed">{`import requests, datetime
 
-const deviceId = msg.topic || "device-001";
-const metrics = {};
+INGEST_URL = "https://your-domain/api/ingest/payload"
 
-if (msg.payload.energy_kwh !== undefined)
-  metrics.energy_meter_kwh = msg.payload.energy_kwh;
-if (msg.payload.temp !== undefined)
-  metrics.temperature = msg.payload.temp;
+payload = {
+    "deviceId": "my-device-01",
+    "timestamp": datetime.datetime.now(datetime.timezone.utc).isoformat(),
+    "chiller":  { "energy_kWh": 15.2, "load_percent": 82 },
+    "solar":    { "generated_kWh": 8.3, "irradiance_Wm2": 750 },
+}
 
-msg.payload = {
-  deviceId,
-  timestamp: new Date().toISOString(),
-  metrics,
-};
-msg.headers = { "Content-Type": "application/json" };
-return msg;`}</pre>
+# Optional: authenticate with an API client token
+headers = {
+    "Content-Type": "application/json",
+    # "Authorization": "Bearer YOUR_API_CLIENT_SECRET",
+}
+
+resp = requests.post(INGEST_URL, json=payload, headers=headers)
+print(resp.json())`}</pre>
             </TabsContent>
 
             <TabsContent value="curl" className="mt-3">
-              <pre className="bg-muted rounded-md p-3 text-xs overflow-auto leading-relaxed">{`# Single payload
+              <pre className="bg-muted rounded-md p-3 text-xs overflow-auto leading-relaxed">{`# Single payload (nested sub-systems format)
 curl -s -X POST /api/ingest/payload \\
   -H "Content-Type: application/json" \\
   -d '{
-    "deviceId": "rf-dryer",
-    "metrics": { "energy_meter_kwh": 4660.0, "interval_kwh": 0.84 }
+    "deviceId": "my-device-01",
+    "chiller":  { "energy_kWh": 15.2, "load_percent": 82 },
+    "solar":    { "generated_kWh": 8.3 }
   }' | jq
 
-# Batch
-curl -s -X POST /api/ingest/batch \\
+# With authentication token (from Security → API Clients)
+curl -s -X POST /api/ingest/payload \\
   -H "Content-Type: application/json" \\
-  -d '[
-    {"deviceId":"rf-dryer","metrics":{"energy_meter_kwh":4660}},
-    {"deviceId":"extrudr","metrics":{"temperature":188.2}}
-  ]' | jq`}</pre>
+  -H "Authorization: Bearer YOUR_TOKEN" \\
+  -d '{"deviceId":"my-device-01","metrics":{"temperature":72.4}}' | jq`}</pre>
             </TabsContent>
           </Tabs>
         </CardContent>

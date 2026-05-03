@@ -20,7 +20,7 @@ import Settings from "@/pages/Settings";
 import IngestSimulator from "@/pages/IngestSimulator";
 import Destinations from "@/pages/Destinations";
 import DataExplorer from "@/pages/DataExplorer";
-import NodeRedDocs from "@/pages/NodeRedDocs";
+import IntegrationGuide from "@/pages/NodeRedDocs";
 import ActivityLog from "@/pages/ActivityLog";
 import DataManagement from "@/pages/DataManagement";
 import Reports from "@/pages/Reports";
@@ -51,7 +51,7 @@ function AppRouter() {
         <Route path="/api-clients" component={ApiClients} />
         <Route path="/destinations" component={Destinations} />
         <Route path="/data-explorer" component={DataExplorer} />
-        <Route path="/node-red-docs" component={NodeRedDocs} />
+        <Route path="/integration-guide" component={IntegrationGuide} />
         <Route path="/activity-log" component={ActivityLog} />
         <Route path="/data-management" component={DataManagement} />
         <Route path="/reports" component={Reports} />

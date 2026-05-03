@@ -30,6 +30,14 @@ import { ReadOnlyBanner } from "@/components/RoleGuard";
 // ── Scope definitions ─────────────────────────────────────────────────────────
 const SCOPES = [
   {
+    id: "ingest:write",
+    label: "Write Telemetry",
+    description: "Post telemetry data to the ingest endpoint",
+    icon: <Activity className="w-3.5 h-3.5" />,
+    color: "text-green-600 dark:text-green-400",
+    endpoint: "POST /api/ingest/payload",
+  },
+  {
     id: "read:assets",
     label: "Read Assets",
     description: "List assets and their current attribute values",
@@ -146,10 +154,11 @@ function IntegrationGuide({ client }: { client: Record<string, unknown> }) {
   function copy(text: string) { navigator.clipboard.writeText(text); toast({ title: "Copied" }); }
 
   const examples = [
+    { label: "Post telemetry (ingest)", scope: "ingest:write", format: "json", cmd: `curl -s -X POST ${origin}/api/ingest/payload \\\n  -H "Authorization: Bearer ${secret}" \\\n  -H "Content-Type: application/json" \\\n  -d '{"deviceId":"my-device-01","chiller":{"energy_kWh":15.2,"load_percent":82}}'` },
     { label: "List assets (JSON)", scope: "read:assets", format: "json", cmd: `curl -H "Authorization: Bearer ${secret}" \\\n  ${origin}/api/export/assets` },
     { label: "List assets (CSV)", scope: "read:assets", format: "csv", cmd: `curl -H "Authorization: Bearer ${secret}" \\\n  "${origin}/api/export/assets?format=csv" -o assets.csv` },
     { label: "Telemetry (last 100)", scope: "read:telemetry", format: "json", cmd: `curl -H "X-API-Key: ${secret}" \\\n  "${origin}/api/export/telemetry?limit=100"` },
-    { label: "Telemetry (CSV)", scope: "read:telemetry", format: "csv", cmd: `curl -H "X-API-Key: ${secret}" \\\n  "${origin}/api/export/telemetry?limit=500&format=csv" -o telemetry.csv` },
+    { label: "Telemetry (CSV export)", scope: "read:telemetry", format: "csv", cmd: `curl -H "X-API-Key: ${secret}" \\\n  "${origin}/api/export/telemetry?limit=500&format=csv" -o telemetry.csv` },
     { label: "Active alarms", scope: "read:alarms", format: "json", cmd: `curl -H "Authorization: Bearer ${secret}" \\\n  "${origin}/api/export/alarms?status=active"` },
     { label: "Alarm history (date range)", scope: "read:alarm-history", format: "json", cmd: `curl -H "Authorization: Bearer ${secret}" \\\n  "${origin}/api/export/alarm-history?from=2024-01-01T00:00:00Z&limit=500"` },
   ];
@@ -276,7 +285,7 @@ function RotateDialog({
               <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
               <div>
                 <p className="font-semibold mb-1">This action is irreversible</p>
-                <p className="text-xs">Any Node-RED flows, scripts, or dashboards using the current secret will break immediately. Update them before rotating in production.</p>
+                <p className="text-xs">Any applications, scripts, or dashboards using the current secret will break immediately. Update them before rotating in production.</p>
               </div>
             </div>
             <DialogFooter>
@@ -376,7 +385,7 @@ function CreateDialog({
               <FormItem>
                 <FormLabel>Client Name *</FormLabel>
                 <FormControl>
-                  <Input placeholder="e.g. Grafana Export, Python ETL, Node-RED" {...field} data-testid="client-name-input" />
+                  <Input placeholder="e.g. Grafana Export, Python ETL, SCADA Gateway" {...field} data-testid="client-name-input" />
                 </FormControl>
               </FormItem>
             )} />
@@ -519,7 +528,7 @@ export default function ApiClients() {
             <KeyRound className="w-5 h-5 text-primary" /> API Clients
           </h1>
           <p className="text-sm text-muted-foreground">
-            Issue bearer tokens so external systems can securely export data from this platform
+            Issue bearer tokens for external applications to securely ingest data and export analytics
           </p>
         </div>
         {can("manage_api_clients") && (
@@ -536,7 +545,7 @@ export default function ApiClients() {
           { icon: <Shield className="w-4 h-4 text-blue-500" />, label: "Scoped Access", desc: "Per-client read scopes" },
           { icon: <Clock className="w-4 h-4 text-orange-500" />, label: "Token Expiry", desc: "Auto-expire credentials" },
           { icon: <Globe className="w-4 h-4 text-green-500" />, label: "IP Allowlist", desc: "Restrict by source IP" },
-          { icon: <FileDown className="w-4 h-4 text-purple-500" />, label: "CSV + JSON", desc: "Two export formats" },
+          { icon: <FileDown className="w-4 h-4 text-purple-500" />, label: "Ingest & Export", desc: "Write and read via API" },
         ].map((c) => (
           <div key={c.label} className="rounded-lg border border-border bg-card p-3 flex items-center gap-3">
             <div className="w-8 h-8 rounded-md bg-muted flex items-center justify-center shrink-0">{c.icon}</div>

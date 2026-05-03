@@ -145,10 +145,10 @@ function parseCsv(text: string): AttrDef[] {
   return results;
 }
 
-const CSV_EXAMPLE = `name,type,dataType,tagName,uom\nTemperature,dynamic,double,sensorgrow.temperature,°C\nVibration RMS X,dynamic,double,sensorgrow.vibration_rms_velocity_x,mm/s\nSensor Serial,static,text,sensorgrow.sensor_serial,`;
+const CSV_EXAMPLE = `name,type,dataType,tagName,uom\nTemperature,dynamic,double,device-01.temperature,°C\nEnergy kWh,dynamic,double,device-01.energy_kwh,kWh\nDevice ID,static,text,device-01.device_serial,`;
 const JSON_EXAMPLE = JSON.stringify([
-  { name: "Temperature", type: "dynamic", dataType: "double", tagName: "sensorgrow.temperature", uom: "°C" },
-  { name: "Sensor Serial", type: "static", dataType: "text", tagName: "sensorgrow.sensor_serial" },
+  { name: "Temperature", type: "dynamic", dataType: "double", tagName: "device-01.temperature", uom: "°C" },
+  { name: "Energy kWh", type: "dynamic", dataType: "double", tagName: "device-01.energy_kwh", uom: "kWh" },
 ], null, 2);
 
 const TIME_RANGES = [
@@ -1172,7 +1172,7 @@ export default function Assets() {
                   <div className="grid grid-cols-2 gap-3">
                     <FormField control={editAttrForm.control} name="tagName" render={({ field }) => (
                       <FormItem><FormLabel>Tag Name</FormLabel>
-                        <FormControl><Input className="font-mono text-xs" placeholder="rf-dryer.energy_meter_kwh" {...field} /></FormControl>
+                        <FormControl><Input className="font-mono text-xs" placeholder="device-id.metric_name" {...field} /></FormControl>
                       </FormItem>
                     )} />
                     <FormField control={editAttrForm.control} name="sourceMetric" render={({ field }) => (
@@ -1298,7 +1298,7 @@ export default function Assets() {
                 <button className="text-xs text-primary hover:underline" onClick={() => setCsvText(CSV_EXAMPLE)}>Load example</button>
               </div>
               <Textarea value={csvText} onChange={(e) => { setCsvText(e.target.value); setPreviewRows([]); setParseError(null); }}
-                placeholder={"name,type,dataType,tagName,sourceMetric,uom,decimalPlaces\nenergy_meter,dynamic,double,rf-dryer.energy_meter_kwh,energy_meter_kwh,kWh,2"}
+                placeholder={"name,type,dataType,tagName,sourceMetric,uom,decimalPlaces\nEnergy kWh,dynamic,double,device-01.energy_kwh,energy_kwh,kWh,2"}
                 className="font-mono text-xs h-36 resize-none" />
               {parseError && <p className="text-xs text-destructive flex items-center gap-1"><AlertTriangle className="w-3 h-3" />{parseError}</p>}
               <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleParse} disabled={!csvText.trim()}>Preview</Button>
@@ -1317,7 +1317,7 @@ export default function Assets() {
                 <button className="text-xs text-primary hover:underline" onClick={() => setJsonText(JSON_EXAMPLE)}>Load example</button>
               </div>
               <Textarea value={jsonText} onChange={(e) => { setJsonText(e.target.value); setPreviewRows([]); setParseError(null); }}
-                placeholder={'[\n  {"name":"Temperature","type":"dynamic","dataType":"double","tagName":"sensorgrow.temperature","uom":"°C"}\n]'}
+                placeholder={'[\n  {"name":"Temperature","type":"dynamic","dataType":"double","tagName":"device-01.temperature","uom":"°C"}\n]'}
                 className="font-mono text-xs h-36 resize-none" />
               {parseError && <p className="text-xs text-destructive flex items-center gap-1"><AlertTriangle className="w-3 h-3" />{parseError}</p>}
               <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleParse} disabled={!jsonText.trim()}>Preview</Button>

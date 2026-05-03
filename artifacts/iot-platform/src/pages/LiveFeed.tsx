@@ -319,7 +319,7 @@ export default function LiveFeed() {
                 <Radio className="w-12 h-12 mb-3 opacity-20" style={{ color: "#64748b" }} />
                 <p className="text-sm font-semibold mb-1" style={{ color: "#64748b" }}>Waiting for live data…</p>
                 <p className="text-xs max-w-xs" style={{ color: "#475569" }}>
-                  Start the Payload Simulator or send data from Node-RED using POST /api/ingest/payload
+                  Start the Payload Simulator or send data from your device using POST /api/ingest/payload
                 </p>
               </div>
             ) : (

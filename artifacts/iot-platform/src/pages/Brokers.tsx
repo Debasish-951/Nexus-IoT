@@ -52,7 +52,7 @@ function IngestEndpointPanel() {
         <Info className="w-4 h-4" /> HTTP API Ingest Endpoints
       </p>
       <p className="text-xs text-blue-700 dark:text-blue-400">
-        External systems (Node-RED, custom scripts, SCADA) can push data directly to these endpoints using HTTP POST.
+        External systems (gateways, custom scripts, SCADA) can push data directly to these endpoints using HTTP POST.
       </p>
       <div className="space-y-2">
         {[

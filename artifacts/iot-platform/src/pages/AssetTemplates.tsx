@@ -57,7 +57,7 @@ function AttributeType({ type }: { type: string }) {
 }
 
 // ── Payload extractor ─────────────────────────────────────────────────────────
-// Accepts Sensorgrow, standard, flat JSON, or array of payloads
+// Accepts nested-data, nested-metrics, flat JSON, or array of payloads
 function extractFromPayload(text: string): { defs: AttributeDefinition[]; deviceId: string | null } {
   const raw = JSON.parse(text);
   const payloads: any[] = Array.isArray(raw) ? raw : [raw];
@@ -147,21 +147,17 @@ function parseCsvDefs(text: string): AttributeDefinition[] {
 
 // ── Example payloads ──────────────────────────────────────────────────────────
 const PAYLOAD_EXAMPLE = JSON.stringify({
-  deviceId: "sensorgrow",
+  deviceId: "my-device-01",
   timestampUnix: 1766062407826,
-  sensor: { serial: "S125010T1TA10", mac: "00:80:e1:11:00:2b" },
-  asset:  { name: "Fan", id: 4979 },
-  measurement_point: { name: "Fan Drive End", id: 9362 },
   data: {
-    temperature: 31.706,
-    ultrasound: 53.167,
-    battery: 3,
+    temperature: 31.7,
+    humidity: 68.4,
+    pressure: 1013.2,
+    energy_kwh: 145.7,
+    vibration_rms_x: 1.1,
+    vibration_rms_y: 0.8,
+    battery: 3.0,
     runhours: 1654,
-    vibration_rms_velocity_x: 1.1,
-    vibration_rms_velocity_y: 0.8,
-    vibration_rms_velocity_z: 0.8,
-    vibration_rms_acceleration_x: 0.197,
-    vibration_max_velocity_x: 3.3,
   },
 }, null, 2);
 
@@ -435,7 +431,7 @@ export default function AssetTemplates() {
                           <LayoutTemplate className="w-7 h-7 mx-auto mb-3 opacity-20" />
                           <p className="text-sm font-medium mb-1">No attribute definitions yet</p>
                           <p className="text-xs opacity-60 mb-4 max-w-xs mx-auto">
-                            The fastest way: paste a raw Node-RED / device payload and extract all fields automatically.
+                            The fastest way: paste a raw device payload and extract all fields automatically.
                           </p>
                           <Button size="sm" variant="outline" className="h-7 text-xs"
                             onClick={() => { setImportOpen(true); setImportTab("payload"); }}>
@@ -598,7 +594,7 @@ export default function AssetTemplates() {
                   <Info className="w-3.5 h-3.5" /> How this works
                 </p>
                 <ul className="text-xs text-blue-700 dark:text-blue-400 space-y-1 list-none">
-                  <li>• Paste the raw JSON your device/Node-RED sends to the ingest endpoint</li>
+                  <li>• Paste the raw JSON your device or gateway sends to the ingest endpoint</li>
                   <li>• The platform reads every field in <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">data</code> / <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">metrics</code> and turns each one into an attribute definition</li>
                   <li>• Numbers → <span className="font-medium">dynamic / double</span> · strings → <span className="font-medium">static / text</span> · the <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">deviceId</code> is shown for reference but not stored in the template</li>
                   <li>• Tag names stay as relative keys (e.g. <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">temperature</code>) — the asset identifier is prepended when you apply the template to an asset</li>
@@ -606,11 +602,11 @@ export default function AssetTemplates() {
               </div>
               <div className="space-y-1">
                 <div className="flex items-center justify-between">
-                  <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Paste Node-RED / Device Payload</label>
+                  <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Paste Device Payload</label>
                   <button className="text-xs text-primary hover:underline" onClick={() => setImportText(PAYLOAD_EXAMPLE)}>Load example</button>
                 </div>
                 <Textarea value={importText} onChange={(e) => { setImportText(e.target.value); setImportPreview([]); setImportError(null); }}
-                  placeholder={'{\n  "deviceId": "sensorgrow",\n  "data": {\n    "temperature": 31.7,\n    "vibration_rms_velocity_x": 1.1\n  }\n}'}
+                  placeholder={'{\n  "deviceId": "my-device-01",\n  "data": {\n    "temperature": 31.7,\n    "energy_kwh": 145.7\n  }\n}'}
                   className="font-mono text-xs h-44 resize-none" />
               </div>
               {importError && <p className="text-xs text-destructive flex items-center gap-1.5"><AlertTriangle className="w-3 h-3 shrink-0" />{importError}</p>}

@@ -7,6 +7,7 @@ import {
 import { GetTelemetryParams, GetTelemetryQueryParams } from "@workspace/api-zod";
 import { Parser } from "expr-eval";
 import { broadcast } from "../lib/ws-broadcast";
+import { optionalApiKeyAuth } from "../middleware/apiKeyAuth";
 
 const router: IRouter = Router();
 
@@ -56,7 +57,7 @@ export function normalise(body: Record<string, unknown>): NormalisedPayload | nu
     if (isNaN(ts.getTime())) ts = new Date();
   }
 
-  // ── Nested {data: {...}} envelope (e.g. Sensorgrow / Node-RED) ────────────
+  // ── Nested {data: {...}} envelope ────────────────────────────────────────
   if (body.data && typeof body.data === "object" && !Array.isArray(body.data)) {
     const sensor = body.sensor as Record<string, unknown> | undefined;
     const asset  = body.asset  as Record<string, unknown> | undefined;
@@ -74,9 +75,9 @@ export function normalise(body: Record<string, unknown>): NormalisedPayload | nu
       metrics: body.metrics as Record<string, unknown> };
   }
 
-  // ── Flat / AHI-style nested-root payload ──────────────────────────────────
+  // ── Flat / nested-root payload ────────────────────────────────────────────
   // Extracts root-level primitives AND dot-flattens nested objects one level deep.
-  // AHI / WS-Integrated Suite style:
+  // Nested-root style (e.g. energy gateway with subsystems):
   //   { deviceId, timestamp, chiller: { energy_kWh: 15.2, load_percent: 82 }, lighting: { ... } }
   // becomes: { "chiller.energy_kWh": 15.2, "chiller.load_percent": 82, ... }
   const flatMetrics: Record<string, unknown> = {};
@@ -292,7 +293,7 @@ export async function processNormalised(n: NormalisedPayload, assetIdHint?: stri
 
   // Update dynamic attributes — match by tagName OR sourceMetric
   for (const [metric, value] of Object.entries(n.metrics)) {
-    // Primary: tagName-based match (e.g. "rf-dryer.energy_meter_kwh")
+    // Primary: tagName-based match (e.g. "device-id.metric_name")
     await db.update(attributesTable).set({ value, timestamp: ts })
       .where(and(eq(attributesTable.assetId, assetId as string), eq(attributesTable.tagName, `${n.deviceId}.${metric}`)));
     // Secondary: explicit sourceMetric remapping (attribute.sourceMetric = "energy_meter_kwh")
@@ -339,7 +340,7 @@ export async function processNormalised(n: NormalisedPayload, assetIdHint?: stri
 }
 
 // ── Validate (dry-run) endpoint ───────────────────────────────────────────────
-router.post("/ingest/validate", async (req, res): Promise<void> => {
+router.post("/ingest/validate", optionalApiKeyAuth("ingest:write"), async (req, res): Promise<void> => {
   const body = req.body as Record<string, unknown>;
   const warnings: string[] = [];
 
@@ -380,7 +381,7 @@ router.post("/ingest/validate", async (req, res): Promise<void> => {
 });
 
 // ── Routes ────────────────────────────────────────────────────────────────────
-router.post("/ingest/payload", async (req, res): Promise<void> => {
+router.post("/ingest/payload", optionalApiKeyAuth("ingest:write"), async (req, res): Promise<void> => {
   const body = req.body as Record<string, unknown>;
   const normalised = normalise(body);
   if (!normalised) { res.status(400).json({ error: "Missing required field: deviceId" }); return; }
@@ -392,7 +393,7 @@ router.post("/ingest/payload", async (req, res): Promise<void> => {
     res.status(422).json({
       success: false,
       error: `Unknown deviceId: "${normalised.deviceId}"`,
-      hint: `No asset has identifier="${normalised.deviceId}". Set this identifier on the asset in Asset Management, or check for a typo in your Node-RED Device Id node.`,
+      hint: `No asset has identifier="${normalised.deviceId}". Set this identifier on the asset in Asset Management, or check for a typo in your deviceId.`,
       deviceId: normalised.deviceId,
       recordsWritten: 0,
     });
@@ -406,7 +407,7 @@ router.post("/ingest/payload", async (req, res): Promise<void> => {
     alarmsTriggered: triggered.length, alarmsCleared: cleared.length, alarmEvents: result.alarmEvents });
 });
 
-router.post("/ingest/batch", async (req, res): Promise<void> => {
+router.post("/ingest/batch", optionalApiKeyAuth("ingest:write"), async (req, res): Promise<void> => {
   const items = req.body;
   if (!Array.isArray(items)) { res.status(400).json({ error: "Body must be an array" }); return; }
   let successCount = 0, failureCount = 0, totalTriggered = 0, totalCleared = 0;

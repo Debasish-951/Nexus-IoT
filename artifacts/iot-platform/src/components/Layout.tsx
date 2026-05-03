@@ -58,7 +58,7 @@ const navItems: NavItem[] = [
     children: [
       { label: "Broker",       href: "/brokers",               icon: Wifi },
       { label: "Destinations", href: "/destinations",          icon: Send },
-      { label: "Node-RED API", href: "/node-red-docs",         icon: Zap },
+      { label: "Integration Guide", href: "/integration-guide",   icon: Zap },
       { label: "Integration",  href: "/settings?v=integration", icon: Plug },
     ],
   },
