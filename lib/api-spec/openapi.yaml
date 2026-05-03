@@ -338,6 +338,25 @@ paths:
               schema:
                 $ref: "#/components/schemas/IngestResult"
 
+  /ingest/validate:
+    post:
+      operationId: validatePayload
+      tags: [ingest]
+      summary: Dry-run a payload — resolves deviceId, extracts metrics, checks asset match. Does NOT write to DB.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IngestPayloadBody"
+      responses:
+        "200":
+          description: Validation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidateResult"
+
   /ingest/batch:
     post:
       operationId: ingestBatch
@@ -954,7 +973,7 @@ components:
           type: string
         type:
           type: string
-          enum: [static, dynamic, metric]
+          enum: [static, dynamic, metric, runtime]
         dataType:
           type: string
           enum: [text, number, boolean, timestamp, double]
@@ -963,9 +982,20 @@ components:
         tagName:
           type: string
           nullable: true
+        sourceMetric:
+          type: string
+          nullable: true
+          description: "Payload key that feeds this attribute when it differs from the tagName-derived key"
         uom:
           type: string
           nullable: true
+        decimalPlaces:
+          type: integer
+          nullable: true
+          description: "Number of decimal places for display (null = no rounding)"
+        thousandSeparator:
+          type: boolean
+          description: "Whether to use thousand separator for display"
         quality:
           type: string
           nullable: true
@@ -979,7 +1009,7 @@ components:
         updatedAt:
           type: string
           format: date-time
-      required: [id, assetId, name, type, dataType, updatedAt]
+      required: [id, assetId, name, type, dataType, thousandSeparator, updatedAt]
 
     CreateAttributeBody:
       type: object
@@ -988,7 +1018,7 @@ components:
           type: string
         type:
           type: string
-          enum: [static, dynamic, metric]
+          enum: [static, dynamic, metric, runtime]
         dataType:
           type: string
           enum: [text, number, boolean, timestamp, double]
@@ -997,9 +1027,17 @@ components:
         tagName:
           type: string
           nullable: true
+        sourceMetric:
+          type: string
+          nullable: true
         uom:
           type: string
           nullable: true
+        decimalPlaces:
+          type: integer
+          nullable: true
+        thousandSeparator:
+          type: boolean
         expression:
           type: string
           nullable: true
@@ -1010,11 +1048,26 @@ components:
       properties:
         name:
           type: string
+        type:
+          type: string
+        dataType:
+          type: string
+        tagName:
+          type: string
+          nullable: true
+        sourceMetric:
+          type: string
+          nullable: true
         value:
           nullable: true
         uom:
           type: string
           nullable: true
+        decimalPlaces:
+          type: integer
+          nullable: true
+        thousandSeparator:
+          type: boolean
         expression:
           type: string
           nullable: true
@@ -1109,6 +1162,39 @@ components:
         failureCount:
           type: integer
       required: [success, totalRecords, successCount, failureCount]
+
+    ValidateResult:
+      type: object
+      properties:
+        valid:
+          type: boolean
+        deviceId:
+          type: string
+          nullable: true
+        assetId:
+          type: string
+          nullable: true
+        assetName:
+          type: string
+          nullable: true
+        assetMatched:
+          type: boolean
+        timestamp:
+          type: string
+          nullable: true
+        payloadFormat:
+          type: string
+          description: "flat | nested-data | nested-metrics | unknown"
+        extractedMetrics:
+          type: object
+          additionalProperties: true
+        metricCount:
+          type: integer
+        warnings:
+          type: array
+          items:
+            type: string
+      required: [valid, assetMatched, metricCount, warnings, extractedMetrics, payloadFormat]
 
     TelemetryRecord:
       type: object

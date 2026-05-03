@@ -121,11 +121,24 @@ export const ListAssetAttributesResponseItem = zod.object({
   id: zod.string(),
   assetId: zod.string(),
   name: zod.string(),
-  type: zod.enum(["static", "dynamic", "metric"]),
+  type: zod.enum(["static", "dynamic", "metric", "runtime"]),
   dataType: zod.enum(["text", "number", "boolean", "timestamp", "double"]),
   value: zod.unknown().nullish(),
   tagName: zod.string().nullish(),
+  sourceMetric: zod
+    .string()
+    .nullish()
+    .describe(
+      "Payload key that feeds this attribute when it differs from the tagName-derived key",
+    ),
   uom: zod.string().nullish(),
+  decimalPlaces: zod
+    .number()
+    .nullish()
+    .describe("Number of decimal places for display (null = no rounding)"),
+  thousandSeparator: zod
+    .boolean()
+    .describe("Whether to use thousand separator for display"),
   quality: zod.string().nullish(),
   expression: zod.string().nullish(),
   timestamp: zod.coerce.date().nullish(),
@@ -144,11 +157,14 @@ export const CreateAssetAttributeParams = zod.object({
 
 export const CreateAssetAttributeBody = zod.object({
   name: zod.string(),
-  type: zod.enum(["static", "dynamic", "metric"]),
+  type: zod.enum(["static", "dynamic", "metric", "runtime"]),
   dataType: zod.enum(["text", "number", "boolean", "timestamp", "double"]),
   value: zod.unknown().nullish(),
   tagName: zod.string().nullish(),
+  sourceMetric: zod.string().nullish(),
   uom: zod.string().nullish(),
+  decimalPlaces: zod.number().nullish(),
+  thousandSeparator: zod.boolean().optional(),
   expression: zod.string().nullish(),
 });
 
@@ -161,8 +177,14 @@ export const UpdateAttributeParams = zod.object({
 
 export const UpdateAttributeBody = zod.object({
   name: zod.string().optional(),
+  type: zod.string().optional(),
+  dataType: zod.string().optional(),
+  tagName: zod.string().nullish(),
+  sourceMetric: zod.string().nullish(),
   value: zod.unknown().nullish(),
   uom: zod.string().nullish(),
+  decimalPlaces: zod.number().nullish(),
+  thousandSeparator: zod.boolean().optional(),
   expression: zod.string().nullish(),
 });
 
@@ -170,11 +192,24 @@ export const UpdateAttributeResponse = zod.object({
   id: zod.string(),
   assetId: zod.string(),
   name: zod.string(),
-  type: zod.enum(["static", "dynamic", "metric"]),
+  type: zod.enum(["static", "dynamic", "metric", "runtime"]),
   dataType: zod.enum(["text", "number", "boolean", "timestamp", "double"]),
   value: zod.unknown().nullish(),
   tagName: zod.string().nullish(),
+  sourceMetric: zod
+    .string()
+    .nullish()
+    .describe(
+      "Payload key that feeds this attribute when it differs from the tagName-derived key",
+    ),
   uom: zod.string().nullish(),
+  decimalPlaces: zod
+    .number()
+    .nullish()
+    .describe("Number of decimal places for display (null = no rounding)"),
+  thousandSeparator: zod
+    .boolean()
+    .describe("Whether to use thousand separator for display"),
   quality: zod.string().nullish(),
   expression: zod.string().nullish(),
   timestamp: zod.coerce.date().nullish(),
@@ -275,6 +310,32 @@ export const IngestPayloadResponse = zod.object({
   recordsWritten: zod.number(),
   assetId: zod.string().nullish(),
   message: zod.string(),
+});
+
+/**
+ * @summary Dry-run a payload — resolves deviceId, extracts metrics, checks asset match. Does NOT write to DB.
+ */
+export const ValidatePayloadBody = zod.object({
+  deviceId: zod.string(),
+  assetId: zod.string().nullish(),
+  timestamp: zod.coerce.date().nullish(),
+  timestampUnix: zod.number().nullish(),
+  metrics: zod.record(zod.string(), zod.unknown()).optional(),
+});
+
+export const ValidatePayloadResponse = zod.object({
+  valid: zod.boolean(),
+  deviceId: zod.string().nullish(),
+  assetId: zod.string().nullish(),
+  assetName: zod.string().nullish(),
+  assetMatched: zod.boolean(),
+  timestamp: zod.string().nullish(),
+  payloadFormat: zod
+    .string()
+    .describe("flat | nested-data | nested-metrics | unknown"),
+  extractedMetrics: zod.record(zod.string(), zod.unknown()),
+  metricCount: zod.number(),
+  warnings: zod.array(zod.string()),
 });
 
 /**

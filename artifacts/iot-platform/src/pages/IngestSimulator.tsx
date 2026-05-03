@@ -105,6 +105,16 @@ const SENSORGROW_BASE_DATA: Record<string, number> = {
   vibration_rms_displacement_z: 0.000049,
 };
 
+// ── RF-Dryer base data (flat Yokogawa/Siemens style payload) ─────────────────
+const RF_DRYER_BASE_DATA: Record<string, number> = {
+  energy_meter_kwh: 4659.166,
+  interval_kwh: 0.739,
+  daily_cum_kwh: 32.16,
+  wtd_cum_kwh: 319.97,
+  mtd_cum_kwh: 968.86,
+  ytd_cum_kwh: 4658.35,
+};
+
 const PRESETS: Preset[] = [
   {
     id: "sensorgrow-fan",
@@ -114,18 +124,13 @@ const PRESETS: Preset[] = [
     metrics: { ...SENSORGROW_BASE_DATA },
     randomize: (base) => ({
       ...base,
-      // Drift vibration slightly
       vibration_rms_velocity_x: +(base.vibration_rms_velocity_x + (Math.random() * 0.3 - 0.15)).toFixed(4),
       vibration_rms_velocity_y: +(base.vibration_rms_velocity_y + (Math.random() * 0.2 - 0.1)).toFixed(4),
       vibration_rms_velocity_z: +(base.vibration_rms_velocity_z + (Math.random() * 0.2 - 0.1)).toFixed(4),
       vibration_max_velocity_x: +(base.vibration_max_velocity_x + (Math.random() * 0.4 - 0.2)).toFixed(4),
-      // Drift temperature slowly
       temperature: +(base.temperature + (Math.random() * 0.4 - 0.2)).toFixed(3),
-      // Drift ultrasound
       ultrasound: +(base.ultrasound + (Math.random() * 1 - 0.5)).toFixed(3),
-      // Runhours increments
       runhours: Math.round(base.runhours + 1),
-      // Battery stays stable (3V lithium)
       battery: +(Math.min(3.1, Math.max(2.4, base.battery + (Math.random() * 0.02 - 0.01)))).toFixed(2),
     }),
     buildPayload: (data) => ({
@@ -138,6 +143,29 @@ const PRESETS: Preset[] = [
       asset: { tag_id: null, name: "Fan", id: 4979 },
       measurement_point: { name: "Fan Drive End", id: 9362 },
       data,
+    }),
+  },
+  {
+    id: "rf-dryer",
+    label: "RF Dryer — Flat Payload (Yokogawa/Siemens style)",
+    description: "Energy meter flat payload — all metrics at root level alongside deviceId and timestamps. Matches the reference AHI/MindSphere format. Requires an asset with identifier='rf-dryer'.",
+    deviceId: "rf-dryer",
+    metrics: { ...RF_DRYER_BASE_DATA },
+    randomize: (base) => ({
+      ...base,
+      energy_meter_kwh: +(base.energy_meter_kwh + Math.random() * 0.15 + 0.05).toFixed(3),
+      interval_kwh: +(Math.random() * 0.4 + 0.5).toFixed(3),
+      daily_cum_kwh: +(base.daily_cum_kwh + Math.random() * 0.25 + 0.1).toFixed(3),
+      wtd_cum_kwh: +(base.wtd_cum_kwh + Math.random() * 0.3 + 0.2).toFixed(3),
+      mtd_cum_kwh: +(base.mtd_cum_kwh + Math.random() * 0.6 + 0.3).toFixed(3),
+      ytd_cum_kwh: +(base.ytd_cum_kwh + Math.random() * 0.15 + 0.05).toFixed(3),
+    }),
+    buildPayload: (metrics) => ({
+      deviceId: "rf-dryer",
+      timestamp: new Date().toISOString().replace("T", " ").replace("Z", "+00:00"),
+      timestampUnix: Date.now(),
+      ts: new Date().toISOString(),
+      ...metrics,
     }),
   },
 ];

@@ -17,7 +17,7 @@ scripts/                  — Utility scripts
 
 ### Database Tables
 - `assets` — hierarchical asset tree (self-referencing parentId)
-- `attributes` — asset attributes (static/dynamic/metric/runtime) with tagName, UoM, quality, timestamp, expression
+- `attributes` — asset attributes (static/dynamic/metric/runtime) with tagName, sourceMetric, UoM, decimalPlaces, thousandSeparator, quality, timestamp, expression
 - `asset_templates` — reusable attribute blueprints with expression support
 - `telemetry` — time-series sensor readings (assetId, deviceId, metric, value, quality, timestamp)
 - `alarms` — active alarm instances with severity/status/class
@@ -39,6 +39,7 @@ scripts/                  — Utility scripts
 - `GET/PUT/DELETE /api/attributes/:id` — manage individual attributes
 - `GET/POST /api/asset-templates` — list/create templates
 - `POST /api/ingest/payload` — single payload ingest (normalise + write telemetry + evaluate runtime attrs + fire alarm rules + deliver webhooks)
+- `POST /api/ingest/validate` — dry-run: resolves deviceId, extracts metrics, checks asset match — does NOT write to DB
 - `POST /api/ingest/batch` — batch ingest array
 - `GET /api/telemetry/:assetId` — query telemetry (metric, from, to, limit filters)
 - `GET /api/telemetry/:assetId/export` — CSV export of telemetry

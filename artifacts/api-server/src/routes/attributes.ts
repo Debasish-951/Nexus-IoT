@@ -41,6 +41,8 @@ router.post("/assets/:id/attributes", async (req, res): Promise<void> => {
     return;
   }
 
+  const body = req.body as Record<string, unknown>;
+
   const [attr] = await db
     .insert(attributesTable)
     .values({
@@ -50,7 +52,10 @@ router.post("/assets/:id/attributes", async (req, res): Promise<void> => {
       dataType: parsed.data.dataType,
       value: parsed.data.value ?? null,
       tagName: parsed.data.tagName ?? null,
+      sourceMetric: (body.sourceMetric as string | null) ?? null,
       uom: parsed.data.uom ?? null,
+      decimalPlaces: typeof body.decimalPlaces === "number" ? body.decimalPlaces : null,
+      thousandSeparator: typeof body.thousandSeparator === "boolean" ? body.thousandSeparator : false,
       expression: parsed.data.expression ?? null,
     })
     .returning();
@@ -76,20 +81,21 @@ router.put("/attributes/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  // Accept extra fields beyond the generated schema (type, dataType, tagName)
   const body = req.body as Record<string, unknown>;
 
   const [attr] = await db
     .update(attributesTable)
     .set({
-      ...(parsed.data.name       !== undefined ? { name:       parsed.data.name }       : {}),
-      ...(parsed.data.value      !== undefined ? { value:      parsed.data.value }      : {}),
-      ...(parsed.data.uom        !== undefined ? { uom:        parsed.data.uom }        : {}),
-      ...(parsed.data.expression !== undefined ? { expression: parsed.data.expression } : {}),
-      // Extra fields not in generated schema
-      ...(body.type     !== undefined ? { type:     body.type     as string } : {}),
-      ...(body.dataType !== undefined ? { dataType: body.dataType as string } : {}),
-      ...(body.tagName  !== undefined ? { tagName:  body.tagName  as string | null } : {}),
+      ...(parsed.data.name              !== undefined ? { name:             parsed.data.name }             : {}),
+      ...(parsed.data.value             !== undefined ? { value:            parsed.data.value }            : {}),
+      ...(parsed.data.uom               !== undefined ? { uom:              parsed.data.uom }              : {}),
+      ...(parsed.data.expression        !== undefined ? { expression:       parsed.data.expression }       : {}),
+      ...(body.type                     !== undefined ? { type:             body.type             as string        } : {}),
+      ...(body.dataType                 !== undefined ? { dataType:         body.dataType         as string        } : {}),
+      ...(body.tagName                  !== undefined ? { tagName:          body.tagName          as string | null  } : {}),
+      ...(body.sourceMetric             !== undefined ? { sourceMetric:     body.sourceMetric     as string | null  } : {}),
+      ...(body.decimalPlaces            !== undefined ? { decimalPlaces:    body.decimalPlaces    as number | null  } : {}),
+      ...(body.thousandSeparator        !== undefined ? { thousandSeparator: body.thousandSeparator as boolean      } : {}),
     })
     .where(eq(attributesTable.id, params.data.id))
     .returning();

@@ -49,7 +49,9 @@ interface Asset {
 }
 interface AttrDef {
   name: string; type: string; dataType: string;
-  value?: string; tagName?: string; uom?: string; expression?: string;
+  value?: string; tagName?: string; sourceMetric?: string;
+  uom?: string; decimalPlaces?: number | null; thousandSeparator?: boolean;
+  expression?: string;
 }
 
 // ── Attribute type badge ──────────────────────────────────────────────────────
@@ -398,8 +400,8 @@ export default function Assets() {
   const deleteAttr  = useDeleteAttribute();
 
   const assetForm = useForm({ defaultValues: { name: "", identifier: "", parentId: "" } });
-  const attrForm  = useForm({ defaultValues: { name: "", type: "static", dataType: "double", value: "", tagName: "", uom: "", expression: "" } });
-  const editAttrForm = useForm({ defaultValues: { name: "", type: "static", dataType: "double", value: "", tagName: "", uom: "", expression: "" } });
+  const attrForm  = useForm({ defaultValues: { name: "", type: "static", dataType: "double", value: "", tagName: "", sourceMetric: "", uom: "", decimalPlaces: "", thousandSeparator: false, expression: "" } });
+  const editAttrForm = useForm({ defaultValues: { name: "", type: "static", dataType: "double", value: "", tagName: "", sourceMetric: "", uom: "", decimalPlaces: "", thousandSeparator: false, expression: "" } });
 
   const allAssets    = (assets    as Asset[] | undefined) ?? [];
   const templateList = (templates as any[]   | undefined) ?? [];
@@ -501,7 +503,10 @@ export default function Assets() {
     const body: Record<string, any> = {
       name: data.name, type: data.type, dataType: data.dataType,
       value: data.value || null, tagName: data.tagName || null,
+      sourceMetric: data.sourceMetric || null,
       uom: data.uom || null,
+      decimalPlaces: data.decimalPlaces !== "" && data.decimalPlaces != null ? Number(data.decimalPlaces) : null,
+      thousandSeparator: data.thousandSeparator === true,
       expression: editAttrUseExpr ? data.expression || null : null,
     };
     if (editAttrUseExpr) body.type = "runtime";
@@ -521,11 +526,14 @@ export default function Assets() {
   // ── Export CSV ────────────────────────────────────────────────────────────
   function handleExportCsv() {
     if (attrList.length === 0) return;
-    const header = "name,type,dataType,value,tagName,uom,expression";
+    const header = "name,type,dataType,value,tagName,sourceMetric,uom,decimalPlaces,thousandSeparator,expression";
     const rows = attrList.map((a: any) =>
       [a.name, a.type, a.dataType,
         a.value != null ? String(typeof a.value === "object" ? JSON.stringify(a.value) : a.value) : "",
-        a.tagName ?? "", a.uom ?? "", a.expression ?? ""]
+        a.tagName ?? "", a.sourceMetric ?? "", a.uom ?? "",
+        a.decimalPlaces != null ? String(a.decimalPlaces) : "",
+        a.thousandSeparator ? "TRUE" : "FALSE",
+        a.expression ?? ""]
         .map((v) => `"${String(v).replace(/"/g, '""')}"`)
         .join(",")
     );
@@ -547,14 +555,18 @@ export default function Assets() {
     });
   }
 
-  function onAddAttr(data: { name: string; type: string; dataType: string; value?: string; tagName?: string; uom?: string; expression?: string }) {
+  function onAddAttr(data: any) {
     if (!selectedAsset) return;
     const finalType = attrUseExpr ? "runtime" : data.type;
     createAttr.mutate({
       id: selectedAsset.id,
       data: {
         name: data.name, type: finalType as any, dataType: data.dataType as any,
-        value: data.value || null, tagName: data.tagName || null, uom: data.uom || null,
+        value: data.value || null, tagName: data.tagName || null,
+        sourceMetric: data.sourceMetric || null,
+        uom: data.uom || null,
+        decimalPlaces: data.decimalPlaces !== "" && data.decimalPlaces != null ? Number(data.decimalPlaces) : null,
+        thousandSeparator: data.thousandSeparator === true,
         expression: attrUseExpr ? data.expression || null : null,
       } as any,
     }, {
@@ -573,7 +585,9 @@ export default function Assets() {
     editAttrForm.reset({
       name: attr.name, type: attr.type, dataType: attr.dataType,
       value: attr.value != null ? String(attr.value) : "",
-      tagName: attr.tagName ?? "", uom: attr.uom ?? "",
+      tagName: attr.tagName ?? "", sourceMetric: attr.sourceMetric ?? "",
+      uom: attr.uom ?? "", decimalPlaces: attr.decimalPlaces != null ? String(attr.decimalPlaces) : "",
+      thousandSeparator: attr.thousandSeparator ?? false,
       expression: attr.expression ?? "",
     });
   }
@@ -719,9 +733,9 @@ export default function Assets() {
                       <th className="text-left px-3 py-2 font-medium text-muted-foreground w-8"></th>
                       <th className="text-left px-3 py-2 font-medium text-muted-foreground w-24">Type</th>
                       <th className="text-left px-3 py-2 font-medium text-muted-foreground">Name</th>
-                      <th className="text-left px-3 py-2 font-medium text-muted-foreground">Value</th>
+                      <th className="text-left px-3 py-2 font-medium text-muted-foreground">Value / UoM</th>
                       <th className="text-left px-3 py-2 font-medium text-muted-foreground">Expression</th>
-                      <th className="text-left px-3 py-2 font-medium text-muted-foreground">Tag / UoM</th>
+                      <th className="text-left px-3 py-2 font-medium text-muted-foreground">Tag / Source</th>
                       <th className="text-left px-3 py-2 font-medium text-muted-foreground">Quality</th>
                       <th className="text-left px-3 py-2 font-medium text-muted-foreground">Updated</th>
                       <th className="px-3 py-2 w-8"></th>
@@ -765,7 +779,21 @@ export default function Assets() {
                           <td className="px-3 py-2 font-mono">
                             {attr.value != null
                               ? <span className={cn(attr.type === "runtime" && "font-semibold text-orange-700 dark:text-orange-400")}>
-                                  {String(typeof attr.value === "object" ? JSON.stringify(attr.value) : attr.value)}
+                                  {(() => {
+                                    const raw = typeof attr.value === "object" ? JSON.stringify(attr.value) : String(attr.value);
+                                    const num = Number(raw);
+                                    if (!isNaN(num) && attr.decimalPlaces != null) {
+                                      return num.toLocaleString(undefined, {
+                                        minimumFractionDigits: attr.decimalPlaces,
+                                        maximumFractionDigits: attr.decimalPlaces,
+                                        useGrouping: attr.thousandSeparator ?? false,
+                                      });
+                                    }
+                                    if (!isNaN(num) && attr.thousandSeparator) {
+                                      return num.toLocaleString(undefined, { useGrouping: true });
+                                    }
+                                    return raw;
+                                  })()}
                                   {attr.uom && <span className="text-muted-foreground ml-1 font-normal">{attr.uom}</span>}
                                 </span>
                               : <span className="text-muted-foreground/40">—</span>}
@@ -778,7 +806,14 @@ export default function Assets() {
                               : <span className="text-muted-foreground/40">—</span>}
                           </td>
                           <td className="px-3 py-2 text-muted-foreground font-mono">
-                            {attr.tagName ? <span className="text-xs">{attr.tagName}</span> : <span className="text-muted-foreground/40">—</span>}
+                            {attr.tagName
+                              ? <span className="text-xs">{attr.tagName}</span>
+                              : attr.sourceMetric
+                                ? <span className="text-xs text-blue-600 dark:text-blue-400">src:{attr.sourceMetric}</span>
+                                : <span className="text-muted-foreground/40">—</span>}
+                            {attr.sourceMetric && attr.tagName
+                              ? <span className="ml-1 text-[10px] text-blue-600 dark:text-blue-400">→{attr.sourceMetric}</span>
+                              : null}
                           </td>
                           <td className="px-3 py-2">
                             {attr.quality
@@ -950,11 +985,34 @@ export default function Assets() {
                     <FormField control={attrForm.control} name="tagName" render={({ field }) => (
                       <FormItem><FormLabel>Tag Name</FormLabel>
                         <FormControl><Input placeholder="device.key" className="font-mono text-xs" {...field} /></FormControl>
+                        <FormDescription className="text-[10px]">Auto-updated by ingest when tagName matches payload</FormDescription>
                       </FormItem>
                     )} />
+                    <FormField control={attrForm.control} name="sourceMetric" render={({ field }) => (
+                      <FormItem><FormLabel>Source Metric <span className="text-muted-foreground font-normal text-[10px]">(remap)</span></FormLabel>
+                        <FormControl><Input placeholder="energy_meter_kwh" className="font-mono text-xs" {...field} /></FormControl>
+                        <FormDescription className="text-[10px]">Payload key that feeds this attribute (if ≠ tagName key)</FormDescription>
+                      </FormItem>
+                    )} />
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
                     <FormField control={attrForm.control} name="uom" render={({ field }) => (
                       <FormItem><FormLabel>UoM</FormLabel>
-                        <FormControl><Input placeholder="°C, mm/s, V" {...field} /></FormControl>
+                        <FormControl><Input placeholder="kWh, °C" {...field} /></FormControl>
+                      </FormItem>
+                    )} />
+                    <FormField control={attrForm.control} name="decimalPlaces" render={({ field }) => (
+                      <FormItem><FormLabel>Decimal Places</FormLabel>
+                        <FormControl><Input type="number" min={0} max={10} placeholder="2" {...field} /></FormControl>
+                      </FormItem>
+                    )} />
+                    <FormField control={attrForm.control} name="thousandSeparator" render={({ field }) => (
+                      <FormItem className="flex flex-col justify-end gap-2 pb-1">
+                        <FormLabel>Thousand Sep.</FormLabel>
+                        <div className="flex items-center gap-2 h-9">
+                          <Switch checked={!!field.value} onCheckedChange={field.onChange} />
+                          <span className="text-xs text-muted-foreground">{field.value ? "On" : "Off"}</span>
+                        </div>
                       </FormItem>
                     )} />
                   </div>
@@ -1024,7 +1082,7 @@ export default function Assets() {
                   )} />
                 </>
               ) : (
-                /* Normal attribute — edit type, dataType, tagName, uom, value */
+                /* Normal attribute — edit type, dataType, tagName, sourceMetric, uom, decimalPlaces, value */
                 <>
                   <div className="grid grid-cols-2 gap-3">
                     <FormField control={editAttrForm.control} name="type" render={({ field }) => (
@@ -1048,6 +1106,7 @@ export default function Assets() {
                             <SelectItem value="number">Number</SelectItem>
                             <SelectItem value="double">Double</SelectItem>
                             <SelectItem value="boolean">Boolean</SelectItem>
+                            <SelectItem value="timestamp">Timestamp</SelectItem>
                           </SelectContent>
                         </Select>
                       </FormItem>
@@ -1056,11 +1115,32 @@ export default function Assets() {
                   <div className="grid grid-cols-2 gap-3">
                     <FormField control={editAttrForm.control} name="tagName" render={({ field }) => (
                       <FormItem><FormLabel>Tag Name</FormLabel>
-                        <FormControl><Input className="font-mono text-xs" {...field} /></FormControl>
+                        <FormControl><Input className="font-mono text-xs" placeholder="rf-dryer.energy_meter_kwh" {...field} /></FormControl>
                       </FormItem>
                     )} />
+                    <FormField control={editAttrForm.control} name="sourceMetric" render={({ field }) => (
+                      <FormItem><FormLabel>Source Metric <span className="text-muted-foreground font-normal text-[10px]">(remap)</span></FormLabel>
+                        <FormControl><Input className="font-mono text-xs" placeholder="energy_meter_kwh" {...field} /></FormControl>
+                      </FormItem>
+                    )} />
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
                     <FormField control={editAttrForm.control} name="uom" render={({ field }) => (
-                      <FormItem><FormLabel>UoM</FormLabel><FormControl><Input {...field} /></FormControl></FormItem>
+                      <FormItem><FormLabel>UoM</FormLabel><FormControl><Input placeholder="kWh, °C" {...field} /></FormControl></FormItem>
+                    )} />
+                    <FormField control={editAttrForm.control} name="decimalPlaces" render={({ field }) => (
+                      <FormItem><FormLabel>Decimal Places</FormLabel>
+                        <FormControl><Input type="number" min={0} max={10} placeholder="2" {...field} /></FormControl>
+                      </FormItem>
+                    )} />
+                    <FormField control={editAttrForm.control} name="thousandSeparator" render={({ field }) => (
+                      <FormItem className="flex flex-col justify-end gap-2 pb-1">
+                        <FormLabel>Thousand Sep.</FormLabel>
+                        <div className="flex items-center gap-2 h-9">
+                          <Switch checked={!!field.value} onCheckedChange={field.onChange} />
+                          <span className="text-xs text-muted-foreground">{field.value ? "On" : "Off"}</span>
+                        </div>
+                      </FormItem>
                     )} />
                   </div>
                   <div className="rounded-md bg-muted/40 border border-border/60 px-3 py-2 text-xs text-muted-foreground">
@@ -1157,11 +1237,11 @@ export default function Assets() {
 
             <TabsContent value="csv" className="space-y-3 mt-3">
               <div className="flex items-center justify-between">
-                <p className="text-xs text-muted-foreground">Columns: name, type, dataType, tagName, uom</p>
+                <p className="text-xs text-muted-foreground">Columns: name, type, dataType, tagName, sourceMetric, uom, decimalPlaces, thousandSeparator</p>
                 <button className="text-xs text-primary hover:underline" onClick={() => setCsvText(CSV_EXAMPLE)}>Load example</button>
               </div>
               <Textarea value={csvText} onChange={(e) => { setCsvText(e.target.value); setPreviewRows([]); setParseError(null); }}
-                placeholder={"name,type,dataType,tagName,uom\nTemperature,dynamic,double,sensorgrow.temperature,°C"}
+                placeholder={"name,type,dataType,tagName,sourceMetric,uom,decimalPlaces\nenergy_meter,dynamic,double,rf-dryer.energy_meter_kwh,energy_meter_kwh,kWh,2"}
                 className="font-mono text-xs h-36 resize-none" />
               {parseError && <p className="text-xs text-destructive flex items-center gap-1"><AlertTriangle className="w-3 h-3" />{parseError}</p>}
               <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleParse} disabled={!csvText.trim()}>Preview</Button>

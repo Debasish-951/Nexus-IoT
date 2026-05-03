@@ -45,6 +45,7 @@ export const AttributeType = {
   static: "static",
   dynamic: "dynamic",
   metric: "metric",
+  runtime: "runtime",
 } as const;
 
 export type AttributeDataType =
@@ -66,7 +67,13 @@ export interface Attribute {
   dataType: AttributeDataType;
   value?: unknown | null;
   tagName?: string | null;
+  /** Payload key that feeds this attribute when it differs from the tagName-derived key */
+  sourceMetric?: string | null;
   uom?: string | null;
+  /** Number of decimal places for display (null = no rounding) */
+  decimalPlaces?: number | null;
+  /** Whether to use thousand separator for display */
+  thousandSeparator: boolean;
   quality?: string | null;
   expression?: string | null;
   timestamp?: string | null;
@@ -80,6 +87,7 @@ export const CreateAttributeBodyType = {
   static: "static",
   dynamic: "dynamic",
   metric: "metric",
+  runtime: "runtime",
 } as const;
 
 export type CreateAttributeBodyDataType =
@@ -99,14 +107,23 @@ export interface CreateAttributeBody {
   dataType: CreateAttributeBodyDataType;
   value?: unknown | null;
   tagName?: string | null;
+  sourceMetric?: string | null;
   uom?: string | null;
+  decimalPlaces?: number | null;
+  thousandSeparator?: boolean;
   expression?: string | null;
 }
 
 export interface UpdateAttributeBody {
   name?: string;
+  type?: string;
+  dataType?: string;
+  tagName?: string | null;
+  sourceMetric?: string | null;
   value?: unknown | null;
   uom?: string | null;
+  decimalPlaces?: number | null;
+  thousandSeparator?: boolean;
   expression?: string | null;
 }
 
@@ -151,6 +168,22 @@ export interface IngestBatchResult {
   totalRecords: number;
   successCount: number;
   failureCount: number;
+}
+
+export type ValidateResultExtractedMetrics = { [key: string]: unknown };
+
+export interface ValidateResult {
+  valid: boolean;
+  deviceId?: string | null;
+  assetId?: string | null;
+  assetName?: string | null;
+  assetMatched: boolean;
+  timestamp?: string | null;
+  /** flat | nested-data | nested-metrics | unknown */
+  payloadFormat: string;
+  extractedMetrics: ValidateResultExtractedMetrics;
+  metricCount: number;
+  warnings: string[];
 }
 
 export interface TelemetryRecord {

@@ -28,10 +28,17 @@ function toDate(unix: number): Date {
   return new Date(unix > 1e12 ? unix : unix * 1000);
 }
 
+// ── Reserved payload envelope fields (never treated as metrics) ───────────────
+const ENVELOPE_FIELDS = new Set([
+  "deviceId", "assetId", "timestamp", "timestampUnix", "capturedAt", "receivedAt",
+  "sensor", "asset", "measurement_point", "data", "metrics",
+]);
+
 // ── Payload normaliser ────────────────────────────────────────────────────────
 export interface NormalisedPayload {
   deviceId: string; timestamp?: Date;
   metrics: Record<string, unknown>;
+  payloadFormat: "nested-data" | "nested-metrics" | "flat" | "unknown";
   sensorSerial?: string; externalAssetName?: string; measurementPoint?: string;
 }
 
@@ -42,23 +49,45 @@ export function normalise(body: Record<string, unknown>): NormalisedPayload | nu
   else if (body.capturedAt) ts = new Date(body.capturedAt as string);
   else if (body.receivedAt) ts = new Date(body.receivedAt as string);
   else if (body.timestamp) {
-    try { ts = new Date(body.timestamp as string); } catch { ts = new Date(); }
+    const raw = body.timestamp as string;
+    // Normalise non-standard format: "2025-11-14 05:11:40.418-05:30" → ISO 8601
+    const isoLike = raw.replace(" ", "T");
+    try { ts = new Date(isoLike); } catch { ts = new Date(); }
     if (isNaN(ts.getTime())) ts = new Date();
   }
+
+  // ── Nested {data: {...}} envelope (e.g. Sensorgrow / Node-RED) ────────────
   if (body.data && typeof body.data === "object" && !Array.isArray(body.data)) {
     const sensor = body.sensor as Record<string, unknown> | undefined;
     const asset  = body.asset  as Record<string, unknown> | undefined;
     const mp     = body.measurement_point as Record<string, unknown> | undefined;
-    return { deviceId: body.deviceId, timestamp: ts,
+    return { deviceId: body.deviceId, timestamp: ts, payloadFormat: "nested-data",
       metrics: body.data as Record<string, unknown>,
       sensorSerial: sensor?.serial as string | undefined,
       externalAssetName: (asset?.name as string | undefined)?.trim(),
       measurementPoint: mp?.name as string | undefined };
   }
+
+  // ── Nested {metrics: {...}} envelope ──────────────────────────────────────
   if (body.metrics && typeof body.metrics === "object" && !Array.isArray(body.metrics)) {
-    return { deviceId: body.deviceId, timestamp: ts, metrics: body.metrics as Record<string, unknown> };
+    return { deviceId: body.deviceId, timestamp: ts, payloadFormat: "nested-metrics",
+      metrics: body.metrics as Record<string, unknown> };
   }
-  return { deviceId: body.deviceId, timestamp: ts, metrics: {} };
+
+  // ── Flat payload: all metrics at root level (Yokogawa/Siemens/rf-dryer style)
+  // Extract every root-level field that isn't an envelope field.
+  const flatMetrics: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(body)) {
+    if (ENVELOPE_FIELDS.has(k)) continue;
+    if (typeof v === "number" || typeof v === "string" || typeof v === "boolean") {
+      flatMetrics[k] = v;
+    }
+  }
+  if (Object.keys(flatMetrics).length > 0) {
+    return { deviceId: body.deviceId, timestamp: ts, payloadFormat: "flat", metrics: flatMetrics };
+  }
+
+  return { deviceId: body.deviceId, timestamp: ts, payloadFormat: "unknown", metrics: {} };
 }
 
 // ── Operator evaluation ───────────────────────────────────────────────────────
@@ -245,10 +274,14 @@ export async function processNormalised(n: NormalisedPayload, assetIdHint?: stri
   }));
   await db.insert(telemetryTable).values(records as any[]);
 
-  // Update dynamic attributes
+  // Update dynamic attributes — match by tagName OR sourceMetric
   for (const [metric, value] of Object.entries(n.metrics)) {
+    // Primary: tagName-based match (e.g. "rf-dryer.energy_meter_kwh")
     await db.update(attributesTable).set({ value, timestamp: ts })
       .where(and(eq(attributesTable.assetId, assetId as string), eq(attributesTable.tagName, `${n.deviceId}.${metric}`)));
+    // Secondary: explicit sourceMetric remapping (attribute.sourceMetric = "energy_meter_kwh")
+    await db.update(attributesTable).set({ value, timestamp: ts })
+      .where(and(eq(attributesTable.assetId, assetId as string), eq(attributesTable.sourceMetric, metric)));
   }
   if (n.sensorSerial) {
     await db.update(attributesTable).set({ value: n.sensorSerial, timestamp: ts })
@@ -286,6 +319,47 @@ export async function processNormalised(n: NormalisedPayload, assetIdHint?: stri
 
   return { recordsWritten: records.length, assetId, assetName, alarmEvents };
 }
+
+// ── Validate (dry-run) endpoint ───────────────────────────────────────────────
+router.post("/ingest/validate", async (req, res): Promise<void> => {
+  const body = req.body as Record<string, unknown>;
+  const warnings: string[] = [];
+
+  if (!body.deviceId || typeof body.deviceId !== "string") {
+    res.json({ valid: false, assetMatched: false, metricCount: 0,
+      warnings: ["Missing required field: deviceId"], extractedMetrics: {}, payloadFormat: "unknown" });
+    return;
+  }
+
+  const n = normalise(body);
+  if (!n) {
+    res.json({ valid: false, deviceId: body.deviceId, assetMatched: false,
+      metricCount: 0, warnings: ["Payload could not be normalised"], extractedMetrics: {}, payloadFormat: "unknown" });
+    return;
+  }
+
+  // Lookup asset
+  const [asset] = await db.select({ id: assetsTable.id, name: assetsTable.name })
+    .from(assetsTable).where(eq(assetsTable.identifier, n.deviceId));
+
+  const metricCount = Object.keys(n.metrics).length;
+  if (!asset) warnings.push(`No asset found with identifier="${n.deviceId}". Telemetry will be discarded until the asset is created.`);
+  if (metricCount === 0) warnings.push("No metrics extracted — check payload format and envelope fields.");
+  if (n.payloadFormat === "unknown") warnings.push("Payload format unrecognised (no data, metrics, or flat metric fields found).");
+
+  res.json({
+    valid: !!asset && Object.keys(n.metrics).length > 0,
+    deviceId: n.deviceId,
+    assetId: asset?.id ?? null,
+    assetName: asset?.name ?? null,
+    assetMatched: !!asset,
+    timestamp: n.timestamp?.toISOString() ?? null,
+    payloadFormat: n.payloadFormat,
+    extractedMetrics: n.metrics,
+    metricCount,
+    warnings,
+  });
+});
 
 // ── Routes ────────────────────────────────────────────────────────────────────
 router.post("/ingest/payload", async (req, res): Promise<void> => {

@@ -55,6 +55,7 @@ import type {
   UpdateBrokerBody,
   UpdateUserBody,
   User,
+  ValidateResult,
 } from "./api.schemas";
 
 import { customFetch } from "../custom-fetch";
@@ -1447,6 +1448,92 @@ export const useIngestPayload = <
   TContext
 > => {
   return useMutation(getIngestPayloadMutationOptions(options));
+};
+
+/**
+ * @summary Dry-run a payload — resolves deviceId, extracts metrics, checks asset match. Does NOT write to DB.
+ */
+export const getValidatePayloadUrl = () => {
+  return `/api/ingest/validate`;
+};
+
+export const validatePayload = async (
+  ingestPayloadBody: IngestPayloadBody,
+  options?: RequestInit,
+): Promise<ValidateResult> => {
+  return customFetch<ValidateResult>(getValidatePayloadUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(ingestPayloadBody),
+  });
+};
+
+export const getValidatePayloadMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof validatePayload>>,
+    TError,
+    { data: BodyType<IngestPayloadBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof validatePayload>>,
+  TError,
+  { data: BodyType<IngestPayloadBody> },
+  TContext
+> => {
+  const mutationKey = ["validatePayload"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof validatePayload>>,
+    { data: BodyType<IngestPayloadBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return validatePayload(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ValidatePayloadMutationResult = NonNullable<
+  Awaited<ReturnType<typeof validatePayload>>
+>;
+export type ValidatePayloadMutationBody = BodyType<IngestPayloadBody>;
+export type ValidatePayloadMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Dry-run a payload — resolves deviceId, extracts metrics, checks asset match. Does NOT write to DB.
+ */
+export const useValidatePayload = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof validatePayload>>,
+    TError,
+    { data: BodyType<IngestPayloadBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof validatePayload>>,
+  TError,
+  { data: BodyType<IngestPayloadBody> },
+  TContext
+> => {
+  return useMutation(getValidatePayloadMutationOptions(options));
 };
 
 /**

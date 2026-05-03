@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, jsonb } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, uuid, jsonb, integer, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -10,7 +10,10 @@ export const attributesTable = pgTable("attributes", {
   dataType: text("data_type").notNull().default("text"), // text | number | boolean | timestamp | double
   value: jsonb("value"),
   tagName: text("tag_name"),
+  sourceMetric: text("source_metric"),   // payload key that feeds this attribute (if ≠ tagName-derived key)
   uom: text("uom"),
+  decimalPlaces: integer("decimal_places"),          // display decimal places (null = no rounding)
+  thousandSeparator: boolean("thousand_separator").notNull().default(false),
   quality: text("quality"),
   expression: text("expression"),
   timestamp: timestamp("timestamp", { withTimezone: true }),
