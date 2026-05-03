@@ -145,6 +145,16 @@ function parseCsv(text: string): AttrDef[] {
   return results;
 }
 
+function flattenPayload(obj: Record<string, any>, prefix = "", out: Record<string, any> = {}) {
+  for (const [k, v] of Object.entries(obj)) {
+    if (["deviceId","device_id","timestamp","timestampUnix","timestamp_unix","receivedAt","received_at","capturedAt","captured_at","sensor","asset","measurement_point","id","version","type","source"].includes(k)) continue;
+    const key = prefix ? `${prefix}.${k}` : k;
+    if (v && typeof v === "object" && !Array.isArray(v)) flattenPayload(v as Record<string, any>, key, out);
+    else out[key] = v;
+  }
+  return out;
+}
+
 const CSV_EXAMPLE = `name,type,dataType,tagName,uom\nTemperature,dynamic,double,device-01.temperature,°C\nEnergy kWh,dynamic,double,device-01.energy_kwh,kWh\nDevice ID,static,text,device-01.device_serial,`;
 const JSON_EXAMPLE = JSON.stringify([
   { name: "Temperature", type: "dynamic", dataType: "double", tagName: "device-01.temperature", uom: "°C" },
@@ -479,7 +489,27 @@ export default function Assets() {
         setPreviewRows(rows);
       } else if (importTab === "json") {
         const parsed = JSON.parse(jsonText);
-        setPreviewRows(Array.isArray(parsed) ? parsed : [parsed]);
+        const payloads = Array.isArray(parsed) ? parsed : [parsed];
+        const flattened: AttrDef[] = [];
+        for (const item of payloads) {
+          const obj = item && typeof item === "object" ? item as Record<string, any> : {};
+          const source = obj.data && typeof obj.data === "object" && !Array.isArray(obj.data)
+            ? obj.data
+            : obj.metrics && typeof obj.metrics === "object" && !Array.isArray(obj.metrics)
+              ? obj.metrics
+              : flattenPayload(obj);
+          for (const [key, value] of Object.entries(source)) {
+            if (value === undefined) continue;
+            const isNumber = typeof value === "number";
+            flattened.push({
+              name: key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
+              type: isNumber ? "dynamic" : "static",
+              dataType: isNumber ? (Number.isInteger(value) ? "number" : "double") : "text",
+              tagName: key,
+            });
+          }
+        }
+        setPreviewRows(flattened);
       }
     } catch (e: any) { setParseError(e.message); }
   }

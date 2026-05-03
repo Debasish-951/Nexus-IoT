@@ -65,6 +65,18 @@ function extractFromPayload(text: string): { defs: AttributeDefinition[]; device
   let deviceId: string | null = null;
   const seen: Record<string, any> = {};
 
+  function collectMetrics(obj: Record<string, any>, prefix = "") {
+    for (const [k, v] of Object.entries(obj)) {
+      if (PAYLOAD_SKIP_KEYS.has(k) || k === "metrics" || k === "data" || k === "values" || k === "payload") continue;
+      const key = prefix ? `${prefix}.${k}` : k;
+      if (v && typeof v === "object" && !Array.isArray(v)) {
+        collectMetrics(v as Record<string, any>, key);
+      } else if (typeof v !== "undefined") {
+        seen[key] = v;
+      }
+    }
+  }
+
   for (const p of payloads) {
     // Capture device identifier
     if (!deviceId && (p.deviceId || p.device_id)) {
@@ -84,12 +96,8 @@ function extractFromPayload(text: string): { defs: AttributeDefinition[]; device
         if (typeof v !== "object" || v === null) seen[k] = v;
       }
     } else {
-      // Priority 2: flat payload — skip metadata keys & nested objects
-      for (const [k, v] of Object.entries(p)) {
-        if (!PAYLOAD_SKIP_KEYS.has(k) && (typeof v !== "object" || v === null)) {
-          seen[k] = v;
-        }
-      }
+      // Priority 2: flat or nested-root payload — flatten nested objects
+      collectMetrics(p);
     }
   }
 
