@@ -25,6 +25,7 @@ import ActivityLog from "@/pages/ActivityLog";
 import DataManagement from "@/pages/DataManagement";
 import Reports from "@/pages/Reports";
 import Visualization from "@/pages/Visualization";
+import LiveFeed from "@/pages/LiveFeed";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -55,6 +56,7 @@ function AppRouter() {
         <Route path="/data-management" component={DataManagement} />
         <Route path="/reports" component={Reports} />
         <Route path="/visualization" component={Visualization} />
+        <Route path="/live" component={LiveFeed} />
         <Route path="/settings" component={Settings} />
         <Route path="/simulator" component={IngestSimulator} />
         <Route component={NotFound} />

@@ -85,7 +85,8 @@ scripts/                  — Utility scripts
 - `/activity-log` — Audit trail table (filter by category, search by actor/target/action, paginated 25/page, 30s auto-refresh)
 - `/data-management` — Storage overview (total rows, table size, oldest/newest), per-asset breakdown, retention policy CRUD, manual pruning trigger, storage architecture notes
 - `/reports` — On-demand report generation: Telemetry Summary (aggregated min/avg/max per bucket), Alarm Report (date-range filtered), Asset Status Snapshot; quick range buttons, download as CSV or JSON
-- `/visualization` — Industrial dark-theme dashboard with **named dashboards** (CRUD: New/Edit/Clone/Delete + access control per role), **multi-metric overlay** (up to 4 extra series on Line/Area/Bar/StackBar charts), dashboard selector dropdown, role badge, **global time range dropdown** (11 presets), widget type as dropdown (11 types), asset hierarchy tree panel, per-widget fullscreen/refresh, auto-refresh 30s, all data persisted in `ws-dashboards-v1` localStorage key. Role-based dashboard visibility (admin/engineer/operator/viewer per dashboard).
+- `/visualization` — Industrial dark-theme dashboard with **named dashboards** (CRUD: New/Edit/Clone/Delete + access control per role), **multi-metric overlay** (up to 4 extra series on Line/Area/Bar/StackBar charts), dashboard selector dropdown, role badge, **global time range dropdown** (11 presets), widget type as dropdown (11 types), asset hierarchy tree panel, per-widget fullscreen/refresh, auto-refresh 30s, all data persisted in `ws-dashboards-v1` localStorage key. Role-based dashboard visibility. **Real-time WS updates**: `useWsEvents` hook wires telemetry events → per-asset `wsSignals` map → each WidgetCard auto-refetches on signal change + shows animated `● LIVE` badge.
+- `/live` — **Live Telemetry Feed**: real-time WebSocket monitoring page. Left pane: per-asset metric tiles (auto-expand on first data, flash animation on update, stale detection after 30s, trend indicators). Right pane: scrollable event log (200 event buffer, expandable rows showing all metric values). Top bar: WS connection status, events/min, live asset count, total received, metrics tracked, asset filter, clear log button. Status bar with buffer/stale config info.
 - Asset Management: "Projects & Assets" panel header with prominent "+ Add New" button (creates root project), "New Root Project" button at bottom, tree supports unlimited nesting. Add dialog explains root vs child context.
 
 ### Services
@@ -155,9 +156,12 @@ cd lib/api-spec && pnpm exec orval --config ./orval.config.ts
 - `artifacts/api-server: API Server` — runs `pnpm --filter @workspace/api-server run dev`
 - `artifacts/iot-platform: web` — runs `pnpm --filter @workspace/iot-platform run dev`
 
-## Phase 3 Planned Features
+### Payload Simulator (IngestSimulator.tsx)
+- **Mode switcher**: "Device Presets" tab (existing hardcoded Sensorgrow/RF-Dryer payloads) and **"Custom Asset" tab** (new).
+- **Custom Asset Sender**: pick any asset from dropdown → auto-discovers dynamic/measurement attributes via `GET /api/assets/:id/attributes` → populates metric rows with min/max ranges → sliders to adjust values → send once or auto-send with randomized jitter → live trend chart + request log. Payloads sent as `{ deviceId: asset.identifier, timestamp, metrics }`.
+
+## Planned Features
 - Device management (device registry, firmware OTA)
 - Reporting module (scheduled PDF reports)
-- Real-time WebSocket telemetry push
 - Broker mapping rule UI editor
 - Alarm escalation chains

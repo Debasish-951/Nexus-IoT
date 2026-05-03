@@ -4,6 +4,7 @@ import {
   getGetRecentTelemetryQueryKey,
   getListAlarmsQueryKey,
   getGetAlarmStatsQueryKey,
+  useListAssets,
 } from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -31,6 +32,7 @@ import {
   Play, Square, Send, RefreshCw, Zap, ChevronRight,
   CheckCircle2, XCircle, Clock, Activity, Cpu, TrendingUp,
   Bell, BellOff, History, AlertTriangle,
+  Plus, Trash2, Package, Sliders,
 } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -583,6 +585,435 @@ function ChartTooltip({ active, payload, label }: any) {
   );
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// ── Custom Asset Sender ───────────────────────────────────────────────────────
+interface CustomMetricRow {
+  id: string;
+  name: string;
+  min: number;
+  max: number;
+  value: number;
+  step: number;
+}
+
+interface CustomLogEntry {
+  id: string;
+  ts: Date;
+  assetName: string;
+  deviceId: string;
+  metrics: Record<string, number>;
+  status: "success" | "error";
+  durationMs: number;
+  alarmEvents: AlarmEvent[];
+}
+
+function CustomAssetSender() {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const { data: assetsData } = useListAssets();
+  const allAssets = (assetsData as any[] | undefined) ?? [];
+
+  const [selectedAssetId, setSelectedAssetId] = useState<string>("");
+  const [rows, setRows] = useState<CustomMetricRow[]>([
+    { id: crypto.randomUUID(), name: "temperature", min: 20, max: 80, value: 35, step: 0.1 },
+    { id: crypto.randomUUID(), name: "pressure",    min: 0,  max: 20, value: 8,  step: 0.01 },
+  ]);
+  const [autoSend, setAutoSend]     = useState(false);
+  const [intervalSecs, setIntervalSecs] = useState(3);
+  const [sending, setSending]       = useState(false);
+  const [log, setLog]               = useState<CustomLogEntry[]>([]);
+  const [totalSent, setTotalSent]   = useState(0);
+  const [totalSuccess, setTotalSuccess] = useState(0);
+  const [totalAlarms, setTotalAlarms]   = useState(0);
+  const [chartData, setChartData]   = useState<ChartPoint[]>([]);
+  const [hiddenLines, setHiddenLines] = useState<Set<string>>(new Set());
+  const intervalRef = useRef<number | null>(null);
+  const MAX_CHART = 40;
+
+  const selectedAsset = allAssets.find((a: any) => a.id === selectedAssetId);
+
+  // Discover metrics from asset attributes when asset changes
+  useEffect(() => {
+    if (!selectedAssetId) return;
+    fetch(`/api/assets/${selectedAssetId}/attributes`)
+      .then(r => r.ok ? r.json() : null)
+      .then((attrs: any[] | null) => {
+        if (!attrs || attrs.length === 0) return;
+        const dynamic = attrs.filter((a: any) => a.attributeType === "dynamic" || a.attributeType === "measurement");
+        if (dynamic.length === 0) return;
+        setRows(dynamic.map((a: any) => ({
+          id: crypto.randomUUID(),
+          name: a.name,
+          min: a.minValue ?? 0,
+          max: a.maxValue ?? 100,
+          value: ((a.minValue ?? 0) + (a.maxValue ?? 100)) / 2,
+          step: 0.01,
+        })));
+        toast({ title: `Discovered ${dynamic.length} metric attribute${dynamic.length>1?"s":""} for ${selectedAsset?.name ?? "asset"}` });
+      })
+      .catch(() => {/* silently ignore */});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [selectedAssetId]);
+
+  function addRow() {
+    setRows(prev => [...prev, { id: crypto.randomUUID(), name: "", min: 0, max: 100, value: 50, step: 0.1 }]);
+  }
+  function removeRow(id: string) { setRows(prev => prev.filter(r => r.id !== id)); }
+  function updateRow(id: string, patch: Partial<CustomMetricRow>) {
+    setRows(prev => prev.map(r => r.id === id ? { ...r, ...patch } : r));
+  }
+  function randomizeValues() {
+    setRows(prev => prev.map(r => ({
+      ...r,
+      value: +(r.min + Math.random() * (r.max - r.min)).toFixed(4),
+    })));
+  }
+
+  const buildMetrics = useCallback((theRows: CustomMetricRow[]) =>
+    Object.fromEntries(theRows.filter(r => r.name.trim()).map(r => [r.name.trim(), r.value])),
+  []);
+
+  const doSend = useCallback(async (metricsOverride?: Record<string, number>) => {
+    if (!selectedAsset) { toast({ title: "Select an asset first", variant: "destructive" }); return; }
+    const metrics = metricsOverride ?? buildMetrics(rows);
+    if (Object.keys(metrics).length === 0) { toast({ title: "Add at least one metric", variant: "destructive" }); return; }
+
+    const deviceId = selectedAsset.identifier || selectedAsset.id;
+    const payload = { deviceId, timestamp: new Date().toISOString(), metrics };
+    const start = performance.now();
+    setSending(true);
+    try {
+      const res = await fetch("/api/ingest/payload", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const data = await res.json();
+      const dur = Math.round(performance.now() - start);
+      const alarmEvents: AlarmEvent[] = data?.alarmEvents ?? [];
+      const newlyTriggered = alarmEvents.filter((e: AlarmEvent) => e.event === "triggered");
+
+      const entry: CustomLogEntry = {
+        id: crypto.randomUUID(),
+        ts: new Date(),
+        assetName: selectedAsset.name,
+        deviceId,
+        metrics,
+        status: res.ok ? "success" : "error",
+        durationMs: dur,
+        alarmEvents,
+      };
+      setLog(l => [entry, ...l].slice(0, 80));
+      setTotalSent(n => n + 1);
+      if (res.ok) {
+        setTotalSuccess(n => n + 1);
+        setChartData(prev => [...prev, { time: format(new Date(), "HH:mm:ss"), ...metrics }].slice(-MAX_CHART));
+        if (newlyTriggered.length > 0) {
+          setTotalAlarms(n => n + newlyTriggered.length);
+          newlyTriggered.slice(0, 2).forEach((ae: AlarmEvent) => {
+            toast({ title: `🔔 ${ae.ruleName}`, description: `${ae.metric} ${ae.operator} ${ae.threshold} (got ${ae.value})`, variant: "destructive" });
+          });
+          qc.invalidateQueries({ queryKey: getListAlarmsQueryKey() });
+          qc.invalidateQueries({ queryKey: getGetAlarmStatsQueryKey() });
+        }
+      }
+      qc.invalidateQueries({ queryKey: getGetRecentTelemetryQueryKey({ limit: 12 }) });
+    } catch (err) {
+      const entry: CustomLogEntry = {
+        id: crypto.randomUUID(), ts: new Date(),
+        assetName: selectedAsset.name, deviceId, metrics,
+        status: "error", durationMs: Math.round(performance.now() - start), alarmEvents: [],
+      };
+      setLog(l => [entry, ...l].slice(0, 80));
+      setTotalSent(n => n + 1);
+    } finally { setSending(false); }
+  }, [selectedAsset, rows, buildMetrics, toast, qc]);
+
+  // Auto-send loop
+  useEffect(() => {
+    if (!autoSend) {
+      if (intervalRef.current !== null) { window.clearInterval(intervalRef.current); intervalRef.current = null; }
+      return;
+    }
+    const tick = () => {
+      const jittered = Object.fromEntries(
+        rows.filter(r => r.name.trim()).map(r => [
+          r.name.trim(),
+          +(r.min + Math.random() * (r.max - r.min)).toFixed(4),
+        ])
+      );
+      doSend(jittered);
+    };
+    tick();
+    intervalRef.current = window.setInterval(tick, intervalSecs * 1000);
+    return () => { if (intervalRef.current !== null) { window.clearInterval(intervalRef.current); intervalRef.current = null; } };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoSend, intervalSecs, selectedAssetId]);
+
+  const metricNames = rows.filter(r => r.name.trim()).map(r => r.name.trim());
+  const successRate = totalSent > 0 ? Math.round((totalSuccess / totalSent) * 100) : 100;
+
+  return (
+    <div className="space-y-4">
+      {/* Stats */}
+      <div className="flex items-center gap-6">
+        {[
+          { label: "Sent", value: totalSent, cls: "" },
+          { label: "OK", value: totalSuccess, cls: "text-green-600" },
+          { label: "Rate", value: `${successRate}%`, cls: "" },
+          { label: "Alarms", value: totalAlarms, cls: totalAlarms > 0 ? "text-orange-500" : "text-muted-foreground/60" },
+        ].map(s => (
+          <div key={s.label} className="text-center">
+            <p className={cn("text-2xl font-bold tabular-nums", s.cls)}>{s.value}</p>
+            <p className="text-xs text-muted-foreground">{s.label}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-5 gap-4">
+        {/* Left: asset + metric config */}
+        <div className="xl:col-span-3 space-y-3">
+          {/* Asset selector */}
+          <Card className="shadow-sm">
+            <CardContent className="p-4 space-y-3">
+              <div className="flex items-end gap-3">
+                <div className="flex-1">
+                  <Label className="text-xs text-muted-foreground mb-1.5 block">Target Asset</Label>
+                  <select
+                    value={selectedAssetId}
+                    onChange={e => { setSelectedAssetId(e.target.value); setAutoSend(false); setChartData([]); }}
+                    className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+                  >
+                    <option value="">— choose an asset —</option>
+                    {allAssets.map((a: any) => (
+                      <option key={a.id} value={a.id}>
+                        {a.name}{a.identifier ? ` (${a.identifier})` : ""}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                {selectedAsset && (
+                  <div className="text-xs text-muted-foreground shrink-0 text-right">
+                    <p className="font-medium text-foreground">{selectedAsset.name}</p>
+                    <p className="font-mono">{selectedAsset.identifier || selectedAsset.id}</p>
+                  </div>
+                )}
+              </div>
+              {selectedAsset && (
+                <p className="text-xs text-muted-foreground">
+                  Payloads will be sent with <code className="bg-muted px-1 rounded font-mono">deviceId: "{selectedAsset.identifier || selectedAsset.id}"</code>.
+                  The ingest pipeline will match this to the asset automatically.
+                </p>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Metric rows */}
+          <Card className="shadow-sm">
+            <CardHeader className="pb-2 pt-3 px-4">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-xs font-semibold text-muted-foreground uppercase tracking-wide flex items-center gap-1.5">
+                  <Sliders className="w-3.5 h-3.5" /> Metric Configuration
+                </CardTitle>
+                <div className="flex items-center gap-2">
+                  <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={randomizeValues} disabled={autoSend}>
+                    <RefreshCw className="w-3 h-3 mr-1" /> Randomize
+                  </Button>
+                  <Button variant="outline" size="sm" className="h-7 text-xs" onClick={addRow} disabled={autoSend}>
+                    <Plus className="w-3 h-3 mr-1" /> Add Metric
+                  </Button>
+                </div>
+              </div>
+            </CardHeader>
+            <CardContent className="px-4 pb-4 space-y-2">
+              {rows.length === 0 && (
+                <p className="text-xs text-muted-foreground text-center py-4">No metrics configured — click Add Metric</p>
+              )}
+              {rows.map((row, i) => (
+                <div key={row.id} className="flex items-center gap-2 p-2 rounded border border-border/60 bg-muted/20">
+                  <span className="w-4 h-4 rounded-full shrink-0" style={{ background: CHART_COLORS[i % CHART_COLORS.length] }} />
+                  <input
+                    value={row.name}
+                    onChange={e => updateRow(row.id, { name: e.target.value })}
+                    placeholder="metric_name"
+                    className="flex-1 min-w-0 h-7 rounded border border-border bg-background px-2 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+                    disabled={autoSend}
+                  />
+                  <div className="flex items-center gap-1 shrink-0">
+                    <span className="text-xs text-muted-foreground w-6 text-right">{row.min}</span>
+                    <input type="range" min={row.min} max={row.max} step={row.step}
+                      value={row.value}
+                      onChange={e => updateRow(row.id, { value: +e.target.value })}
+                      className="w-24"
+                      disabled={autoSend}
+                    />
+                    <span className="text-xs text-muted-foreground w-6">{row.max}</span>
+                  </div>
+                  <span className="text-xs font-mono font-semibold text-primary w-16 text-right tabular-nums">
+                    {row.value.toFixed(4)}
+                  </span>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <input type="number" value={row.min} onChange={e => updateRow(row.id, { min: +e.target.value })}
+                      className="w-14 h-6 rounded border border-border/60 bg-background px-1.5 text-xs text-center font-mono focus:outline-none"
+                      placeholder="min" title="Min value" disabled={autoSend}
+                    />
+                    <span className="text-xs text-muted-foreground">–</span>
+                    <input type="number" value={row.max} onChange={e => updateRow(row.id, { max: +e.target.value })}
+                      className="w-14 h-6 rounded border border-border/60 bg-background px-1.5 text-xs text-center font-mono focus:outline-none"
+                      placeholder="max" title="Max value" disabled={autoSend}
+                    />
+                  </div>
+                  <button onClick={() => removeRow(row.id)} disabled={autoSend}
+                    className="p-1 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive transition-colors disabled:opacity-30">
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              ))}
+            </CardContent>
+          </Card>
+
+          {/* Payload preview */}
+          <Card className="shadow-sm">
+            <CardHeader className="pb-1 pt-3 px-4">
+              <CardTitle className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Payload Preview</CardTitle>
+            </CardHeader>
+            <CardContent className="px-4 pb-4">
+              <pre className="bg-muted/40 rounded-md p-3 text-xs font-mono overflow-auto max-h-40 leading-relaxed">
+                {JSON.stringify({
+                  deviceId: selectedAsset?.identifier || selectedAsset?.id || "<select asset>",
+                  timestamp: "<now>",
+                  metrics: buildMetrics(rows),
+                }, null, 2)}
+              </pre>
+            </CardContent>
+          </Card>
+
+          {/* Send controls */}
+          <Card className="shadow-sm">
+            <CardContent className="p-4">
+              <div className="flex items-center gap-4 flex-wrap">
+                <Button onClick={() => doSend()} disabled={sending || autoSend || !selectedAssetId} className="min-w-28">
+                  {sending
+                    ? <><RefreshCw className="w-4 h-4 mr-2 animate-spin" />Sending…</>
+                    : <><Send className="w-4 h-4 mr-2" />Send Once</>}
+                </Button>
+                <div className="h-6 w-px bg-border" />
+                <div className="flex items-center gap-2">
+                  <Switch checked={autoSend} onCheckedChange={v => { if (!selectedAssetId && v) { toast({ title: "Select an asset first" }); return; } setAutoSend(v); }} id="custom-auto-send" />
+                  <Label htmlFor="custom-auto-send" className="text-sm cursor-pointer select-none">
+                    {autoSend
+                      ? <span className="flex items-center gap-1.5 text-primary font-medium"><Play className="w-3.5 h-3.5 animate-pulse" />Auto-sending every {intervalSecs}s</span>
+                      : <span className="text-muted-foreground">Auto-send</span>}
+                  </Label>
+                </div>
+                <div className="flex items-center gap-3 flex-1 min-w-40">
+                  <Clock className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                  <Slider value={[intervalSecs]} onValueChange={([v]) => setIntervalSecs(v)} min={1} max={30} step={1} disabled={autoSend} className="flex-1" />
+                  <span className="text-xs text-muted-foreground w-10 text-right">{intervalSecs}s</span>
+                </div>
+                {autoSend && (
+                  <Button variant="destructive" size="sm" onClick={() => setAutoSend(false)}>
+                    <Square className="w-3.5 h-3.5 mr-1.5" />Stop
+                  </Button>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+
+        {/* Right: log */}
+        <div className="xl:col-span-2 space-y-3">
+          <Card className="shadow-sm">
+            <CardHeader className="pb-2 pt-3 px-4">
+              <div className="flex items-center justify-between">
+                <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                  <Cpu className="w-3.5 h-3.5 text-muted-foreground" /> Request Log
+                </CardTitle>
+                {log.length > 0 && (
+                  <button className="text-xs text-muted-foreground hover:text-destructive transition-colors"
+                    onClick={() => { setLog([]); setTotalSent(0); setTotalSuccess(0); setTotalAlarms(0); }}>
+                    Clear
+                  </button>
+                )}
+              </div>
+            </CardHeader>
+            <CardContent className="p-0">
+              <ScrollArea className="h-[480px]">
+                {log.length === 0 ? (
+                  <div className="px-4 py-10 text-center text-xs text-muted-foreground">No requests yet — pick an asset and send</div>
+                ) : (
+                  log.map(entry => (
+                    <div key={entry.id} className={cn("border-b border-border/50 px-3 py-2 text-xs flex items-center gap-2",
+                      entry.status === "error" ? "bg-red-50/30 dark:bg-red-950/20" : "")}>
+                      {entry.status === "success"
+                        ? <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-green-500" />
+                        : <XCircle    className="w-3.5 h-3.5 shrink-0 text-red-500" />}
+                      <span className="font-mono text-muted-foreground shrink-0">{format(entry.ts, "HH:mm:ss.SSS")}</span>
+                      <span className="font-medium truncate flex-1">{entry.assetName}</span>
+                      <span className="font-mono text-primary shrink-0">{Object.keys(entry.metrics).length}M</span>
+                      {entry.alarmEvents.filter(e => e.event === "triggered").length > 0 && (
+                        <span className="text-orange-500 flex items-center gap-0.5 shrink-0">
+                          <Bell className="w-3 h-3" />{entry.alarmEvents.filter(e => e.event === "triggered").length}
+                        </span>
+                      )}
+                      <span className="text-muted-foreground shrink-0">{entry.durationMs}ms</span>
+                      <Badge variant={entry.status === "success" ? "outline" : "destructive"} className="text-xs h-4 px-1 shrink-0">
+                        {entry.status}
+                      </Badge>
+                    </div>
+                  ))
+                )}
+              </ScrollArea>
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+
+      {/* Trend chart */}
+      {chartData.length > 0 && (
+        <Card className="shadow-sm">
+          <CardHeader className="pb-0 pt-3 px-4">
+            <div className="flex items-center justify-between">
+              <CardTitle className="text-sm font-semibold flex items-center gap-2">
+                <TrendingUp className="w-3.5 h-3.5 text-primary" />
+                Live Trend
+                {autoSend && <span className="text-xs text-primary font-normal flex items-center gap-1.5"><span className="w-1.5 h-1.5 rounded-full bg-primary animate-pulse" />Streaming</span>}
+              </CardTitle>
+              <div className="flex items-center gap-2">
+                {metricNames.map((k, i) => (
+                  <button key={k} onClick={() => setHiddenLines(prev => { const n = new Set(prev); n.has(k) ? n.delete(k) : n.add(k); return n; })}
+                    className={cn("flex items-center gap-1 text-xs px-2 py-0.5 rounded border transition-all",
+                      hiddenLines.has(k) ? "border-border/40 text-muted-foreground/50 bg-muted/20 line-through" : "border-border text-foreground bg-muted/40")}>
+                    <span className="w-2 h-2 rounded-full" style={{ background: CHART_COLORS[i % CHART_COLORS.length] }} />
+                    {k}
+                  </button>
+                ))}
+                <button className="text-xs text-muted-foreground hover:text-destructive" onClick={() => setChartData([])}>Clear</button>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent className="px-4 pb-4 pt-3">
+            <ResponsiveContainer width="100%" height={220}>
+              <LineChart data={chartData} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.5} />
+                <XAxis dataKey="time" tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={{ stroke: "hsl(var(--border))" }} interval="preserveStartEnd" />
+                <YAxis tick={{ fontSize: 10, fill: "hsl(var(--muted-foreground))" }} tickLine={false} axisLine={false} width={50} />
+                <Tooltip content={<ChartTooltip />} />
+                {metricNames.map((k, i) => (
+                  <Line key={k} type="monotone" dataKey={k} stroke={CHART_COLORS[i % CHART_COLORS.length]}
+                    strokeWidth={hiddenLines.has(k) ? 0 : 2} dot={false}
+                    activeDot={hiddenLines.has(k) ? false : { r: 3, strokeWidth: 0 }}
+                    isAnimationActive={false} hide={hiddenLines.has(k)} />
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+          </CardContent>
+        </Card>
+      )}
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 export default function IngestSimulator() {
   const qc = useQueryClient();
@@ -784,6 +1215,8 @@ export default function IngestSimulator() {
   const successRate = totalSent > 0 ? Math.round((totalSuccess / totalSent) * 100) : 100;
   const telemetryList = (recentTelemetry as any[] | undefined) ?? [];
 
+  const [simMode, setSimMode] = useState<"presets" | "custom">("presets");
+
   return (
     <div className="p-6 space-y-4">
       {/* ── Header ── */}
@@ -823,6 +1256,27 @@ export default function IngestSimulator() {
         </div>
       </div>
 
+      {/* ── Mode switcher ── */}
+      <div className="flex items-center gap-1 p-1 rounded-lg w-fit" style={{ background: "hsl(var(--muted))" }}>
+        <button
+          onClick={() => { setSimMode("presets"); setAutoSend(false); }}
+          className={cn("flex items-center gap-1.5 px-4 py-1.5 rounded-md text-sm font-medium transition-all",
+            simMode === "presets" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground")}
+        >
+          <Zap className="w-3.5 h-3.5" /> Device Presets
+        </button>
+        <button
+          onClick={() => { setSimMode("custom"); setAutoSend(false); }}
+          className={cn("flex items-center gap-1.5 px-4 py-1.5 rounded-md text-sm font-medium transition-all",
+            simMode === "custom" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground")}
+        >
+          <Package className="w-3.5 h-3.5" /> Custom Asset
+        </button>
+      </div>
+
+      {simMode === "custom" && <CustomAssetSender />}
+
+      {simMode === "presets" && (<>
       {/* ── Main 2-panel grid ── */}
       <div className="grid grid-cols-1 xl:grid-cols-5 gap-4">
         {/* Left */}
@@ -1299,6 +1753,7 @@ curl -s -X POST /api/ingest/batch \\
           </Tabs>
         </CardContent>
       </Card>
+      </>)}
     </div>
   );
 }

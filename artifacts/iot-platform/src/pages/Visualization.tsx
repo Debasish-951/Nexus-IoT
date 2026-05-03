@@ -5,6 +5,7 @@ import {
   getListAssetsQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
+import { useWsEvents } from "@/hooks/useWsEvents";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -375,15 +376,17 @@ function ChartWidget({ widget, data }: { widget: Widget; data: Record<string, an
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ── Widget Card ───────────────────────────────────────────────────────────────
-function WidgetCard({ widget, onDelete, onEdit, onClone, onCopy, fullscreen, onFullscreen }: {
+function WidgetCard({ widget, onDelete, onEdit, onClone, onCopy, fullscreen, onFullscreen, wsSignal }: {
   widget: Widget; onDelete: () => void; onEdit: () => void;
   onClone: () => void; onCopy: () => void;
   fullscreen: boolean; onFullscreen: () => void;
+  wsSignal?: number;
 }) {
   const [data, setData]           = useState<Record<string, any[]>>({});
   const [loading, setLoading]     = useState(true);
   const [lastFetch, setLastFetch] = useState<Date | null>(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
+  const [liveFlash, setLiveFlash] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchData = useCallback(async () => {
@@ -411,6 +414,17 @@ function WidgetCard({ widget, onDelete, onEdit, onClone, onCopy, fullscreen, onF
     if (autoRefresh) timerRef.current = setInterval(fetchData, 30_000);
     return () => { if (timerRef.current) clearInterval(timerRef.current); };
   }, [autoRefresh, fetchData]);
+
+  // Real-time: refetch when a WebSocket telemetry event arrives for this asset
+  const prevWsSignal = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (wsSignal && wsSignal !== prevWsSignal.current) {
+      prevWsSignal.current = wsSignal;
+      fetchData();
+      setLiveFlash(true);
+      setTimeout(() => setLiveFlash(false), 1200);
+    }
+  }, [wsSignal, fetchData]);
 
   const overlayCount = widget.overlayMetrics?.length ?? 0;
   const chartH = widget.chartType === "kpi" ? 110 : widget.chartType === "gauge" ? 150 : widget.size === "lg" ? 240 : 180;
@@ -443,6 +457,7 @@ function WidgetCard({ widget, onDelete, onEdit, onClone, onCopy, fullscreen, onF
             <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: D.border2, color: D.accent }}>{widget.assetName}</span>
             <span className="text-[9px] px-1 rounded font-mono" style={{ background: D.border2, color: D.accent2 }}>{widget.metric}</span>
             {overlayCount > 0 && <span className="text-[9px] px-1 rounded" style={{ background: D.purple+"33", color: D.purple }}>+{overlayCount}</span>}
+            {liveFlash && <span className="text-[9px] px-1.5 py-0.5 rounded font-semibold animate-pulse" style={{ background: D.green+"33", color: D.green }}>● LIVE</span>}
           </div>
           <div className="flex items-center gap-1 mt-px">
             <Clock className="w-2.5 h-2.5" style={{ color: D.muted }} />
@@ -953,6 +968,14 @@ export default function Visualization() {
   const assetList = (assets as any[] | undefined) ?? [];
   const roots     = assetList.filter(a => !a.parentId);
 
+  // Real-time WebSocket telemetry signals: assetId → last received timestamp
+  const [wsSignals, setWsSignals] = useState<Record<string, number>>({});
+  useWsEvents({
+    telemetry: (data: any) => {
+      if (data?.assetId) setWsSignals(prev => ({ ...prev, [data.assetId]: Date.now() }));
+    }
+  });
+
   // Persist dashboards
   useEffect(() => { saveDashboards(dashboards); }, [dashboards]);
 
@@ -1299,7 +1322,8 @@ export default function Visualization() {
                         onClone={() => cloneWidget(w)}
                         onCopy={() => copyWidget(w)}
                         fullscreen={fullscreenId === w.id}
-                        onFullscreen={() => setFullscreenId(prev => prev === w.id ? null : w.id)} />
+                        onFullscreen={() => setFullscreenId(prev => prev === w.id ? null : w.id)}
+                        wsSignal={wsSignals[w.assetId]} />
                     </div>
                   ))}
                 </div>
