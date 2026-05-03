@@ -136,6 +136,16 @@ function pickDefaultMetric(attrs: any[]) {
 function metricKeyOf(a: any) {
   return a.tagName?.split(".").pop() ?? a.sourceMetric?.split(".").pop() ?? a.name;
 }
+function widgetSeriesKeys(widget: Widget) {
+  const keys = [widget.metric, widget.metric?.split(".").pop()].filter(Boolean) as string[];
+  return [...new Set(keys)];
+}
+function getWidgetRows(widget: Widget, data: Record<string, any[]>) {
+  for (const key of widgetSeriesKeys(widget)) {
+    if (data[key]?.length) return data[key];
+  }
+  return data[widget.metric] ?? [];
+}
 
 const darkAxis    = { stroke: D.muted, fontSize: 10, tickLine: false, axisLine: false };
 const darkGrid    = { strokeDasharray: "3 3", stroke: D.border2, vertical: false };
@@ -150,7 +160,7 @@ function EmptyState() {
 // ══════════════════════════════════════════════════════════════════════════════
 // ── Chart sub-widgets (unchanged logic) ───────────────────────────────────────
 function GaugeWidget({ widget, data }: { widget: Widget; data: Record<string, any[]> }) {
-  const rows   = data[widget.metric] ?? [];
+  const rows   = getWidgetRows(widget, data);
   const latest = rows.length > 0 ? Number(rows[rows.length - 1]?.value) : null;
   const min = widget.minVal ?? 0, max = widget.maxVal ?? 100;
   const pct = latest !== null ? Math.min(1, Math.max(0, (latest - min) / (max - min))) : 0;
@@ -183,7 +193,7 @@ function GaugeWidget({ widget, data }: { widget: Widget; data: Record<string, an
 }
 
 function KpiWidget({ widget, data }: { widget: Widget; data: Record<string, any[]> }) {
-  const rows   = [...(data[widget.metric] ?? [])].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
+  const rows   = [...getWidgetRows(widget, data)].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime());
   const latest = rows[0], prev = rows[1];
   const val = latest ? Number(latest.value) : null, prevV = prev ? Number(prev.value) : null;
   const delta = val !== null && prevV !== null ? val - prevV : null;
@@ -225,7 +235,7 @@ function KpiWidget({ widget, data }: { widget: Widget; data: Record<string, any[
 }
 
 function PieWidget({ widget, data, donut }: { widget: Widget; data: Record<string, any[]>; donut?: boolean }) {
-  const values = (data[widget.metric] ?? []).map(d => Number(d.value)).filter(v => !isNaN(v));
+  const values = getWidgetRows(widget, data).map(d => Number(d.value)).filter(v => !isNaN(v));
   if (values.length === 0) return <EmptyState />;
   const min = Math.min(...values), max = Math.max(...values), range = max - min || 1, B = 6;
   const buckets = Array.from({ length: B }, (_, i) => {
@@ -247,7 +257,7 @@ function PieWidget({ widget, data, donut }: { widget: Widget; data: Record<strin
 }
 
 function ScatterWidget({ widget, data }: { widget: Widget; data: Record<string, any[]> }) {
-  const points = (data[widget.metric] ?? []).map((d, i) => ({ x: i, y: Number(d.value) })).filter(p => !isNaN(p.y));
+  const points = getWidgetRows(widget, data).map((d, i) => ({ x: i, y: Number(d.value) })).filter(p => !isNaN(p.y));
   if (points.length === 0) return <EmptyState />;
   return (
     <ResponsiveContainer width="100%" height="100%">
@@ -263,7 +273,7 @@ function ScatterWidget({ widget, data }: { widget: Widget; data: Record<string, 
 }
 
 function HeatmapWidget({ widget, data }: { widget: Widget; data: Record<string, any[]> }) {
-  const rows = data[widget.metric] ?? [];
+  const rows = getWidgetRows(widget, data);
   if (rows.length === 0) return <EmptyState />;
   const buckets: number[][] = Array.from({ length: 24 }, () => []);
   rows.forEach(d => buckets[new Date(d.timestamp).getHours()].push(Number(d.value)));
@@ -297,7 +307,7 @@ function HeatmapWidget({ widget, data }: { widget: Widget; data: Record<string, 
 }
 
 function StateTimelineWidget({ widget, data }: { widget: Widget; data: Record<string, any[]> }) {
-  const sorted = [...(data[widget.metric] ?? [])].sort((a, b) => new Date(a.timestamp).getTime()-new Date(b.timestamp).getTime());
+  const sorted = [...getWidgetRows(widget, data)].sort((a, b) => new Date(a.timestamp).getTime()-new Date(b.timestamp).getTime());
   if (sorted.length === 0) return <EmptyState />;
   const vals = sorted.map(d => Number(d.value));
   const minV = Math.min(...vals), maxV = Math.max(...vals), range = maxV-minV||1;
@@ -331,7 +341,8 @@ function ChartWidget({ widget, data }: { widget: Widget; data: Record<string, an
   ];
   const tsBuckets: Record<string, Record<string, number>> = {};
   allSeries.forEach(s => {
-    (data[s.metric] ?? []).forEach(r => {
+    const rows = s.metric === widget.metric ? getWidgetRows(widget, data) : (data[s.metric] ?? []);
+    rows.forEach(r => {
       const t = fmtTs(r.timestamp, widget.rangeMinutes);
       if (!tsBuckets[t]) tsBuckets[t] = {};
       tsBuckets[t][s.metric] = Number(r.value);
@@ -408,7 +419,10 @@ function WidgetCard({ widget, onDelete, onEdit, onClone, onCopy, fullscreen, onF
       const result: Record<string, any[]> = {};
       const p = new URLSearchParams({ metric: widget.metric, from, to, limit: "2000" });
       const r = await fetch(`${BASE}/api/telemetry/${widget.assetId}?${p}`, { credentials: "include" });
-      if (r.ok) result[widget.metric] = await r.json();
+      if (r.ok) {
+        const rows = await r.json();
+        for (const key of widgetSeriesKeys(widget)) result[key] = rows;
+      }
       for (const ov of (widget.overlayMetrics ?? [])) {
         const key = `${ov.assetId}::${ov.metric}`;
         const op = new URLSearchParams({ metric: ov.metric, from, to, limit: "2000" });
@@ -751,6 +765,23 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
   const canOverlay  = supportsOverlay(chartType);
 
   useEffect(() => { if (preselectedAssetId && !initial) setAssetId(preselectedAssetId); }, [preselectedAssetId]);
+  useEffect(() => {
+    if (!open) return;
+    setTitle(initial?.title ?? "");
+    setChartType(initial?.chartType ?? "line");
+    setAssetId(initial?.assetId ?? preselectedAssetId ?? "");
+    setMetric(initial?.metric ?? "");
+    setRangeMinutes(initial?.rangeMinutes ?? 60);
+    setColor(initial?.color ?? nextColor);
+    setMinVal(String(initial?.minVal ?? "0"));
+    setMaxVal(String(initial?.maxVal ?? "100"));
+    setUnit(initial?.unit ?? "");
+    setSize(initial?.size ?? "md");
+    setUseCustom(!!initial?.customFrom);
+    setCustomFrom(initial?.customFrom ?? "");
+    setCustomTo(initial?.customTo ?? "");
+    setOverlayMetrics(initial?.overlayMetrics ?? []);
+  }, [open, initial, preselectedAssetId, nextColor]);
 
   function addOverlay() { setOverlayMetrics(prev => [...prev, { assetId:"", assetName:"", metric:"", color: NEON_PALETTE[(prev.length+1)%NEON_PALETTE.length] }]); }
   function removeOverlay(i: number) { setOverlayMetrics(prev => prev.filter((_,idx)=>idx!==i)); }
