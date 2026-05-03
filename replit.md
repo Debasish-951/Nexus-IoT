@@ -16,7 +16,7 @@ scripts/                  — Utility scripts
 ```
 
 ### Database Tables
-- `assets` — hierarchical asset tree (self-referencing parentId)
+- `assets` — hierarchical asset tree (self-referencing parentId); maintenanceMode, maintenanceSince, maintenanceNote suppress alarm evaluation while set
 - `attributes` — asset attributes (static/dynamic/metric/runtime) with tagName, sourceMetric, UoM, decimalPlaces, thousandSeparator, quality, timestamp, expression
 - `asset_templates` — reusable attribute blueprints with expression support
 - `telemetry` — time-series sensor readings (assetId, deviceId, metric, value, quality, timestamp)
@@ -26,7 +26,7 @@ scripts/                  — Utility scripts
 - `users` — platform users with roles (admin/engineer/operator/viewer)
 - `brokers` — MQTT/REST/Azure IoT broker configurations + mqttUsername, mqttPassword, mqttTopic, mqttClientId, mappingRules (JSONB)
 - `broker_events` — immutable connection history log: brokerId, brokerName, status (connected/disconnected/error), message, timestamp
-- `api_clients` — OAuth client credentials with scopes
+- `api_clients` — OAuth client credentials with scopes, expiresAt, allowedIps, description, secretRotatedAt, totalRequests, lastUsedAt
 - `destinations` — webhook/HTTP forward destinations with auth, enabled toggle, eventTypes filter
 - `activity_logs` — audit trail: action, category, actorName, actorRole, actorUsername, targetId, targetName, detail, timestamp
 

@@ -238,14 +238,17 @@ export async function processNormalised(n: NormalisedPayload, assetIdHint?: stri
   let assetId: string | null = assetIdHint ?? null;
   let assetName = n.externalAssetName ?? n.deviceId;
 
+  let isInMaintenance = false;
   if (!assetId) {
-    const [asset] = await db.select({ id: assetsTable.id, name: assetsTable.name })
+    const [asset] = await db.select({ id: assetsTable.id, name: assetsTable.name, maintenanceMode: assetsTable.maintenanceMode })
       .from(assetsTable).where(eq(assetsTable.identifier, n.deviceId));
     assetId = asset?.id ?? null;
     if (asset?.name) assetName = asset.name;
+    if (asset?.maintenanceMode) isInMaintenance = true;
   } else {
-    const [asset] = await db.select({ name: assetsTable.name }).from(assetsTable).where(eq(assetsTable.id, assetId));
+    const [asset] = await db.select({ name: assetsTable.name, maintenanceMode: assetsTable.maintenanceMode }).from(assetsTable).where(eq(assetsTable.id, assetId));
     if (asset?.name) assetName = asset.name;
+    if (asset?.maintenanceMode) isInMaintenance = true;
   }
 
   const ts = n.timestamp ?? new Date();
@@ -291,8 +294,10 @@ export async function processNormalised(n: NormalisedPayload, assetIdHint?: stri
   // Evaluate runtime (computed) attributes
   await evaluateRuntimeAttributes(assetId as string, ts);
 
-  // Evaluate alarm rules (threshold + rate-of-change)
-  const alarmEvents = await evaluateAlarmRules(assetId as string, assetName, n.metrics, prevMetrics, ts);
+  // Evaluate alarm rules — skip when asset is in maintenance mode
+  const alarmEvents = isInMaintenance
+    ? []
+    : await evaluateAlarmRules(assetId as string, assetName, n.metrics, prevMetrics, ts);
 
   broadcast("telemetry", {
     assetId,

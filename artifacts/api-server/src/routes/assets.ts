@@ -11,6 +11,8 @@ import {
   ListAssetsQueryParams,
 } from "@workspace/api-zod";
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const router: IRouter = Router();
 
 router.get("/assets", async (req, res): Promise<void> => {
@@ -85,6 +87,35 @@ router.put("/assets/:id", async (req, res): Promise<void> => {
     .returning();
 
   if (!asset) { res.status(404).json({ error: "Asset not found" }); return; }
+  res.json(asset);
+});
+
+// ── Maintenance mode toggle ───────────────────────────────────────────────────
+router.post("/assets/:id/maintenance", async (req, res): Promise<void> => {
+  const { id } = req.params;
+  if (!id || !UUID_RE.test(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+
+  const [current] = await db.select().from(assetsTable).where(eq(assetsTable.id, id));
+  if (!current) { res.status(404).json({ error: "Asset not found" }); return; }
+
+  const body = req.body as Record<string, unknown>;
+  const enable = typeof body.enable === "boolean" ? body.enable : !current.maintenanceMode;
+  const note   = typeof body.note === "string" ? body.note : null;
+
+  const [asset] = await db
+    .update(assetsTable)
+    .set({
+      maintenanceMode: enable,
+      maintenanceSince: enable ? new Date() : null,
+      maintenanceNote:  enable ? note : null,
+    })
+    .where(eq(assetsTable.id, id))
+    .returning();
+
+  void logActivity(
+    enable ? "asset.maintenance_enabled" : "asset.maintenance_disabled",
+    "asset", id, current.name, null, req
+  );
   res.json(asset);
 });
 

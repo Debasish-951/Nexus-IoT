@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, integer, uuid } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, integer, uuid, boolean } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -13,6 +13,10 @@ export const assetsTable = pgTable("assets", {
   tags: text("tags").array().notNull().default([]),
   childCount: integer("child_count").notNull().default(0),
   attributeCount: integer("attribute_count").notNull().default(0),
+  // Maintenance mode — suppresses alarm evaluation while set
+  maintenanceMode: boolean("maintenance_mode").notNull().default(false),
+  maintenanceSince: timestamp("maintenance_since", { withTimezone: true }),
+  maintenanceNote: text("maintenance_note"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 });

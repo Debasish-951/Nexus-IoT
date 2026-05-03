@@ -2,12 +2,14 @@ import { useState } from "react";
 import {
   useListApiClients,
   useCreateApiClient,
+  useUpdateApiClient,
   useDeleteApiClient,
   getListApiClientsQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
@@ -17,9 +19,10 @@ import { useToast } from "@/hooks/use-toast";
 import {
   KeyRound, Plus, Trash2, Copy, Eye, EyeOff, ChevronDown,
   CheckCircle2, XCircle, BookOpen, Shield, Zap, Bell, Clock,
-  Terminal, AlertTriangle,
+  Terminal, AlertTriangle, RefreshCw, Ban, RotateCcw, Calendar,
+  Globe, Activity, FileDown, Heart, Info,
 } from "lucide-react";
-import { format, formatDistanceToNow } from "date-fns";
+import { format, formatDistanceToNow, differenceInDays, isPast } from "date-fns";
 import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { ReadOnlyBanner } from "@/components/RoleGuard";
@@ -62,28 +65,67 @@ const SCOPES = [
 
 const ALL_SCOPES_ID = "*";
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Expiry badge ───────────────────────────────────────────────────────────────
+function ExpiryBadge({ expiresAt }: { expiresAt: string | null }) {
+  if (!expiresAt) return null;
+  const d = new Date(expiresAt);
+  const expired = isPast(d);
+  const daysLeft = differenceInDays(d, new Date());
+  if (expired) return (
+    <span className="inline-flex items-center gap-1 text-[9px] font-semibold bg-red-50 text-red-700 dark:bg-red-950/40 dark:text-red-400 border border-red-200 dark:border-red-800 px-1.5 py-0.5 rounded-full">
+      <XCircle className="w-2.5 h-2.5" /> Expired
+    </span>
+  );
+  if (daysLeft <= 7) return (
+    <span className="inline-flex items-center gap-1 text-[9px] font-semibold bg-orange-50 text-orange-700 dark:bg-orange-950/40 dark:text-orange-400 border border-orange-200 dark:border-orange-800 px-1.5 py-0.5 rounded-full">
+      <AlertTriangle className="w-2.5 h-2.5" /> Expires {daysLeft === 0 ? "today" : `in ${daysLeft}d`}
+    </span>
+  );
+  return (
+    <span className="inline-flex items-center gap-1 text-[9px] text-muted-foreground border border-border px-1.5 py-0.5 rounded-full">
+      <Calendar className="w-2.5 h-2.5" /> {format(d, "MMM d, yyyy")}
+    </span>
+  );
+}
+
+// ── Status badge ──────────────────────────────────────────────────────────────
+function StatusBadge({ status }: { status: string }) {
+  const map: Record<string, { icon: React.ReactNode; label: string; cls: string }> = {
+    active: {
+      icon: <CheckCircle2 className="w-2.5 h-2.5" />, label: "Active",
+      cls: "bg-green-50 text-green-700 border-green-200 dark:bg-green-950/40 dark:text-green-400 dark:border-green-800",
+    },
+    inactive: {
+      icon: <XCircle className="w-2.5 h-2.5" />, label: "Inactive",
+      cls: "bg-gray-100 text-gray-600 border-gray-200 dark:bg-gray-800 dark:text-gray-400",
+    },
+    revoked: {
+      icon: <Ban className="w-2.5 h-2.5" />, label: "Revoked",
+      cls: "bg-red-50 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-400 dark:border-red-800",
+    },
+  };
+  const s = map[status] ?? map.inactive;
+  return (
+    <span className={cn("inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border", s.cls)}>
+      {s.icon}{s.label}
+    </span>
+  );
+}
+
+// ── Secret field ──────────────────────────────────────────────────────────────
 function SecretField({ secret }: { secret: string }) {
   const [visible, setVisible] = useState(false);
   const { toast } = useToast();
-  function copy() {
-    navigator.clipboard.writeText(secret);
-    toast({ title: "Bearer token copied" });
-  }
   return (
-    <div className="flex items-center gap-1.5 group">
-      <code className="font-mono text-[11px] text-foreground/80 bg-muted px-1.5 py-0.5 rounded max-w-[220px] truncate">
+    <div className="flex items-center gap-1.5">
+      <code className="font-mono text-[11px] text-foreground/80 bg-muted px-1.5 py-0.5 rounded max-w-[200px] truncate">
         {visible ? secret : "••••••••••••••••••••••••"}
       </code>
-      <button
-        onClick={() => setVisible((v) => !v)}
-        className="text-muted-foreground hover:text-foreground opacity-60 hover:opacity-100 transition-opacity"
-        title={visible ? "Hide" : "Reveal token"}
-      >
+      <button onClick={() => setVisible((v) => !v)} className="text-muted-foreground hover:text-foreground opacity-60 hover:opacity-100 transition-opacity" title={visible ? "Hide" : "Reveal"}>
         {visible ? <EyeOff className="w-3 h-3" /> : <Eye className="w-3 h-3" />}
       </button>
       <button
-        onClick={copy}
+        onClick={() => { navigator.clipboard.writeText(secret); toast({ title: "Bearer token copied" }); }}
         className="text-muted-foreground hover:text-primary opacity-60 hover:opacity-100 transition-opacity"
         title="Copy bearer token"
       >
@@ -93,45 +135,28 @@ function SecretField({ secret }: { secret: string }) {
   );
 }
 
-function IntegrationGuide({ client }: { client: any }) {
+// ── Integration guide ─────────────────────────────────────────────────────────
+function IntegrationGuide({ client }: { client: Record<string, unknown> }) {
   const { toast } = useToast();
   const origin = window.location.origin;
-  const secret = client.clientSecret ?? "<clientSecret>";
-
-  function copy(text: string) {
-    navigator.clipboard.writeText(text);
-    toast({ title: "Copied" });
-  }
-
-  const examples: Array<{ label: string; scope: string; cmd: string }> = [
-    {
-      label: "List assets",
-      scope: "read:assets",
-      cmd: `curl -H "Authorization: Bearer ${secret}" \\\n  ${origin}/api/export/assets`,
-    },
-    {
-      label: "Telemetry (last 100 rows)",
-      scope: "read:telemetry",
-      cmd: `curl -H "X-API-Key: ${secret}" \\\n  "${origin}/api/export/telemetry?limit=100"`,
-    },
-    {
-      label: "Active alarms",
-      scope: "read:alarms",
-      cmd: `curl -H "Authorization: Bearer ${secret}" \\\n  "${origin}/api/export/alarms?status=active"`,
-    },
-    {
-      label: "Alarm history (date range)",
-      scope: "read:alarm-history",
-      cmd: `curl -H "Authorization: Bearer ${secret}" \\\n  "${origin}/api/export/alarm-history?from=2024-01-01T00:00:00Z&limit=500"`,
-    },
-  ];
-
-  const scopes: string[] = client.scopes ?? [];
+  const secret = (client.clientSecret as string) ?? "<clientSecret>";
+  const scopes = (client.scopes as string[]) ?? [];
   const allScopes = scopes.includes("*") || scopes.length === 0;
+
+  function copy(text: string) { navigator.clipboard.writeText(text); toast({ title: "Copied" }); }
+
+  const examples = [
+    { label: "List assets (JSON)", scope: "read:assets", format: "json", cmd: `curl -H "Authorization: Bearer ${secret}" \\\n  ${origin}/api/export/assets` },
+    { label: "List assets (CSV)", scope: "read:assets", format: "csv", cmd: `curl -H "Authorization: Bearer ${secret}" \\\n  "${origin}/api/export/assets?format=csv" -o assets.csv` },
+    { label: "Telemetry (last 100)", scope: "read:telemetry", format: "json", cmd: `curl -H "X-API-Key: ${secret}" \\\n  "${origin}/api/export/telemetry?limit=100"` },
+    { label: "Telemetry (CSV)", scope: "read:telemetry", format: "csv", cmd: `curl -H "X-API-Key: ${secret}" \\\n  "${origin}/api/export/telemetry?limit=500&format=csv" -o telemetry.csv` },
+    { label: "Active alarms", scope: "read:alarms", format: "json", cmd: `curl -H "Authorization: Bearer ${secret}" \\\n  "${origin}/api/export/alarms?status=active"` },
+    { label: "Alarm history (date range)", scope: "read:alarm-history", format: "json", cmd: `curl -H "Authorization: Bearer ${secret}" \\\n  "${origin}/api/export/alarm-history?from=2024-01-01T00:00:00Z&limit=500"` },
+  ];
 
   return (
     <div className="space-y-4">
-      {/* Auth method */}
+      {/* Auth */}
       <div>
         <p className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wide">Authentication</p>
         <div className="grid grid-cols-2 gap-2">
@@ -139,38 +164,43 @@ function IntegrationGuide({ client }: { client: any }) {
             { label: "Bearer Token", value: `Authorization: Bearer ${secret}` },
             { label: "API Key Header", value: `X-API-Key: ${secret}` },
           ].map(({ label, value }) => (
-            <div key={label} className="rounded-md border border-border bg-muted/40 px-3 py-2">
+            <div key={label} className="rounded-md border bg-muted/40 px-3 py-2">
               <p className="text-[10px] text-muted-foreground mb-1">{label}</p>
               <div className="flex items-center gap-1.5">
                 <code className="text-[10px] font-mono text-foreground/80 flex-1 truncate">{value}</code>
-                <button onClick={() => copy(value)} className="text-muted-foreground hover:text-foreground shrink-0">
-                  <Copy className="w-3 h-3" />
-                </button>
+                <button onClick={() => copy(value)} className="text-muted-foreground hover:text-foreground shrink-0"><Copy className="w-3 h-3" /></button>
               </div>
             </div>
           ))}
         </div>
       </div>
 
-      {/* curl examples */}
+      {/* Rate limit info */}
+      <div className="flex items-center gap-2 text-[10px] text-muted-foreground rounded-md border border-border bg-muted/30 px-3 py-2">
+        <Activity className="w-3 h-3 shrink-0" />
+        Rate limit: <strong className="text-foreground">120 requests / minute</strong> per client. Returns HTTP 429 with <code className="font-mono">Retry-After: 60</code> when exceeded.
+      </div>
+
+      {/* Curl examples */}
       <div>
         <p className="text-xs font-semibold text-muted-foreground mb-2 uppercase tracking-wide">curl Examples</p>
-        <div className="space-y-2">
+        <div className="space-y-1.5">
           {examples.map((ex) => {
             const allowed = allScopes || scopes.includes(ex.scope);
             return (
-              <div key={ex.scope} className={cn("rounded-md border bg-slate-950 dark:bg-black/40", !allowed && "opacity-40")}>
+              <div key={`${ex.scope}-${ex.format}`} className={cn("rounded-md border bg-slate-950 dark:bg-black/40", !allowed && "opacity-40")}>
                 <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/5">
-                  <div className="flex items-center gap-1.5">
+                  <div className="flex items-center gap-2">
                     <Terminal className="w-3 h-3 text-green-400" />
                     <span className="text-[10px] text-slate-300">{ex.label}</span>
                     <span className="text-[9px] font-mono text-slate-500">{ex.scope}</span>
+                    {ex.format === "csv" && (
+                      <span className="text-[8px] bg-yellow-900/60 text-yellow-300 px-1 rounded">CSV</span>
+                    )}
                   </div>
                   <div className="flex items-center gap-1.5">
-                    {!allowed && <span className="text-[9px] text-orange-400 flex items-center gap-0.5"><AlertTriangle className="w-2.5 h-2.5" />not in scopes</span>}
-                    <button onClick={() => copy(ex.cmd.replace(/\\\n\s+/g, " "))} className="text-slate-500 hover:text-slate-300">
-                      <Copy className="w-3 h-3" />
-                    </button>
+                    {!allowed && <span className="text-[9px] text-orange-400 flex items-center gap-0.5"><AlertTriangle className="w-2.5 h-2.5" />no scope</span>}
+                    <button onClick={() => copy(ex.cmd.replace(/\\\n\s+/g, " "))} className="text-slate-500 hover:text-slate-300"><Copy className="w-3 h-3" /></button>
                   </div>
                 </div>
                 <pre className="text-[10px] font-mono text-green-300 px-3 py-2 overflow-x-auto whitespace-pre">{ex.cmd}</pre>
@@ -180,17 +210,274 @@ function IntegrationGuide({ client }: { client: any }) {
         </div>
       </div>
 
-      {/* API schema link */}
-      <div className="rounded-md border border-blue-200 dark:border-blue-800/40 bg-blue-50/50 dark:bg-blue-950/20 px-3 py-2 flex items-center justify-between">
-        <div>
-          <p className="text-xs font-medium text-blue-800 dark:text-blue-300">Full API reference</p>
-          <code className="text-[10px] font-mono text-blue-600 dark:text-blue-400">{origin}/api/export/schema</code>
+      {/* Links */}
+      <div className="grid grid-cols-2 gap-2">
+        <div className="rounded-md border border-blue-200 dark:border-blue-800/40 bg-blue-50/50 dark:bg-blue-950/20 px-3 py-2 flex items-center justify-between">
+          <div>
+            <p className="text-xs font-medium text-blue-800 dark:text-blue-300">API Schema</p>
+            <code className="text-[10px] font-mono text-blue-600 dark:text-blue-400">/api/export/schema</code>
+          </div>
+          <button onClick={() => copy(`${origin}/api/export/schema`)} className="text-blue-400 hover:text-blue-600"><Copy className="w-3.5 h-3.5" /></button>
         </div>
-        <button onClick={() => copy(`${origin}/api/export/schema`)} className="text-blue-400 hover:text-blue-600">
-          <Copy className="w-3.5 h-3.5" />
-        </button>
+        <div className="rounded-md border border-green-200 dark:border-green-800/40 bg-green-50/50 dark:bg-green-950/20 px-3 py-2 flex items-center justify-between">
+          <div>
+            <p className="text-xs font-medium text-green-800 dark:text-green-300">Health Check</p>
+            <code className="text-[10px] font-mono text-green-600 dark:text-green-400">/api/export/health</code>
+          </div>
+          <button onClick={() => copy(`${origin}/api/export/health`)} className="text-green-400 hover:text-green-600"><Copy className="w-3.5 h-3.5" /></button>
+        </div>
       </div>
     </div>
+  );
+}
+
+// ── Rotate secret dialog ──────────────────────────────────────────────────────
+function RotateDialog({
+  client, open, onClose, onRefresh,
+}: { client: Record<string, unknown> | null; open: boolean; onClose: () => void; onRefresh: () => void }) {
+  const { toast } = useToast();
+  const [newSecret, setNewSecret] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  function handleRotate() {
+    if (!client) return;
+    setLoading(true);
+    fetch(`/api/api-clients/${client.id}/rotate-secret`, { method: "POST" })
+      .then((r) => r.json())
+      .then((data: Record<string, unknown>) => {
+        setNewSecret(data.clientSecret as string);
+        onRefresh();
+        toast({ title: "Secret rotated", description: "Copy and store the new token — it won't be shown again." });
+      })
+      .catch(() => toast({ title: "Rotation failed", variant: "destructive" }))
+      .finally(() => setLoading(false));
+  }
+
+  function handleClose() {
+    setNewSecret(null);
+    onClose();
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleClose}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <RefreshCw className="w-4 h-4 text-orange-500" /> Rotate API Secret
+          </DialogTitle>
+          <DialogDescription>
+            Generate a new secret for <strong>{client?.name as string}</strong>. The old secret will stop working immediately.
+          </DialogDescription>
+        </DialogHeader>
+
+        {!newSecret ? (
+          <div className="space-y-4">
+            <div className="rounded-md bg-orange-50 dark:bg-orange-950/30 border border-orange-200 dark:border-orange-800 px-4 py-3 text-sm text-orange-800 dark:text-orange-300 flex items-start gap-2">
+              <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" />
+              <div>
+                <p className="font-semibold mb-1">This action is irreversible</p>
+                <p className="text-xs">Any Node-RED flows, scripts, or dashboards using the current secret will break immediately. Update them before rotating in production.</p>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={handleClose}>Cancel</Button>
+              <Button variant="destructive" onClick={handleRotate} disabled={loading}>
+                {loading ? <RefreshCw className="w-3.5 h-3.5 mr-1.5 animate-spin" /> : <RefreshCw className="w-3.5 h-3.5 mr-1.5" />}
+                Rotate Secret
+              </Button>
+            </DialogFooter>
+          </div>
+        ) : (
+          <div className="space-y-4">
+            <div className="rounded-md bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 px-4 py-3 text-sm text-green-800 dark:text-green-300">
+              <p className="font-semibold mb-2 flex items-center gap-1.5"><CheckCircle2 className="w-4 h-4" /> Secret rotated successfully</p>
+              <p className="text-xs mb-3">Copy this now — it will <strong>not be shown again</strong> after closing this dialog.</p>
+              <div className="flex items-center gap-2 bg-white dark:bg-black/40 rounded border px-3 py-2">
+                <code className="font-mono text-xs text-foreground flex-1 break-all">{newSecret}</code>
+                <button
+                  onClick={() => { navigator.clipboard.writeText(newSecret); }}
+                  className="text-green-600 hover:text-green-800 shrink-0"
+                  title="Copy new secret"
+                >
+                  <Copy className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+            <DialogFooter>
+              <Button onClick={handleClose}>Done</Button>
+            </DialogFooter>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ── Create dialog ─────────────────────────────────────────────────────────────
+interface CreateForm {
+  name: string;
+  description: string;
+  scopes: string[];
+  allScopes: boolean;
+  expiresAt: string;
+  allowedIps: string;
+}
+
+function CreateDialog({
+  open, onClose, onCreated,
+}: { open: boolean; onClose: () => void; onCreated: (client: Record<string, unknown>) => void }) {
+  const { toast } = useToast();
+  const createClient = useCreateApiClient();
+  const form = useForm<CreateForm>({
+    defaultValues: { name: "", description: "", scopes: [], allScopes: false, expiresAt: "", allowedIps: "" },
+  });
+  const watchAllScopes = form.watch("allScopes");
+
+  function onSubmit(data: CreateForm) {
+    const finalScopes = data.allScopes ? [ALL_SCOPES_ID] : data.scopes;
+    const allowedIps = data.allowedIps
+      .split(/[\n,]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    createClient.mutate(
+      {
+        data: {
+          name: data.name,
+          scopes: finalScopes,
+          description: data.description || undefined,
+          expiresAt: data.expiresAt || undefined,
+          allowedIps,
+        } as Parameters<typeof createClient.mutate>[0]["data"],
+      },
+      {
+        onSuccess: (created) => {
+          toast({ title: "API client created" });
+          onCreated(created as unknown as Record<string, unknown>);
+          form.reset();
+        },
+        onError: () => toast({ title: "Failed to create client", variant: "destructive" }),
+      }
+    );
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto" data-testid="add-client-dialog">
+        <DialogHeader>
+          <DialogTitle>Create API Client</DialogTitle>
+          <DialogDescription>
+            A bearer token will be generated automatically. It will be visible in the client list.
+          </DialogDescription>
+        </DialogHeader>
+        <Form {...form}>
+          <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
+            {/* Name */}
+            <FormField control={form.control} name="name" rules={{ required: true }} render={({ field }) => (
+              <FormItem>
+                <FormLabel>Client Name *</FormLabel>
+                <FormControl>
+                  <Input placeholder="e.g. Grafana Export, Python ETL, Node-RED" {...field} data-testid="client-name-input" />
+                </FormControl>
+              </FormItem>
+            )} />
+
+            {/* Description */}
+            <FormField control={form.control} name="description" render={({ field }) => (
+              <FormItem>
+                <FormLabel>Description</FormLabel>
+                <FormControl>
+                  <Textarea placeholder="What is this token used for?" rows={2} className="resize-none" {...field} />
+                </FormControl>
+              </FormItem>
+            )} />
+
+            {/* Scopes */}
+            <div className="space-y-2">
+              <p className="text-sm font-medium">Scopes</p>
+              <FormDescription className="text-xs">Control what data this client can read.</FormDescription>
+
+              <Controller control={form.control} name="allScopes" render={({ field }) => (
+                <label className={cn(
+                  "flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors",
+                  field.value ? "border-purple-400 bg-purple-50/50 dark:bg-purple-950/20" : "border-border hover:border-muted-foreground/40"
+                )}>
+                  <input type="checkbox" className="mt-0.5 accent-purple-600" checked={field.value}
+                    onChange={(e) => { field.onChange(e.target.checked); if (e.target.checked) form.setValue("scopes", []); }} />
+                  <div>
+                    <p className="text-xs font-semibold flex items-center gap-1.5">
+                      <Shield className="w-3.5 h-3.5 text-purple-600" /> All Scopes (*)
+                    </p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">Super-key — grants full read access. Use for trusted internal integrations only.</p>
+                  </div>
+                </label>
+              )} />
+
+              {!watchAllScopes && (
+                <Controller control={form.control} name="scopes" render={({ field }) => (
+                  <div className="space-y-1.5">
+                    {SCOPES.map((s) => {
+                      const checked = (field.value as string[]).includes(s.id);
+                      return (
+                        <label key={s.id} className={cn(
+                          "flex items-start gap-3 p-2.5 rounded-lg border cursor-pointer transition-colors",
+                          checked ? "border-primary/50 bg-primary/5" : "border-border hover:border-muted-foreground/30"
+                        )}>
+                          <input type="checkbox" className="mt-0.5 accent-blue-600" checked={checked}
+                            onChange={(e) => {
+                              const next = e.target.checked
+                                ? [...(field.value as string[]), s.id]
+                                : (field.value as string[]).filter((x) => x !== s.id);
+                              field.onChange(next);
+                            }} />
+                          <div>
+                            <p className={cn("text-xs font-medium flex items-center gap-1.5", s.color)}>{s.icon}{s.label}</p>
+                            <p className="text-[10px] text-muted-foreground">{s.description}</p>
+                          </div>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )} />
+              )}
+            </div>
+
+            {/* Expiry */}
+            <FormField control={form.control} name="expiresAt" render={({ field }) => (
+              <FormItem>
+                <FormLabel className="flex items-center gap-1.5"><Calendar className="w-3.5 h-3.5" /> Token Expiry <span className="text-muted-foreground font-normal text-xs">(optional)</span></FormLabel>
+                <FormControl>
+                  <Input type="date" {...field} min={new Date().toISOString().split("T")[0]} />
+                </FormControl>
+                <FormDescription className="text-xs">Token will be rejected after this date. Leave blank for no expiry.</FormDescription>
+              </FormItem>
+            )} />
+
+            {/* IP Allowlist */}
+            <FormField control={form.control} name="allowedIps" render={({ field }) => (
+              <FormItem>
+                <FormLabel className="flex items-center gap-1.5"><Globe className="w-3.5 h-3.5" /> IP Allowlist <span className="text-muted-foreground font-normal text-xs">(optional)</span></FormLabel>
+                <FormControl>
+                  <Textarea
+                    placeholder={"192.168.1.10\n10.0.0.0\n203.0.113.5"}
+                    rows={3}
+                    className="resize-none font-mono text-xs"
+                    {...field}
+                  />
+                </FormControl>
+                <FormDescription className="text-xs">One IP per line (or comma-separated). Leave blank to allow all IPs.</FormDescription>
+              </FormItem>
+            )} />
+
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+              <Button type="submit" disabled={createClient.isPending}>
+                {createClient.isPending ? "Creating…" : "Create Client"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </Form>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -198,37 +485,30 @@ function IntegrationGuide({ client }: { client: any }) {
 export default function ApiClients() {
   const { toast } = useToast();
   const qc = useQueryClient();
-  const [open, setOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [rotateClient, setRotateClient] = useState<Record<string, unknown> | null>(null);
   const { can } = useCurrentUser();
 
   const { data: clients } = useListApiClients();
-  const createClient = useCreateApiClient();
   const deleteClient = useDeleteApiClient();
+  const updateClient = useUpdateApiClient();
 
-  const form = useForm<{ name: string; scopes: string[]; allScopes: boolean }>({
-    defaultValues: { name: "", scopes: [], allScopes: false },
-  });
-  const watchAllScopes = form.watch("allScopes");
-  const watchScopes    = form.watch("scopes");
+  function invalidate() { qc.invalidateQueries({ queryKey: getListApiClientsQueryKey() }); }
 
-  function onSubmit(data: { name: string; scopes: string[]; allScopes: boolean }) {
-    const finalScopes = data.allScopes ? [ALL_SCOPES_ID] : data.scopes;
-    createClient.mutate(
-      { data: { name: data.name, scopes: finalScopes } },
-      {
-        onSuccess: (created: any) => {
-          toast({ title: "API client created", description: `Token: ${created.clientSecret}` });
-          qc.invalidateQueries({ queryKey: getListApiClientsQueryKey() });
-          setOpen(false);
-          form.reset();
-          setExpandedId(created.id);
-        },
-      }
-    );
+  function handleRevoke(client: Record<string, unknown>) {
+    fetch(`/api/api-clients/${client.id}/revoke`, { method: "POST" })
+      .then(() => { toast({ title: `"${client.name}" revoked` }); invalidate(); })
+      .catch(() => toast({ title: "Failed", variant: "destructive" }));
   }
 
-  const clientList = (clients as any[] | undefined) ?? [];
+  function handleRestore(client: Record<string, unknown>) {
+    fetch(`/api/api-clients/${client.id}/restore`, { method: "POST" })
+      .then(() => { toast({ title: `"${client.name}" restored` }); invalidate(); })
+      .catch(() => toast({ title: "Failed", variant: "destructive" }));
+  }
+
+  const clientList = (clients as unknown as Record<string, unknown>[] | undefined) ?? [];
 
   return (
     <div className="p-6 space-y-5">
@@ -243,36 +523,50 @@ export default function ApiClients() {
           </p>
         </div>
         {can("manage_api_clients") && (
-          <Button onClick={() => setOpen(true)} size="sm" data-testid="add-client-btn">
+          <Button onClick={() => setCreateOpen(true)} size="sm" data-testid="add-client-btn">
             <Plus className="w-4 h-4 mr-1.5" /> New Client
           </Button>
         )}
       </div>
       <ReadOnlyBanner permission="manage_api_clients" message="cannot create or delete API clients." />
 
-      {/* How it works banner */}
-      <div className="rounded-lg border border-primary/20 bg-primary/5 px-4 py-3 flex items-start gap-3">
-        <KeyRound className="w-4 h-4 text-primary mt-0.5 shrink-0" />
-        <div className="text-xs space-y-0.5">
-          <p className="font-semibold text-foreground">How API export works</p>
-          <p className="text-muted-foreground">
-            Each client has a <strong>Client Secret</strong> that acts as a bearer token.
-            External tools (BI dashboards, Python scripts, Node-RED) send it as{" "}
-            <code className="bg-muted px-1 rounded font-mono">Authorization: Bearer &lt;secret&gt;</code>{" "}
-            or <code className="bg-muted px-1 rounded font-mono">X-API-Key: &lt;secret&gt;</code> when calling{" "}
-            <code className="bg-muted px-1 rounded font-mono">/api/export/*</code> endpoints.
-            Scopes control what data each client can access.
-          </p>
-        </div>
+      {/* Capability cards */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+        {[
+          { icon: <Shield className="w-4 h-4 text-blue-500" />, label: "Scoped Access", desc: "Per-client read scopes" },
+          { icon: <Clock className="w-4 h-4 text-orange-500" />, label: "Token Expiry", desc: "Auto-expire credentials" },
+          { icon: <Globe className="w-4 h-4 text-green-500" />, label: "IP Allowlist", desc: "Restrict by source IP" },
+          { icon: <FileDown className="w-4 h-4 text-purple-500" />, label: "CSV + JSON", desc: "Two export formats" },
+        ].map((c) => (
+          <div key={c.label} className="rounded-lg border border-border bg-card p-3 flex items-center gap-3">
+            <div className="w-8 h-8 rounded-md bg-muted flex items-center justify-center shrink-0">{c.icon}</div>
+            <div>
+              <p className="text-xs font-semibold">{c.label}</p>
+              <p className="text-[10px] text-muted-foreground">{c.desc}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {/* Health check callout */}
+      <div className="rounded-lg border border-green-200 dark:border-green-800/40 bg-green-50/50 dark:bg-green-950/10 px-4 py-2.5 flex items-center gap-3 text-xs">
+        <Heart className="w-4 h-4 text-green-600 dark:text-green-400 shrink-0" />
+        <span className="text-green-800 dark:text-green-300">
+          <strong>Health endpoint:</strong> <code className="font-mono">/api/export/health</code> — no authentication required. Use it in uptime monitors (Grafana, Datadog, Zabbix).
+        </span>
+        <button
+          onClick={() => { navigator.clipboard.writeText(`${window.location.origin}/api/export/health`); toast({ title: "Copied" }); }}
+          className="text-green-600 hover:text-green-800 shrink-0 ml-auto"
+        >
+          <Copy className="w-3.5 h-3.5" />
+        </button>
       </div>
 
       {/* Scope reference */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
         {SCOPES.map((s) => (
           <div key={s.id} className="rounded-lg border border-border bg-card p-3 space-y-1">
-            <div className={cn("flex items-center gap-1.5 font-medium text-xs", s.color)}>
-              {s.icon}{s.label}
-            </div>
+            <div className={cn("flex items-center gap-1.5 font-medium text-xs", s.color)}>{s.icon}{s.label}</div>
             <p className="text-[10px] text-muted-foreground">{s.description}</p>
             <code className="text-[9px] font-mono text-muted-foreground/80">{s.endpoint}</code>
           </div>
@@ -285,7 +579,7 @@ export default function ApiClients() {
           <thead>
             <tr className="border-b border-border bg-muted/50">
               <th className="text-left px-4 py-2.5 font-medium text-muted-foreground">Name</th>
-              <th className="text-left px-4 py-2.5 font-medium text-muted-foreground">Bearer Token (Secret)</th>
+              <th className="text-left px-4 py-2.5 font-medium text-muted-foreground">Bearer Token</th>
               <th className="text-left px-4 py-2.5 font-medium text-muted-foreground">Scopes</th>
               <th className="text-left px-4 py-2.5 font-medium text-muted-foreground">Requests</th>
               <th className="text-left px-4 py-2.5 font-medium text-muted-foreground">Last Used</th>
@@ -311,22 +605,49 @@ export default function ApiClients() {
                 </td>
               </tr>
             ) : (
-              clientList.flatMap((client: any) => {
+              clientList.flatMap((client) => {
                 const isExpanded = expandedId === client.id;
-                const scopes: string[] = client.scopes ?? [];
+                const scopes = (client.scopes as string[]) ?? [];
                 const isAllScopes = scopes.includes("*") || scopes.length === 0;
+                const isRevoked = client.status === "revoked";
+
                 return [
                   <tr
-                    key={client.id}
-                    className={cn("border-b border-border/50 hover:bg-muted/20 transition-colors", isExpanded && "bg-muted/10")}
-                    data-testid={`client-row-${client.id}`}
+                    key={client.id as string}
+                    className={cn(
+                      "border-b border-border/50 hover:bg-muted/20 transition-colors",
+                      isExpanded && "bg-muted/10",
+                      isRevoked && "opacity-60"
+                    )}
                   >
-                    <td className="px-4 py-3 font-medium">{client.name}</td>
+                    {/* Name + description */}
+                    <td className="px-4 py-3">
+                      <div>
+                        <p className="font-medium text-sm leading-tight">{client.name as string}</p>
+                        {Boolean(client.description) && (
+                          <p className="text-[10px] text-muted-foreground mt-0.5 max-w-[180px] truncate">{client.description as string}</p>
+                        )}
+                        {/* Expiry + IP badges */}
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          <ExpiryBadge expiresAt={(client.expiresAt as string | null) ?? null} />
+                          {(client.allowedIps as string[])?.length > 0 && (
+                            <span className="text-[9px] text-muted-foreground border border-border px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
+                              <Globe className="w-2 h-2" /> {(client.allowedIps as string[]).length} IP{(client.allowedIps as string[]).length !== 1 ? "s" : ""}
+                            </span>
+                          )}
+                          {Boolean(client.secretRotatedAt) && (
+                            <span className="text-[9px] text-muted-foreground border border-border px-1.5 py-0.5 rounded-full flex items-center gap-0.5">
+                              <RefreshCw className="w-2 h-2" /> rotated
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </td>
 
                     {/* Bearer token */}
                     <td className="px-4 py-3">
                       {client.clientSecret
-                        ? <SecretField secret={client.clientSecret} />
+                        ? <SecretField secret={client.clientSecret as string} />
                         : <span className="text-xs text-muted-foreground italic">hidden</span>}
                     </td>
 
@@ -334,7 +655,7 @@ export default function ApiClients() {
                     <td className="px-4 py-3">
                       {isAllScopes ? (
                         <span className="inline-flex items-center gap-1 text-[10px] font-semibold bg-purple-100 text-purple-700 dark:bg-purple-950/50 dark:text-purple-300 px-2 py-0.5 rounded border border-purple-200 dark:border-purple-800">
-                          <Shield className="w-2.5 h-2.5" /> All scopes
+                          <Shield className="w-2.5 h-2.5" /> All
                         </span>
                       ) : (
                         <div className="flex flex-wrap gap-1">
@@ -345,7 +666,7 @@ export default function ApiClients() {
                       )}
                     </td>
 
-                    {/* Request count */}
+                    {/* Requests */}
                     <td className="px-4 py-3 tabular-nums text-xs text-muted-foreground">
                       {Number(client.totalRequests ?? 0).toLocaleString()}
                     </td>
@@ -353,67 +674,97 @@ export default function ApiClients() {
                     {/* Last used */}
                     <td className="px-4 py-3 text-xs text-muted-foreground">
                       {client.lastUsedAt
-                        ? <span title={format(new Date(client.lastUsedAt), "yyyy-MM-dd HH:mm:ss")}>
-                            {formatDistanceToNow(new Date(client.lastUsedAt), { addSuffix: true })}
+                        ? <span title={format(new Date(client.lastUsedAt as string), "yyyy-MM-dd HH:mm:ss")}>
+                            {formatDistanceToNow(new Date(client.lastUsedAt as string), { addSuffix: true })}
                           </span>
                         : <span className="opacity-40">Never</span>}
                     </td>
 
                     {/* Status */}
                     <td className="px-4 py-3">
-                      <span className={cn(
-                        "inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border",
-                        client.status === "active"
-                          ? "bg-green-50 text-green-700 border-green-200 dark:bg-green-950/40 dark:text-green-400 dark:border-green-800"
-                          : "bg-gray-100 text-gray-600 border-gray-200 dark:bg-gray-800 dark:text-gray-400"
-                      )}>
-                        {client.status === "active"
-                          ? <><CheckCircle2 className="w-2.5 h-2.5" />Active</>
-                          : <><XCircle className="w-2.5 h-2.5" />Inactive</>}
-                      </span>
+                      <StatusBadge status={client.status as string} />
                     </td>
 
                     {/* Actions */}
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-1.5">
+                        {/* Integration guide */}
                         <button
-                          onClick={() => setExpandedId(isExpanded ? null : client.id)}
+                          onClick={() => setExpandedId(isExpanded ? null : client.id as string)}
                           className={cn(
                             "flex items-center gap-1 text-xs px-2 py-1 rounded transition-colors",
-                            isExpanded
-                              ? "bg-primary/10 text-primary"
-                              : "text-muted-foreground hover:text-foreground hover:bg-muted"
+                            isExpanded ? "bg-primary/10 text-primary" : "text-muted-foreground hover:text-foreground hover:bg-muted"
                           )}
                           title="Integration guide"
                         >
                           <BookOpen className="w-3.5 h-3.5" />
                           <ChevronDown className={cn("w-3 h-3 transition-transform", isExpanded && "rotate-180")} />
                         </button>
+
                         {can("manage_api_clients") && (
-                          <button
-                            className="text-muted-foreground hover:text-destructive transition-colors"
-                            onClick={() => deleteClient.mutate({ id: client.id }, {
-                              onSuccess: () => {
-                                toast({ title: "Client deleted" });
-                                qc.invalidateQueries({ queryKey: getListApiClientsQueryKey() });
-                                if (expandedId === client.id) setExpandedId(null);
-                              },
-                            })}
-                            data-testid={`delete-client-${client.id}`}
-                          >
-                            <Trash2 className="w-3.5 h-3.5" />
-                          </button>
+                          <>
+                            {/* Rotate */}
+                            <button
+                              onClick={() => setRotateClient(client)}
+                              className="text-muted-foreground hover:text-orange-500 transition-colors"
+                              title="Rotate secret"
+                              disabled={isRevoked}
+                            >
+                              <RefreshCw className="w-3.5 h-3.5" />
+                            </button>
+
+                            {/* Revoke / Restore */}
+                            {isRevoked ? (
+                              <button
+                                onClick={() => handleRestore(client)}
+                                className="text-muted-foreground hover:text-green-600 transition-colors"
+                                title="Restore (un-revoke)"
+                              >
+                                <RotateCcw className="w-3.5 h-3.5" />
+                              </button>
+                            ) : (
+                              <button
+                                onClick={() => handleRevoke(client)}
+                                className="text-muted-foreground hover:text-destructive transition-colors"
+                                title="Revoke token"
+                              >
+                                <Ban className="w-3.5 h-3.5" />
+                              </button>
+                            )}
+
+                            {/* Delete */}
+                            <button
+                              className="text-muted-foreground hover:text-destructive transition-colors"
+                              onClick={() => deleteClient.mutate({ id: client.id as string }, {
+                                onSuccess: () => {
+                                  toast({ title: "Client deleted" });
+                                  invalidate();
+                                  if (expandedId === client.id) setExpandedId(null);
+                                },
+                              })}
+                              title="Permanently delete"
+                            >
+                              <Trash2 className="w-3.5 h-3.5" />
+                            </button>
+                          </>
                         )}
                       </div>
                     </td>
                   </tr>,
 
                   isExpanded && (
-                    <tr key={`${client.id}-guide`} className="border-b border-border/50 bg-muted/5">
+                    <tr key={`${client.id as string}-guide`} className="border-b border-border/50 bg-muted/5">
                       <td colSpan={7} className="px-6 py-5">
                         <div className="flex items-center gap-2 mb-4">
                           <BookOpen className="w-4 h-4 text-primary" />
-                          <h3 className="text-sm font-semibold">Integration Guide — {client.name}</h3>
+                          <h3 className="text-sm font-semibold">Integration Guide — {client.name as string}</h3>
+                          <div className="flex gap-1.5 ml-2">
+                            {(client.allowedIps as string[])?.length > 0 && (
+                              <span className="text-[10px] bg-muted text-muted-foreground px-2 py-0.5 rounded-full border">
+                                IPs: {(client.allowedIps as string[]).join(", ")}
+                              </span>
+                            )}
+                          </div>
                         </div>
                         <IntegrationGuide client={client} />
                       </td>
@@ -426,110 +777,23 @@ export default function ApiClients() {
         </table>
       </div>
 
-      {/* Create dialog */}
-      <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="max-w-lg" data-testid="add-client-dialog">
-          <DialogHeader>
-            <DialogTitle>Create API Client</DialogTitle>
-            <DialogDescription>
-              A bearer token (client secret) will be generated automatically. Copy it immediately — it is shown only once.
-            </DialogDescription>
-          </DialogHeader>
-          <Form {...form}>
-            <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-5">
-              <FormField control={form.control} name="name" render={({ field }) => (
-                <FormItem>
-                  <FormLabel>Client Name *</FormLabel>
-                  <FormControl>
-                    <Input placeholder="e.g. Grafana Export, Python ETL, Node-RED" {...field} data-testid="client-name-input" />
-                  </FormControl>
-                </FormItem>
-              )} />
+      {/* Dialogs */}
+      <CreateDialog
+        open={createOpen}
+        onClose={() => setCreateOpen(false)}
+        onCreated={(created) => {
+          invalidate();
+          setCreateOpen(false);
+          setExpandedId(created.id as string);
+        }}
+      />
 
-              {/* Scope picker */}
-              <div className="space-y-2">
-                <p className="text-sm font-medium">Scopes</p>
-                <FormDescription className="text-xs">
-                  Choose what data this client can access. Leave all unchecked to grant every scope.
-                </FormDescription>
-
-                {/* All scopes toggle */}
-                <Controller control={form.control} name="allScopes" render={({ field }) => (
-                  <label className={cn(
-                    "flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors",
-                    field.value
-                      ? "border-purple-400 bg-purple-50/50 dark:bg-purple-950/20"
-                      : "border-border hover:border-muted-foreground/40"
-                  )}>
-                    <input
-                      type="checkbox"
-                      className="mt-0.5 accent-purple-600"
-                      checked={field.value}
-                      onChange={(e) => {
-                        field.onChange(e.target.checked);
-                        if (e.target.checked) form.setValue("scopes", []);
-                      }}
-                    />
-                    <div>
-                      <p className="text-xs font-semibold flex items-center gap-1.5">
-                        <Shield className="w-3.5 h-3.5 text-purple-600" /> All Scopes (*)
-                      </p>
-                      <p className="text-[10px] text-muted-foreground mt-0.5">Super-key — can access everything. Use only for trusted internal integrations.</p>
-                    </div>
-                  </label>
-                )} />
-
-                {/* Individual scopes */}
-                {!watchAllScopes && (
-                  <Controller control={form.control} name="scopes" render={({ field }) => (
-                    <div className="space-y-1.5">
-                      {SCOPES.map((s) => {
-                        const checked = (field.value as string[]).includes(s.id);
-                        return (
-                          <label key={s.id} className={cn(
-                            "flex items-start gap-3 p-2.5 rounded-lg border cursor-pointer transition-colors",
-                            checked ? "border-primary/50 bg-primary/5" : "border-border hover:border-muted-foreground/30"
-                          )}>
-                            <input
-                              type="checkbox"
-                              className="mt-0.5 accent-blue-600"
-                              checked={checked}
-                              onChange={(e) => {
-                                const next = e.target.checked
-                                  ? [...(field.value as string[]), s.id]
-                                  : (field.value as string[]).filter((x) => x !== s.id);
-                                field.onChange(next);
-                              }}
-                            />
-                            <div className="flex-1 min-w-0">
-                              <p className={cn("text-xs font-medium flex items-center gap-1.5", s.color)}>
-                                {s.icon}{s.label}
-                              </p>
-                              <p className="text-[10px] text-muted-foreground">{s.description}</p>
-                              <code className="text-[9px] font-mono text-muted-foreground/70">{s.endpoint}</code>
-                            </div>
-                          </label>
-                        );
-                      })}
-                    </div>
-                  )} />
-                )}
-              </div>
-
-              <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setOpen(false)}>Cancel</Button>
-                <Button
-                  type="submit"
-                  disabled={createClient.isPending || (!watchAllScopes && watchScopes.length === 0)}
-                  data-testid="save-client-btn"
-                >
-                  {createClient.isPending ? "Creating…" : "Create Client"}
-                </Button>
-              </DialogFooter>
-            </form>
-          </Form>
-        </DialogContent>
-      </Dialog>
+      <RotateDialog
+        client={rotateClient}
+        open={rotateClient !== null}
+        onClose={() => setRotateClient(null)}
+        onRefresh={invalidate}
+      />
     </div>
   );
 }
