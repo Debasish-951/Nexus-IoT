@@ -639,19 +639,28 @@ function AssetManageDialog({ open, onOpenChange, parentId, editAsset, allAssets,
   }, [open, editAsset]);
 
   function autoId(n: string) { return n.toLowerCase().replace(/\s+/g,"_").replace(/[^a-z0-9_]/g,""); }
+  function safeIdentifier(n: string) {
+    const id = autoId(n).slice(0, 64);
+    return id || `asset_${crypto.randomUUID().slice(0, 8)}`;
+  }
 
   async function handleSave() {
     if (!name) return;
     setSaving(true);
     try {
+      const resolvedIdentifier = (identifier.trim() || safeIdentifier(name)).trim();
       if (editAsset) {
-        await updateAsset.mutateAsync({ id: editAsset.id, data: { name, identifier: identifier || autoId(name) } });
+        await updateAsset.mutateAsync({ id: editAsset.id, data: { name, identifier: resolvedIdentifier } });
       } else {
-        await createAsset.mutateAsync({ data: { name, identifier: identifier || autoId(name), parentId: parentId ?? null } });
+        await createAsset.mutateAsync({ data: { name, identifier: resolvedIdentifier, parentId: parentId ?? null } });
       }
       onSaved(); onOpenChange(false);
-    } catch {
-      toast({ title: "Failed to save asset", variant: "destructive" });
+    } catch (err: any) {
+      toast({
+        title: "Failed to save asset",
+        description: err?.message ? String(err.message) : "The server rejected the project data.",
+        variant: "destructive",
+      });
     } finally { setSaving(false); }
   }
 

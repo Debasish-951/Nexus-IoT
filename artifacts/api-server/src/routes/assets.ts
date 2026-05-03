@@ -37,17 +37,23 @@ router.post("/assets", async (req, res): Promise<void> => {
   const parsed = CreateAssetBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
 
-  const [asset] = await db
-    .insert(assetsTable)
-    .values({
-      name:        parsed.data.name,
-      identifier:  parsed.data.identifier,
-      parentId:    parsed.data.parentId ?? null,
-      templateId:  parsed.data.templateId ?? null,
-      description: parsed.data.description ?? null,
-      tags:        parsed.data.tags ?? [],
-    })
-    .returning();
+  let asset;
+  try {
+    [asset] = await db
+      .insert(assetsTable)
+      .values({
+        name:        parsed.data.name,
+        identifier:  parsed.data.identifier,
+        parentId:    parsed.data.parentId ?? null,
+        templateId:  parsed.data.templateId ?? null,
+        description: parsed.data.description ?? null,
+        tags:        parsed.data.tags ?? [],
+      })
+      .returning();
+  } catch (err: any) {
+    res.status(400).json({ error: err?.message ?? "Failed to create asset" });
+    return;
+  }
 
   if (asset.parentId) {
     await db
