@@ -791,6 +791,18 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
   const metricAttrs = ((attributes as any[] | undefined) ?? []).filter((a: any) => metricKeyOf(a));
   const assetName   = assetList.find((a: any) => a.id === assetId)?.name ?? "";
   const canOverlay  = supportsOverlay(chartType);
+  useEffect(() => {
+    if (!open || initial) return;
+    if (assetId === "testing" && !metric && metricAttrs.length > 0) {
+      const preferred = metricAttrs.find((a: any) =>
+        /energy/i.test(metricValueOf(a)) ||
+        /energy/i.test(a.name ?? "") ||
+        /kwh/i.test(metricValueOf(a)) ||
+        /kwh/i.test(a.name ?? "")
+      );
+      setMetric(metricValueOf(preferred ?? metricAttrs[0]));
+    }
+  }, [open, initial, assetId, metric, metricAttrs]);
 
   useEffect(() => { if (preselectedAssetId && !initial) setAssetId(preselectedAssetId); }, [preselectedAssetId]);
   useEffect(() => {
