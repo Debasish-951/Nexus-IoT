@@ -96,8 +96,8 @@ export default function Reports() {
 
   const assetList  = (assets as any[] | undefined) ?? [];
   const attrList   = (attributes as any[] | undefined) ?? [];
-  const metricAttrs = attrList.filter((a: any) => a.sourceMetric || a.tagName || a.name);
   const metricKeyOf = (a: any) => a.sourceMetric?.split(".").pop() ?? a.tagName?.split(".").pop() ?? a.name;
+  const metricAttrs = attrList.filter((a: any) => metricKeyOf(a));
 
   const selectedAssetName = assetList.find((a: any) => a.id === assetId)?.name ?? "All Assets";
 

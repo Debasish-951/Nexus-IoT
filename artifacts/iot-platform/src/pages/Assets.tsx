@@ -183,8 +183,7 @@ const CHART_COLORS = [
 // ── Trends Panel ──────────────────────────────────────────────────────────────
 function TrendsPanel({ assetId, attrList }: { assetId: string; attrList: any[] }) {
   const metricKeyOf = (a: any) => a.sourceMetric?.split(".").pop() ?? a.tagName?.split(".").pop() ?? a.name;
-  const numericAttrs = attrList.filter((a: any) => metricKeyOf(a));
-  const metricOptions = numericAttrs.map((a: any) => ({ key: metricKeyOf(a), label: a.name, uom: a.uom }));
+  const metricOptions = attrList.filter((a: any) => metricKeyOf(a)).map((a: any) => ({ key: metricKeyOf(a), label: a.name, uom: a.uom }));
 
   const [selectedMetrics, setSelectedMetrics] = useState<string[]>([]);
   const [rangeHours, setRangeHours] = useState(1);
@@ -196,10 +195,10 @@ function TrendsPanel({ assetId, attrList }: { assetId: string; attrList: any[] }
 
   // Default to first available numeric attribute
   useEffect(() => {
-    if (numericAttrs.length > 0 && selectedMetrics.length === 0) {
-      setSelectedMetrics([metricOptions[0]?.key ?? metricKeyOf(numericAttrs[0])]);
+    if (metricOptions.length > 0 && selectedMetrics.length === 0) {
+      setSelectedMetrics([metricOptions[0].key]);
     }
-  }, [attrList, numericAttrs, metricOptions, selectedMetrics.length]);
+  }, [metricOptions, selectedMetrics.length]);
 
   const fetchTelemetry = useCallback(async () => {
     if (selectedMetrics.length === 0) return;

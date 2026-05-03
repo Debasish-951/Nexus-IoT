@@ -127,11 +127,7 @@ function supportsOverlay(ct: ChartType) { return CHART_TYPE_OPTS.find(o => o.val
 
 function pickDefaultMetric(attrs: any[]) {
   const usable = attrs.filter((a: any) => metricKeyOf(a));
-  const numeric = usable.filter((a: any) =>
-    ["dynamic", "metric", "runtime"].includes(a.type) &&
-    ["double", "number", "float"].includes(a.dataType?.toLowerCase?.() ?? "")
-  );
-  const first = numeric[0] ?? usable[0];
+  const first = usable[0];
   return first ? metricKeyOf(first) : "";
 }
 function metricKeyOf(a: any) {

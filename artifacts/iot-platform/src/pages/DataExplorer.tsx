@@ -31,7 +31,7 @@ const COLORS = ["#3b82f6","#22c55e","#f97316","#a855f7","#ef4444","#14b8a6","#ea
 interface Series { assetId: string; assetName: string; metric: string; label: string; color: string; }
 
 export default function DataExplorer() {
-  const [rangeHours, setRangeHours] = useState(1);
+  const [rangeHours, setRangeHours] = useState(24);
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
   const [series, setSeries] = useState<Series[]>([]);
@@ -49,8 +49,7 @@ export default function DataExplorer() {
   const assetList = (assets as any[] | undefined) ?? [];
   const attrList  = (attributes as any[] | undefined) ?? [];
   const metricKeyOf = (a: any) => a.sourceMetric?.split(".").pop() ?? a.tagName?.split(".").pop() ?? a.name;
-  const numericAttrs = attrList.filter((a: any) => metricKeyOf(a));
-  const metricOptions = numericAttrs.map((a: any) => ({ key: metricKeyOf(a), label: a.name }));
+  const metricOptions = attrList.filter((a: any) => metricKeyOf(a)).map((a: any) => ({ key: metricKeyOf(a), label: a.name }));
 
   const fetchSeries = useCallback(async () => {
     if (series.length === 0) return;
@@ -222,7 +221,7 @@ export default function DataExplorer() {
         ) : chartData.length === 0 ? (
           <div className="h-full flex flex-col items-center justify-center text-muted-foreground">
             <TrendingUp className="w-10 h-10 mb-3 opacity-20" />
-            <p className="text-sm">No data in the selected time range</p>
+            <p className="text-sm">No data found. Try a larger range or another metric.</p>
           </div>
         ) : (
           <ResponsiveContainer width="100%" height="100%">
