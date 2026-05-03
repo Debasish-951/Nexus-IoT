@@ -397,18 +397,6 @@ router.post("/ingest/payload", optionalApiKeyAuth("ingest:write"), async (req, r
   const assetIdHint = typeof body.assetId === "string" ? body.assetId : undefined;
   const result = await processNormalised(normalised, assetIdHint);
 
-  // Strict deviceId validation — return 422 if no asset is matched
-  if (!result.assetId) {
-    res.status(422).json({
-      success: false,
-      error: `Unknown deviceId: "${normalised.deviceId}"`,
-      hint: `No asset has identifier="${normalised.deviceId}". Set this identifier on the asset in Asset Management, or check for a typo in your deviceId.`,
-      deviceId: normalised.deviceId,
-      recordsWritten: 0,
-    });
-    return;
-  }
-
   const triggered = result.alarmEvents.filter((e) => e.event === "triggered");
   const cleared   = result.alarmEvents.filter((e) => e.event === "cleared");
   res.json({ success: true, recordsWritten: result.recordsWritten, assetId: result.assetId,
