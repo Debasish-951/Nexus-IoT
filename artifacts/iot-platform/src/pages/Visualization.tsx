@@ -1229,6 +1229,12 @@ export default function Visualization() {
     mutateWidgets(activeDash.id, ws => [...ws, cloned]);
     toast({ title: "Widget cloned" });
   }
+  function duplicateWidget(w: Widget) {
+    if (!activeDash) return;
+    const duplicated: Widget = { ...w, id: crypto.randomUUID(), title: `${w.title} (Duplicate)` };
+    mutateWidgets(activeDash.id, ws => [...ws, duplicated]);
+    toast({ title: "Widget duplicated" });
+  }
   function copyWidget(w: Widget) {
     setClipboard({ ...w });
     toast({ title: `"${w.title}" copied to clipboard`, description: "Switch dashboards and use Paste to add it there." });
@@ -1571,6 +1577,7 @@ export default function Visualization() {
                         onDelete={() => removeWidget(w.id)}
                         onEdit={() => { setEditWidget(w); setDialogOpen(true); }}
                         onClone={() => cloneWidget(w)}
+                        onDuplicate={() => duplicateWidget(w)}
                         onCopy={() => copyWidget(w)}
                         fullscreen={fullscreenId === w.id}
                         onFullscreen={() => setFullscreenId(prev => prev === w.id ? null : w.id)}
