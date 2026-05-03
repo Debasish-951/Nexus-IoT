@@ -98,7 +98,7 @@ interface Widget {
   rangeMinutes: number; color: string;
   minVal?: number; maxVal?: number; unit?: string;
   customFrom?: string; customTo?: string;
-  size?: "sm" | "md" | "lg";
+  width?: number; height?: number;
   overlayMetrics?: OverlayMetric[];
 }
 interface Dashboard {
@@ -139,6 +139,12 @@ function metricKeyOf(a: any) {
 function widgetSeriesKeys(widget: Widget) {
   const keys = [widget.metric, widget.metric?.split(".").pop()].filter(Boolean) as string[];
   return [...new Set(keys)];
+}
+function seriesMatchesMetric(rowMetric: string | undefined, widgetMetric: string) {
+  if (!rowMetric) return false;
+  const a = rowMetric.split(".").pop();
+  const b = widgetMetric.split(".").pop();
+  return rowMetric === widgetMetric || a === widgetMetric || rowMetric === b || a === b;
 }
 function getWidgetRows(widget: Widget, data: Record<string, any[]>) {
   for (const key of widgetSeriesKeys(widget)) {
@@ -421,7 +427,8 @@ function WidgetCard({ widget, onDelete, onEdit, onClone, onCopy, fullscreen, onF
       const r = await fetch(`${BASE}/api/telemetry/${widget.assetId}?${p}`, { credentials: "include" });
       if (r.ok) {
         const rows = await r.json();
-        for (const key of widgetSeriesKeys(widget)) result[key] = rows;
+        const matched = Array.isArray(rows) ? rows : [];
+        for (const key of widgetSeriesKeys(widget)) result[key] = matched;
       }
       for (const ov of (widget.overlayMetrics ?? [])) {
         const key = `${ov.assetId}::${ov.metric}`;
@@ -453,7 +460,7 @@ function WidgetCard({ widget, onDelete, onEdit, onClone, onCopy, fullscreen, onF
   }, [wsSignal, fetchData]);
 
   const overlayCount = widget.overlayMetrics?.length ?? 0;
-  const chartH = widget.chartType === "kpi" ? 110 : widget.chartType === "gauge" ? 150 : widget.size === "lg" ? 240 : 180;
+  const chartH = widget.chartType === "kpi" ? 110 : widget.chartType === "gauge" ? 150 : 180;
 
   function renderContent() {
     if (loading && Object.keys(data).length === 0)
@@ -471,8 +478,9 @@ function WidgetCard({ widget, onDelete, onEdit, onClone, onCopy, fullscreen, onF
   }
 
   return (
-    <div className="flex flex-col rounded-lg overflow-hidden"
-      style={{ background: D.card, border: `1px solid ${D.border}`, boxShadow: "0 2px 12px rgba(0,0,0,0.4)" }}>
+    <div
+      className="flex flex-col rounded-lg overflow-hidden resize"
+      style={{ background: D.card, border: `1px solid ${D.border}`, boxShadow: "0 2px 12px rgba(0,0,0,0.4)", minWidth: 320, minHeight: 220 }}>
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2 shrink-0"
         style={{ borderBottom: `1px solid ${D.border}`, background: D.panel }}>
@@ -751,7 +759,8 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
   const [minVal,       setMinVal]       = useState(String(initial?.minVal ?? "0"));
   const [maxVal,       setMaxVal]       = useState(String(initial?.maxVal ?? "100"));
   const [unit,         setUnit]         = useState(initial?.unit ?? "");
-  const [size,         setSize]         = useState<"sm"|"md"|"lg">(initial?.size ?? "md");
+  const [width,        setWidth]        = useState(initial?.width ?? 1);
+  const [height,       setHeight]       = useState(initial?.height ?? 1);
   const [useCustom,    setUseCustom]    = useState(!!(initial?.customFrom));
   const [customFrom,   setCustomFrom]   = useState(initial?.customFrom ?? "");
   const [customTo,     setCustomTo]     = useState(initial?.customTo ?? "");
@@ -776,7 +785,8 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
     setMinVal(String(initial?.minVal ?? "0"));
     setMaxVal(String(initial?.maxVal ?? "100"));
     setUnit(initial?.unit ?? "");
-    setSize(initial?.size ?? "md");
+    setWidth(initial?.width ?? 1);
+    setHeight(initial?.height ?? 1);
     setUseCustom(!!initial?.customFrom);
     setCustomFrom(initial?.customFrom ?? "");
     setCustomTo(initial?.customTo ?? "");
@@ -800,7 +810,7 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
       id: initial?.id ?? crypto.randomUUID(),
       title: title || `${assetName} / ${metric}`,
       chartType, assetId, assetName, metric, rangeMinutes, color,
-      minVal: Number(minVal), maxVal: Number(maxVal), unit, size,
+      minVal: Number(minVal), maxVal: Number(maxVal), unit, width, height,
       customFrom: useCustom ? customFrom : undefined,
       customTo:   useCustom ? customTo   : undefined,
       overlayMetrics: canOverlay ? overlayMetrics.filter(o => o.assetId && o.metric) : [],
@@ -1157,7 +1167,7 @@ export default function Visualization() {
     return widgets.filter(w => w.assetId === selectedAssetId || (w.overlayMetrics ?? []).some(o => o.assetId === selectedAssetId));
   }, [widgets, selectedAssetId]);
 
-  function sizeClass(w: Widget) { return w.chartType === "kpi" ? "col-span-1" : w.size === "lg" ? "col-span-2" : "col-span-1"; }
+  function sizeClass() { return "col-span-1"; }
 
   return (
     <div className="flex h-full overflow-hidden" style={{ background: D.bg }}>
