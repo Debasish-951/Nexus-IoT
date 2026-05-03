@@ -95,7 +95,7 @@ export default function DataExplorer() {
     if (!selAsset || !selMetric) return;
     const asset = assetList.find((a: any) => a.id === selAsset);
     if (!asset) return;
-    const label = `${asset.name} › ${selMetric}`;
+    const label = `${asset.name} › ${metricOptions.find((m) => m.key === selMetric)?.label ?? selMetric}`;
     if (series.some((s) => s.label === label)) return;
     const color = COLORS[series.length % COLORS.length];
     setSeries((prev) => [...prev, { assetId: selAsset, assetName: asset.name, metric: selMetric, label, color }]);
@@ -116,7 +116,7 @@ export default function DataExplorer() {
   }
 
   const metricOptions = numericAttrs.map((a: any) => ({
-    key: a.tagName?.split(".").pop() ?? a.name,
+    key: a.sourceMetric?.split(".").pop() ?? a.tagName?.split(".").pop() ?? a.name,
     label: a.name,
   }));
 

@@ -186,6 +186,7 @@ function TrendsPanel({ assetId, attrList }: { assetId: string; attrList: any[] }
     ["dynamic","metric","runtime"].includes(a.type) &&
     ["double","number","float"].includes(a.dataType?.toLowerCase?.() ?? "")
   );
+  const metricKeyOf = (a: any) => a.sourceMetric?.split(".").pop() ?? a.tagName?.split(".").pop() ?? a.name;
 
   const [selectedMetrics, setSelectedMetrics] = useState<string[]>([]);
   const [rangeHours, setRangeHours] = useState(1);
@@ -199,10 +200,9 @@ function TrendsPanel({ assetId, attrList }: { assetId: string; attrList: any[] }
   useEffect(() => {
     if (numericAttrs.length > 0 && selectedMetrics.length === 0) {
       const first = numericAttrs[0];
-      const metricKey = first.tagName?.split(".").pop() ?? first.name;
-      setSelectedMetrics([metricKey]);
+      setSelectedMetrics([metricKeyOf(first)]);
     }
-  }, [attrList]);
+  }, [attrList, numericAttrs, selectedMetrics.length]);
 
   const fetchTelemetry = useCallback(async () => {
     if (selectedMetrics.length === 0) return;
@@ -255,10 +255,11 @@ function TrendsPanel({ assetId, attrList }: { assetId: string; attrList: any[] }
   }
 
   const metricOptions = numericAttrs.map((a: any) => ({
-    key: a.tagName?.split(".").pop() ?? a.name,
+    key: metricKeyOf(a),
     label: a.name,
     uom: a.uom,
   }));
+  const metricLabelOf = (key: string) => metricOptions.find((o: any) => o.key === key)?.label ?? key;
 
   const hasData = telemetry.length > 0;
 
@@ -358,7 +359,7 @@ function TrendsPanel({ assetId, attrList }: { assetId: string; attrList: any[] }
       </div>
 
       {/* Summary stats */}
-      {hasData && (
+          {hasData && (
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
           {selectedMetrics.map((metric, i) => {
             const vals = telemetry.map((r) => r[metric]).filter((v) => v != null) as number[];
@@ -369,7 +370,7 @@ function TrendsPanel({ assetId, attrList }: { assetId: string; attrList: any[] }
             const color = CHART_COLORS[i % CHART_COLORS.length];
             return (
               <div key={metric} className="rounded-lg border border-border bg-muted/30 p-3" style={{ borderLeftColor: color, borderLeftWidth: 3 }}>
-                <p className="text-xs font-medium mb-1.5 truncate">{metric}</p>
+                <p className="text-xs font-medium mb-1.5 truncate">{metricLabelOf(metric)}</p>
                 <div className="grid grid-cols-2 gap-y-1 text-xs">
                   <span className="text-muted-foreground">Last</span><span className="font-mono font-medium">{last.toFixed(2)}</span>
                   <span className="text-muted-foreground">Avg</span><span className="font-mono">{avg.toFixed(2)}</span>

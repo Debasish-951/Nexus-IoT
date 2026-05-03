@@ -133,6 +133,9 @@ function pickDefaultMetric(attrs: any[]) {
   const first = numeric[0];
   return first ? (first.tagName?.split(".").pop() ?? first.name) : "";
 }
+function metricKeyOf(a: any) {
+  return a.tagName?.split(".").pop() ?? a.sourceMetric?.split(".").pop() ?? a.name;
+}
 
 const darkAxis    = { stroke: D.muted, fontSize: 10, tickLine: false, axisLine: false };
 const darkGrid    = { strokeDasharray: "3 3", stroke: D.border2, vertical: false };
@@ -704,7 +707,7 @@ function OverlayRow({ overlay, assetList, index, onChange, onRemove }: {
         disabled={!overlay.assetId}
         className="flex-1 h-7 rounded border border-border bg-background px-1.5 text-[11px] disabled:opacity-40">
         <option value="">Metric…</option>
-        {attrs.map((a: any) => <option key={a.name} value={a.name}>{a.name}</option>)}
+        {attrs.map((a: any) => <option key={metricKeyOf(a)} value={metricKeyOf(a)}>{a.name}</option>)}
       </select>
       <div className="flex gap-1 shrink-0">
         {NEON_PALETTE.slice(0,6).map(c => (
@@ -806,7 +809,7 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
             <select value={metric} onChange={e => setMetric(e.target.value)} disabled={!assetId}
               className="w-full h-8 rounded border border-border bg-background px-2 text-xs disabled:opacity-50">
               <option value="">{assetId ? "Select metric…" : "Select asset first"}</option>
-              {metricAttrs.map((a: any) => <option key={a.name} value={a.name}>{a.name}</option>)}
+              {metricAttrs.map((a: any) => <option key={metricKeyOf(a)} value={metricKeyOf(a)}>{a.name}</option>)}
             </select>
           </div>
           {canOverlay && (
