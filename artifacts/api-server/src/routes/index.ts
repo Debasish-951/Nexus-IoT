@@ -13,6 +13,7 @@ import dashboardRouter from "./dashboard";
 import destinationsRouter from "./destinations";
 import activityLogRouter from "./activity_log";
 import brokerHistoryRouter from "./broker_history";
+import exportRouter from "./export";
 
 const router: IRouter = Router();
 
@@ -30,5 +31,6 @@ router.use(dashboardRouter);
 router.use(destinationsRouter);
 router.use(activityLogRouter);
 router.use(brokerHistoryRouter);
+router.use(exportRouter);
 
 export default router;
