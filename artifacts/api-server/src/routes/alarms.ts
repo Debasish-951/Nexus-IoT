@@ -7,6 +7,7 @@ import {
   ListAlarmHistoryQueryParams,
 } from "@workspace/api-zod";
 import { logActivity } from "./activity_log";
+import { broadcast } from "../lib/ws-broadcast";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -55,6 +56,14 @@ router.post("/alarms/:id/acknowledge", async (req, res): Promise<void> => {
   }
 
   void logActivity("alarm.acknowledged", "alarm", alarm.id, alarm.name, null, req);
+  broadcast("alarm", {
+    event: "acknowledged",
+    alarmId: alarm.id,
+    ruleName: alarm.name,
+    severity: alarm.severity,
+    assetId: alarm.assetId,
+    assetName: alarm.assetName,
+  });
   res.json(alarm);
 });
 
@@ -93,6 +102,14 @@ router.post("/alarms/history/:id/acknowledge", async (req, res): Promise<void> =
     ));
 
   void logActivity("alarm.acknowledged", "alarm", historyRecord.alarmId, historyRecord.name, "via alarm history", req);
+  broadcast("alarm", {
+    event: "acknowledged",
+    alarmId: historyRecord.alarmId,
+    ruleName: historyRecord.name,
+    severity: historyRecord.severity,
+    assetId: historyRecord.assetId,
+    assetName: historyRecord.assetName,
+  });
   res.json(updated);
 });
 

@@ -1,15 +1,15 @@
-import { useState } from "react";
+import { useState, useCallback, useRef } from "react";
 import { useListAlarmHistory } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Skeleton } from "@/components/ui/skeleton";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
+import { useWsEvents } from "@/hooks/useWsEvents";
 import {
   BookOpen, Search, AlertCircle, Clock, CheckCircle2,
-  ArrowDownToLine, ShieldCheck,
+  ArrowDownToLine, ShieldCheck, Radio,
 } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -87,6 +87,30 @@ export default function AlarmHistory() {
   const [filterStatus, setFilterStatus]     = useState("all");
   const [acknowledging, setAcknowledging]   = useState<Record<string, boolean>>({});
 
+  // Live event counter — tracks new alarm events since last page focus
+  const [liveCount, setLiveCount] = useState(0);
+  const [lastEvent, setLastEvent] = useState<{ event: string; ruleName?: string; severity?: string } | null>(null);
+  const refetchTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Debounced refetch — coalesces rapid bursts (e.g. batch ingest) into one query
+  const debouncedRefetch = useCallback(() => {
+    if (refetchTimerRef.current) clearTimeout(refetchTimerRef.current);
+    refetchTimerRef.current = setTimeout(() => { void refetch(); }, 400);
+  }, [refetch]);
+
+  const handleAlarmEvent = useCallback((raw: unknown) => {
+    const ev = raw as { event: string; ruleName?: string; severity?: string; alarmId?: string };
+    setLiveCount((n) => n + 1);
+    setLastEvent(ev);
+    debouncedRefetch();
+    // Also keep the Alarms list in sync
+    qc.invalidateQueries({ queryKey: ["listAlarms"] });
+  }, [debouncedRefetch, qc]);
+
+  const wsStatus = useWsEvents({ alarm: handleAlarmEvent });
+
+  function clearLiveBadge() { setLiveCount(0); setLastEvent(null); }
+
   const historyList = (history as any[] | undefined) ?? [];
   const filtered = historyList.filter((h) => {
     if (filterSeverity !== "all" && h.severity !== filterSeverity) return false;
@@ -127,20 +151,54 @@ export default function AlarmHistory() {
             Historical log of all alarm events — {filtered.length} records
           </p>
         </div>
-        {/* Legend */}
-        <div className="hidden md:flex items-center gap-4 text-xs text-muted-foreground">
-          <span className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-[2px] bg-red-200 dark:bg-red-900/50 border-l-2 border-red-500" />
-            Unacknowledged
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-[2px] bg-yellow-100 dark:bg-yellow-900/40 border-l-2 border-yellow-500" />
-            Acknowledged
-          </span>
-          <span className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-[2px] bg-green-100 dark:bg-green-900/40 border-l-2 border-green-500" />
-            Returned to Normal
-          </span>
+
+        <div className="flex items-center gap-3 flex-wrap">
+          {/* Live WS status + new-event badge */}
+          <div className="flex items-center gap-2">
+            <span className={cn(
+              "inline-flex items-center gap-1.5 text-[10px] font-medium px-2 py-0.5 rounded-full border",
+              wsStatus === "connected"
+                ? "bg-green-50 border-green-300 text-green-700 dark:bg-green-950/30 dark:border-green-700 dark:text-green-400"
+                : "bg-muted border-border text-muted-foreground"
+            )}>
+              <Radio className={cn("w-3 h-3", wsStatus === "connected" ? "text-green-500 animate-pulse" : "text-muted-foreground")} />
+              {wsStatus === "connected" ? "Live" : wsStatus === "reconnecting" ? "Reconnecting…" : "Connecting…"}
+            </span>
+
+            {liveCount > 0 && (
+              <button
+                onClick={clearLiveBadge}
+                title="New alarm events received — click to dismiss"
+                className={cn(
+                  "inline-flex items-center gap-1 text-[10px] font-semibold px-2 py-0.5 rounded-full border animate-pulse cursor-pointer",
+                  lastEvent?.event === "triggered"
+                    ? "bg-red-100 border-red-400 text-red-700 dark:bg-red-950/50 dark:border-red-600 dark:text-red-300"
+                    : lastEvent?.event === "cleared"
+                    ? "bg-green-100 border-green-400 text-green-700 dark:bg-green-950/50 dark:border-green-600 dark:text-green-300"
+                    : "bg-yellow-100 border-yellow-400 text-yellow-700 dark:bg-yellow-950/50 dark:border-yellow-600 dark:text-yellow-300"
+                )}
+              >
+                <AlertCircle className="w-3 h-3" />
+                {liveCount} new event{liveCount !== 1 ? "s" : ""}
+              </button>
+            )}
+          </div>
+
+          {/* Legend */}
+          <div className="hidden md:flex items-center gap-4 text-xs text-muted-foreground">
+            <span className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-[2px] bg-red-200 dark:bg-red-900/50 border-l-2 border-red-500" />
+              Unacknowledged
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-[2px] bg-yellow-100 dark:bg-yellow-900/40 border-l-2 border-yellow-500" />
+              Acknowledged
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded-[2px] bg-green-100 dark:bg-green-900/40 border-l-2 border-green-500" />
+              Returned to Normal
+            </span>
+          </div>
         </div>
       </div>
 
