@@ -5,7 +5,7 @@ import {
   FileText, Image, BarChart2, Blocks, Cpu, Bell,
   AlarmClock, BookOpen, Settings2, Router, Plug,
   Shield, Users, KeyRound, Activity, Menu, X,
-  Wifi, Zap, Send,
+  Wifi, Zap, Send, Database,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -66,6 +66,13 @@ const navItems: NavItem[] = [
     children: [
       { label: "User",       href: "/users",       icon: Users },
       { label: "API Client", href: "/api-clients", icon: KeyRound },
+    ],
+  },
+  {
+    label: "System",
+    icon: Database,
+    children: [
+      { label: "Data Management", href: "/data-management", icon: Database },
     ],
   },
   { label: "Activity Log",      href: "/activity-log", icon: Activity },

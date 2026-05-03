@@ -3,6 +3,7 @@ import app from "./app";
 import { logger } from "./lib/logger";
 import { startMqttSubscribers } from "./services/mqtt.js";
 import { initWebSocketServer } from "./lib/ws-broadcast";
+import { runPruning } from "./routes/system";
 
 const rawPort = process.env["PORT"];
 
@@ -23,6 +24,14 @@ server.listen(port, () => {
   startMqttSubscribers().catch((e) => {
     logger.warn({ err: e }, "MQTT subscriber startup failed — will retry on next broker save");
   });
+
+  // Background data-retention pruning — runs every hour
+  const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
+  setInterval(() => {
+    runPruning()
+      .then((r) => { if (r.totalRowsDeleted > 0) logger.info(r, "Retention pruning completed"); })
+      .catch((e) => logger.warn({ err: e }, "Retention pruning error"));
+  }, PRUNE_INTERVAL_MS);
 });
 
 server.on("error", (err) => {

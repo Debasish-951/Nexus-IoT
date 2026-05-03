@@ -58,6 +58,14 @@ scripts/                  — Utility scripts
 - `GET /api/dashboard/recent-telemetry` — latest records
 - `GET /api/dashboard/alarm-stats` — alarm counts by severity
 - `GET /api/activity-log` — paginated audit trail (category, actorName, limit, offset filters)
+- `POST /api/assets/:id/maintenance` — toggle maintenance mode (body: { enabled, note? })
+- `GET /api/system/storage` — storage stats (totalRows, tableSize, perAsset breakdown)
+- `GET /api/system/aggregate` — time-bucketed aggregation (bucket: 5m/15m/30m/1h/6h/12h/1d/1w; avg/min/max per interval)
+- `GET /api/system/retention` — list data retention policies
+- `POST /api/system/retention` — create retention policy (name, retentionDays, assetId?, metric?, enabled)
+- `PUT /api/system/retention/:id` — update retention policy
+- `DELETE /api/system/retention/:id` — delete retention policy
+- `POST /api/system/retention/run` — manually trigger pruning across all enabled policies
 
 ### Activity Logging
 - `logActivity(action, category, targetId, targetName, detail, req)` — internal helper in `activity_log.ts`
@@ -75,6 +83,7 @@ scripts/                  — Utility scripts
 - `/brokers` — Broker management (MQTT, REST API, Azure IoT, with payload mapping rules) + expandable per-broker connection history timeline
 - `/api-clients` — API client credentials with scope management
 - `/activity-log` — Audit trail table (filter by category, search by actor/target/action, paginated 25/page, 30s auto-refresh)
+- `/data-management` — Storage overview (total rows, table size, oldest/newest), per-asset breakdown, retention policy CRUD, manual pruning trigger, storage architecture notes
 
 ### Services
 - `artifacts/api-server/src/services/mqtt.ts` — MQTT subscriber service: reads broker configs, subscribes to topics, applies mapping rules, calls processNormalised; broadcasts `broker_status` WS events and inserts `broker_events` rows on connect/error/close
@@ -124,6 +133,13 @@ cd lib/api-spec && pnpm exec orval --config ./orval.config.ts
 ### DB Schema Notes
 - `alarm_rules`: added `webhook_url TEXT`, `webhook_enabled BOOLEAN DEFAULT false`, `roc_window INTEGER DEFAULT 60`
 - `brokers`: added `mapping_rules JSONB DEFAULT '[]'`, `mqtt_username`, `mqtt_password`, `mqtt_topic`, `mqtt_client_id`
+- `telemetry`: three composite indexes: `idx_telemetry_asset_metric_ts (asset_id, metric, timestamp)`, `idx_telemetry_ts (timestamp)`, `idx_telemetry_asset_ts (asset_id, timestamp)`
+- `data_retention_policies`: id, name, assetId (null=all), metric (null=all), retentionDays, enabled, lastPrunedAt, rowsPruned
+
+### Data Retention / Pruning
+- Hourly background job (`setInterval` in `src/index.ts`) calls `runPruning()` from `routes/system.ts`
+- Policies evaluated per-record matching assetId+metric; deletes rows older than `retentionDays`
+- `rowsPruned` counter accumulates across all runs
 
 ### Seeded Sample Data (fixed UUIDs)
 - Fan = `bbbb0002-0000-0000-0000-000000000001`, Plant 1 = `bbbb0001-0000-0000-0000-000000000001`

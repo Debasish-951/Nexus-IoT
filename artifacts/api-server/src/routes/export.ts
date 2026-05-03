@@ -152,7 +152,7 @@ router.get("/export/assets", apiKeyAuth("read:assets"), async (req, res): Promis
   const attrsByAsset: Record<string, Array<{ name: string; value: unknown; unit: string | null; dataType: string; updatedAt: Date }>> = {};
   for (const a of attrs) {
     if (!attrsByAsset[a.assetId]) attrsByAsset[a.assetId] = [];
-    attrsByAsset[a.assetId].push({ name: a.name, value: a.value, unit: a.unit, dataType: a.dataType, updatedAt: a.updatedAt });
+    attrsByAsset[a.assetId].push({ name: a.name, value: a.value, unit: a.uom, dataType: a.dataType, updatedAt: a.updatedAt });
   }
 
   if (format === "csv") {
@@ -232,8 +232,9 @@ router.get("/export/alarms", apiKeyAuth("read:alarms"), async (req, res): Promis
 
   const flat = rows.map((r) => ({
     id: r.id, assetId: r.assetId, assetName: r.assetName,
-    ruleName: r.ruleName, metric: r.metric, value: r.value,
-    threshold: r.threshold, operator: r.operator,
+    name: r.name, ruleId: r.ruleId ?? "",
+    alarmClass: r.alarmClass ?? "", message: r.message ?? "",
+    triggerValue: r.triggerValue,
     severity: r.severity, status: r.status,
     triggeredAt: r.triggeredAt?.toISOString() ?? "",
     acknowledgedAt: r.acknowledgedAt?.toISOString() ?? "",
@@ -262,9 +263,7 @@ router.get("/export/alarm-history", apiKeyAuth("read:alarm-history"), async (req
 
   const flat = rows.map((r) => ({
     id: r.id, alarmId: r.alarmId, assetId: r.assetId, assetName: r.assetName,
-    ruleName: r.ruleName, metric: r.metric, value: r.value,
-    threshold: r.threshold, severity: r.severity,
-    event: r.event, acknowledgedBy: r.acknowledgedBy ?? "",
+    name: r.name, severity: r.severity, status: r.status,
     triggeredAt: r.triggeredAt?.toISOString() ?? "",
     clearedAt: r.clearedAt?.toISOString() ?? "",
   }));

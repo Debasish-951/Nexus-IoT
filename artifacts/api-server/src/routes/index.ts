@@ -14,6 +14,7 @@ import destinationsRouter from "./destinations";
 import activityLogRouter from "./activity_log";
 import brokerHistoryRouter from "./broker_history";
 import exportRouter from "./export";
+import systemRouter from "./system";
 
 const router: IRouter = Router();
 
@@ -32,5 +33,6 @@ router.use(destinationsRouter);
 router.use(activityLogRouter);
 router.use(brokerHistoryRouter);
 router.use(exportRouter);
+router.use(systemRouter);
 
 export default router;

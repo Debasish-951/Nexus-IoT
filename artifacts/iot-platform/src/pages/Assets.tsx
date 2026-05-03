@@ -29,7 +29,7 @@ import {
   ChevronRight, ChevronDown, Blocks, Plus, Trash2, Edit2,
   Search, Download, FileSpreadsheet, Braces, LayoutTemplate,
   CheckCircle2, AlertTriangle, Info, Folder, FolderOpen, Calculator,
-  Zap, HelpCircle, TrendingUp, RefreshCw,
+  Zap, HelpCircle, TrendingUp, RefreshCw, Wrench,
 } from "lucide-react";
 import {
   LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
@@ -46,6 +46,9 @@ interface Asset {
   parentId?: string | null; templateId?: string | null;
   templateName?: string | null; childCount: number;
   attributeCount: number; updatedAt: string;
+  maintenanceMode?: boolean;
+  maintenanceSince?: string | null;
+  maintenanceNote?: string | null;
 }
 interface AttrDef {
   name: string; type: string; dataType: string;
@@ -383,6 +386,7 @@ export default function Assets() {
   const [importing, setImporting]       = useState(false);
   const [applyingTemplate, setApplyingTemplate] = useState(false);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  const [maintenanceLoading, setMaintenanceLoading] = useState(false);
 
   // Add/Edit attribute form state
   const [attrUseExpr, setAttrUseExpr]   = useState(false);
@@ -431,6 +435,32 @@ export default function Assets() {
     setAddAssetParentId(parentId);
     assetForm.reset({ name: "", identifier: "", parentId: parentId ?? "" });
     setAddAssetOpen(true);
+  }
+
+  async function toggleMaintenance(asset: Asset) {
+    setMaintenanceLoading(true);
+    try {
+      const res = await fetch(`/api/assets/${asset.id}/maintenance`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: !asset.maintenanceMode }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const updated = await res.json() as Asset;
+      setSelectedAsset((prev) => prev ? { ...prev, ...updated } : prev);
+      qc.invalidateQueries({ queryKey: getListAssetsQueryKey() });
+      toast({
+        title: updated.maintenanceMode ? "Maintenance mode ON" : "Maintenance mode OFF",
+        description: updated.maintenanceMode
+          ? "Alarm evaluation is suspended for this asset."
+          : "Alarm evaluation resumed for this asset.",
+      });
+    } catch {
+      toast({ title: "Failed to toggle maintenance mode", variant: "destructive" });
+    } finally {
+      setMaintenanceLoading(false);
+    }
   }
 
   function handleNameChange(name: string) {
@@ -665,6 +695,22 @@ export default function Assets() {
               </div>
               <div className="flex items-center gap-2 shrink-0">
                 {selectedAsset.templateName && <Badge variant="secondary" className="text-xs">{selectedAsset.templateName}</Badge>}
+                {/* Maintenance Mode toggle */}
+                {can("manage_assets") && (
+                  <div className="flex items-center gap-1.5 border border-border rounded-md px-2 py-1">
+                    <Wrench className={`w-3 h-3 ${selectedAsset.maintenanceMode ? "text-amber-500" : "text-muted-foreground"}`} />
+                    <Switch
+                      checked={!!selectedAsset.maintenanceMode}
+                      onCheckedChange={() => toggleMaintenance(selectedAsset)}
+                      disabled={maintenanceLoading}
+                      className="scale-75 -my-0.5"
+                      aria-label="Maintenance mode"
+                    />
+                    {selectedAsset.maintenanceMode && (
+                      <span className="text-xs text-amber-600 dark:text-amber-400 font-medium">Maintenance</span>
+                    )}
+                  </div>
+                )}
                 {can("manage_assets") && (
                   <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => openAddAsset(selectedAsset.id)}>
                     <Plus className="w-3 h-3 mr-1" /> Add Child
