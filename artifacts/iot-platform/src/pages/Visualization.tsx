@@ -126,12 +126,13 @@ function rangeLabelOf(w: Widget) {
 function supportsOverlay(ct: ChartType) { return CHART_TYPE_OPTS.find(o => o.value === ct)?.supportsOverlay ?? false; }
 
 function pickDefaultMetric(attrs: any[]) {
-  const numeric = attrs.filter((a: any) =>
+  const usable = attrs.filter((a: any) => metricKeyOf(a));
+  const numeric = usable.filter((a: any) =>
     ["dynamic", "metric", "runtime"].includes(a.type) &&
     ["double", "number", "float"].includes(a.dataType?.toLowerCase?.() ?? "")
   );
-  const first = numeric[0];
-  return first ? (first.tagName?.split(".").pop() ?? first.name) : "";
+  const first = numeric[0] ?? usable[0];
+  return first ? metricKeyOf(first) : "";
 }
 function metricKeyOf(a: any) {
   return a.tagName?.split(".").pop() ?? a.sourceMetric?.split(".").pop() ?? a.name;
@@ -725,7 +726,7 @@ function OverlayRow({ overlay, assetList, index, onChange, onRemove }: {
   const { data: attributes } = useListAssetAttributes(overlay.assetId, {
     query: { enabled: !!overlay.assetId, queryKey: ["viz-ov-attrs", overlay.assetId, index] },
   });
-  const attrs = ((attributes as any[] | undefined) ?? []).filter((a: any) => ["dynamic","metric","runtime"].includes(a.type));
+  const attrs = ((attributes as any[] | undefined) ?? []).filter((a: any) => metricKeyOf(a));
   return (
     <div className="flex items-center gap-2 p-2 rounded" style={{ background: D.panel, border: `1px solid ${D.border}` }}>
       <div className="w-3 h-3 rounded-full shrink-0" style={{ background: overlay.color }} />
@@ -778,7 +779,7 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
   const { data: assets }     = useListAssets();
   const { data: attributes } = useListAssetAttributes(assetId, { query: { enabled: !!assetId } });
   const assetList   = (assets as any[] | undefined) ?? [];
-  const metricAttrs = ((attributes as any[] | undefined) ?? []).filter((a: any) => ["dynamic","metric","runtime"].includes(a.type));
+  const metricAttrs = ((attributes as any[] | undefined) ?? []).filter((a: any) => metricKeyOf(a));
   const assetName   = assetList.find((a: any) => a.id === assetId)?.name ?? "";
   const canOverlay  = supportsOverlay(chartType);
 
