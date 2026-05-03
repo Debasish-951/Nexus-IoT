@@ -1,49 +1,91 @@
 import { useState } from "react";
 import { useListAlarmHistory } from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { BookOpen, Search, AlertCircle, Clock } from "lucide-react";
-import { format } from "date-fns";
+import { useToast } from "@/hooks/use-toast";
+import {
+  BookOpen, Search, AlertCircle, Clock, CheckCircle2,
+  ArrowDownToLine, ShieldCheck,
+} from "lucide-react";
+import { format, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 
+// ── Severity ──────────────────────────────────────────────────────────────────
 const SEVERITY_PRIORITY: Record<string, number> = {
   critical: 900, high: 600, medium: 400, low: 200, info: 100,
 };
 
-function SeverityIcon({ severity }: { severity: string }) {
-  if (severity === "critical") return <AlertCircle className="w-3 h-3 text-red-600 shrink-0" />;
-  if (severity === "high")     return <span className="w-3 h-3 inline-flex items-center justify-center text-orange-500 font-bold text-[9px] shrink-0">◇</span>;
-  if (severity === "medium")   return <span className="w-3 h-3 inline-flex items-center justify-center text-yellow-500 font-bold text-[9px] shrink-0">◇</span>;
-  return <Clock className="w-3 h-3 text-blue-400 shrink-0" />;
+function SeverityBadge({ severity }: { severity: string }) {
+  const map: Record<string, string> = {
+    critical: "bg-red-100 text-red-700 border-red-300 dark:bg-red-950/60 dark:text-red-300 dark:border-red-800",
+    high:     "bg-orange-100 text-orange-700 border-orange-300 dark:bg-orange-950/60 dark:text-orange-300 dark:border-orange-800",
+    medium:   "bg-yellow-100 text-yellow-700 border-yellow-300 dark:bg-yellow-950/60 dark:text-yellow-300",
+    low:      "bg-blue-100 text-blue-700 border-blue-200 dark:bg-blue-950/60 dark:text-blue-300",
+    info:     "bg-slate-100 text-slate-600 border-slate-200 dark:bg-slate-800 dark:text-slate-300",
+  };
+  const icon =
+    severity === "critical" ? <AlertCircle className="w-3 h-3" /> :
+    severity === "high"     ? <AlertCircle className="w-3 h-3" /> :
+    <Clock className="w-3 h-3" />;
+
+  return (
+    <span className={cn("inline-flex items-center gap-1 px-1.5 py-0.5 rounded border text-[10px] font-semibold uppercase tracking-wide", map[severity] ?? map.info)}>
+      {icon}{severity}
+    </span>
+  );
 }
 
-const STATE_CONFIG: Record<string, { label: string; rowCls: string; barCls: string; textCls: string }> = {
+// ── Row state config ──────────────────────────────────────────────────────────
+// Base config by status; severity overlays are applied on top for critical
+const STATE_CONFIG: Record<string, {
+  label: string; badge: string;
+  rowCls: string; barCls: string; textCls: string;
+  icon: React.ReactNode;
+}> = {
   active: {
     label:   "Unacknowledged",
-    rowCls:  "bg-red-50 dark:bg-red-950/25 hover:bg-red-100/70 dark:hover:bg-red-950/35",
+    badge:   "bg-red-100 text-red-700 border-red-300 dark:bg-red-950/60 dark:text-red-300 dark:border-red-700",
+    rowCls:  "bg-red-50/60 dark:bg-red-950/20 hover:bg-red-100/60 dark:hover:bg-red-950/30",
     barCls:  "border-l-[3px] border-l-red-500",
-    textCls: "text-red-700 dark:text-red-400 font-medium",
+    textCls: "text-red-700 dark:text-red-400 font-semibold",
+    icon:    <AlertCircle className="w-3.5 h-3.5 text-red-500" />,
   },
   acknowledged: {
     label:   "Acknowledged",
-    rowCls:  "bg-yellow-50 dark:bg-yellow-950/20 hover:bg-yellow-100/60",
-    barCls:  "border-l-[3px] border-l-yellow-500",
+    badge:   "bg-yellow-100 text-yellow-700 border-yellow-300 dark:bg-yellow-950/60 dark:text-yellow-300 dark:border-yellow-700",
+    rowCls:  "bg-yellow-50/40 dark:bg-yellow-950/15 hover:bg-yellow-100/50",
+    barCls:  "border-l-[3px] border-l-yellow-400",
     textCls: "text-yellow-700 dark:text-yellow-400 font-medium",
+    icon:    <ShieldCheck className="w-3.5 h-3.5 text-yellow-500" />,
   },
   cleared: {
-    label:   "Returned to normal una…",
-    rowCls:  "bg-green-50 dark:bg-green-950/20 hover:bg-green-100/60 dark:hover:bg-green-950/30",
+    label:   "Returned to Normal",
+    badge:   "bg-green-100 text-green-700 border-green-300 dark:bg-green-950/60 dark:text-green-300 dark:border-green-700",
+    rowCls:  "bg-green-50/40 dark:bg-green-950/15 hover:bg-green-100/50 dark:hover:bg-green-950/25",
     barCls:  "border-l-[3px] border-l-green-500",
     textCls: "text-green-700 dark:text-green-400 font-medium",
+    icon:    <CheckCircle2 className="w-3.5 h-3.5 text-green-500" />,
   },
 };
 
+// Extra row overlay for critical severity + active
+const CRITICAL_ROW_CLS = "bg-red-100/80 dark:bg-red-950/35 hover:bg-red-200/60 dark:hover:bg-red-950/45";
+const CRITICAL_BAR_CLS = "border-l-[4px] border-l-red-600";
+
+// ── Main component ────────────────────────────────────────────────────────────
 export default function AlarmHistory() {
-  const { data: history } = useListAlarmHistory({ limit: 200 });
-  const [search, setSearch]         = useState("");
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const { data: history, refetch } = useListAlarmHistory({ limit: 200 });
+
+  const [search, setSearch]               = useState("");
   const [filterSeverity, setFilterSeverity] = useState("all");
   const [filterStatus, setFilterStatus]     = useState("all");
+  const [acknowledging, setAcknowledging]   = useState<Record<string, boolean>>({});
 
   const historyList = (history as any[] | undefined) ?? [];
   const filtered = historyList.filter((h) => {
@@ -53,6 +95,25 @@ export default function AlarmHistory() {
         !h.assetName?.toLowerCase().includes(search.toLowerCase())) return false;
     return true;
   });
+
+  async function handleAcknowledge(historyId: string, name: string) {
+    setAcknowledging((p) => ({ ...p, [historyId]: true }));
+    try {
+      const res = await fetch(`/api/alarms/history/${historyId}/acknowledge`, { method: "POST" });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({ error: "Unknown error" }));
+        toast({ title: "Error", description: err.error ?? "Could not acknowledge", variant: "destructive" });
+        return;
+      }
+      toast({ title: "Alarm acknowledged", description: name });
+      await refetch();
+      qc.invalidateQueries({ queryKey: ["listAlarms"] });
+    } catch (e: any) {
+      toast({ title: "Network error", description: e.message, variant: "destructive" });
+    } finally {
+      setAcknowledging((p) => ({ ...p, [historyId]: false }));
+    }
+  }
 
   return (
     <div className="p-6 space-y-4 h-full flex flex-col">
@@ -69,15 +130,15 @@ export default function AlarmHistory() {
         {/* Legend */}
         <div className="hidden md:flex items-center gap-4 text-xs text-muted-foreground">
           <span className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-[2px] bg-red-200 dark:bg-red-800 border-l-2 border-red-500" />
+            <span className="w-3 h-3 rounded-[2px] bg-red-200 dark:bg-red-900/50 border-l-2 border-red-500" />
             Unacknowledged
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-[2px] bg-yellow-100 dark:bg-yellow-800/40 border-l-2 border-yellow-500" />
+            <span className="w-3 h-3 rounded-[2px] bg-yellow-100 dark:bg-yellow-900/40 border-l-2 border-yellow-500" />
             Acknowledged
           </span>
           <span className="flex items-center gap-1.5">
-            <span className="w-3 h-3 rounded-[2px] bg-green-100 dark:bg-green-800/40 border-l-2 border-green-500" />
+            <span className="w-3 h-3 rounded-[2px] bg-green-100 dark:bg-green-900/40 border-l-2 border-green-500" />
             Returned to Normal
           </span>
         </div>
@@ -95,7 +156,7 @@ export default function AlarmHistory() {
           />
         </div>
         <Select value={filterSeverity} onValueChange={setFilterSeverity}>
-          <SelectTrigger className="h-8 text-xs w-32"><SelectValue placeholder="Severity" /></SelectTrigger>
+          <SelectTrigger className="h-8 text-xs w-36"><SelectValue placeholder="Severity" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All Severities</SelectItem>
             <SelectItem value="critical">Critical</SelectItem>
@@ -106,7 +167,7 @@ export default function AlarmHistory() {
           </SelectContent>
         </Select>
         <Select value={filterStatus} onValueChange={setFilterStatus}>
-          <SelectTrigger className="h-8 text-xs w-40"><SelectValue placeholder="State" /></SelectTrigger>
+          <SelectTrigger className="h-8 text-xs w-44"><SelectValue placeholder="State" /></SelectTrigger>
           <SelectContent>
             <SelectItem value="all">All States</SelectItem>
             <SelectItem value="active">Unacknowledged</SelectItem>
@@ -114,28 +175,31 @@ export default function AlarmHistory() {
             <SelectItem value="cleared">Returned to Normal</SelectItem>
           </SelectContent>
         </Select>
+        <div className="ml-auto text-xs text-muted-foreground">
+          {filtered.length} / {historyList.length} records
+        </div>
       </div>
 
       {/* Table */}
       <div className="flex-1 overflow-auto rounded-lg border border-border shadow-sm">
-        <table className="w-full text-xs border-collapse min-w-[900px]">
+        <table className="w-full text-xs border-collapse min-w-[960px]">
           <thead>
             <tr className="bg-muted/80 dark:bg-muted/40 border-b border-border sticky top-0 z-10">
               <th className="w-8 px-3 py-2.5"></th>
-              {[
-                "Event Time", "Alarm Name", "Asset", "Condition",
-                "State", "Priority", "Severity", "Message",
-              ].map((h) => (
-                <th key={h} className="text-left px-3 py-2.5 font-semibold text-foreground/80 whitespace-nowrap">
-                  {h} <span className="ml-0.5 opacity-30">↑↓</span>
-                </th>
-              ))}
+              <th className="text-left px-3 py-2.5 font-semibold text-foreground/80 whitespace-nowrap">Event Time</th>
+              <th className="text-left px-3 py-2.5 font-semibold text-foreground/80">Alarm Name</th>
+              <th className="text-left px-3 py-2.5 font-semibold text-foreground/80">Asset</th>
+              <th className="text-left px-3 py-2.5 font-semibold text-foreground/80">Severity</th>
+              <th className="text-left px-3 py-2.5 font-semibold text-foreground/80">Priority</th>
+              <th className="text-left px-3 py-2.5 font-semibold text-foreground/80">State</th>
+              <th className="text-left px-3 py-2.5 font-semibold text-foreground/80">Cleared / Ack. At</th>
+              <th className="text-left px-3 py-2.5 font-semibold text-foreground/80 w-28">Action</th>
             </tr>
           </thead>
           <tbody>
             {!history ? (
               Array.from({ length: 8 }).map((_, i) => (
-                <tr key={i} className={cn("border-b border-border/20", i % 2 === 0 ? "bg-red-50/30" : "bg-green-50/30")}>
+                <tr key={i} className={cn("border-b border-border/20", i % 2 === 0 ? "bg-red-50/20" : "bg-green-50/20")}>
                   {Array.from({ length: 9 }).map((__, j) => (
                     <td key={j} className="px-3 py-2.5"><Skeleton className="h-3 w-full" /></td>
                   ))}
@@ -152,42 +216,120 @@ export default function AlarmHistory() {
               </tr>
             ) : (
               filtered.map((h: any) => {
+                const isCriticalActive = h.severity === "critical" && h.status === "active";
                 const cfg = STATE_CONFIG[h.status] ?? STATE_CONFIG.active;
+                const rowCls = isCriticalActive ? CRITICAL_ROW_CLS : cfg.rowCls;
+                const barCls = isCriticalActive ? CRITICAL_BAR_CLS : cfg.barCls;
                 const priority = SEVERITY_PRIORITY[h.severity] ?? 0;
+                const isAcking = !!acknowledging[h.id];
+
                 return (
                   <tr
                     key={h.id}
                     className={cn(
                       "border-b border-border/20 transition-colors cursor-default",
-                      cfg.rowCls,
-                      cfg.barCls,
+                      rowCls, barCls,
                     )}
                   >
+                    {/* Checkbox */}
                     <td className="px-2 py-2 text-center">
                       <input type="checkbox" className="rounded w-3 h-3 cursor-pointer" />
                     </td>
-                    <td className="px-3 py-2 font-mono whitespace-nowrap text-foreground/80">
-                      {format(new Date(h.triggeredAt), "yyyy-MM-dd HH:mm:ss.SSS")}
+
+                    {/* Event Time */}
+                    <td className="px-3 py-2.5 font-mono whitespace-nowrap text-foreground/80">
+                      <div>{format(new Date(h.triggeredAt), "yyyy-MM-dd HH:mm:ss")}</div>
+                      <div className="text-[10px] text-muted-foreground">
+                        {formatDistanceToNow(new Date(h.triggeredAt), { addSuffix: true })}
+                      </div>
                     </td>
-                    <td className="px-3 py-2 font-medium text-primary hover:underline cursor-pointer max-w-[160px] truncate">
-                      {h.name}
+
+                    {/* Alarm Name */}
+                    <td className="px-3 py-2.5 max-w-[180px]">
+                      <div className={cn("font-semibold truncate", isCriticalActive ? "text-red-700 dark:text-red-400" : "text-primary")}>
+                        {h.name}
+                      </div>
+                      {h.message && (
+                        <div className="text-[10px] text-muted-foreground truncate max-w-[160px]" title={h.message}>
+                          {h.message}
+                        </div>
+                      )}
                     </td>
-                    <td className="px-3 py-2 text-muted-foreground truncate max-w-[100px]">
+
+                    {/* Asset */}
+                    <td className="px-3 py-2.5 text-muted-foreground">
                       {h.assetName ?? "—"}
                     </td>
-                    <td className="px-3 py-2 font-mono uppercase text-foreground/60 text-[11px]">
-                      {h.alarmClass ? String(h.alarmClass).slice(0, 6) : "—"}
+
+                    {/* Severity badge */}
+                    <td className="px-3 py-2.5">
+                      <SeverityBadge severity={h.severity} />
                     </td>
-                    <td className={cn("px-3 py-2", cfg.textCls)}>
-                      {cfg.label}
+
+                    {/* Priority */}
+                    <td className="px-3 py-2.5 font-mono text-foreground/60 tabular-nums">
+                      {priority}
                     </td>
-                    <td className="px-3 py-2 flex items-center gap-1">
-                      <SeverityIcon severity={h.severity} />
-                      <span className="capitalize text-foreground/80">{h.severity}</span>
+
+                    {/* State */}
+                    <td className="px-3 py-2.5">
+                      <span className={cn("inline-flex items-center gap-1.5 px-2 py-1 rounded border text-[10px] font-semibold", cfg.badge)}>
+                        {cfg.icon}
+                        {h.status === "cleared" ? "Returned to Normal" : cfg.label}
+                      </span>
                     </td>
-                    <td className="px-3 py-2 font-mono text-foreground/60">{priority}</td>
-                    <td className="px-3 py-2 text-muted-foreground max-w-[200px] truncate" title={h.message ?? ""}>
-                      {h.message ?? ""}
+
+                    {/* Cleared / Ack At */}
+                    <td className="px-3 py-2.5 font-mono text-muted-foreground text-[10px] whitespace-nowrap">
+                      {h.status === "cleared" && h.clearedAt ? (
+                        <div>
+                          <div className="flex items-center gap-1 text-green-600 dark:text-green-400">
+                            <ArrowDownToLine className="w-3 h-3 shrink-0" />
+                            {format(new Date(h.clearedAt), "HH:mm:ss")}
+                          </div>
+                          <div className="text-[9px] text-muted-foreground">
+                            {format(new Date(h.clearedAt), "yyyy-MM-dd")}
+                          </div>
+                        </div>
+                      ) : h.status === "acknowledged" && h.acknowledgedAt ? (
+                        <div>
+                          <div className="flex items-center gap-1 text-yellow-600 dark:text-yellow-400">
+                            <ShieldCheck className="w-3 h-3 shrink-0" />
+                            {format(new Date(h.acknowledgedAt), "HH:mm:ss")}
+                          </div>
+                          <div className="text-[9px] text-muted-foreground">
+                            {format(new Date(h.acknowledgedAt), "yyyy-MM-dd")}
+                          </div>
+                        </div>
+                      ) : (
+                        <span className="opacity-30">—</span>
+                      )}
+                    </td>
+
+                    {/* Action */}
+                    <td className="px-3 py-2.5">
+                      {h.status === "active" ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-6 text-[10px] px-2 gap-1 border-yellow-400 text-yellow-700 dark:text-yellow-400 hover:bg-yellow-50 dark:hover:bg-yellow-950/30"
+                          onClick={() => handleAcknowledge(h.id, h.name)}
+                          disabled={isAcking}
+                        >
+                          <ShieldCheck className="w-3 h-3" />
+                          {isAcking ? "…" : "Acknowledge"}
+                        </Button>
+                      ) : h.status === "cleared" ? (
+                        <span className="inline-flex items-center gap-1 text-[10px] text-green-600 dark:text-green-400 font-medium">
+                          <CheckCircle2 className="w-3 h-3" />
+                          Resolved
+                        </span>
+                      ) : (
+                        <span className="inline-flex items-center gap-1 text-[10px] text-yellow-600 dark:text-yellow-400 font-medium">
+                          <ShieldCheck className="w-3 h-3" />
+                          Ack'd
+                        </span>
+                      )}
                     </td>
                   </tr>
                 );
@@ -196,10 +338,6 @@ export default function AlarmHistory() {
           </tbody>
         </table>
       </div>
-
-      <p className="text-xs text-muted-foreground">
-        Showing {filtered.length} of {historyList.length} alarm events
-      </p>
     </div>
   );
 }

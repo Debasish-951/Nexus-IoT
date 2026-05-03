@@ -8,6 +8,8 @@ import {
 } from "@workspace/api-zod";
 import { logActivity } from "./activity_log";
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 const router: IRouter = Router();
 
 router.get("/alarms", async (req, res): Promise<void> => {
@@ -54,6 +56,44 @@ router.post("/alarms/:id/acknowledge", async (req, res): Promise<void> => {
 
   void logActivity("alarm.acknowledged", "alarm", alarm.id, alarm.name, null, req);
   res.json(alarm);
+});
+
+// Acknowledge a specific alarm-history record (and its linked active alarm)
+router.post("/alarms/history/:id/acknowledge", async (req, res): Promise<void> => {
+  const { id } = req.params;
+  if (!id || !UUID_RE.test(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+
+  const [historyRecord] = await db
+    .select()
+    .from(alarmHistoryTable)
+    .where(eq(alarmHistoryTable.id, id));
+
+  if (!historyRecord) { res.status(404).json({ error: "Alarm history record not found" }); return; }
+  if (historyRecord.status !== "active") {
+    res.status(409).json({ error: `Cannot acknowledge — current status is '${historyRecord.status}'` });
+    return;
+  }
+
+  const now = new Date();
+
+  // Update history record status to acknowledged
+  const [updated] = await db
+    .update(alarmHistoryTable)
+    .set({ status: "acknowledged" })
+    .where(eq(alarmHistoryTable.id, id))
+    .returning();
+
+  // Also update the linked active alarm if it still exists and is active
+  await db
+    .update(alarmsTable)
+    .set({ status: "acknowledged", acknowledgedAt: now })
+    .where(and(
+      eq(alarmsTable.id, historyRecord.alarmId),
+      eq(alarmsTable.status, "active"),
+    ));
+
+  void logActivity("alarm.acknowledged", "alarm", historyRecord.alarmId, historyRecord.name, "via alarm history", req);
+  res.json(updated);
 });
 
 router.get("/alarms/history", async (req, res): Promise<void> => {
