@@ -48,10 +48,9 @@ export default function DataExplorer() {
 
   const assetList = (assets as any[] | undefined) ?? [];
   const attrList  = (attributes as any[] | undefined) ?? [];
-  const numericAttrs = attrList.filter((a: any) =>
-    ["dynamic","metric","runtime"].includes(a.type) &&
-    ["double","number","float"].includes(a.dataType?.toLowerCase?.() ?? "")
-  );
+  const metricKeyOf = (a: any) => a.sourceMetric?.split(".").pop() ?? a.tagName?.split(".").pop() ?? a.name;
+  const numericAttrs = attrList.filter((a: any) => metricKeyOf(a));
+  const metricOptions = numericAttrs.map((a: any) => ({ key: metricKeyOf(a), label: a.name }));
 
   const fetchSeries = useCallback(async () => {
     if (series.length === 0) return;
@@ -66,9 +65,18 @@ export default function DataExplorer() {
       for (const s of series) {
         const params = new URLSearchParams({ metric: s.metric, from, limit: "2000" });
         const res = await fetch(`/api/telemetry/${s.assetId}?${params}`);
-        if (res.ok) {
-          const rows: any[] = await res.json();
+        const rows: any[] = res.ok ? await res.json() : [];
+        if (rows.length > 0) {
           allRows.push(...rows.map((r) => ({ ...r, _key: `${s.assetId}::${s.metric}` })));
+        } else {
+          const agg = await fetch(`/api/system/aggregate?${new URLSearchParams({ assetId: s.assetId, metric: s.metric, from, to: new Date().toISOString(), bucket: "1h", limit: "2000" })}`);
+          const json = agg.ok ? await agg.json() : null;
+          const aggRows = (json?.data ?? []).map((r: any) => ({
+            timestamp: r.bucket,
+            value: r.avg_val ?? r.max_val ?? r.min_val ?? null,
+            _key: `${s.assetId}::${s.metric}`,
+          }));
+          allRows.push(...aggRows);
         }
       }
       const byTs: Record<number, any> = {};
@@ -114,11 +122,6 @@ export default function DataExplorer() {
     const a = document.createElement("a"); a.href = url; a.download = `explorer_${Date.now()}.csv`; a.click();
     URL.revokeObjectURL(url);
   }
-
-  const metricOptions = numericAttrs.map((a: any) => ({
-    key: a.sourceMetric?.split(".").pop() ?? a.tagName?.split(".").pop() ?? a.name,
-    label: a.name,
-  }));
 
   return (
     <div className="p-6 space-y-4 h-full flex flex-col">

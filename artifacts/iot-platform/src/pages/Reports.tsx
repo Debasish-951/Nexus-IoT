@@ -96,9 +96,8 @@ export default function Reports() {
 
   const assetList  = (assets as any[] | undefined) ?? [];
   const attrList   = (attributes as any[] | undefined) ?? [];
-  const metricAttrs = attrList.filter((a: any) =>
-    ["dynamic", "metric", "runtime"].includes(a.type)
-  );
+  const metricAttrs = attrList.filter((a: any) => a.sourceMetric || a.tagName || a.name);
+  const metricKeyOf = (a: any) => a.sourceMetric?.split(".").pop() ?? a.tagName?.split(".").pop() ?? a.name;
 
   const selectedAssetName = assetList.find((a: any) => a.id === assetId)?.name ?? "All Assets";
 
@@ -298,7 +297,7 @@ export default function Reports() {
                     <SelectTrigger className="h-8 text-xs mt-0.5"><SelectValue placeholder="All metrics" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="all" className="text-xs">All metrics</SelectItem>
-                      {metricAttrs.map((a: any) => <SelectItem key={a.name} value={a.name} className="text-xs">{a.name}</SelectItem>)}
+                      {metricAttrs.map((a: any) => <SelectItem key={metricKeyOf(a)} value={metricKeyOf(a)} className="text-xs">{a.name}</SelectItem>)}
                     </SelectContent>
                   </Select>
                 </div>

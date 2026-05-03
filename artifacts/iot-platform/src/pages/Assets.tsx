@@ -182,11 +182,9 @@ const CHART_COLORS = [
 
 // ── Trends Panel ──────────────────────────────────────────────────────────────
 function TrendsPanel({ assetId, attrList }: { assetId: string; attrList: any[] }) {
-  const numericAttrs = attrList.filter((a: any) =>
-    ["dynamic","metric","runtime"].includes(a.type) &&
-    ["double","number","float"].includes(a.dataType?.toLowerCase?.() ?? "")
-  );
   const metricKeyOf = (a: any) => a.sourceMetric?.split(".").pop() ?? a.tagName?.split(".").pop() ?? a.name;
+  const numericAttrs = attrList.filter((a: any) => metricKeyOf(a));
+  const metricOptions = numericAttrs.map((a: any) => ({ key: metricKeyOf(a), label: a.name, uom: a.uom }));
 
   const [selectedMetrics, setSelectedMetrics] = useState<string[]>([]);
   const [rangeHours, setRangeHours] = useState(1);
@@ -199,10 +197,9 @@ function TrendsPanel({ assetId, attrList }: { assetId: string; attrList: any[] }
   // Default to first available numeric attribute
   useEffect(() => {
     if (numericAttrs.length > 0 && selectedMetrics.length === 0) {
-      const first = numericAttrs[0];
-      setSelectedMetrics([metricKeyOf(first)]);
+      setSelectedMetrics([metricOptions[0]?.key ?? metricKeyOf(numericAttrs[0])]);
     }
-  }, [attrList, numericAttrs, selectedMetrics.length]);
+  }, [attrList, numericAttrs, metricOptions, selectedMetrics.length]);
 
   const fetchTelemetry = useCallback(async () => {
     if (selectedMetrics.length === 0) return;
@@ -215,9 +212,17 @@ function TrendsPanel({ assetId, attrList }: { assetId: string; attrList: any[] }
       for (const metric of selectedMetrics) {
         const params = new URLSearchParams({ metric, from, limit: "1000" });
         const res = await fetch(`/api/telemetry/${assetId}?${params}`);
-        if (res.ok) {
-          const rows: any[] = await res.json();
-          allRows.push(...rows.map((r) => ({ ...r, _metric: metric })));
+        const rows: any[] = res.ok ? await res.json() : [];
+        if (rows.length > 0) allRows.push(...rows.map((r) => ({ ...r, _metric: metric })));
+        if (rows.length === 0) {
+          const agg = await fetch(`/api/system/aggregate?${new URLSearchParams({ assetId, metric, from, to: new Date().toISOString(), bucket: "1h", limit: "1000" })}`);
+          const json = agg.ok ? await agg.json() : null;
+          const aggRows = (json?.data ?? []).map((r: any) => ({
+            timestamp: r.bucket,
+            value: r.avg_val ?? r.max_val ?? r.min_val ?? null,
+            _metric: metric,
+          }));
+          allRows.push(...aggRows);
         }
       }
       // Pivot: group by timestamp, one key per metric
@@ -254,11 +259,6 @@ function TrendsPanel({ assetId, attrList }: { assetId: string; attrList: any[] }
     a.click();
   }
 
-  const metricOptions = numericAttrs.map((a: any) => ({
-    key: metricKeyOf(a),
-    label: a.name,
-    uom: a.uom,
-  }));
   const metricLabelOf = (key: string) => metricOptions.find((o: any) => o.key === key)?.label ?? key;
 
   const hasData = telemetry.length > 0;
