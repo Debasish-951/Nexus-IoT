@@ -517,13 +517,14 @@ function WidgetCard({ widget, onDelete, onEdit, onClone, onCopy, fullscreen, onF
 // ══════════════════════════════════════════════════════════════════════════════
 // ── Asset Hierarchy Tree (with inline management) ─────────────────────────────
 interface AssetNode { id: string; name: string; identifier?: string; parentId?: string | null; }
+interface AssetNodeWithTelemetry extends AssetNode { lastSeen?: string | null; }
 
 function AssetTreeNode({ asset, allAssets, selectedId, onSelect, onAddChild, onEdit, onDelete, depth }: {
-  asset: AssetNode; allAssets: AssetNode[]; selectedId: string | null;
-  onSelect: (a: AssetNode) => void;
+  asset: AssetNodeWithTelemetry; allAssets: AssetNodeWithTelemetry[]; selectedId: string | null;
+  onSelect: (a: AssetNodeWithTelemetry) => void;
   onAddChild: (parentId: string) => void;
-  onEdit: (a: AssetNode) => void;
-  onDelete: (a: AssetNode) => void;
+  onEdit: (a: AssetNodeWithTelemetry) => void;
+  onDelete: (a: AssetNodeWithTelemetry) => void;
   depth: number;
 }) {
   const children = allAssets.filter(a => a.parentId === asset.id);
@@ -552,6 +553,7 @@ function AssetTreeNode({ asset, allAssets, selectedId, onSelect, onAddChild, onE
                      : <Folder     className="w-3 h-3 shrink-0" style={{ color: "#f59e0b" }} />
           : <Blocks className="w-3 h-3 shrink-0" style={{ color: D.accent }} />}
         <span className="truncate flex-1 text-[11px]">{asset.name}</span>
+        {asset.lastSeen && <span className="text-[9px] px-1 rounded" style={{ background: `${D.green}22`, color: D.green }}>LIVE</span>}
 
         {/* Hover actions */}
         {hovered && (
@@ -585,8 +587,8 @@ function AssetTreeNode({ asset, allAssets, selectedId, onSelect, onAddChild, onE
 // ── Asset Manage Dialog (create / edit asset from Visualization) ───────────────
 function AssetManageDialog({ open, onOpenChange, parentId, editAsset, allAssets, onSaved }: {
   open: boolean; onOpenChange: (v: boolean) => void;
-  parentId?: string | null; editAsset?: AssetNode | null;
-  allAssets: AssetNode[]; onSaved: () => void;
+  parentId?: string | null; editAsset?: AssetNodeWithTelemetry | null;
+  allAssets: AssetNodeWithTelemetry[]; onSaved: () => void;
 }) {
   const createAsset = useCreateAsset();
   const updateAsset = useUpdateAsset();
@@ -657,6 +659,18 @@ function AssetManageDialog({ open, onOpenChange, parentId, editAsset, allAssets,
       </DialogContent>
     </Dialog>
   );
+}
+
+function useAssetTelemetryMap(widgets: Widget[]) {
+  return useMemo(() => {
+    const latestByAsset: Record<string, string> = {};
+    for (const w of widgets) {
+      const rows = (w as any)?.data ?? [];
+      const latest = [...rows].sort((a, b) => new Date(b.timestamp).getTime() - new Date(a.timestamp).getTime())[0];
+      if (latest?.timestamp) latestByAsset[w.assetId] = latest.timestamp;
+    }
+    return latestByAsset;
+  }, [widgets]);
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
@@ -958,8 +972,8 @@ export default function Visualization() {
   // Asset management from tree panel
   const [assetDialogOpen,   setAssetDialogOpen]   = useState(false);
   const [assetDialogParent, setAssetDialogParent] = useState<string | null>(null);
-  const [assetDialogEdit,   setAssetDialogEdit]   = useState<AssetNode | null>(null);
-  const [deleteAssetConfirm,setDeleteAssetConfirm]= useState<AssetNode | null>(null);
+  const [assetDialogEdit,   setAssetDialogEdit]   = useState<AssetNodeWithTelemetry | null>(null);
+  const [deleteAssetConfirm,setDeleteAssetConfirm]= useState<AssetNodeWithTelemetry | null>(null);
 
   // Widget clipboard (copy/paste between dashboards)
   const [clipboard, setClipboard] = useState<Widget | null>(null);
@@ -1080,7 +1094,7 @@ export default function Visualization() {
     qc.invalidateQueries({ queryKey: getListAssetsQueryKey() });
     toast({ title: "Asset saved" });
   }
-  function handleDeleteAsset(asset: AssetNode) { setDeleteAssetConfirm(asset); }
+  function handleDeleteAsset(asset: AssetNodeWithTelemetry) { setDeleteAssetConfirm(asset); }
   async function confirmDeleteAsset() {
     if (!deleteAssetConfirm) return;
     try {
@@ -1093,6 +1107,8 @@ export default function Visualization() {
   }
 
   const widgets = activeDash?.widgets ?? [];
+  const latestByAsset = useAssetTelemetryMap(widgets);
+  const assetListWithTelemetry = useMemo(() => assetList.map((a: any) => ({ ...a, lastSeen: latestByAsset[a.id] ?? null })), [assetList, latestByAsset]);
   const displayWidgets = useMemo(() => {
     if (!selectedAssetId) return widgets;
     return widgets.filter(w => w.assetId === selectedAssetId || (w.overlayMetrics ?? []).some(o => o.assetId === selectedAssetId));
@@ -1150,8 +1166,8 @@ export default function Visualization() {
                   </button>
                 )}
               </div>
-            ) : roots.map(root => (
-              <AssetTreeNode key={root.id} asset={root} allAssets={assetList}
+            ) : assetListWithTelemetry.filter(a => !a.parentId).map(root => (
+              <AssetTreeNode key={root.id} asset={root} allAssets={assetListWithTelemetry}
                 selectedId={selectedAssetId} depth={0}
                 onSelect={a => setSelectedAssetId(prev => prev === a.id ? null : a.id)}
                 onAddChild={parentId => { setAssetDialogEdit(null); setAssetDialogParent(parentId); setAssetDialogOpen(true); }}

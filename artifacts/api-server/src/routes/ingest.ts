@@ -266,6 +266,15 @@ export async function processNormalised(n: NormalisedPayload, assetIdHint?: stri
   }
 
   const ts = n.timestamp ?? new Date();
+  if (!assetId) {
+    const [created] = await db.insert(assetsTable).values({
+      name: assetName,
+      identifier: n.deviceId,
+      parentId: null,
+    }).returning({ id: assetsTable.id, name: assetsTable.name });
+    assetId = created.id;
+    assetName = created.name;
+  }
   if (!assetId || Object.keys(n.metrics).length === 0) {
     return { recordsWritten: 0, assetId, assetName, alarmEvents: [] };
   }
