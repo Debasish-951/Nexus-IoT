@@ -393,7 +393,24 @@ router.post("/ingest/validate", optionalApiKeyAuth("ingest:write"), async (req, 
 router.post("/ingest/payload", optionalApiKeyAuth("ingest:write"), async (req, res): Promise<void> => {
   const body = req.body as Record<string, unknown>;
   const normalised = normalise(body);
-  if (!normalised) { res.status(400).json({ error: "Missing required field: deviceId" }); return; }
+  if (!normalised) {
+    if (Array.isArray(req.body) && req.body.length > 0) {
+      const item = req.body[req.body.length - 1] as Record<string, unknown>;
+      const fallback = normalise(item);
+      if (fallback) {
+        const assetIdHint = typeof item.assetId === "string" ? item.assetId : undefined;
+        const result = await processNormalised(fallback, assetIdHint);
+        const triggered = result.alarmEvents.filter((e) => e.event === "triggered");
+        const cleared   = result.alarmEvents.filter((e) => e.event === "cleared");
+        res.json({ success: true, recordsWritten: result.recordsWritten, assetId: result.assetId,
+          assetName: result.assetName, message: `Ingested ${result.recordsWritten} metric(s)`,
+          alarmsTriggered: triggered.length, alarmsCleared: cleared.length, alarmEvents: result.alarmEvents });
+        return;
+      }
+    }
+    res.status(400).json({ error: "Missing required field: deviceId" });
+    return;
+  }
   const assetIdHint = typeof body.assetId === "string" ? body.assetId : undefined;
   const result = await processNormalised(normalised, assetIdHint);
 
