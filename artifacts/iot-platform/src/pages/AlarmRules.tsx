@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import {
   useListAlarmRules, useCreateAlarmRule, useDeleteAlarmRule,
   useUpdateAlarmRule, getListAlarmRulesQueryKey,
@@ -72,7 +72,26 @@ export default function AlarmRules() {
   const { data: assetAttributes } = useListAssetAttributes(watchAssetId ?? "", {
     query: { enabled: !!watchAssetId, queryKey: ["alarm-rule-asset-attributes", watchAssetId] },
   });
-  const attributeOptions = ((assetAttributes as any[] | undefined) ?? []).map((attr: any) => attr.tagName ?? attr.sourceMetric ?? attr.name).filter(Boolean);
+  const [telemetryMetricKeys, setTelemetryMetricKeys] = useState<string[]>([]);
+  useEffect(() => {
+    if (!watchAssetId) { setTelemetryMetricKeys([]); return; }
+    fetch(`/api/telemetry/${watchAssetId}/metrics`, { credentials: "include" })
+      .then(r => r.ok ? r.json() : []).then(setTelemetryMetricKeys).catch(() => setTelemetryMetricKeys([]));
+  }, [watchAssetId]);
+  const attrList = (assetAttributes as any[] | undefined) ?? [];
+  function attrLabelForKey(key: string) {
+    const m = attrList.find((a: any) => {
+      const tag = a.tagName ?? a.sourceMetric ?? ""; if (!tag) return false;
+      return tag === key || tag.split(".").slice(1).join(".") === key;
+    });
+    return m ? `${m.name} (${key})` : key;
+  }
+  const attributeOptions: Array<{ key: string; label: string }> = telemetryMetricKeys.length > 0
+    ? telemetryMetricKeys.map(k => ({ key: k, label: attrLabelForKey(k) }))
+    : attrList.filter((a: any) => a.tagName ?? a.sourceMetric).map((a: any) => ({
+        key: a.tagName ?? a.sourceMetric ?? a.name,
+        label: a.name,
+      }));
 
   function onSubmit(data: any) {
     createRule.mutate({
@@ -293,7 +312,10 @@ export default function AlarmRules() {
                         <Select value={field.value} onValueChange={field.onChange}>
                           <FormControl><SelectTrigger><SelectValue placeholder="Select attribute" /></SelectTrigger></FormControl>
                           <SelectContent>
-                            {attributeOptions.map((metric: string) => <SelectItem key={metric} value={metric}>{metric}</SelectItem>)}
+                            {attributeOptions.length === 0
+                              ? <SelectItem value="__none__" disabled>{watchAssetId ? "No telemetry found — ingest data first" : "Select an asset first"}</SelectItem>
+                              : attributeOptions.map(({ key, label }) => <SelectItem key={key} value={key}>{label}</SelectItem>)
+                            }
                           </SelectContent>
                         </Select>
                       </FormItem>

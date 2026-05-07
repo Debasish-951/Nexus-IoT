@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { eq, and, gte, lte, sql, isNull, or, lt } from "drizzle-orm";
-import { db, assetsTable, telemetryTable, alarmsTable, dataRetentionTable } from "@workspace/db";
+import { db, pool, assetsTable, telemetryTable, alarmsTable, dataRetentionTable } from "@workspace/db";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
@@ -62,51 +62,55 @@ router.get("/system/storage", async (_req, res): Promise<void> => {
 });
 
 // ── Aggregation endpoint ──────────────────────────────────────────────────────
-// GET /api/system/aggregate?assetId=&metric=&bucket=1h|6h|1d|1w&from=&to=&limit=
+// GET /api/system/aggregate?assetId=&metric=&bucket=5m|15m|30m|1h|6h|12h|1d|1w&from=&to=&limit=
 router.get("/system/aggregate", async (req, res): Promise<void> => {
   const { assetId, metric, from, to, limit } = req.query as Record<string, string | undefined>;
-  let bucket = (req.query.bucket as string | undefined) ?? "1h";
+  const bucket = (req.query.bucket as string | undefined) ?? "1h";
 
-  // Map friendly bucket names to pg interval strings
-  const intervalMap: Record<string, string> = {
-    "5m": "5 minutes", "15m": "15 minutes", "30m": "30 minutes",
-    "1h": "1 hour", "6h": "6 hours", "12h": "12 hours",
-    "1d": "1 day", "1w": "1 week",
+  // Map bucket names to seconds — used for epoch-floor bucketing (avoids INTERVAL parameterization)
+  const bucketSeconds: Record<string, number> = {
+    "5m": 300, "15m": 900, "30m": 1800,
+    "1h": 3600, "6h": 21600, "12h": 43200,
+    "1d": 86400, "1w": 604800,
   };
-  const pgInterval = intervalMap[bucket] ?? "1 hour";
-  const maxLimit   = Math.min(Number(limit ?? 1000), 10000);
+  const stepSec  = bucketSeconds[bucket] ?? 3600;
+  const maxLimit = Math.min(Number(limit ?? 1000), 10000);
 
-  const conditions = [];
-  if (assetId) conditions.push(eq(telemetryTable.assetId, assetId));
-  if (metric)  conditions.push(eq(telemetryTable.metric, metric));
-  if (from)    conditions.push(gte(telemetryTable.timestamp, new Date(from) as unknown as Date));
-  if (to)      conditions.push(lte(telemetryTable.timestamp, new Date(to)   as unknown as Date));
+  // Build WHERE clause as a raw SQL string to avoid Drizzle prepared-statement
+  // type-inference issues with EXTRACT/FLOOR arithmetic.
+  // stepSec and maxLimit are validated integers from a whitelist; string params are bound.
+  const filters: string[] = ["value::text ~ '^-?[0-9]+(\\.[0-9]+)?$'"];
+  const params: (string | number | Date)[] = [];
 
-  const where = conditions.length > 0 ? and(...conditions) : sql`1=1`;
+  if (assetId) { params.push(assetId);           filters.push(`asset_id = $${params.length}`); }
+  if (metric)  { params.push(metric);             filters.push(`metric = $${params.length}`); }
+  if (from)    { params.push(new Date(from));     filters.push(`"timestamp" >= $${params.length}`); }
+  if (to)      { params.push(new Date(to));       filters.push(`"timestamp" <= $${params.length}`); }
+  params.push(maxLimit);
+  const limitParam = params.length;
 
-  const aggResult = await db.execute<{
-    bucket: Date; asset_id: string; metric: string;
-    avg_val: number; min_val: number; max_val: number; count: number;
-  }>(sql`
+  // stepSec is from a fixed whitelist — safe to inline as an integer literal
+  const rawSql = `
     SELECT
-      date_trunc('hour', timestamp) + 
-        FLOOR(EXTRACT(EPOCH FROM timestamp - date_trunc('hour', timestamp))
-              / EXTRACT(EPOCH FROM INTERVAL ${pgInterval})
-        ) * INTERVAL ${pgInterval} AS bucket,
+      to_timestamp(FLOOR(EXTRACT(EPOCH FROM "timestamp") / ${stepSec}) * ${stepSec}) AS bucket,
       asset_id,
       metric,
-      AVG((value::text)::numeric)   AS avg_val,
-      MIN((value::text)::numeric)   AS min_val,
-      MAX((value::text)::numeric)   AS max_val,
-      COUNT(*)                      AS count
+      AVG((value::text)::numeric)  AS avg_val,
+      MIN((value::text)::numeric)  AS min_val,
+      MAX((value::text)::numeric)  AS max_val,
+      COUNT(*)::int                AS count
     FROM telemetry
-    WHERE ${where}
-      AND value ~ '^-?[0-9]+(\.[0-9]+)?$'
+    WHERE ${filters.join(" AND ")}
     GROUP BY 1, asset_id, metric
-    ORDER BY bucket DESC
-    LIMIT ${maxLimit}
-  `);
-  const aggRows = aggResult.rows ?? (aggResult as unknown as unknown[]);
+    ORDER BY bucket ASC
+    LIMIT $${limitParam}
+  `;
+
+  const aggResult = await pool.query<{
+    bucket: Date; asset_id: string; metric: string;
+    avg_val: string; min_val: string; max_val: string; count: number;
+  }>(rawSql, params);
+  const aggRows = aggResult.rows;
 
   res.json({
     bucket,

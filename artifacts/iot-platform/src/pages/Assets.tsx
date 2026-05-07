@@ -182,8 +182,32 @@ const CHART_COLORS = [
 
 // ── Trends Panel ──────────────────────────────────────────────────────────────
 function TrendsPanel({ assetId, attrList }: { assetId: string; attrList: any[] }) {
-  const metricKeyOf = (a: any) => a.sourceMetric?.split(".").pop() ?? a.tagName?.split(".").pop() ?? a.name;
-  const metricOptions = attrList.filter((a: any) => metricKeyOf(a)).map((a: any) => ({ key: metricKeyOf(a), label: a.name, uom: a.uom }));
+  const [telemetryKeys, setTelemetryKeys] = useState<string[]>([]);
+  useEffect(() => {
+    if (!assetId) { setTelemetryKeys([]); return; }
+    fetch(`/api/telemetry/${assetId}/metrics`, { credentials: "include" })
+      .then(r => r.ok ? r.json() : []).then(setTelemetryKeys).catch(() => setTelemetryKeys([]));
+  }, [assetId]);
+
+  // Map a real telemetry key to a friendly attribute label + UoM
+  function metaForKey(key: string): { label: string; uom?: string } {
+    const m = attrList.find((a: any) => {
+      const tag = a.tagName ?? a.sourceMetric ?? ""; if (!tag) return false;
+      return tag === key || tag.split(".").slice(1).join(".") === key;
+    });
+    return m ? { label: m.name, uom: m.uom } : { label: key };
+  }
+
+  // Always use real telemetry keys; fall back to attributes if no telemetry ingested yet
+  const metricOptions = telemetryKeys.length > 0
+    ? telemetryKeys.map(k => { const { label, uom } = metaForKey(k); return { key: k, label, uom }; })
+    : attrList
+        .filter((a: any) => a.tagName ?? a.sourceMetric)
+        .map((a: any) => {
+          const raw = a.tagName ?? a.sourceMetric ?? a.name;
+          const key = raw.split(".").slice(1).join(".") || raw;
+          return { key, label: a.name, uom: a.uom };
+        });
 
   const [selectedMetrics, setSelectedMetrics] = useState<string[]>([]);
   const [rangeHours, setRangeHours] = useState(1);
@@ -193,7 +217,10 @@ function TrendsPanel({ assetId, attrList }: { assetId: string; attrList: any[] }
   const [loading, setLoading] = useState(false);
   const [lastFetch, setLastFetch] = useState<Date | null>(null);
 
-  // Default to first available numeric attribute
+  // Reset selected metrics when asset changes
+  useEffect(() => { setSelectedMetrics([]); }, [assetId]);
+
+  // Default to first available metric
   useEffect(() => {
     if (metricOptions.length > 0 && selectedMetrics.length === 0) {
       setSelectedMetrics([metricOptions[0].key]);

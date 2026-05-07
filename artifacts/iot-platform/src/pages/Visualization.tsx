@@ -431,20 +431,33 @@ function WidgetCard({ widget, onDelete, onEdit, onClone, onDuplicate, onCopy, fu
   const fetchData = useCallback(async () => {
     setLoading(true);
     const from = getFrom(widget), to = getTo(widget);
+    const rangeMin = widget.customFrom ? Infinity : (widget.rangeMinutes > 0 ? widget.rangeMinutes : 60);
+    // For ranges > 2 hours use bucketed aggregation so the full span is always visible
+    const useAgg = rangeMin > 120;
+    const aggBucket = rangeMin <= 360 ? "5m" : rangeMin <= 1440 ? "15m" : rangeMin <= 4320 ? "1h" : rangeMin <= 10080 ? "6h" : "1d";
+
+    async function fetchOneSeries(assetId: string, metric: string): Promise<any[]> {
+      if (useAgg) {
+        const p = new URLSearchParams({ assetId, metric, from, to, bucket: aggBucket, limit: "1000" });
+        const r = await fetch(`${BASE}/api/system/aggregate?${p}`, { credentials: "include" });
+        if (!r.ok) return [];
+        const json = await r.json();
+        return (json.data ?? []).map((d: any) => ({
+          timestamp: d.bucket,
+          value: d.avg_val ?? d.max_val ?? d.min_val ?? null,
+        }));
+      }
+      const p = new URLSearchParams({ metric, from, to, limit: "2000" });
+      const r = await fetch(`${BASE}/api/telemetry/${assetId}?${p}`, { credentials: "include" });
+      return r.ok ? (await r.json()) : [];
+    }
+
     try {
       const result: Record<string, any[]> = {};
-      const p = new URLSearchParams({ metric: widget.metric, from, to, limit: "2000" });
-      const r = await fetch(`${BASE}/api/telemetry/${widget.assetId}?${p}`, { credentials: "include" });
-      if (r.ok) {
-        const rows = await r.json();
-        const matched = Array.isArray(rows) ? rows : [];
-        for (const key of widgetSeriesKeys(widget)) result[key] = matched;
-      }
+      const primary = await fetchOneSeries(widget.assetId, widget.metric);
+      for (const key of widgetSeriesKeys(widget)) result[key] = primary;
       for (const ov of (widget.overlayMetrics ?? [])) {
-        const key = `${ov.assetId}::${ov.metric}`;
-        const op = new URLSearchParams({ metric: ov.metric, from, to, limit: "2000" });
-        const or2 = await fetch(`${BASE}/api/telemetry/${ov.assetId}?${op}`, { credentials: "include" });
-        if (or2.ok) result[key] = await or2.json();
+        result[`${ov.assetId}::${ov.metric}`] = await fetchOneSeries(ov.assetId, ov.metric);
       }
       setData(result); setLastFetch(new Date());
     } finally { setLoading(false); }

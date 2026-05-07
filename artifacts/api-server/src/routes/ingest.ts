@@ -147,6 +147,22 @@ async function evaluateAlarmRules(
   const rules = await db.select().from(alarmRulesTable)
     .where(and(eq(alarmRulesTable.enabled, true)));
 
+  // Resolve a metric value: try exact key first, then strip the first dot-segment
+  // (asset-identifier prefix). Rules stored as "testing.grid.consumed_kWh" still match
+  // normalised metric keys like "grid.consumed_kWh".
+  function resolveMetric(map: Record<string, unknown>, key: string): unknown {
+    const v = map[key];
+    if (v !== undefined) return v;
+    const dot = key.indexOf(".");
+    return dot > 0 ? map[key.slice(dot + 1)] : undefined;
+  }
+  function resolvePrev(map: Record<string, { value: number; ts: Date }>, key: string) {
+    const v = map[key];
+    if (v !== undefined) return v;
+    const dot = key.indexOf(".");
+    return dot > 0 ? map[key.slice(dot + 1)] : undefined;
+  }
+
   for (const rule of rules) {
     if (rule.assetId && rule.assetId !== assetId) continue;
     if (!rule.metric || !rule.operator || rule.threshold == null) continue;
@@ -154,16 +170,16 @@ async function evaluateAlarmRules(
     let effectiveValue: number | null = null;
 
     if (rule.alarmType === "threshold") {
-      const raw = metrics[rule.metric];
+      const raw = resolveMetric(metrics, rule.metric);
       if (raw === undefined) continue;
       effectiveValue = Number(raw);
       if (isNaN(effectiveValue)) continue;
     } else if (rule.alarmType === "rate_of_change") {
-      const raw = metrics[rule.metric];
+      const raw = resolveMetric(metrics, rule.metric);
       if (raw === undefined) continue;
       const newVal = Number(raw);
       if (isNaN(newVal)) continue;
-      const prev = prevMetrics[rule.metric];
+      const prev = resolvePrev(prevMetrics, rule.metric);
       if (!prev) continue;
       const deltaSeconds = Math.max((ts.getTime() - prev.ts.getTime()) / 1000, 0.001);
       effectiveValue = Math.abs((newVal - prev.value) / deltaSeconds);

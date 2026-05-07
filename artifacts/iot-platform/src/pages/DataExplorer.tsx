@@ -46,11 +46,36 @@ export default function DataExplorer() {
 
   const { data: assets } = useListAssets();
   const { data: attributes } = useListAssetAttributes(selAsset, { query: { enabled: !!selAsset, queryKey: ["asset-attributes", selAsset] } });
+  const [telemetryMetrics, setTelemetryMetrics] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (!selAsset) { setTelemetryMetrics([]); return; }
+    fetch(`/api/telemetry/${selAsset}/metrics`, { credentials: "include" })
+      .then(r => r.ok ? r.json() : []).then(setTelemetryMetrics).catch(() => setTelemetryMetrics([]));
+  }, [selAsset]);
 
   const assetList = (assets as any[] | undefined) ?? [];
   const attrList  = (attributes as any[] | undefined) ?? [];
-  const metricKeyOf = (a: any) => a.sourceMetric?.split(".").pop() ?? a.tagName?.split(".").pop() ?? a.name;
-  const metricOptions = attrList.filter((a: any) => metricKeyOf(a)).map((a: any) => ({ key: metricKeyOf(a), label: a.name }));
+
+  // Map a real telemetry key to a friendly attribute label
+  function labelForTelemetryKey(key: string): string {
+    const m = attrList.find((a: any) => {
+      const tag = a.tagName ?? a.sourceMetric ?? ""; if (!tag) return false;
+      return tag === key || tag.split(".").slice(1).join(".") === key;
+    });
+    return m ? `${m.name} (${key})` : key;
+  }
+
+  // Use real telemetry keys (always correct); fall back to attributes if no telemetry yet
+  const metricOptions = telemetryMetrics.length > 0
+    ? telemetryMetrics.map(k => ({ key: k, label: labelForTelemetryKey(k) }))
+    : attrList
+        .filter((a: any) => a.tagName ?? a.sourceMetric)
+        .map((a: any) => {
+          const raw = a.tagName ?? a.sourceMetric ?? a.name;
+          const key = raw.split(".").slice(1).join(".") || raw;
+          return { key, label: a.name };
+        });
 
   const fetchSeries = useCallback(async () => {
     if (series.length === 0) return;
