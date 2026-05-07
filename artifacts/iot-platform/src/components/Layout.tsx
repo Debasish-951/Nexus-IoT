@@ -57,9 +57,9 @@ const navItems: NavItem[] = [
     icon: Router,
     children: [
       { label: "Broker",       href: "/brokers",               icon: Wifi },
-      { label: "Destinations", href: "/destinations",          icon: Send },
-      { label: "Integration Guide", href: "/integration-guide",   icon: Zap },
-      { label: "Integration",  href: "/settings?v=integration", icon: Plug },
+      { label: "Destinations",      href: "/destinations",      icon: Send },
+      { label: "Integration Hub",   href: "/integrations",      icon: Plug },
+      { label: "Integration Guide", href: "/integration-guide", icon: Zap },
     ],
   },
   {

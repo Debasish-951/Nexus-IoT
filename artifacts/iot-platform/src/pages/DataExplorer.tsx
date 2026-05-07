@@ -13,6 +13,15 @@ import { BarChart2, Download, RefreshCw, Plus, X, TrendingUp } from "lucide-reac
 import { format, subMinutes, subHours, subDays } from "date-fns";
 import { cn } from "@/lib/utils";
 
+function bucketForRange(hours: number): string {
+  if (hours <= 1)        return "5m";
+  if (hours <= 6)        return "15m";
+  if (hours <= 24)       return "30m";
+  if (hours <= 24 * 7)   return "1h";
+  if (hours <= 24 * 30)  return "6h";
+  return "1d";
+}
+
 const TIME_RANGES = [
   { label: "1 min", hours: 1 / 60 },
   { label: "5 min", hours: 5 / 60 },
@@ -81,39 +90,52 @@ export default function DataExplorer() {
     if (series.length === 0) return;
     setLoading(true);
     try {
+      const now = new Date();
       const from = rangeHours === -1 && customFrom
         ? new Date(customFrom).toISOString()
-        : (rangeHours < 1 ? subMinutes(new Date(), rangeHours * 60).toISOString() : rangeHours <= 24
-          ? subHours(new Date(), rangeHours).toISOString()
-          : subDays(new Date(), rangeHours / 24).toISOString());
+        : (rangeHours < 1 ? subMinutes(now, rangeHours * 60).toISOString()
+          : rangeHours <= 24 ? subHours(now, rangeHours).toISOString()
+          : subDays(now, rangeHours / 24).toISOString());
+      const to = rangeHours === -1 && customTo ? new Date(customTo).toISOString() : now.toISOString();
+
+      // Use aggregation for ranges > 24 h so the X-axis spans the full window
+      const useAgg = rangeHours > 24;
+      const bucket = bucketForRange(rangeHours);
+      const timeFmt = rangeHours <= 1 ? "HH:mm:ss" : rangeHours <= 24 ? "HH:mm" : "MM/dd HH:mm";
+
       const allRows: any[] = [];
       for (const s of series) {
-        const params = new URLSearchParams({ metric: s.metric, from, limit: "2000" });
-        const res = await fetch(`/api/telemetry/${s.assetId}?${params}`);
-        const rows: any[] = res.ok ? await res.json() : [];
-        if (rows.length > 0) {
-          allRows.push(...rows.map((r) => ({ ...r, _key: `${s.assetId}::${s.metric}` })));
-        } else {
-          const agg = await fetch(`/api/system/aggregate?${new URLSearchParams({ assetId: s.assetId, metric: s.metric, from, to: new Date().toISOString(), bucket: "1h", limit: "2000" })}`);
+        const key = `${s.assetId}::${s.metric}`;
+        if (useAgg) {
+          const params = new URLSearchParams({ assetId: s.assetId, metric: s.metric, from, to, bucket, limit: "2000" });
+          const agg = await fetch(`/api/system/aggregate?${params}`);
           const json = agg.ok ? await agg.json() : null;
-          const aggRows = (json?.data ?? []).map((r: any) => ({
+          allRows.push(...(json?.data ?? []).map((r: any) => ({
             timestamp: r.bucket,
             value: r.avg_val ?? r.max_val ?? r.min_val ?? null,
-            _key: `${s.assetId}::${s.metric}`,
-          }));
-          allRows.push(...aggRows);
+            _key: key,
+          })));
+        } else {
+          const params = new URLSearchParams({ metric: s.metric, from, limit: "2000" });
+          const res = await fetch(`/api/telemetry/${s.assetId}?${params}`);
+          const rows: any[] = res.ok ? await res.json() : [];
+          if (rows.length > 0) {
+            allRows.push(...rows.map((r) => ({ ...r, _key: key })));
+          } else {
+            // fallback to aggregate when no raw rows
+            const agg = await fetch(`/api/system/aggregate?${new URLSearchParams({ assetId: s.assetId, metric: s.metric, from, to, bucket, limit: "2000" })}`);
+            const json = agg.ok ? await agg.json() : null;
+            allRows.push(...(json?.data ?? []).map((r: any) => ({
+              timestamp: r.bucket, value: r.avg_val ?? r.max_val ?? r.min_val ?? null, _key: key,
+            })));
+          }
         }
       }
+
       const byTs: Record<number, any> = {};
       for (const row of allRows) {
         const ts = new Date(row.timestamp).getTime();
-        if (!byTs[ts]) {
-          byTs[ts] = {
-            ts,
-            time: format(new Date(row.timestamp),
-              rangeHours <= 1 ? "HH:mm:ss" : rangeHours <= 24 ? "HH:mm" : "MM/dd HH:mm"),
-          };
-        }
+        if (!byTs[ts]) byTs[ts] = { ts, time: format(new Date(row.timestamp), timeFmt) };
         const v = Number(row.value);
         if (!isNaN(v)) byTs[ts][row._key] = v;
       }

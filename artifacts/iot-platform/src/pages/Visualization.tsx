@@ -560,8 +560,8 @@ function WidgetCard({ widget, onDelete, onEdit, onClone, onDuplicate, onCopy, fu
 
   return (
     <div
-      className="flex flex-col rounded-lg overflow-hidden resize"
-      style={{ background: D.card, border: `1px solid ${D.border}`, boxShadow: "0 2px 12px rgba(0,0,0,0.4)", minWidth: 320, minHeight: 220 }}>
+      className="flex flex-col rounded-lg overflow-hidden"
+      style={{ background: D.card, border: `1px solid ${D.border}`, boxShadow: "0 2px 12px rgba(0,0,0,0.4)", minHeight: 260 }}>
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2 shrink-0"
         style={{ borderBottom: `1px solid ${D.border}`, background: D.panel }}>
