@@ -262,7 +262,8 @@ export default function DataExplorer() {
               <Brush dataKey="time" height={20} stroke="hsl(var(--border))" fill="hsl(var(--muted))" travellerWidth={6}
                 style={{ fontSize: 9 }} />
               {series.map((s) => (
-                <Line key={s.label} type="monotone" dataKey={s.label}
+                <Line key={s.label} type="monotone" dataKey={`${s.assetId}::${s.metric}`}
+                  name={s.label}
                   stroke={s.color} strokeWidth={2}
                   dot={chartData.length < 100} activeDot={{ r: 4 }}
                   connectNulls={false} />

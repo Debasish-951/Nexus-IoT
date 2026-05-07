@@ -629,9 +629,7 @@ function WidgetCard({ widget, onDelete, onEdit, onClone, onDuplicate, onCopy, fu
             <span> · {AGG_TYPE_OPTS.find(a=>a.value===widget.aggType)?.label ?? widget.aggType}</span>
           )}
         </span>
-        <button className="p-1 rounded hover:bg-white/5" onClick={fetchData} disabled={loading} title="Refresh widget">
-          <RefreshCw className={`w-2.5 h-2.5 ${loading?"animate-spin":""}`} style={{ color: D.muted }} />
-        </button>
+        <span />
       </div>
     </div>
   );
@@ -940,7 +938,7 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
     setCustomFrom(initial?.customFrom ?? "");
     setCustomTo(initial?.customTo ?? "");
     setOverlayMetrics(initial?.overlayMetrics ?? []);
-    setTelemetryMetrics([]);
+    setTelemetryMetrics(initial?.metric ? [initial.metric] : []);
     setGranularity(initial?.granularity ?? "auto");
     setAggType(initial?.aggType ?? "avg");
   }, [open, initial, preselectedAssetId, nextColor]);
