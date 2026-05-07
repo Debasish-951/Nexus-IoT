@@ -19,7 +19,7 @@ import { Form, FormField, FormItem, FormLabel, FormControl, FormDescription } fr
 import { useToast } from "@/hooks/use-toast";
 import {
   Settings2, Plus, Trash2, Webhook, AlertTriangle, TrendingUp,
-  CheckCircle2, Loader2, ExternalLink, Mail, MessageCircle, MessageSquareText,
+  CheckCircle2, Loader2, ExternalLink, Mail, MessageCircle, MessageSquareText, Pencil,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/contexts/UserContext";
@@ -44,6 +44,7 @@ export default function AlarmRules() {
   const { toast } = useToast();
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [editingRule, setEditingRule] = useState<any | null>(null);
   const [testingWebhook, setTestingWebhook] = useState<string | null>(null);
   const { can } = useCurrentUser();
 
@@ -65,6 +66,47 @@ export default function AlarmRules() {
       assetId: "",
     },
   });
+
+  function openEdit(rule: any) {
+    setEditingRule(rule);
+    form.reset({
+      name:              rule.name ?? "",
+      description:       rule.description ?? "",
+      alarmType:         rule.alarmType ?? "threshold",
+      severity:          rule.severity ?? "medium",
+      assetId:           rule.assetId ?? "",
+      metric:            rule.metric ?? "",
+      operator:          rule.operator ?? "gt",
+      threshold:         rule.threshold != null ? String(rule.threshold) : "",
+      deadband:          rule.deadband  != null ? String(rule.deadband)  : "",
+      onDelay:           rule.onDelay   != null ? String(rule.onDelay)   : "0",
+      offDelay:          rule.offDelay  != null ? String(rule.offDelay)  : "0",
+      scanRate:          rule.scanRate  != null ? String(rule.scanRate)  : "2",
+      rocWindow:         rule.rocWindow != null ? String(rule.rocWindow) : "60",
+      enabled:           rule.enabled ?? true,
+      requireAcknowledge:rule.requireAcknowledge ?? true,
+      webhookUrl:        rule.webhookUrl ?? "",
+      webhookEnabled:    rule.webhookEnabled ?? false,
+      emailEnabled:      rule.emailEnabled ?? false,
+      whatsappEnabled:   rule.whatsappEnabled ?? false,
+      smsEnabled:        rule.smsEnabled ?? false,
+    });
+    setOpen(true);
+  }
+
+  function openCreate() {
+    setEditingRule(null);
+    form.reset({
+      name: "", description: "", alarmType: "threshold", severity: "medium",
+      metric: "", operator: "gt", threshold: "", deadband: "",
+      onDelay: "0", offDelay: "0", scanRate: "2", rocWindow: "60",
+      enabled: true, requireAcknowledge: true,
+      webhookUrl: "", webhookEnabled: false,
+      emailEnabled: false, whatsappEnabled: false, smsEnabled: false,
+      assetId: "",
+    });
+    setOpen(true);
+  }
 
   const watchAlarmType = form.watch("alarmType");
   const watchWebhookEnabled = form.watch("webhookEnabled");
@@ -93,34 +135,45 @@ export default function AlarmRules() {
         label: a.name,
       }));
 
+  function buildPayload(data: any) {
+    return {
+      name: data.name, description: data.description || null,
+      alarmType: data.alarmType, severity: data.severity,
+      assetId: data.assetId || null,
+      metric: data.metric || null, operator: data.operator || null,
+      threshold: data.threshold ? Number(data.threshold) : null,
+      deadband: data.deadband ? Number(data.deadband) : null,
+      onDelay: data.onDelay ? Number(data.onDelay) : null,
+      offDelay: data.offDelay ? Number(data.offDelay) : null,
+      scanRate: data.scanRate ? Number(data.scanRate) : 2,
+      enabled: data.enabled, requireAcknowledge: data.requireAcknowledge,
+      ...(data.rocWindow ? { rocWindow: Number(data.rocWindow) } : {}),
+      ...(data.webhookUrl ? { webhookUrl: data.webhookUrl } : {}),
+      webhookEnabled: data.webhookEnabled,
+      emailEnabled: data.emailEnabled,
+      whatsappEnabled: data.whatsappEnabled,
+      smsEnabled: data.smsEnabled,
+    } as any;
+  }
+
   function onSubmit(data: any) {
-    createRule.mutate({
-      data: {
-        name: data.name, description: data.description || null,
-        alarmType: data.alarmType, severity: data.severity,
-        assetId: data.assetId || null,
-        metric: data.metric || null, operator: data.operator || null,
-        threshold: data.threshold ? Number(data.threshold) : null,
-        deadband: data.deadband ? Number(data.deadband) : null,
-        onDelay: data.onDelay ? Number(data.onDelay) : null,
-        offDelay: data.offDelay ? Number(data.offDelay) : null,
-        scanRate: data.scanRate ? Number(data.scanRate) : 2,
-        enabled: data.enabled, requireAcknowledge: data.requireAcknowledge,
-        // Extra fields passed through req.body
-        ...(data.rocWindow ? { rocWindow: Number(data.rocWindow) } : {}),
-        ...(data.webhookUrl ? { webhookUrl: data.webhookUrl } : {}),
-        webhookEnabled: data.webhookEnabled,
-        emailEnabled: data.emailEnabled,
-        whatsappEnabled: data.whatsappEnabled,
-        smsEnabled: data.smsEnabled,
-      } as any,
-    }, {
-      onSuccess: () => {
-        toast({ title: "Alarm rule created" });
-        qc.invalidateQueries({ queryKey: getListAlarmRulesQueryKey() });
-        setOpen(false); form.reset();
-      },
-    });
+    if (editingRule) {
+      updateRule.mutate({ id: editingRule.id, data: buildPayload(data) }, {
+        onSuccess: () => {
+          toast({ title: "Alarm rule updated" });
+          qc.invalidateQueries({ queryKey: getListAlarmRulesQueryKey() });
+          setOpen(false); setEditingRule(null); form.reset();
+        },
+      });
+    } else {
+      createRule.mutate({ data: buildPayload(data) }, {
+        onSuccess: () => {
+          toast({ title: "Alarm rule created" });
+          qc.invalidateQueries({ queryKey: getListAlarmRulesQueryKey() });
+          setOpen(false); form.reset();
+        },
+      });
+    }
   }
 
   async function testWebhook(ruleId: string) {
@@ -146,7 +199,7 @@ export default function AlarmRules() {
           </h1>
           <p className="text-sm text-muted-foreground">Configure threshold, rate-of-change, and event-based alarm conditions</p>
         </div>
-        {can("manage_alarms") && <Button onClick={() => setOpen(true)} size="sm"><Plus className="w-4 h-4 mr-1.5" /> Add Rule</Button>}
+        {can("manage_alarms") && <Button onClick={openCreate} size="sm"><Plus className="w-4 h-4 mr-1.5" /> Add Rule</Button>}
       </div>
       <ReadOnlyBanner permission="manage_alarms" message="cannot create, edit, or delete alarm rules." />
 
@@ -219,27 +272,35 @@ export default function AlarmRules() {
                       { onSuccess: () => qc.invalidateQueries({ queryKey: getListAlarmRulesQueryKey() }) })}
                   />
                 </td>
-                <td className="px-4 py-3 flex items-center gap-2">
-                  {rule.webhookUrl && (
-                    <button
-                      className="text-muted-foreground hover:text-primary transition-colors opacity-0 group-hover:opacity-100"
-                      title="Test webhook"
-                      disabled={testingWebhook === rule.id}
-                      onClick={() => testWebhook(rule.id)}
-                    >
-                      {testingWebhook === rule.id
-                        ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        : <Webhook className="w-3.5 h-3.5" />}
-                    </button>
-                  )}
-                  {can("manage_alarms") && (
-                    <button className="text-muted-foreground hover:text-destructive transition-colors opacity-0 group-hover:opacity-100"
-                      onClick={() => deleteRule.mutate({ id: rule.id }, {
-                        onSuccess: () => { toast({ title: "Rule deleted" }); qc.invalidateQueries({ queryKey: getListAlarmRulesQueryKey() }); }
-                      })}>
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </button>
-                  )}
+                <td className="px-4 py-3">
+                  <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {rule.webhookUrl && (
+                      <button
+                        className="text-muted-foreground hover:text-primary transition-colors"
+                        title="Test webhook"
+                        disabled={testingWebhook === rule.id}
+                        onClick={() => testWebhook(rule.id)}
+                      >
+                        {testingWebhook === rule.id
+                          ? <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          : <Webhook className="w-3.5 h-3.5" />}
+                      </button>
+                    )}
+                    {can("manage_alarms") && (<>
+                      <button className="text-muted-foreground hover:text-primary transition-colors"
+                        title="Edit rule"
+                        onClick={() => openEdit(rule)}>
+                        <Pencil className="w-3.5 h-3.5" />
+                      </button>
+                      <button className="text-muted-foreground hover:text-destructive transition-colors"
+                        title="Delete rule"
+                        onClick={() => deleteRule.mutate({ id: rule.id }, {
+                          onSuccess: () => { toast({ title: "Rule deleted" }); qc.invalidateQueries({ queryKey: getListAlarmRulesQueryKey() }); }
+                        })}>
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </>)}
+                  </div>
                 </td>
               </tr>
             ))}
@@ -247,11 +308,11 @@ export default function AlarmRules() {
         </table>
       </div>
 
-      <Dialog open={open} onOpenChange={setOpen}>
+      <Dialog open={open} onOpenChange={v => { setOpen(v); if (!v) setEditingRule(null); }}>
         <DialogContent className="max-w-2xl">
           <DialogHeader>
-            <DialogTitle>Add Alarm Rule</DialogTitle>
-          <DialogDescription>Configure when an alarm should trigger and choose how notifications are delivered.</DialogDescription>
+            <DialogTitle>{editingRule ? "Edit Alarm Rule" : "Add Alarm Rule"}</DialogTitle>
+            <DialogDescription>Configure when an alarm should trigger and choose how notifications are delivered.</DialogDescription>
           </DialogHeader>
           <Form {...form}>
             <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
@@ -451,8 +512,10 @@ export default function AlarmRules() {
               </Tabs>
 
               <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => { setOpen(false); form.reset(); }}>Cancel</Button>
-                <Button type="submit" disabled={createRule.isPending}>Add Rule</Button>
+                <Button type="button" variant="outline" onClick={() => { setOpen(false); setEditingRule(null); form.reset(); }}>Cancel</Button>
+                <Button type="submit" disabled={createRule.isPending || updateRule.isPending}>
+                  {editingRule ? "Update Rule" : "Add Rule"}
+                </Button>
               </DialogFooter>
             </form>
           </Form>

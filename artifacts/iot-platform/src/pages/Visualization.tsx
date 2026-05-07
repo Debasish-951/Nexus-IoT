@@ -54,6 +54,47 @@ const NEON_PALETTE = [
 ];
 
 // ── Time ranges ────────────────────────────────────────────────────────────────
+const REFRESH_INTERVALS = [
+  { label: "1 s",   ms: 1_000 },
+  { label: "2 s",   ms: 2_000 },
+  { label: "20 s",  ms: 20_000 },
+  { label: "1 min", ms: 60_000 },
+  { label: "5 min", ms: 300_000 },
+  { label: "15 min",ms: 900_000 },
+  { label: "30 min",ms: 1_800_000 },
+  { label: "1 hr",  ms: 3_600_000 },
+  { label: "3 hr",  ms: 10_800_000 },
+  { label: "6 hr",  ms: 21_600_000 },
+  { label: "12 hr", ms: 43_200_000 },
+  { label: "1 day", ms: 86_400_000 },
+];
+
+const GRANULARITY_OPTS = [
+  { label: "Auto",  value: "auto" },
+  { label: "1 min", value: "1m" },
+  { label: "5 min", value: "5m" },
+  { label: "15 min",value: "15m" },
+  { label: "30 min",value: "30m" },
+  { label: "1 hr",  value: "1h" },
+  { label: "6 hr",  value: "6h" },
+  { label: "12 hr", value: "12h" },
+  { label: "1 day", value: "1d" },
+  { label: "1 wk",  value: "1w" },
+];
+
+const AGG_TYPE_OPTS = [
+  { label: "Average", value: "avg" },
+  { label: "Sum",     value: "sum" },
+  { label: "Min",     value: "min" },
+  { label: "Max",     value: "max" },
+  { label: "Count",   value: "count" },
+];
+
+const GRANULARITY_STEP_MAP: Record<string, string> = {
+  "1m": "1m", "5m": "5m", "15m": "15m", "30m": "30m",
+  "1h": "1h", "6h": "6h", "12h": "12h", "1d": "1d", "1w": "1w",
+};
+
 const RANGES = [
   { label: "Last 1 min",    minutes: 1 },
   { label: "Last 5 min",    minutes: 5 },
@@ -100,6 +141,8 @@ interface Widget {
   customFrom?: string; customTo?: string;
   width?: number; height?: number;
   overlayMetrics?: OverlayMetric[];
+  aggType?: "avg" | "sum" | "min" | "max" | "count";
+  granularity?: string;
 }
 interface Dashboard {
   id: string; name: string; description?: string;
@@ -415,41 +458,53 @@ function ChartWidget({ widget, data }: { widget: Widget; data: Record<string, an
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ── Widget Card ───────────────────────────────────────────────────────────────
-function WidgetCard({ widget, onDelete, onEdit, onClone, onDuplicate, onCopy, fullscreen, onFullscreen, wsSignal }: {
+function WidgetCard({ widget, onDelete, onEdit, onClone, onDuplicate, onCopy, fullscreen, onFullscreen, wsSignal, refreshSignal }: {
   widget: Widget; onDelete: () => void; onEdit: () => void;
   onClone: () => void; onDuplicate: () => void; onCopy: () => void;
   fullscreen: boolean; onFullscreen: () => void;
-  wsSignal?: number;
+  wsSignal?: number; refreshSignal?: number;
 }) {
   const [data, setData]           = useState<Record<string, any[]>>({});
   const [loading, setLoading]     = useState(true);
   const [lastFetch, setLastFetch] = useState<Date | null>(null);
-  const [autoRefresh, setAutoRefresh] = useState(true);
   const [liveFlash, setLiveFlash] = useState(false);
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
     const from = getFrom(widget), to = getTo(widget);
     const rangeMin = widget.customFrom ? Infinity : (widget.rangeMinutes > 0 ? widget.rangeMinutes : 60);
-    // For ranges > 2 hours use bucketed aggregation so the full span is always visible
-    const useAgg = rangeMin > 120;
-    const aggBucket = rangeMin <= 360 ? "5m" : rangeMin <= 1440 ? "15m" : rangeMin <= 4320 ? "1h" : rangeMin <= 10080 ? "6h" : "1d";
+    // Use aggregation for ranges > 2 hours, or when granularity is explicitly set
+    const hasCustomGran = widget.granularity && widget.granularity !== "auto";
+    const useAgg = rangeMin > 120 || hasCustomGran;
+    // Auto-detect bucket from range, or use widget's granularity setting
+    const autoGran = rangeMin <= 60 ? "1m" : rangeMin <= 360 ? "5m" : rangeMin <= 1440 ? "15m" : rangeMin <= 4320 ? "1h" : rangeMin <= 10080 ? "6h" : "1d";
+    const aggBucket = hasCustomGran ? (GRANULARITY_STEP_MAP[widget.granularity!] ?? autoGran) : autoGran;
+    // Select which aggregated field to show based on widget aggType
+    const aggField = widget.aggType === "sum" ? "sum_val"
+      : widget.aggType === "min" ? "min_val"
+      : widget.aggType === "max" ? "max_val"
+      : widget.aggType === "count" ? "count"
+      : "avg_val";
 
     async function fetchOneSeries(assetId: string, metric: string): Promise<any[]> {
       if (useAgg) {
-        const p = new URLSearchParams({ assetId, metric, from, to, bucket: aggBucket, limit: "1000" });
+        const p = new URLSearchParams({ assetId, metric, from, to, bucket: aggBucket, limit: "2000" });
         const r = await fetch(`${BASE}/api/system/aggregate?${p}`, { credentials: "include" });
         if (!r.ok) return [];
         const json = await r.json();
-        return (json.data ?? []).map((d: any) => ({
-          timestamp: d.bucket,
-          value: d.avg_val ?? d.max_val ?? d.min_val ?? null,
-        }));
+        return (json.data ?? []).map((d: any) => {
+          const raw = d[aggField] ?? d.avg_val ?? d.max_val ?? d.min_val ?? null;
+          return {
+            timestamp: d.bucket,
+            value: raw !== null ? parseFloat(String(raw)) : null,
+          };
+        });
       }
       const p = new URLSearchParams({ metric, from, to, limit: "2000" });
       const r = await fetch(`${BASE}/api/telemetry/${assetId}?${p}`, { credentials: "include" });
-      return r.ok ? (await r.json()) : [];
+      if (!r.ok) return [];
+      const rows: any[] = await r.json();
+      return rows.map(d => ({ ...d, value: d.value !== null && d.value !== undefined ? parseFloat(String(d.value)) : null }));
     }
 
     try {
@@ -462,25 +517,28 @@ function WidgetCard({ widget, onDelete, onEdit, onClone, onDuplicate, onCopy, fu
       setData(result); setLastFetch(new Date());
     } finally { setLoading(false); }
   }, [widget.assetId, widget.metric, widget.rangeMinutes, widget.customFrom, widget.customTo,
-      JSON.stringify(widget.overlayMetrics)]);
+      widget.aggType, widget.granularity, JSON.stringify(widget.overlayMetrics)]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
-  useEffect(() => {
-    if (timerRef.current) clearInterval(timerRef.current);
-    if (autoRefresh) timerRef.current = setInterval(fetchData, 30_000);
-    return () => { if (timerRef.current) clearInterval(timerRef.current); };
-  }, [autoRefresh, fetchData]);
 
-  // Real-time: refetch when a WebSocket telemetry event arrives for this asset
+  // React to global refresh signal
+  const prevRefreshSignal = useRef<number | undefined>(undefined);
+  useEffect(() => {
+    if (refreshSignal !== undefined && refreshSignal !== prevRefreshSignal.current) {
+      prevRefreshSignal.current = refreshSignal;
+      fetchData();
+    }
+  }, [refreshSignal, fetchData]);
+
+  // Real-time: flash LIVE badge when a WebSocket telemetry event arrives for this asset
   const prevWsSignal = useRef<number | undefined>(undefined);
   useEffect(() => {
     if (wsSignal && wsSignal !== prevWsSignal.current) {
       prevWsSignal.current = wsSignal;
-      fetchData();
       setLiveFlash(true);
       setTimeout(() => setLiveFlash(false), 1200);
     }
-  }, [wsSignal, fetchData]);
+  }, [wsSignal]);
 
   const overlayCount = widget.overlayMetrics?.length ?? 0;
   const chartH = widget.chartType === "kpi" ? 110 : widget.chartType === "gauge" ? 150 : 180;
@@ -564,11 +622,16 @@ function WidgetCard({ widget, onDelete, onEdit, onClone, onDuplicate, onCopy, fu
         style={{ borderTop: `1px solid ${D.border}`, background: D.panel }}>
         <span style={{ fontSize: 9, color: D.muted }}>
           {Object.values(data).reduce((s,a)=>s+a.length,0)} pts · {CHART_TYPE_OPTS.find(c=>c.value===widget.chartType)?.label}
+          {widget.granularity && widget.granularity !== "auto" && (
+            <span> · {GRANULARITY_OPTS.find(g=>g.value===widget.granularity)?.label ?? widget.granularity}</span>
+          )}
+          {widget.aggType && widget.aggType !== "avg" && (
+            <span> · {AGG_TYPE_OPTS.find(a=>a.value===widget.aggType)?.label ?? widget.aggType}</span>
+          )}
         </span>
-        <div className="flex items-center gap-1">
-          <span style={{ fontSize: 9, color: D.muted }}>Auto</span>
-          <Switch checked={autoRefresh} onCheckedChange={setAutoRefresh} className="scale-50 origin-right" />
-        </div>
+        <button className="p-1 rounded hover:bg-white/5" onClick={fetchData} disabled={loading} title="Refresh widget">
+          <RefreshCw className={`w-2.5 h-2.5 ${loading?"animate-spin":""}`} style={{ color: D.muted }} />
+        </button>
       </div>
     </div>
   );
@@ -819,6 +882,8 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
   const [customTo,     setCustomTo]     = useState(initial?.customTo ?? "");
   const [overlayMetrics, setOverlayMetrics] = useState<OverlayMetric[]>(initial?.overlayMetrics ?? []);
   const [telemetryMetrics, setTelemetryMetrics] = useState<string[]>([]);
+  const [granularity,  setGranularity]  = useState<string>(initial?.granularity ?? "auto");
+  const [aggType,      setAggType]      = useState<string>(initial?.aggType ?? "avg");
 
   const { data: assets }     = useListAssets();
   const { data: attributes } = useListAssetAttributes(assetId, { query: { enabled: !!assetId, queryKey: ["asset-attributes", assetId] } });
@@ -876,6 +941,8 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
     setCustomTo(initial?.customTo ?? "");
     setOverlayMetrics(initial?.overlayMetrics ?? []);
     setTelemetryMetrics([]);
+    setGranularity(initial?.granularity ?? "auto");
+    setAggType(initial?.aggType ?? "avg");
   }, [open, initial, preselectedAssetId, nextColor]);
 
   function addOverlay() { setOverlayMetrics(prev => [...prev, { assetId:"", assetName:"", metric:"", color: NEON_PALETTE[(prev.length+1)%NEON_PALETTE.length] }]); }
@@ -899,6 +966,8 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
       customFrom: useCustom ? customFrom : undefined,
       customTo:   useCustom ? customTo   : undefined,
       overlayMetrics: canOverlay ? overlayMetrics.filter(o => o.assetId && o.metric) : [],
+      granularity: granularity as Widget["granularity"],
+      aggType: aggType as Widget["aggType"],
     });
     onOpenChange(false);
   }
@@ -998,6 +1067,24 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
           {chartType === "kpi" && (
             <div className="space-y-1"><Label className="text-xs">Unit (optional)</Label><Input className="h-8 text-xs" value={unit} onChange={e=>setUnit(e.target.value)} placeholder="kWh, rpm…" /></div>
           )}
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-1">
+              <Label className="text-xs">Granularity</Label>
+              <select value={granularity} onChange={e => setGranularity(e.target.value)}
+                className="w-full h-8 rounded border border-border bg-background px-2 text-xs">
+                {GRANULARITY_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+              <p className="text-[10px] text-muted-foreground">Bucket size for time-series. Auto = based on range.</p>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs">Aggregation</Label>
+              <select value={aggType} onChange={e => setAggType(e.target.value)}
+                className="w-full h-8 rounded border border-border bg-background px-2 text-xs">
+                {AGG_TYPE_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+              <p className="text-[10px] text-muted-foreground">How values are rolled up per bucket.</p>
+            </div>
+          </div>
           <div className="space-y-1">
             <Label className="text-xs">Widget Size</Label>
             <p className="text-[10px] text-muted-foreground">
@@ -1113,6 +1200,18 @@ export default function Visualization() {
   const [treeOpen,     setTreeOpen]     = useState(true);
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const [globalRange,  setGlobalRange]  = useState<number | null>(null);
+
+  // Global refresh control
+  const [dashRefreshEnabled,  setDashRefreshEnabled]  = useState(false);
+  const [dashRefreshInterval, setDashRefreshInterval] = useState(30_000);
+  const [dashRefreshSignal,   setDashRefreshSignal]   = useState(0);
+  const refreshTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  function refreshAll() { setDashRefreshSignal(s => s + 1); }
+  useEffect(() => {
+    if (refreshTimerRef.current) clearInterval(refreshTimerRef.current);
+    if (dashRefreshEnabled) refreshTimerRef.current = setInterval(refreshAll, dashRefreshInterval);
+    return () => { if (refreshTimerRef.current) clearInterval(refreshTimerRef.current); };
+  }, [dashRefreshEnabled, dashRefreshInterval]);
 
   // Dashboard dialogs
   const [dbDialogOpen,   setDbDialogOpen]   = useState(false);
@@ -1467,6 +1566,33 @@ export default function Visualization() {
             </button>
           )}
 
+          {/* Global refresh control */}
+          <div className="flex items-center gap-1.5 shrink-0">
+            <button
+              onClick={refreshAll}
+              className="p-1.5 rounded hover:bg-white/5 transition-colors"
+              title="Refresh all widgets now"
+              style={{ color: D.muted }}>
+              <RefreshCw className="w-3.5 h-3.5" />
+            </button>
+            <Switch
+              checked={dashRefreshEnabled}
+              onCheckedChange={setDashRefreshEnabled}
+              className="scale-75 origin-left"
+            />
+            <span style={{ fontSize: 10, color: dashRefreshEnabled ? D.green : D.muted, userSelect: "none" }}>
+              {dashRefreshEnabled ? "On" : "Off"}
+            </span>
+            <select
+              value={dashRefreshInterval}
+              onChange={e => setDashRefreshInterval(Number(e.target.value))}
+              className="h-7 rounded px-2 text-xs border"
+              style={{ background: D.card, color: D.text, borderColor: D.border2 }}
+              title="Refresh interval">
+              {REFRESH_INTERVALS.map(r => <option key={r.ms} value={r.ms}>{r.label}</option>)}
+            </select>
+          </div>
+
           {/* Global time range */}
           <div className="flex items-center gap-1.5 shrink-0">
             <Clock className="w-3.5 h-3.5" style={{ color: D.muted }} />
@@ -1614,7 +1740,8 @@ export default function Visualization() {
                         onCopy={() => copyWidget(w)}
                         fullscreen={fullscreenId === w.id}
                         onFullscreen={() => setFullscreenId(prev => prev === w.id ? null : w.id)}
-                        wsSignal={wsSignals[w.assetId]} />
+                        wsSignal={wsSignals[w.assetId]}
+                        refreshSignal={dashRefreshSignal} />
                     </div>
                   ))}
                 </div>
@@ -1629,7 +1756,9 @@ export default function Visualization() {
           <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: D.green }} />
           <span style={{ fontSize:10, color:D.muted }}>
             {displayWidgets.length} widget{displayWidgets.length!==1?"s":""}{activeDash?` · "${activeDash.name}"`:""}
-            {" · "}Auto-refresh 30 s
+            {" · "}{dashRefreshEnabled
+              ? `Auto-refresh ${REFRESH_INTERVALS.find(r=>r.ms===dashRefreshInterval)?.label ?? "…"}`
+              : "Auto-refresh off"}
           </span>
           <span style={{ fontSize:10, color:D.border2 }}>·</span>
           <span style={{ fontSize:10, color:D.muted }}>{assetList.length} assets</span>

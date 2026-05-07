@@ -69,7 +69,7 @@ router.get("/system/aggregate", async (req, res): Promise<void> => {
 
   // Map bucket names to seconds — used for epoch-floor bucketing (avoids INTERVAL parameterization)
   const bucketSeconds: Record<string, number> = {
-    "5m": 300, "15m": 900, "30m": 1800,
+    "1m": 60, "5m": 300, "15m": 900, "30m": 1800,
     "1h": 3600, "6h": 21600, "12h": 43200,
     "1d": 86400, "1w": 604800,
   };
@@ -98,6 +98,7 @@ router.get("/system/aggregate", async (req, res): Promise<void> => {
       AVG((value::text)::numeric)  AS avg_val,
       MIN((value::text)::numeric)  AS min_val,
       MAX((value::text)::numeric)  AS max_val,
+      SUM((value::text)::numeric)  AS sum_val,
       COUNT(*)::int                AS count
     FROM telemetry
     WHERE ${filters.join(" AND ")}
@@ -108,7 +109,7 @@ router.get("/system/aggregate", async (req, res): Promise<void> => {
 
   const aggResult = await pool.query<{
     bucket: Date; asset_id: string; metric: string;
-    avg_val: string; min_val: string; max_val: string; count: number;
+    avg_val: string; min_val: string; max_val: string; sum_val: string; count: number;
   }>(rawSql, params);
   const aggRows = aggResult.rows;
 
