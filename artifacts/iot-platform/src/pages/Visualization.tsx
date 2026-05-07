@@ -741,12 +741,19 @@ function OverlayRow({ overlay, assetList, index, onChange, onRemove }: {
   const attrs = ((attributes as any[] | undefined) ?? []).filter((a: any) => metricKeyOf(a));
   const [telemetryMetrics, setTelemetryMetrics] = useState<string[]>([]);
   useEffect(() => {
-    if (!overlay.assetId || attrs.length > 0) { setTelemetryMetrics([]); return; }
+    if (!overlay.assetId) { setTelemetryMetrics([]); return; }
     fetch(`${BASE}/api/telemetry/${overlay.assetId}/metrics`, { credentials: "include" })
       .then(r => r.ok ? r.json() : [])
       .then((keys: string[]) => setTelemetryMetrics(keys))
       .catch(() => setTelemetryMetrics([]));
-  }, [overlay.assetId, attrs.length]);
+  }, [overlay.assetId]);
+  function overlayLabelForKey(key: string) {
+    const m = attrs.find((a: any) => {
+      const tag = metricKeyOf(a); if (!tag) return false;
+      return tag === key || tag.split('.').slice(1).join('.') === key;
+    });
+    return m ? `${m.name} (${key})` : key;
+  }
   return (
     <div className="flex items-center gap-2 p-2 rounded" style={{ background: D.panel, border: `1px solid ${D.border}` }}>
       <div className="w-3 h-3 rounded-full shrink-0" style={{ background: overlay.color }} />
@@ -759,9 +766,9 @@ function OverlayRow({ overlay, assetList, index, onChange, onRemove }: {
         disabled={!overlay.assetId}
         className="flex-1 h-7 rounded border border-border bg-background px-1.5 text-[11px] disabled:opacity-40">
         <option value="">Metric…</option>
-        {attrs.length > 0
-          ? attrs.map((a: any) => <option key={metricKeyOf(a)} value={metricKeyOf(a)}>{a.name}</option>)
-          : telemetryMetrics.map(k => <option key={k} value={k}>{k}</option>)
+        {telemetryMetrics.length > 0
+          ? telemetryMetrics.map(k => <option key={k} value={k}>{overlayLabelForKey(k)}</option>)
+          : attrs.map((a: any) => <option key={metricKeyOf(a)} value={metricKeyOf(a)}>{a.name}</option>)
         }
       </select>
       <div className="flex gap-1 shrink-0">
@@ -807,15 +814,23 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
   const assetName   = assetList.find((a: any) => a.id === assetId)?.name ?? "";
   const canOverlay  = supportsOverlay(chartType);
 
-  // When no attributes exist for the asset, fall back to distinct telemetry metric keys from the DB
+  // Always fetch actual telemetry metric keys — these are the definitive stored keys for API queries
   useEffect(() => {
     if (!assetId) { setTelemetryMetrics([]); return; }
-    if (metricAttrs.length > 0) { setTelemetryMetrics([]); return; }
     fetch(`${BASE}/api/telemetry/${assetId}/metrics`, { credentials: "include" })
       .then(r => r.ok ? r.json() : [])
       .then((keys: string[]) => setTelemetryMetrics(keys))
       .catch(() => setTelemetryMetrics([]));
-  }, [assetId, metricAttrs.length]);
+  }, [assetId]);
+
+  // Map a telemetry key to a friendly attribute label (handles "assetId.metric" prefix in tagName)
+  function labelForKey(key: string): string {
+    const m = metricAttrs.find((a: any) => {
+      const tag = metricKeyOf(a); if (!tag) return false;
+      return tag === key || tag.split('.').slice(1).join('.') === key;
+    });
+    return m ? `${m.name} (${key})` : key;
+  }
 
   // Auto-select first energy/kWh metric when dialog opens with no metric chosen
   useEffect(() => {
@@ -906,17 +921,19 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
             <Label className="text-xs">Primary Metric</Label>
             <select value={metric} onChange={e => setMetric(e.target.value)} disabled={!assetId}
               className="w-full h-8 rounded border border-border bg-background px-2 text-xs disabled:opacity-50">
-              <option value="">{assetId ? "Select metric…" : "Select asset first"}</option>
-              {metricAttrs.length > 0
-                ? metricAttrs.map((a: any) => <option key={metricValueOf(a)} value={metricValueOf(a)}>{a.name}</option>)
-                : telemetryMetrics.map(k => <option key={k} value={k}>{k}</option>)
+              <option value="">{assetId ? (telemetryMetrics.length === 0 ? "Loading…" : "Select metric…") : "Select asset first"}</option>
+              {telemetryMetrics.length > 0
+                ? telemetryMetrics.map(k => <option key={k} value={k}>{labelForKey(k)}</option>)
+                : metricAttrs.map((a: any) => <option key={metricValueOf(a)} value={metricValueOf(a)}>{a.name}</option>)
               }
             </select>
-            {assetId && metricAttrs.length === 0 && telemetryMetrics.length === 0 && (
+            {assetId && telemetryMetrics.length === 0 && metricAttrs.length === 0 && (
               <p className="text-[10px]" style={{ color: D.amber }}>No telemetry found — run the Simulator first to populate metrics.</p>
             )}
-            {assetId && metricAttrs.length === 0 && telemetryMetrics.length > 0 && (
-              <p className="text-[10px]" style={{ color: D.muted }}>Showing live telemetry metrics (no attributes configured).</p>
+            {assetId && telemetryMetrics.length > 0 && (
+              <p className="text-[10px]" style={{ color: D.muted }}>
+                {metricAttrs.length > 0 ? "Metrics from live telemetry — attribute names shown where matched." : "Showing live telemetry metrics."}
+              </p>
             )}
           </div>
           {canOverlay && (
