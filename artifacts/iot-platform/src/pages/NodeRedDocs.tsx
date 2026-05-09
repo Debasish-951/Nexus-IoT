@@ -4,8 +4,10 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Zap, Copy, CheckCircle2, Code2, ExternalLink, Lock,
   Terminal, AlertCircle, Info, GitMerge,
-  Radio, Package,
+  Radio, Package, FileText, FileDown, BookOpen, Loader2,
 } from "lucide-react";
+import { generatePdf } from "@/docs/pdfGenerator";
+import { generateDocx } from "@/docs/docxGenerator";
 
 const BASE_URL = window.location.origin;
 const INGEST_URL = `${BASE_URL}/api/ingest/payload`;
@@ -73,6 +75,163 @@ function FormatBadge({ fmt }: { fmt: string }) {
     <span className={`inline-flex items-center px-1.5 py-0 rounded border font-mono text-[10px] leading-4 ${styles[fmt] ?? "bg-muted text-muted-foreground border-border"}`}>
       {fmt}
     </span>
+  );
+}
+
+// ── Download Button ──────────────────────────────────────────────────────────
+function DownloadButton({
+  label, sublabel, icon: Icon, onClick, variant,
+}: {
+  label: string;
+  sublabel: string;
+  icon: React.ElementType;
+  onClick: () => void;
+  variant: "pdf" | "docx";
+}) {
+  const colors = variant === "pdf"
+    ? "bg-red-600 hover:bg-red-700 text-white border-red-700"
+    : "bg-blue-600 hover:bg-blue-700 text-white border-blue-700";
+
+  return (
+    <button
+      onClick={onClick}
+      className={`flex items-center gap-3 px-4 py-3 rounded-lg border ${colors} transition-all shadow-sm hover:shadow-md active:scale-[0.98] select-none`}
+    >
+      <Icon className="w-5 h-5 shrink-0" />
+      <div className="text-left">
+        <p className="text-sm font-semibold leading-none">{label}</p>
+        <p className="text-xs opacity-80 mt-0.5">{sublabel}</p>
+      </div>
+    </button>
+  );
+}
+
+// ── Documentation Download Panel ────────────────────────────────────────────
+function DocumentationPanel() {
+  const { toast } = useToast();
+  const [pdfState, setPdfState] = useState<"idle" | "loading">("idle");
+  const [docxState, setDocxState] = useState<"idle" | "loading">("idle");
+
+  async function handlePdf() {
+    if (pdfState === "loading") return;
+    setPdfState("loading");
+    toast({ title: "Preparing PDF…", description: "Loading PDF engine from CDN" });
+    try {
+      await generatePdf((msg) => {
+        toast({ title: msg });
+      });
+      toast({ title: "PDF Downloaded", description: "Check your downloads folder." });
+    } catch (err: any) {
+      toast({ title: "PDF generation failed", description: err?.message ?? "Unknown error", variant: "destructive" });
+    } finally {
+      setPdfState("idle");
+    }
+  }
+
+  async function handleDocx() {
+    if (docxState === "loading") return;
+    setDocxState("loading");
+    toast({ title: "Building Word document…" });
+    try {
+      await generateDocx((msg) => {
+        if (msg !== "Done") toast({ title: msg });
+      });
+      toast({ title: "Word Document Downloaded", description: "Check your downloads folder." });
+    } catch (err: any) {
+      toast({ title: "DOCX generation failed", description: err?.message ?? "Unknown error", variant: "destructive" });
+    } finally {
+      setDocxState("idle");
+    }
+  }
+
+  return (
+    <div className="rounded-xl border-2 border-primary/20 bg-gradient-to-br from-primary/5 via-background to-primary/5 shadow-sm overflow-hidden">
+      {/* Header */}
+      <div className="px-5 py-4 border-b border-primary/15 bg-primary/8 flex items-start gap-3">
+        <div className="w-10 h-10 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0 mt-0.5">
+          <BookOpen className="w-5 h-5 text-primary" />
+        </div>
+        <div>
+          <h2 className="text-base font-semibold text-foreground flex items-center gap-2">
+            Platform Documentation
+            <Badge variant="secondary" className="text-[10px] px-1.5 py-0">v1.0</Badge>
+          </h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Complete user manual &amp; technical reference — covers every feature, API endpoint, database schema, and integration detail.
+          </p>
+        </div>
+      </div>
+
+      {/* Coverage list */}
+      <div className="px-5 py-4 border-b border-primary/10">
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">What's inside (24 chapters)</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+          {[
+            ["User Manual", "Dashboard, Assets, Attributes, Templates, Trends"],
+            ["Alarm Management", "Rules (threshold, ROC, heartbeat, deviation), webhooks"],
+            ["Broker & MQTT", "MQTT config, Azure IoT, mapping rules, destinations"],
+            ["Security & RBAC", "Users, API clients, scopes, IP allowlist, role matrix"],
+            ["Visualization", "Named dashboards, 11 widget types, live WS updates"],
+            ["System & Reports", "Data retention, telemetry aggregation, CSV/JSON export"],
+            ["API Reference", "All 50+ endpoints with request/response schemas"],
+            ["Database Schema", "All 15 tables with columns, types, and indexes"],
+            ["Pipeline & Engine", "Ingest pipeline, expression engine, alarm evaluation"],
+            ["WebSocket Protocol", "Event types, payload formats, real-time hook internals"],
+          ].map(([title, desc]) => (
+            <div key={title} className="flex items-start gap-2 text-xs">
+              <CheckCircle2 className="w-3.5 h-3.5 text-green-500 shrink-0 mt-0.5" />
+              <span><span className="font-medium">{title}</span> — <span className="text-muted-foreground">{desc}</span></span>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* Download buttons */}
+      <div className="px-5 py-4">
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Download</p>
+        <div className="flex flex-wrap gap-3">
+
+          {/* PDF */}
+          <button
+            onClick={handlePdf}
+            disabled={pdfState === "loading"}
+            className="flex items-center gap-3 px-4 py-3 rounded-lg border bg-red-600 hover:bg-red-700 disabled:opacity-60 disabled:cursor-not-allowed text-white border-red-700 transition-all shadow-sm hover:shadow-md active:scale-[0.98] select-none"
+          >
+            {pdfState === "loading"
+              ? <Loader2 className="w-5 h-5 shrink-0 animate-spin" />
+              : <FileDown className="w-5 h-5 shrink-0" />}
+            <div className="text-left">
+              <p className="text-sm font-semibold leading-none">
+                {pdfState === "loading" ? "Generating PDF…" : "Download PDF"}
+              </p>
+              <p className="text-xs opacity-80 mt-0.5">A4 · paginated · headers &amp; footers</p>
+            </div>
+          </button>
+
+          {/* Word */}
+          <button
+            onClick={handleDocx}
+            disabled={docxState === "loading"}
+            className="flex items-center gap-3 px-4 py-3 rounded-lg border bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed text-white border-blue-700 transition-all shadow-sm hover:shadow-md active:scale-[0.98] select-none"
+          >
+            {docxState === "loading"
+              ? <Loader2 className="w-5 h-5 shrink-0 animate-spin" />
+              : <FileText className="w-5 h-5 shrink-0" />}
+            <div className="text-left">
+              <p className="text-sm font-semibold leading-none">
+                {docxState === "loading" ? "Generating DOCX…" : "Download Word (.docx)"}
+              </p>
+              <p className="text-xs opacity-80 mt-0.5">Compatible with MS Word &amp; LibreOffice</p>
+            </div>
+          </button>
+
+        </div>
+        <p className="text-xs text-muted-foreground mt-3">
+          <Info className="w-3 h-3 inline mr-1 text-primary" />
+          PDF loads fonts from CDN on first download — requires internet access. Word download is fully offline.
+        </p>
+      </div>
+    </div>
   );
 }
 
@@ -209,6 +368,9 @@ export default function IntegrationGuide() {
           Four payload formats are supported — the platform auto-detects on every request.
         </p>
       </div>
+
+      {/* ── Documentation Download Panel ── */}
+      <DocumentationPanel />
 
       {/* ── Ingest URL box ── */}
       <div className="rounded-xl border-2 border-primary/30 bg-primary/5 p-4 space-y-3">
