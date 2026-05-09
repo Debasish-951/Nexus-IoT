@@ -78,7 +78,6 @@ function FormatBadge({ fmt }: { fmt: string }) {
   );
 }
 
-// ── Download Button ──────────────────────────────────────────────────────────
 function DownloadButton({
   label, sublabel, icon: Icon, onClick, variant,
 }: {
@@ -106,7 +105,6 @@ function DownloadButton({
   );
 }
 
-// ── Documentation Download Panel ────────────────────────────────────────────
 function DocumentationPanel() {
   const { toast } = useToast();
   const [pdfState, setPdfState] = useState<"idle" | "loading">("idle");
@@ -115,11 +113,9 @@ function DocumentationPanel() {
   async function handlePdf() {
     if (pdfState === "loading") return;
     setPdfState("loading");
-    toast({ title: "Preparing PDF…", description: "Loading PDF engine from CDN" });
+    toast({ title: "Preparing PDF…" });
     try {
-      await generatePdf((msg) => {
-        toast({ title: msg });
-      });
+      await generatePdf();
       toast({ title: "PDF Downloaded", description: "Check your downloads folder." });
     } catch (err: any) {
       toast({ title: "PDF generation failed", description: err?.message ?? "Unknown error", variant: "destructive" });
@@ -133,9 +129,7 @@ function DocumentationPanel() {
     setDocxState("loading");
     toast({ title: "Building Word document…" });
     try {
-      await generateDocx((msg) => {
-        if (msg !== "Done") toast({ title: msg });
-      });
+      await generateDocx();
       toast({ title: "Word Document Downloaded", description: "Check your downloads folder." });
     } catch (err: any) {
       toast({ title: "DOCX generation failed", description: err?.message ?? "Unknown error", variant: "destructive" });
@@ -146,7 +140,6 @@ function DocumentationPanel() {
 
   return (
     <div className="rounded-xl border-2 border-primary/20 bg-gradient-to-br from-primary/5 via-background to-primary/5 shadow-sm overflow-hidden">
-      {/* Header */}
       <div className="px-5 py-4 border-b border-primary/15 bg-primary/8 flex items-start gap-3">
         <div className="w-10 h-10 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0 mt-0.5">
           <BookOpen className="w-5 h-5 text-primary" />
@@ -162,7 +155,6 @@ function DocumentationPanel() {
         </div>
       </div>
 
-      {/* Coverage list */}
       <div className="px-5 py-4 border-b border-primary/10">
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">What's inside (24 chapters)</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
@@ -186,56 +178,37 @@ function DocumentationPanel() {
         </div>
       </div>
 
-      {/* Download buttons */}
       <div className="px-5 py-4">
         <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Download</p>
         <div className="flex flex-wrap gap-3">
-
-          {/* PDF */}
           <button
             onClick={handlePdf}
             disabled={pdfState === "loading"}
             className="flex items-center gap-3 px-4 py-3 rounded-lg border bg-red-600 hover:bg-red-700 disabled:opacity-60 disabled:cursor-not-allowed text-white border-red-700 transition-all shadow-sm hover:shadow-md active:scale-[0.98] select-none"
           >
-            {pdfState === "loading"
-              ? <Loader2 className="w-5 h-5 shrink-0 animate-spin" />
-              : <FileDown className="w-5 h-5 shrink-0" />}
+            {pdfState === "loading" ? <Loader2 className="w-5 h-5 shrink-0 animate-spin" /> : <FileDown className="w-5 h-5 shrink-0" />}
             <div className="text-left">
-              <p className="text-sm font-semibold leading-none">
-                {pdfState === "loading" ? "Generating PDF…" : "Download PDF"}
-              </p>
-              <p className="text-xs opacity-80 mt-0.5">A4 · paginated · headers &amp; footers</p>
+              <p className="text-sm font-semibold leading-none">{pdfState === "loading" ? "Generating PDF…" : "Download PDF"}</p>
+              <p className="text-xs opacity-80 mt-0.5">Fast download · generated on demand</p>
             </div>
           </button>
-
-          {/* Word */}
           <button
             onClick={handleDocx}
             disabled={docxState === "loading"}
             className="flex items-center gap-3 px-4 py-3 rounded-lg border bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed text-white border-blue-700 transition-all shadow-sm hover:shadow-md active:scale-[0.98] select-none"
           >
-            {docxState === "loading"
-              ? <Loader2 className="w-5 h-5 shrink-0 animate-spin" />
-              : <FileText className="w-5 h-5 shrink-0" />}
+            {docxState === "loading" ? <Loader2 className="w-5 h-5 shrink-0 animate-spin" /> : <FileText className="w-5 h-5 shrink-0" />}
             <div className="text-left">
-              <p className="text-sm font-semibold leading-none">
-                {docxState === "loading" ? "Generating DOCX…" : "Download Word (.docx)"}
-              </p>
+              <p className="text-sm font-semibold leading-none">{docxState === "loading" ? "Generating DOCX…" : "Download Word (.docx)"}</p>
               <p className="text-xs opacity-80 mt-0.5">Compatible with MS Word &amp; LibreOffice</p>
             </div>
           </button>
-
         </div>
-        <p className="text-xs text-muted-foreground mt-3">
-          <Info className="w-3 h-3 inline mr-1 text-primary" />
-          PDF loads fonts from CDN on first download — requires internet access. Word download is fully offline.
-        </p>
       </div>
     </div>
   );
 }
 
-// ── Payload examples ──────────────────────────────────────────────────────────
 const NESTED_ROOT_PAYLOAD = JSON.stringify({
   deviceId: "energy-gw-01",
   timestamp: "2025-05-03 10:30:00+05:30",
@@ -296,24 +269,18 @@ const ERR_422 = JSON.stringify({
 }, null, 2);
 
 const CURL_EXAMPLE = `# Send a nested sub-systems payload:
-curl -s -X POST ${INGEST_URL} \\
-  -H "Content-Type: application/json" \\
+curl -s -X POST ${INGEST_URL} \
+  -H "Content-Type: application/json" \
   -d '{
     "deviceId": "energy-gw-01",
     "timestamp": "2025-05-03 10:30:00+05:30",
     "chiller": { "energy_kWh": 15.2, "load_percent": 82 },
     "solar":   { "generated_kWh": 8.3, "irradiance_Wm2": 750 }
-  }' | jq
-
-# With API client token (from Security → API Clients):
-curl -s -X POST ${INGEST_URL} \\
-  -H "Content-Type: application/json" \\
-  -H "Authorization: Bearer YOUR_TOKEN" \\
-  -d '{"deviceId":"energy-gw-01","chiller":{"energy_kWh":15.2}}' | jq`;
+  }' | jq`;
 
 const CURL_VALIDATE = `# Dry-run: verify deviceId resolves and inspect extracted metrics (no DB write)
-curl -s -X POST ${BASE_URL}/api/ingest/validate \\
-  -H "Content-Type: application/json" \\
+curl -s -X POST ${BASE_URL}/api/ingest/validate \
+  -H "Content-Type: application/json" \
   -d '{
     "deviceId": "energy-gw-01",
     "chiller": { "energy_kWh": 15.2, "load_percent": 82 }
@@ -357,8 +324,6 @@ print(resp.json())`;
 export default function IntegrationGuide() {
   return (
     <div className="p-6 space-y-6 max-w-3xl">
-
-      {/* ── Hero ── */}
       <div>
         <h1 className="text-xl font-semibold flex items-center gap-2">
           <Zap className="w-5 h-5 text-primary" /> Device Integration Guide
@@ -368,11 +333,7 @@ export default function IntegrationGuide() {
           Four payload formats are supported — the platform auto-detects on every request.
         </p>
       </div>
-
-      {/* ── Documentation Download Panel ── */}
       <DocumentationPanel />
-
-      {/* ── Ingest URL box ── */}
       <div className="rounded-xl border-2 border-primary/30 bg-primary/5 p-4 space-y-3">
         <p className="text-xs font-semibold uppercase tracking-wide text-primary">Ingest endpoint</p>
         <div className="flex items-center gap-3 bg-background rounded-lg border border-primary/20 px-4 py-3">
@@ -384,8 +345,6 @@ export default function IntegrationGuide() {
           responds in &lt;50 ms, evaluates alarm rules, and broadcasts updates via WebSocket in real time.
         </p>
       </div>
-
-      {/* ── Quick setup ── */}
       <Section title="3-Step Quick Setup" icon={GitMerge}>
         <div className="space-y-4">
           <Step n={1}>
@@ -401,7 +360,6 @@ export default function IntegrationGuide() {
               <span>Identifier mismatch returns HTTP 422. Check the Request Log in the Payload Simulator to diagnose quickly.</span>
             </div>
           </Step>
-
           <Step n={2}>
             <p className="font-medium mb-1">Send a test payload</p>
             <p className="text-xs text-muted-foreground">
@@ -410,7 +368,6 @@ export default function IntegrationGuide() {
               The platform will auto-detect the payload format and store all metrics under the matching asset.
             </p>
           </Step>
-
           <Step n={3}>
             <p className="font-medium mb-1">Verify with the validate endpoint</p>
             <p className="text-xs text-muted-foreground">
@@ -420,14 +377,10 @@ export default function IntegrationGuide() {
           </Step>
         </div>
       </Section>
-
-      {/* ── Payload formats ── */}
       <Section title="Supported Payload Formats" icon={Package}>
         <p className="text-xs text-muted-foreground">
           The platform auto-detects the format on every request — no configuration needed.
         </p>
-
-        {/* nested-root */}
         <div className="rounded-lg border border-orange-200 dark:border-orange-800/40 bg-orange-50/60 dark:bg-orange-950/10 p-3 space-y-2">
           <div className="flex items-center gap-2">
             <FormatBadge fmt="nested-root" />
@@ -441,8 +394,6 @@ export default function IntegrationGuide() {
           </p>
           <CodeBlock code={NESTED_ROOT_PAYLOAD} lang="json (nested-root)" />
         </div>
-
-        {/* flat */}
         <div className="rounded-lg border border-blue-200 dark:border-blue-800/40 bg-blue-50/60 dark:bg-blue-950/10 p-3 space-y-2">
           <div className="flex items-center gap-2">
             <FormatBadge fmt="flat" />
@@ -451,8 +402,6 @@ export default function IntegrationGuide() {
           <p className="text-xs text-muted-foreground">Metrics sit directly beside deviceId. Suitable for simple sensors and energy meters.</p>
           <CodeBlock code={FLAT_PAYLOAD} lang="json (flat)" />
         </div>
-
-        {/* nested-metrics */}
         <div className="rounded-lg border border-teal-200 dark:border-teal-800/40 bg-teal-50/60 dark:bg-teal-950/10 p-3 space-y-2">
           <div className="flex items-center gap-2">
             <FormatBadge fmt="nested-metrics" />
@@ -461,8 +410,6 @@ export default function IntegrationGuide() {
           <p className="text-xs text-muted-foreground">All measurements inside a <code className="bg-muted px-1 rounded">metrics</code> key.</p>
           <CodeBlock code={NESTED_METRICS_PAYLOAD} lang="json (nested-metrics)" />
         </div>
-
-        {/* nested-data */}
         <div className="rounded-lg border border-violet-200 dark:border-violet-800/40 bg-violet-50/60 dark:bg-violet-950/10 p-3 space-y-2">
           <div className="flex items-center gap-2">
             <FormatBadge fmt="nested-data" />
@@ -472,8 +419,6 @@ export default function IntegrationGuide() {
           <CodeBlock code={NESTED_DATA_PAYLOAD} lang="json (nested-data)" />
         </div>
       </Section>
-
-      {/* ── Device ID binding ── */}
       <Section title="deviceId → Asset Identifier Binding" icon={Radio}>
         <div className="rounded-md border border-border bg-muted/30 p-3 space-y-2">
           <p className="text-xs font-semibold">How it works</p>
@@ -493,8 +438,6 @@ export default function IntegrationGuide() {
           </div>
         </div>
       </Section>
-
-      {/* ── Python example ── */}
       <Section title="Python Integration Example" icon={Code2}>
         <CodeBlock code={PYTHON_EXAMPLE} lang="python" />
         <div className="flex items-start gap-2 text-xs text-muted-foreground rounded-md border border-border bg-muted/20 p-2.5">
@@ -505,8 +448,6 @@ export default function IntegrationGuide() {
           </span>
         </div>
       </Section>
-
-      {/* ── cURL examples ── */}
       <Section title="Test from Terminal" icon={Terminal}>
         <p className="text-xs text-muted-foreground font-medium">Send a nested sub-systems payload:</p>
         <CodeBlock code={CURL_EXAMPLE} lang="bash" />
@@ -515,8 +456,6 @@ export default function IntegrationGuide() {
         <p className="text-xs text-muted-foreground font-medium mt-2">Validate response — shows exact metric keys that will be stored:</p>
         <CodeBlock code={VALIDATE_RESPONSE} lang="json" />
       </Section>
-
-      {/* ── Response format ── */}
       <Section title="API Response Format" icon={Code2}>
         <p className="text-xs text-muted-foreground font-medium">Success (HTTP 200):</p>
         <CodeBlock code={OK_RESPONSE} lang="json" />
@@ -541,14 +480,12 @@ export default function IntegrationGuide() {
           </div>
         </div>
       </Section>
-
-      {/* ── Endpoints reference ── */}
       <Section title="All Ingest Endpoints" icon={ExternalLink}>
         <div className="space-y-2">
           {[
             { method: "POST", path: "/api/ingest/payload", desc: "Single payload — primary endpoint" },
-            { method: "POST", path: "/api/ingest/batch",   desc: "Array of payloads — up to 500 per request" },
-            { method: "POST", path: "/api/ingest/validate",desc: "Dry-run — checks deviceId + extracts metrics, no DB write" },
+            { method: "POST", path: "/api/ingest/batch", desc: "Array of payloads — up to 500 per request" },
+            { method: "POST", path: "/api/ingest/validate", desc: "Dry-run — checks deviceId + extracts metrics, no DB write" },
           ].map(({ method, path, desc }) => (
             <div key={path} className="flex items-center gap-3 rounded-md border border-border bg-muted/30 px-3 py-2">
               <Badge variant="secondary" className="font-mono text-xs shrink-0">{method}</Badge>
@@ -559,8 +496,6 @@ export default function IntegrationGuide() {
           ))}
         </div>
       </Section>
-
-      {/* ── Auth ── */}
       <div className="rounded-lg border border-amber-200 dark:border-amber-800/40 bg-amber-50 dark:bg-amber-950/20 p-4 space-y-2">
         <p className="text-sm font-semibold flex items-center gap-2 text-amber-800 dark:text-amber-300">
           <Lock className="w-4 h-4" /> Authentication
@@ -573,8 +508,6 @@ export default function IntegrationGuide() {
           Add a token for production deployments or public-facing gateways.
         </p>
       </div>
-
-      {/* ── Multi-asset pattern ── */}
       <Section title="Multi-Gateway Pattern" icon={Radio}>
         <p className="text-xs text-muted-foreground">
           Each gateway gets its own deviceId. Create one asset per gateway, each with a matching identifier:
@@ -593,8 +526,8 @@ export default function IntegrationGuide() {
               {[
                 ["Block A Gateway", "energy-gw-blockA", "energy-gw-blockA", "✓ Matched"],
                 ["Block B Gateway", "energy-gw-blockB", "energy-gw-blockB", "✓ Matched"],
-                ["Plant Genset",    "genset-plant-01",  "genset-plant-01",  "✓ Matched"],
-                ["Wrong spelling",  "energy-gw-blockA", "energy-gw-BlckA",  "✗ 422 Error"],
+                ["Plant Genset", "genset-plant-01", "genset-plant-01", "✓ Matched"],
+                ["Wrong spelling", "energy-gw-blockA", "energy-gw-BlckA", "✗ 422 Error"],
               ].map(([gw, did, id, result], i) => (
                 <tr key={i} className="border-b border-border/50 last:border-0">
                   <td className="px-3 py-2 text-muted-foreground">{gw}</td>
@@ -607,7 +540,6 @@ export default function IntegrationGuide() {
           </table>
         </div>
       </Section>
-
     </div>
   );
 }
