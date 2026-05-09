@@ -260,7 +260,7 @@ export default function Destinations() {
 
               {/* Event types */}
               <div>
-                <FormLabel className="text-sm">Forward Events</FormLabel>
+                <label className="text-sm font-medium leading-none">Forward Events</label>
                 <div className="flex gap-3 mt-2">
                   {["alarm", "telemetry"].map((type) => {
                     const current = form.watch("eventTypes") as string[];

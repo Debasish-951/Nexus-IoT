@@ -403,7 +403,7 @@ function CreateDialog({
             {/* Scopes */}
             <div className="space-y-2">
               <p className="text-sm font-medium">Scopes</p>
-              <FormDescription className="text-xs">Control what data this client can read.</FormDescription>
+              <p className="text-xs text-muted-foreground">Control what data this client can read.</p>
 
               <Controller control={form.control} name="allScopes" render={({ field }) => (
                 <label className={cn(

@@ -134,11 +134,10 @@ export default function Reports() {
         });
 
       } else if (reportType === "alarms") {
-        const params = new URLSearchParams({ format: "json" });
+        const params = new URLSearchParams({ limit: "5000" });
         if (severity !== "all") params.set("severity", severity);
-        const r = await fetch(`${BASE}/api/export/alarms?${params}`, { credentials: "include" });
-        const json = await r.json();
-        const allRows: any[] = json.data ?? json ?? [];
+        const r = await fetch(`${BASE}/api/alarms?${params}`, { credentials: "include" });
+        const allRows: any[] = await r.json();
         const filtered = allRows.filter((row: any) => {
           const ts = new Date(row.triggeredAt ?? "").getTime();
           return ts >= new Date(from).getTime() && ts <= new Date(to).getTime();

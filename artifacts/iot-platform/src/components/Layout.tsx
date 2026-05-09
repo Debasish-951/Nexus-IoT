@@ -244,7 +244,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       {/* Main content column */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Top bar */}
-        <header className="h-12 shrink-0 border-b border-border bg-background/95 backdrop-blur-sm flex items-center justify-end px-4 gap-2">
+        <header className="h-12 shrink-0 border-b border-border bg-background/95 backdrop-blur-sm flex items-center justify-end px-4 gap-2 relative z-20">
           <BrokerStatusBar />
           <div className="w-px h-5 bg-border" />
           <NotificationBell />
