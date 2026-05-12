@@ -17,6 +17,7 @@ import {
 import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import {
   LineChart, Line, AreaChart, Area, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
@@ -28,7 +29,7 @@ import {
   Folder, FolderOpen, Blocks, PanelLeftOpen, PanelLeftClose,
   BarChart2, PieChart as PieIcon, Zap, Layers, Clock, Maximize2, Minimize2,
   RotateCcw, Edit2, Copy, Shield, MoreVertical, BookOpen, Gauge,
-  Clipboard, ClipboardPaste, FolderPlus,
+  Clipboard, ClipboardPaste, FolderPlus, CalendarDays,
 } from "lucide-react";
 import { format, subMinutes, parseISO } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -108,6 +109,9 @@ const RANGES = [
   { label: "Last 7 days",   minutes: 10080 },
   { label: "Last 30 days",  minutes: 43200 },
   { label: "Custom range",  minutes: -1 },
+  { label: "WTD",           minutes: -2 },
+  { label: "MTD",           minutes: -3 },
+  { label: "YTD",           minutes: -4 },
 ];
 
 // ── Widget types ───────────────────────────────────────────────────────────────
@@ -143,6 +147,10 @@ interface Widget {
   overlayMetrics?: OverlayMetric[];
   aggType?: "avg" | "sum" | "min" | "max" | "count";
   granularity?: string;
+  interpolated?: boolean;
+  refreshEnabled?: boolean;
+  refreshInterval?: number;
+  allowOverride?: boolean;
   imageUrl?: string;
   imageMode?: "background" | "icon";
 }
@@ -158,14 +166,31 @@ function fmtTs(ts: string, rangeMinutes: number): string {
   if (rangeMinutes <= 1440) return format(d, "HH:mm");
   return format(d, "MM/dd HH:mm");
 }
-function getFrom(w: Widget) {
+function getFrom(w: Widget): string {
   if (w.customFrom) return new Date(w.customFrom).toISOString();
+  if (w.rangeMinutes === -2) {
+    // WTD — start of current week (Monday)
+    const d = new Date(); d.setHours(0, 0, 0, 0);
+    const day = d.getDay(); const diff = d.getDate() - day + (day === 0 ? -6 : 1);
+    return new Date(d.getFullYear(), d.getMonth(), diff).toISOString();
+  }
+  if (w.rangeMinutes === -3) {
+    // MTD — start of current month
+    const d = new Date(); return new Date(d.getFullYear(), d.getMonth(), 1).toISOString();
+  }
+  if (w.rangeMinutes === -4) {
+    // YTD — start of current year
+    return new Date(new Date().getFullYear(), 0, 1).toISOString();
+  }
   return subMinutes(new Date(), w.rangeMinutes > 0 ? w.rangeMinutes : 60).toISOString();
 }
 function getTo(w: Widget) { return w.customTo ? new Date(w.customTo).toISOString() : new Date().toISOString(); }
 function rangeLabelOf(w: Widget) {
   if (w.customFrom && w.customTo)
     return `${format(new Date(w.customFrom), "MM/dd HH:mm")} → ${format(new Date(w.customTo), "MM/dd HH:mm")}`;
+  if (w.rangeMinutes === -2) return "WTD";
+  if (w.rangeMinutes === -3) return "MTD";
+  if (w.rangeMinutes === -4) return "YTD";
   return RANGES.find(r => r.minutes === w.rangeMinutes)?.label ?? `${w.rangeMinutes}m`;
 }
 function supportsOverlay(ct: ChartType) { return CHART_TYPE_OPTS.find(o => o.value === ct)?.supportsOverlay ?? false; }
@@ -459,10 +484,179 @@ function ChartWidget({ widget, data }: { widget: Widget; data: Record<string, an
 }
 
 // ══════════════════════════════════════════════════════════════════════════════
+// ── Widget Time Range / Aggregation Popover ───────────────────────────────────
+function WidgetTimePopover({ widget, onUpdate }: { widget: Widget; onUpdate: (u: Partial<Widget>) => void }) {
+  const [open,           setOpen]           = useState(false);
+  const [rangeMinutes,   setRangeMinutes]   = useState(widget.rangeMinutes);
+  const [customFrom,     setCustomFrom]     = useState(widget.customFrom ?? "");
+  const [customTo,       setCustomTo]       = useState(widget.customTo ?? "");
+  const [granularity,    setGranularity]    = useState(widget.granularity ?? "auto");
+  const [aggType,        setAggType]        = useState(widget.aggType ?? "avg");
+  const [interpolated,   setInterpolated]   = useState(widget.interpolated ?? false);
+  const [refreshEnabled, setRefreshEnabled] = useState(widget.refreshEnabled ?? false);
+  const [refreshInterv,  setRefreshInterv]  = useState(widget.refreshInterval ?? 30_000);
+  const [allowOverride,  setAllowOverride]  = useState(widget.allowOverride !== false);
+
+  // Sync local state when popover opens
+  useEffect(() => {
+    if (!open) return;
+    setRangeMinutes(widget.rangeMinutes);
+    setCustomFrom(widget.customFrom ?? "");
+    setCustomTo(widget.customTo ?? "");
+    setGranularity(widget.granularity ?? "auto");
+    setAggType(widget.aggType ?? "avg");
+    setInterpolated(widget.interpolated ?? false);
+    setRefreshEnabled(widget.refreshEnabled ?? false);
+    setRefreshInterv(widget.refreshInterval ?? 30_000);
+    setAllowOverride(widget.allowOverride !== false);
+  }, [open]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const isCustom = rangeMinutes === -1;
+  const sel: React.CSSProperties = { background: D.panel, border: `1px solid ${D.border2}`, color: D.text };
+
+  function handleApply() {
+    onUpdate({
+      rangeMinutes,
+      customFrom: isCustom ? customFrom : undefined,
+      customTo:   isCustom ? customTo   : undefined,
+      granularity: granularity as Widget["granularity"],
+      aggType:     aggType    as Widget["aggType"],
+      interpolated,
+      refreshEnabled,
+      refreshInterval: refreshInterv,
+      allowOverride,
+    });
+    setOpen(false);
+  }
+
+  return (
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <button className="p-1 rounded hover:bg-white/5 transition-colors" title="Time Range & Aggregation"
+          style={{ color: open ? D.accent : D.muted }}>
+          <Clock className="w-3 h-3" />
+        </button>
+      </PopoverTrigger>
+      <PopoverContent side="bottom" align="end" sideOffset={6}
+        className="w-80 p-0 rounded-lg overflow-hidden border-0 shadow-2xl"
+        style={{ background: D.card, border: `1px solid ${D.border2}`, color: D.text, zIndex: 200 }}>
+
+        {/* Header */}
+        <div className="px-3 py-2 flex items-center gap-2"
+          style={{ borderBottom: `1px solid ${D.border}`, background: D.panel }}>
+          <Clock className="w-3.5 h-3.5" style={{ color: D.accent }} />
+          <span className="text-xs font-semibold" style={{ color: D.accent }}>Time Range &amp; Aggregation</span>
+          <span className="ml-auto text-[9px] px-1.5 py-0.5 rounded font-mono" style={{ background: D.border2, color: D.muted }}>
+            {rangeLabelOf(widget)}
+          </span>
+        </div>
+
+        <div className="p-3 space-y-3">
+          {/* Row 1: Time Range + To Future */}
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <p className="text-[10px] font-medium" style={{ color: D.muted }}>Time Range</p>
+              <select value={rangeMinutes} onChange={e => setRangeMinutes(Number(e.target.value))}
+                className="w-full h-8 rounded px-2 text-xs" style={sel}>
+                {RANGES.map(r => <option key={r.minutes} value={r.minutes}>{r.label}</option>)}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <p className="text-[10px] font-medium" style={{ color: D.muted }}>To Future</p>
+              <select disabled={!isCustom}
+                onChange={e => {
+                  const offsets: Record<string, number> = { "+1h": 3_600_000, "+6h": 21_600_000, "+1d": 86_400_000 };
+                  setCustomTo(format(new Date(Date.now() + (offsets[e.target.value] ?? 0)), "yyyy-MM-dd'T'HH:mm"));
+                }}
+                defaultValue="now"
+                className="w-full h-8 rounded px-2 text-xs disabled:opacity-40" style={sel}>
+                <option value="now">To Future</option>
+                <option value="+1h">+1 hour</option>
+                <option value="+6h">+6 hours</option>
+                <option value="+1d">+1 day</option>
+              </select>
+            </div>
+          </div>
+
+          {/* Row 2: Custom time range (only shown when Custom is selected) */}
+          {isCustom && (
+            <div className="space-y-1">
+              <p className="text-[10px] font-medium" style={{ color: D.muted }}>Custom Time Range</p>
+              <div className="flex items-center gap-1.5">
+                <input type="datetime-local" value={customFrom} onChange={e => setCustomFrom(e.target.value)}
+                  className="flex-1 h-7 rounded px-2 text-[10px] outline-none" style={sel} />
+                <span className="text-[10px]" style={{ color: D.muted }}>→</span>
+                <input type="datetime-local" value={customTo} onChange={e => setCustomTo(e.target.value)}
+                  className="flex-1 h-7 rounded px-2 text-[10px] outline-none" style={sel} />
+                <CalendarDays className="w-3.5 h-3.5 shrink-0" style={{ color: D.muted }} />
+              </div>
+            </div>
+          )}
+
+          {/* Row 3: Granularity + Aggregation Type */}
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1">
+              <p className="text-[10px] font-medium" style={{ color: D.muted }}>Granularity</p>
+              <select value={granularity} onChange={e => setGranularity(e.target.value)}
+                className="w-full h-8 rounded px-2 text-xs" style={sel}>
+                {GRANULARITY_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+            <div className="space-y-1">
+              <p className="text-[10px] font-medium" style={{ color: D.muted }}>Aggregation Type</p>
+              <select value={aggType} onChange={e => setAggType(e.target.value)}
+                className="w-full h-8 rounded px-2 text-xs" style={sel}>
+                {AGG_TYPE_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="flex items-center gap-1.5 -mt-1">
+            <input type="checkbox" id={`interp-${widget.id}`} checked={interpolated}
+              onChange={e => setInterpolated(e.target.checked)} className="w-3 h-3 accent-cyan-500" />
+            <label htmlFor={`interp-${widget.id}`} className="text-[10px] cursor-pointer" style={{ color: D.muted }}>
+              Interpolated
+            </label>
+          </div>
+
+          {/* Row 4: Refresh Time */}
+          <div className="flex items-center gap-2" style={{ borderTop: `1px solid ${D.border}`, paddingTop: 8 }}>
+            <Switch checked={refreshEnabled} onCheckedChange={setRefreshEnabled} className="scale-75 origin-left shrink-0" />
+            <span className="text-[10px] shrink-0" style={{ color: refreshEnabled ? D.green : D.muted }}>Refresh Time</span>
+            <select value={refreshInterv} onChange={e => setRefreshInterv(Number(e.target.value))}
+              disabled={!refreshEnabled}
+              className="flex-1 h-7 rounded px-2 text-[11px] disabled:opacity-40" style={sel}>
+              {REFRESH_INTERVALS.map(r => <option key={r.ms} value={r.ms}>{r.label}</option>)}
+            </select>
+            <div className="flex items-center gap-1 shrink-0">
+              <input type="checkbox" id={`offset-${widget.id}`} className="w-3 h-3 accent-cyan-500" />
+              <label htmlFor={`offset-${widget.id}`} className="text-[10px] cursor-pointer" style={{ color: D.muted }}>Offset</label>
+            </div>
+          </div>
+
+          {/* Row 5: Allow Override + Apply */}
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Switch checked={allowOverride} onCheckedChange={setAllowOverride} className="scale-75 origin-left" />
+              <span className="text-[10px]" style={{ color: allowOverride ? D.text : D.muted }}>Allow Override</span>
+            </div>
+            <button onClick={handleApply}
+              className="px-4 py-1.5 rounded text-xs font-bold transition-all hover:opacity-90"
+              style={{ background: D.accent, color: "#000" }}>
+              Apply
+            </button>
+          </div>
+        </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════════════
 // ── Widget Card ───────────────────────────────────────────────────────────────
-function WidgetCard({ widget, onDelete, onEdit, onClone, onDuplicate, onCopy, fullscreen, onFullscreen, wsSignal, refreshSignal }: {
+function WidgetCard({ widget, onDelete, onEdit, onClone, onDuplicate, onCopy, onUpdate, fullscreen, onFullscreen, wsSignal, refreshSignal }: {
   widget: Widget; onDelete: () => void; onEdit: () => void;
   onClone: () => void; onDuplicate: () => void; onCopy: () => void;
+  onUpdate: (u: Partial<Widget>) => void;
   fullscreen: boolean; onFullscreen: () => void;
   wsSignal?: number; refreshSignal?: number;
 }) {
@@ -474,10 +668,14 @@ function WidgetCard({ widget, onDelete, onEdit, onClone, onDuplicate, onCopy, fu
   const fetchData = useCallback(async () => {
     setLoading(true);
     const from = getFrom(widget), to = getTo(widget);
-    const rangeMin = widget.customFrom ? Infinity : (widget.rangeMinutes > 0 ? widget.rangeMinutes : 60);
-    // Use aggregation for ranges > 2 hours, or when granularity is explicitly set
+    // WTD/MTD/YTD (negative range codes) and custom date ranges always use aggregation
+    const rangeMin = (widget.customFrom || widget.rangeMinutes < 0)
+      ? Infinity
+      : (widget.rangeMinutes > 0 ? widget.rangeMinutes : 60);
+    // Use aggregation when: range > 2h, OR explicit granularity, OR non-default agg type
     const hasCustomGran = widget.granularity && widget.granularity !== "auto";
-    const useAgg = rangeMin > 120 || hasCustomGran;
+    const hasCustomAgg  = widget.aggType && widget.aggType !== "avg";
+    const useAgg = rangeMin > 120 || hasCustomGran || hasCustomAgg;
     // Auto-detect bucket from range, or use widget's granularity setting
     const autoGran = rangeMin <= 60 ? "1m" : rangeMin <= 360 ? "5m" : rangeMin <= 1440 ? "15m" : rangeMin <= 4320 ? "1h" : rangeMin <= 10080 ? "6h" : "1d";
     const aggBucket = hasCustomGran ? (GRANULARITY_STEP_MAP[widget.granularity!] ?? autoGran) : autoGran;
@@ -519,7 +717,7 @@ function WidgetCard({ widget, onDelete, onEdit, onClone, onDuplicate, onCopy, fu
       setData(result); setLastFetch(new Date());
     } finally { setLoading(false); }
   }, [widget.assetId, widget.metric, widget.rangeMinutes, widget.customFrom, widget.customTo,
-      widget.aggType, widget.granularity, JSON.stringify(widget.overlayMetrics)]);
+      widget.aggType, widget.granularity, widget.interpolated, JSON.stringify(widget.overlayMetrics)]);
 
   useEffect(() => { fetchData(); }, [fetchData]);
 
@@ -531,6 +729,16 @@ function WidgetCard({ widget, onDelete, onEdit, onClone, onDuplicate, onCopy, fu
       fetchData();
     }
   }, [refreshSignal, fetchData]);
+
+  // Per-widget auto-refresh (independent of global refresh)
+  const widgetRefreshTimer = useRef<ReturnType<typeof setInterval> | null>(null);
+  useEffect(() => {
+    if (widgetRefreshTimer.current) clearInterval(widgetRefreshTimer.current);
+    if (widget.refreshEnabled && widget.refreshInterval) {
+      widgetRefreshTimer.current = setInterval(fetchData, widget.refreshInterval);
+    }
+    return () => { if (widgetRefreshTimer.current) clearInterval(widgetRefreshTimer.current); };
+  }, [widget.refreshEnabled, widget.refreshInterval, fetchData]);
 
   // Real-time: flash LIVE badge when a WebSocket telemetry event arrives for this asset
   const prevWsSignal = useRef<number | undefined>(undefined);
@@ -587,6 +795,7 @@ function WidgetCard({ widget, onDelete, onEdit, onClone, onDuplicate, onCopy, fu
           </div>
         </div>
         <div className="flex items-center gap-0.5 shrink-0">
+          <WidgetTimePopover widget={widget} onUpdate={onUpdate} />
           <button className="p-1 rounded hover:bg-white/5" onClick={fetchData} disabled={loading} title="Refresh">
             <RefreshCw className={`w-3 h-3 ${loading?"animate-spin":""}`} style={{ color: D.muted }} />
           </button>
@@ -1083,23 +1292,13 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
           {chartType === "kpi" && (
             <div className="space-y-1"><Label className="text-xs">Unit (optional)</Label><Input className="h-8 text-xs" value={unit} onChange={e=>setUnit(e.target.value)} placeholder="kWh, rpm…" /></div>
           )}
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-1">
-              <Label className="text-xs">Granularity</Label>
-              <select value={granularity} onChange={e => setGranularity(e.target.value)}
-                className="w-full h-8 rounded border border-border bg-background px-2 text-xs">
-                {GRANULARITY_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
-              <p className="text-[10px] text-muted-foreground">Bucket size for time-series. Auto = based on range.</p>
-            </div>
-            <div className="space-y-1">
-              <Label className="text-xs">Aggregation</Label>
-              <select value={aggType} onChange={e => setAggType(e.target.value)}
-                className="w-full h-8 rounded border border-border bg-background px-2 text-xs">
-                {AGG_TYPE_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-              </select>
-              <p className="text-[10px] text-muted-foreground">How values are rolled up per bucket.</p>
-            </div>
+          <div className="rounded-md bg-muted/30 border border-border px-3 py-2.5 flex items-start gap-2">
+            <Clock className="w-3.5 h-3.5 mt-0.5 shrink-0 text-muted-foreground" />
+            <p className="text-[10px] text-muted-foreground leading-relaxed">
+              Time range, granularity, and aggregation are configured per-widget via the{" "}
+              <strong className="text-foreground">clock icon</strong> in the widget header after saving.
+              WTD, MTD, YTD and custom date ranges are also available there.
+            </p>
           </div>
           <div className="space-y-1">
             <Label className="text-xs">Widget Size</Label>
@@ -1430,7 +1629,11 @@ export default function Visualization() {
     setGlobalRange(minutes);
     if (!activeDash) return;
     mutateWidgets(activeDash.id, ws =>
-      ws.map(w => ({ ...w, rangeMinutes: minutes, customFrom: undefined, customTo: undefined }))
+      ws.map(w =>
+        w.allowOverride === false
+          ? w
+          : { ...w, rangeMinutes: minutes, customFrom: undefined, customTo: undefined }
+      )
     );
   }
 
@@ -1787,6 +1990,7 @@ export default function Visualization() {
                         onClone={() => cloneWidget(w)}
                         onDuplicate={() => duplicateWidget(w)}
                         onCopy={() => copyWidget(w)}
+                        onUpdate={updates => addOrUpdateWidget({ ...w, ...updates })}
                         fullscreen={fullscreenId === w.id}
                         onFullscreen={() => setFullscreenId(prev => prev === w.id ? null : w.id)}
                         wsSignal={wsSignals[w.assetId]}
