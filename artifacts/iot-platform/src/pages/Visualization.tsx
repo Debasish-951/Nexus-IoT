@@ -751,7 +751,30 @@ function WidgetCard({ widget, onDelete, onEdit, onClone, onDuplicate, onCopy, on
   }, [wsSignal]);
 
   const overlayCount = widget.overlayMetrics?.length ?? 0;
-  const chartH = widget.chartType === "kpi" ? 110 : widget.chartType === "gauge" ? 150 : 180;
+  const baseH  = widget.chartType === "kpi" ? 110 : widget.chartType === "gauge" ? 150 : 180;
+  const [resizeH, setResizeH] = useState<number | null>(null);
+  const resizeStartRef = useRef<{ y: number; h: number } | null>(null);
+  const chartH = resizeH ?? (widget.height ?? baseH);
+
+  function handleResizeDown(e: React.MouseEvent) {
+    e.preventDefault();
+    resizeStartRef.current = { y: e.clientY, h: chartH };
+    const onMove = (me: MouseEvent) => {
+      if (!resizeStartRef.current) return;
+      setResizeH(Math.max(60, resizeStartRef.current.h + me.clientY - resizeStartRef.current.y));
+    };
+    const onUp = (me: MouseEvent) => {
+      if (!resizeStartRef.current) return;
+      const newH = Math.max(60, resizeStartRef.current.h + me.clientY - resizeStartRef.current.y);
+      onUpdate({ height: newH });
+      setResizeH(null);
+      resizeStartRef.current = null;
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  }
 
   function renderContent() {
     if (loading && Object.keys(data).length === 0)
@@ -770,7 +793,7 @@ function WidgetCard({ widget, onDelete, onEdit, onClone, onDuplicate, onCopy, on
 
   return (
     <div
-      className="flex flex-col rounded-lg overflow-hidden"
+      className="flex flex-col rounded-lg overflow-hidden group"
       style={{ background: D.card, border: `1px solid ${D.border}`, boxShadow: "0 2px 12px rgba(0,0,0,0.4)", minHeight: 260 }}>
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2 shrink-0"
@@ -837,12 +860,22 @@ function WidgetCard({ widget, onDelete, onEdit, onClone, onDuplicate, onCopy, on
             onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
         )}
         <div className="relative h-full">{renderContent()}</div>
+        {!fullscreen && (
+          <div onMouseDown={handleResizeDown}
+            className="absolute bottom-0 right-0 w-5 h-5 cursor-se-resize flex items-end justify-end p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+            title="Drag to resize">
+            <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+              <line x1="1" y1="10" x2="10" y2="1" stroke={D.border2} strokeWidth="1.5" strokeLinecap="round" />
+              <line x1="5" y1="10" x2="10" y2="5" stroke={D.border2} strokeWidth="1.5" strokeLinecap="round" />
+            </svg>
+          </div>
+        )}
       </div>
 
       <div className="px-3 py-1 flex items-center justify-between shrink-0"
         style={{ borderTop: `1px solid ${D.border}`, background: D.panel }}>
         <span style={{ fontSize: 9, color: D.muted }}>
-          {Object.values(data).reduce((s,a)=>s+a.length,0)} pts · {CHART_TYPE_OPTS.find(c=>c.value===widget.chartType)?.label}
+          {getWidgetRows(widget, data).length} pts · {CHART_TYPE_OPTS.find(c=>c.value===widget.chartType)?.label}
           {widget.granularity && widget.granularity !== "auto" && (
             <span> · {GRANULARITY_OPTS.find(g=>g.value===widget.granularity)?.label ?? widget.granularity}</span>
           )}
@@ -1262,26 +1295,6 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
               )}
             </div>
           )}
-          <div className="space-y-1.5">
-            <Label className="text-xs">Time Range</Label>
-            <select value={useCustom ? -1 : rangeMinutes}
-              onChange={e => { const v = Number(e.target.value); if (v===-1){setUseCustom(true);}else{setUseCustom(false);setRangeMinutes(v);} }}
-              className="w-full h-8 rounded border border-border bg-background px-2 text-xs">
-              {RANGES.map(r => <option key={r.minutes} value={r.minutes}>{r.label}</option>)}
-            </select>
-            {useCustom && (
-              <div className="grid grid-cols-2 gap-2 mt-1">
-                <div className="space-y-0.5">
-                  <Label className="text-[10px] text-muted-foreground">From</Label>
-                  <Input type="datetime-local" className="h-8 text-xs" value={customFrom} onChange={e=>setCustomFrom(e.target.value)} />
-                </div>
-                <div className="space-y-0.5">
-                  <Label className="text-[10px] text-muted-foreground">To</Label>
-                  <Input type="datetime-local" className="h-8 text-xs" value={customTo} onChange={e=>setCustomTo(e.target.value)} />
-                </div>
-              </div>
-            )}
-          </div>
           {chartType === "gauge" && (
             <div className="grid grid-cols-3 gap-2">
               <div className="space-y-1"><Label className="text-xs">Min</Label><Input className="h-8 text-xs" type="number" value={minVal} onChange={e=>setMinVal(e.target.value)} /></div>
