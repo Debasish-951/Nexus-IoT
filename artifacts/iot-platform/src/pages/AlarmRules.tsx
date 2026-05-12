@@ -2,8 +2,25 @@ import { useState, useEffect } from "react";
 import {
   useListAlarmRules, useCreateAlarmRule, useDeleteAlarmRule,
   useUpdateAlarmRule, getListAlarmRulesQueryKey,
-  useListAssets, useListAssetAttributes,
+  useListAssets, useListAssetAttributes, useListUsers,
 } from "@workspace/api-client-react";
+
+const RECIPIENTS_KEY = "ws-alarm-recipients-v1";
+const GROUPS_KEY     = "ws-notification-groups-v1";
+
+interface NotifGroup { id: string; name: string; emails: string[]; whatsAppNumbers: string[]; memberUserIds: string[]; }
+
+function loadRecipients(): Record<string, { userIds: string[]; groupIds: string[] }> {
+  try { return JSON.parse(localStorage.getItem(RECIPIENTS_KEY) ?? "{}"); }
+  catch { return {}; }
+}
+function saveRecipients(all: Record<string, { userIds: string[]; groupIds: string[] }>) {
+  localStorage.setItem(RECIPIENTS_KEY, JSON.stringify(all));
+}
+function loadNotifGroups(): NotifGroup[] {
+  try { return JSON.parse(localStorage.getItem(GROUPS_KEY) ?? "[]"); }
+  catch { return []; }
+}
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -50,9 +67,16 @@ export default function AlarmRules() {
 
   const { data: rules } = useListAlarmRules();
   const { data: assets } = useListAssets();
+  const { data: usersData } = useListUsers();
   const createRule = useCreateAlarmRule();
   const deleteRule = useDeleteAlarmRule();
   const updateRule = useUpdateAlarmRule();
+
+  const userList   = (usersData as any[] | undefined) ?? [];
+  const notifGroups = loadNotifGroups();
+
+  const [notifyUserIds,  setNotifyUserIds]  = useState<string[]>([]);
+  const [notifyGroupIds, setNotifyGroupIds] = useState<string[]>([]);
 
   const form = useForm({
     defaultValues: {
@@ -91,11 +115,16 @@ export default function AlarmRules() {
       whatsappEnabled:   rule.whatsappEnabled ?? false,
       smsEnabled:        rule.smsEnabled ?? false,
     });
+    const saved = loadRecipients()[rule.id];
+    setNotifyUserIds(saved?.userIds ?? []);
+    setNotifyGroupIds(saved?.groupIds ?? []);
     setOpen(true);
   }
 
   function openCreate() {
     setEditingRule(null);
+    setNotifyUserIds([]);
+    setNotifyGroupIds([]);
     form.reset({
       name: "", description: "", alarmType: "threshold", severity: "medium",
       metric: "", operator: "gt", threshold: "", deadband: "",
@@ -108,8 +137,10 @@ export default function AlarmRules() {
     setOpen(true);
   }
 
-  const watchAlarmType = form.watch("alarmType");
+  const watchAlarmType      = form.watch("alarmType");
   const watchWebhookEnabled = form.watch("webhookEnabled");
+  const watchEmailEnabled   = form.watch("emailEnabled");
+  const watchWaEnabled      = form.watch("whatsappEnabled");
   const watchAssetId = form.watch("assetId" as any) as string;
   const { data: assetAttributes } = useListAssetAttributes(watchAssetId ?? "", {
     query: { enabled: !!watchAssetId, queryKey: ["alarm-rule-asset-attributes", watchAssetId] },
@@ -156,10 +187,17 @@ export default function AlarmRules() {
     } as any;
   }
 
+  function persistRecipients(ruleId: string) {
+    const all = loadRecipients();
+    all[ruleId] = { userIds: notifyUserIds, groupIds: notifyGroupIds };
+    saveRecipients(all);
+  }
+
   function onSubmit(data: any) {
     if (editingRule) {
       updateRule.mutate({ id: editingRule.id, data: buildPayload(data) }, {
         onSuccess: () => {
+          persistRecipients(editingRule.id);
           toast({ title: "Alarm rule updated" });
           qc.invalidateQueries({ queryKey: getListAlarmRulesQueryKey() });
           setOpen(false); setEditingRule(null); form.reset();
@@ -167,7 +205,8 @@ export default function AlarmRules() {
       });
     } else {
       createRule.mutate({ data: buildPayload(data) }, {
-        onSuccess: () => {
+        onSuccess: (created: any) => {
+          if (created?.id) persistRecipients(created.id);
           toast({ title: "Alarm rule created" });
           qc.invalidateQueries({ queryKey: getListAlarmRulesQueryKey() });
           setOpen(false); form.reset();
@@ -506,6 +545,84 @@ export default function AlarmRules() {
                         assetId: "...", assetName: "Fan",
                         timestamp: new Date().toISOString(),
                       }, null, 2)}</pre>
+                    </div>
+                  )}
+
+                  {(watchEmailEnabled || watchWaEnabled) && (
+                    <div className="space-y-3 rounded-lg border border-border p-3 bg-muted/20">
+                      <p className="text-xs font-semibold flex items-center gap-1.5">
+                        <Mail className="w-3.5 h-3.5 text-primary" />
+                        Notification Recipients
+                      </p>
+                      <p className="text-[10px] text-muted-foreground -mt-1">
+                        Choose who receives alerts when this rule triggers.
+                      </p>
+
+                      {/* Users */}
+                      {userList.length > 0 && (
+                        <div className="space-y-1.5">
+                          <Label className="text-xs font-medium">Platform Users</Label>
+                          <div className="max-h-32 overflow-y-auto rounded border border-border divide-y divide-border/50 bg-background">
+                            {userList.map((u: any) => (
+                              <div key={u.id}
+                                className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer hover:bg-muted/30 transition-colors"
+                                onClick={() => setNotifyUserIds(prev =>
+                                  prev.includes(u.id) ? prev.filter(x => x !== u.id) : [...prev, u.id]
+                                )}>
+                                <div className={`w-3.5 h-3.5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${
+                                  notifyUserIds.includes(u.id) ? "bg-primary border-primary" : "border-border"}`}>
+                                  {notifyUserIds.includes(u.id) && <div className="w-1 h-1 rounded-full bg-white" />}
+                                </div>
+                                <span className="text-xs flex-1 min-w-0 truncate">{u.name}</span>
+                                {u.username && <span className="text-[10px] text-muted-foreground">@{u.username}</span>}
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Notification Groups */}
+                      {notifGroups.length > 0 && (
+                        <div className="space-y-1.5">
+                          <Label className="text-xs font-medium">Notification Groups</Label>
+                          <div className="rounded border border-border divide-y divide-border/50 bg-background">
+                            {notifGroups.map(g => (
+                              <div key={g.id}
+                                className="flex items-center gap-2 px-2.5 py-1.5 cursor-pointer hover:bg-muted/30 transition-colors"
+                                onClick={() => setNotifyGroupIds(prev =>
+                                  prev.includes(g.id) ? prev.filter(x => x !== g.id) : [...prev, g.id]
+                                )}>
+                                <div className={`w-3.5 h-3.5 rounded border-2 flex items-center justify-center shrink-0 transition-colors ${
+                                  notifyGroupIds.includes(g.id) ? "bg-primary border-primary" : "border-border"}`}>
+                                  {notifyGroupIds.includes(g.id) && <div className="w-1 h-1 rounded-full bg-white" />}
+                                </div>
+                                <span className="text-xs flex-1 min-w-0 truncate">{g.name}</span>
+                                <span className="text-[10px] text-muted-foreground shrink-0">
+                                  {g.emails.length + g.whatsAppNumbers.length} contact{g.emails.length + g.whatsAppNumbers.length !== 1 ? "s" : ""}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {notifGroups.length === 0 && userList.length === 0 && (
+                        <p className="text-[10px] text-muted-foreground">
+                          No users or groups found. Add users in Security → User, and groups in Security → Notification Groups.
+                        </p>
+                      )}
+
+                      {notifGroups.length === 0 && userList.length > 0 && (
+                        <p className="text-[10px] text-muted-foreground">
+                          Create notification groups in <strong>Security → Notification Groups</strong> to send alerts to email addresses or WhatsApp numbers.
+                        </p>
+                      )}
+
+                      {(notifyUserIds.length > 0 || notifyGroupIds.length > 0) && (
+                        <p className="text-[10px] text-muted-foreground pt-1 border-t border-border/50">
+                          {notifyUserIds.length + notifyGroupIds.length} recipient{notifyUserIds.length + notifyGroupIds.length !== 1 ? "s" : ""} selected
+                        </p>
+                      )}
                     </div>
                   )}
                 </TabsContent>

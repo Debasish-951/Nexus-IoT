@@ -17,6 +17,8 @@ import Users from "@/pages/Users";
 import Brokers from "@/pages/Brokers";
 import ApiClients from "@/pages/ApiClients";
 import Settings from "@/pages/Settings";
+import MediaLibrary from "@/pages/MediaLibrary";
+import NotificationGroups from "@/pages/NotificationGroups";
 import IngestSimulator from "@/pages/IngestSimulator";
 import Destinations from "@/pages/Destinations";
 import DataExplorer from "@/pages/DataExplorer";
@@ -60,6 +62,8 @@ function AppRouter() {
         <Route path="/visualization" component={Visualization} />
         <Route path="/live" component={LiveFeed} />
         <Route path="/settings" component={Settings} />
+        <Route path="/media-library" component={MediaLibrary} />
+        <Route path="/notification-groups" component={NotificationGroups} />
         <Route path="/simulator" component={IngestSimulator} />
         <Route component={NotFound} />
       </Switch>

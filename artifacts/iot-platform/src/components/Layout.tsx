@@ -31,7 +31,7 @@ const navItems: NavItem[] = [
     children: [
       { label: "Asset", href: "/assets", icon: Blocks },
       { label: "Asset Template", href: "/asset-templates", icon: FileText },
-      { label: "Media List", href: "/settings?v=media", icon: Image },
+      { label: "Media Library", href: "/media-library", icon: Image },
     ],
   },
   {
@@ -66,8 +66,9 @@ const navItems: NavItem[] = [
     label: "Security",
     icon: Shield,
     children: [
-      { label: "User",       href: "/users",       icon: Users },
-      { label: "API Client", href: "/api-clients", icon: KeyRound },
+      { label: "User",                 href: "/users",                icon: Users },
+      { label: "API Client",           href: "/api-clients",          icon: KeyRound },
+      { label: "Notification Groups",  href: "/notification-groups",  icon: Users },
     ],
   },
   {

@@ -143,6 +143,8 @@ interface Widget {
   overlayMetrics?: OverlayMetric[];
   aggType?: "avg" | "sum" | "min" | "max" | "count";
   granularity?: string;
+  imageUrl?: string;
+  imageMode?: "background" | "icon";
 }
 interface Dashboard {
   id: string; name: string; description?: string;
@@ -566,6 +568,10 @@ function WidgetCard({ widget, onDelete, onEdit, onClone, onDuplicate, onCopy, fu
       <div className="flex items-center gap-2 px-3 py-2 shrink-0"
         style={{ borderBottom: `1px solid ${D.border}`, background: D.panel }}>
         <div className="w-2 h-2 rounded-full shrink-0" style={{ background: widget.color, boxShadow: `0 0 6px ${widget.color}` }} />
+        {widget.imageUrl && widget.imageMode === "icon" && (
+          <img src={widget.imageUrl} alt="" className="w-5 h-5 rounded object-cover shrink-0"
+            onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
+        )}
         <div className="flex-1 min-w-0">
           <div className="flex items-center gap-1.5 flex-wrap">
             <span className="text-xs font-semibold truncate max-w-[120px]" style={{ color: D.text }}>{widget.title}</span>
@@ -616,7 +622,13 @@ function WidgetCard({ widget, onDelete, onEdit, onClone, onDuplicate, onCopy, fu
         </div>
       </div>
 
-      <div className="p-2" style={{ height: fullscreen ? 420 : chartH }}>{renderContent()}</div>
+      <div className="p-2 relative overflow-hidden" style={{ height: fullscreen ? 420 : chartH }}>
+        {widget.imageUrl && widget.imageMode === "background" && (
+          <img src={widget.imageUrl} alt="" className="absolute inset-0 w-full h-full object-cover opacity-[0.07] pointer-events-none select-none"
+            onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
+        )}
+        <div className="relative h-full">{renderContent()}</div>
+      </div>
 
       <div className="px-3 py-1 flex items-center justify-between shrink-0"
         style={{ borderTop: `1px solid ${D.border}`, background: D.panel }}>
@@ -882,6 +894,8 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
   const [telemetryMetrics, setTelemetryMetrics] = useState<string[]>([]);
   const [granularity,  setGranularity]  = useState<string>(initial?.granularity ?? "auto");
   const [aggType,      setAggType]      = useState<string>(initial?.aggType ?? "avg");
+  const [imageUrl,     setImageUrl]     = useState(initial?.imageUrl ?? "");
+  const [imageMode,    setImageMode]    = useState<"background" | "icon">(initial?.imageMode ?? "background");
 
   const { data: assets }     = useListAssets();
   const { data: attributes } = useListAssetAttributes(assetId, { query: { enabled: !!assetId, queryKey: ["asset-attributes", assetId] } });
@@ -941,6 +955,8 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
     setTelemetryMetrics(initial?.metric ? [initial.metric] : []);
     setGranularity(initial?.granularity ?? "auto");
     setAggType(initial?.aggType ?? "avg");
+    setImageUrl(initial?.imageUrl ?? "");
+    setImageMode(initial?.imageMode ?? "background");
   }, [open, initial, preselectedAssetId, nextColor]);
 
   function addOverlay() { setOverlayMetrics(prev => [...prev, { assetId:"", assetName:"", metric:"", color: NEON_PALETTE[(prev.length+1)%NEON_PALETTE.length] }]); }
@@ -966,6 +982,8 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
       overlayMetrics: canOverlay ? overlayMetrics.filter(o => o.assetId && o.metric) : [],
       granularity: granularity as Widget["granularity"],
       aggType: aggType as Widget["aggType"],
+      imageUrl: imageUrl.trim() || undefined,
+      imageMode: imageUrl.trim() ? imageMode : undefined,
     });
     onOpenChange(false);
   }
@@ -1098,6 +1116,39 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
                   style={{ background:c, boxShadow:color===c?`0 0 8px ${c}`:"none" }} />
               ))}
             </div>
+          </div>
+          <div className="space-y-2">
+            <Label className="text-xs">Widget Image (optional)</Label>
+            <Input className="h-8 text-xs font-mono" value={imageUrl} onChange={e => setImageUrl(e.target.value)}
+              placeholder="Paste image URL or copy from Media Library" />
+            {imageUrl && (
+              <div className="space-y-2">
+                <div className="flex gap-2">
+                  {(["background", "icon"] as const).map(mode => (
+                    <button key={mode} onClick={() => setImageMode(mode)}
+                      className={cn("flex-1 py-1.5 rounded text-xs border transition-all capitalize",
+                        imageMode === mode ? "border-accent/70 bg-accent/10 text-accent" : "border-border text-muted-foreground")}
+                      style={{ color: imageMode === mode ? D.accent : undefined, borderColor: imageMode === mode ? D.accent : undefined }}>
+                      {mode === "background" ? "Background" : "Header Icon"}
+                    </button>
+                  ))}
+                </div>
+                <div className="flex items-center gap-3 rounded border border-border p-2 bg-muted/20">
+                  <img src={imageUrl} alt="Preview" className="w-10 h-10 object-contain rounded shrink-0"
+                    onError={e => { (e.target as HTMLImageElement).src = "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='24' height='24' viewBox='0 0 24 24' fill='none' stroke='%23888' stroke-width='1.5'%3E%3Crect x='3' y='3' width='18' height='18' rx='2'/%3E%3Cpath d='M3 9l4-4 4 4 4-6 6 8'/%3E%3C/svg%3E"; }} />
+                  <p className="text-[10px]" style={{ color: D.muted }}>
+                    {imageMode === "background"
+                      ? "Image will display as a subtle background behind the chart."
+                      : "Image will show as a small icon in the widget header bar."}
+                  </p>
+                </div>
+              </div>
+            )}
+            {!imageUrl && (
+              <p className="text-[10px]" style={{ color: D.muted }}>
+                Upload images first in <strong>Asset Management → Media Library</strong>, then copy the URL here.
+              </p>
+            )}
           </div>
         </div>
         <DialogFooter>
