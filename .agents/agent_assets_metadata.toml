@@ -12,3 +12,15 @@ id = "MlqCgEcQfJVcFGn_cQY0Y"
 uri = "file://docs/WS-Integrated-Suite-Documentation.pdf"
 type = "pdf"
 title = "WS-Integrated Suite — Platform Documentation (PDF)"
+
+[[outputs]]
+id = "1Ue5egyT0UTOKqXzTg_E7"
+uri = "file://docs/Platform_Documentation_v2.0.docx"
+type = "word_document"
+title = "Platform Documentation v2.0 (Word)"
+
+[[outputs]]
+id = "M3QMOzeNWtLNu2sxzbgK2"
+uri = "file://docs/Platform_Documentation_v2.0.pdf"
+type = "pdf"
+title = "Platform Documentation v2.0 (PDF)"
