@@ -506,6 +506,10 @@ function StateTimelineWidget({ widget, data }: { widget: Widget; data: Record<st
   );
 }
 
+function seriesDisplayName(label: string, uom?: string) {
+  return uom ? `${label} (${uom})` : label;
+}
+
 function ChartWidget({ widget, data }: { widget: Widget; data: Record<string, any[]> }) {
   const allSeries = [
     { metric: widget.metric, color: widget.color, label: widget.label || widget.metric, uom: widget.uom },
@@ -579,8 +583,8 @@ function ChartWidget({ widget, data }: { widget: Widget; data: Record<string, an
         <BarChart {...commonProps}>
           <CartesianGrid {...darkGrid} /><XAxis dataKey="t" {...darkAxis} /><YAxis {...darkAxis} width={36} domain={yDomain} />
           <Tooltip {...darkTooltip} />
-          {allSeries.length > 1 && <Legend wrapperStyle={{ fontSize:9, color:D.muted }} />}
-          {allSeries.map(s => <Bar key={s.metric} dataKey={s.metric} name={s.label} fill={s.color}
+          <Legend wrapperStyle={{ fontSize:9, color:D.muted }} />
+          {allSeries.map(s => <Bar key={s.metric} dataKey={s.metric} name={seriesDisplayName(s.label, s.uom)} fill={s.color}
             stackId={stacked?"stack":undefined} radius={stacked?undefined:[2,2,0,0]} maxBarSize={20} />)}
           {uclLine}{lclLine}{clLine}
         </BarChart>
@@ -599,8 +603,8 @@ function ChartWidget({ widget, data }: { widget: Widget; data: Record<string, an
           ))}</defs>
           <CartesianGrid {...darkGrid} /><XAxis dataKey="t" {...darkAxis} /><YAxis {...darkAxis} width={36} domain={yDomain} />
           <Tooltip {...darkTooltip} />
-          {allSeries.length > 1 && <Legend wrapperStyle={{ fontSize:9, color:D.muted }} />}
-          {allSeries.map(s=><Area key={s.metric} dataKey={s.metric} name={s.label} stroke={s.color}
+          <Legend wrapperStyle={{ fontSize:9, color:D.muted }} />
+          {allSeries.map(s=><Area key={s.metric} dataKey={s.metric} name={seriesDisplayName(s.label, s.uom)} stroke={s.color}
             fill={`url(#grad-${widget.id}-${s.metric})`} strokeWidth={1.5} dot={false} />)}
           {uclLine}{lclLine}{clLine}
         </AreaChart>
@@ -612,8 +616,8 @@ function ChartWidget({ widget, data }: { widget: Widget; data: Record<string, an
       <LineChart {...commonProps}>
         <CartesianGrid {...darkGrid} /><XAxis dataKey="t" {...darkAxis} /><YAxis {...darkAxis} width={36} domain={yDomain} />
         <Tooltip {...darkTooltip} />
-        {allSeries.length > 1 && <Legend wrapperStyle={{ fontSize:9, color:D.muted }} />}
-        {allSeries.map(s=><Line key={s.metric} dataKey={s.metric} name={s.label} stroke={s.color}
+        <Legend wrapperStyle={{ fontSize:9, color:D.muted }} />
+        {allSeries.map(s=><Line key={s.metric} dataKey={s.metric} name={seriesDisplayName(s.label, s.uom)} stroke={s.color}
           strokeWidth={2} dot={false} activeDot={{ r:3, fill:s.color }} />)}
         {uclLine}{lclLine}{clLine}
       </LineChart>
