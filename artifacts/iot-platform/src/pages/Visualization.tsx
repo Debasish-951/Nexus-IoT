@@ -1231,7 +1231,8 @@ function OverlayRow({ overlay, assetList, index, onChange, onRemove }: {
   }
   return (
     <div className="rounded p-2 space-y-2" style={{ background: D.panel, border: `1px solid ${D.border}` }}>
-      <div className="flex items-center gap-2">
+      {/* Row 1: asset + metric selects + delete */}
+      <div className="flex items-center gap-1.5">
         <div className="w-3 h-3 rounded-full shrink-0" style={{ background: overlay.color }} />
         <select value={overlay.assetId} onChange={e => onChange("assetId", e.target.value)}
           className="flex-1 min-w-0 h-7 rounded border border-border bg-background px-1.5 text-[11px]">
@@ -1247,29 +1248,33 @@ function OverlayRow({ overlay, assetList, index, onChange, onRemove }: {
             : attrs.map((a: any) => <option key={metricKeyOf(a)} value={metricKeyOf(a)}>{a.name}</option>)
           }
         </select>
-        <div className="flex gap-1 shrink-0">
-          {NEON_PALETTE.slice(0,6).map(c => (
-            <button key={c} onClick={() => onChange("color", c)}
-              className={cn("w-4 h-4 rounded-full border", overlay.color===c?"border-white":"border-transparent")}
-              style={{ background: c }} />
-          ))}
-        </div>
-        <button onClick={onRemove} className="p-0.5 rounded hover:bg-red-500/20">
+        <button onClick={onRemove} className="p-0.5 rounded hover:bg-red-500/20 shrink-0">
           <Trash2 className="w-3 h-3" style={{ color: D.red }} />
         </button>
       </div>
-      <div className="grid grid-cols-2 gap-2">
-        <div className="space-y-0.5">
+      {/* Row 2: color picker | Label | UoM */}
+      <div className="flex items-end gap-2">
+        <div className="space-y-0.5 shrink-0">
+          <span className="text-[10px]" style={{ color: D.muted }}>Color</span>
+          <div className="flex gap-1">
+            {NEON_PALETTE.slice(0, 6).map(c => (
+              <button key={c} onClick={() => onChange("color", c)}
+                className={cn("w-4 h-4 rounded-full border-2 transition-all", overlay.color === c ? "border-white scale-110" : "border-transparent")}
+                style={{ background: c }} />
+            ))}
+          </div>
+        </div>
+        <div className="flex-1 min-w-0 space-y-0.5">
           <span className="text-[10px]" style={{ color: D.muted }}>Label</span>
           <input type="text" value={overlay.label ?? ""} onChange={e => onChange("label", e.target.value)}
-            placeholder="Short display name"
+            placeholder="Display name"
             className="w-full h-6 text-[11px] rounded border px-1.5 outline-none"
             style={{ background: "#ffffff", color: "#111827", borderColor: D.border2 }} />
         </div>
-        <div className="space-y-0.5">
+        <div className="w-20 shrink-0 space-y-0.5">
           <span className="text-[10px]" style={{ color: D.muted }}>UoM</span>
           <input type="text" value={overlay.uom ?? ""} onChange={e => onChange("uom", e.target.value)}
-            placeholder="e.g. °C, kWh"
+            placeholder="kWh"
             className="w-full h-6 text-[11px] rounded border px-1.5 outline-none"
             style={{ background: "#ffffff", color: "#111827", borderColor: D.border2 }} />
         </div>
@@ -1430,7 +1435,7 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto overflow-x-hidden">
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{initial ? "Edit Widget" : "Add Widget"}</DialogTitle>
           <DialogDescription>Configure your visualization widget</DialogDescription>
