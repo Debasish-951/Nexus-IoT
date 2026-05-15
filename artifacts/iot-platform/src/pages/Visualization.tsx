@@ -486,23 +486,27 @@ function ChartWidget({ widget, data }: { widget: Widget; data: Record<string, an
   const uclColor = widget.uclColor ?? D.amber;
   const lclColor = widget.lclColor ?? D.amber;
   const clColor  = widget.clColor  ?? D.green;
-  const uclDash  = (widget.uclStyle ?? "dashed") === "dashed" ? "8 4" : undefined;
-  const lclDash  = (widget.lclStyle ?? "dashed") === "dashed" ? "8 4" : undefined;
-  const clDash   = (widget.clStyle  ?? "solid")  === "dashed" ? "8 4" : undefined;
+  // Build optional strokeDasharray — never pass undefined as a recharts prop (causes silent no-render)
+  const uclDashProps = (widget.uclStyle ?? "dashed") === "dashed" ? { strokeDasharray: "8 4" } : {};
+  const lclDashProps = (widget.lclStyle ?? "dashed") === "dashed" ? { strokeDasharray: "8 4" } : {};
+  const clDashProps  = (widget.clStyle  ?? "solid")  === "dashed" ? { strokeDasharray: "8 4" } : {};
 
   const refLines = (
     <>
-      {widget.ucl !== undefined && (
-        <ReferenceLine y={widget.ucl} stroke={uclColor}
-          strokeDasharray={uclDash} strokeWidth={2} />
+      {typeof widget.ucl === "number" && (
+        <ReferenceLine y={widget.ucl} stroke={uclColor} strokeWidth={2}
+          {...uclDashProps} isAnimationActive={false}
+          label={{ position: "insideTopRight", value: `UCL ${widget.ucl}`, fontSize: 9, fill: uclColor }} />
       )}
-      {widget.lcl !== undefined && (
-        <ReferenceLine y={widget.lcl} stroke={lclColor}
-          strokeDasharray={lclDash} strokeWidth={2} />
+      {typeof widget.lcl === "number" && (
+        <ReferenceLine y={widget.lcl} stroke={lclColor} strokeWidth={2}
+          {...lclDashProps} isAnimationActive={false}
+          label={{ position: "insideBottomRight", value: `LCL ${widget.lcl}`, fontSize: 9, fill: lclColor }} />
       )}
-      {widget.centerLine !== undefined && (
-        <ReferenceLine y={widget.centerLine} stroke={clColor}
-          strokeDasharray={clDash} strokeWidth={1.5} />
+      {typeof widget.centerLine === "number" && (
+        <ReferenceLine y={widget.centerLine} stroke={clColor} strokeWidth={1.5}
+          {...clDashProps} isAnimationActive={false}
+          label={{ position: "insideTopRight", value: `CL ${widget.centerLine}`, fontSize: 9, fill: clColor }} />
       )}
     </>
   );
@@ -1443,11 +1447,11 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
               col: string; setCol: (c:string)=>void;
               sty: "solid"|"dashed"; setSty: (s:"solid"|"dashed")=>void;
             }) => (
-              <div className="rounded-md p-2.5 space-y-2" style={{ background: D.bg2, border: `1px solid ${D.border}` }}>
+              <div className="rounded-md p-2.5 space-y-2" style={{ background: D.panel, border: `1px solid ${D.border2}` }}>
                 <div className="flex items-center gap-2">
                   <span className="text-[11px] font-medium w-10 shrink-0" style={{ color: col }}>{label}</span>
                   <Input className="h-7 text-xs flex-1" type="number" value={val}
-                    onChange={e => setVal(e.target.value)} placeholder="Y-axis value" />
+                    onChange={e => setVal(e.target.value)} placeholder="" />
                   {val.trim() !== "" && (
                     <button onClick={() => setVal("")} className="shrink-0 text-[11px] hover:opacity-100 opacity-40 transition-opacity" style={{ color: D.muted }}>✕</button>
                   )}
