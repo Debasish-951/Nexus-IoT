@@ -1435,12 +1435,12 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
-        <DialogHeader>
+      <DialogContent className="max-w-lg p-0 gap-0 flex flex-col" style={{ maxHeight: "90vh" }}>
+        <DialogHeader className="px-6 pt-6 pb-3 shrink-0 border-b border-border">
           <DialogTitle>{initial ? "Edit Widget" : "Add Widget"}</DialogTitle>
           <DialogDescription>Configure your visualization widget</DialogDescription>
         </DialogHeader>
-        <div className="space-y-4 py-1">
+        <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-6 py-4 space-y-4">
           <div className="space-y-1">
             <Label className="text-xs font-medium">Widget Type</Label>
             <select value={chartType} onChange={e => setChartType(e.target.value as ChartType)}
@@ -1592,7 +1592,7 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
             )}
           </div>
         </div>
-        <DialogFooter>
+        <DialogFooter className="px-6 py-4 shrink-0 border-t border-border">
           <Button variant="outline" size="sm" onClick={() => onOpenChange(false)}>Cancel</Button>
           <Button size="sm" onClick={handleSave} disabled={!assetId || !metric}>{initial ? "Update Widget" : "Add Widget"}</Button>
         </DialogFooter>
