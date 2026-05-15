@@ -197,7 +197,7 @@ type Role = typeof ALL_ROLES[number];
 const ROLE_COLORS: Record<Role, string> = { admin: "#a855f7", engineer: "#06b6d4", operator: "#10b981", viewer: "#64748b" };
 
 // ── Data model ─────────────────────────────────────────────────────────────────
-interface OverlayMetric { assetId: string; assetName: string; metric: string; color: string; }
+interface OverlayMetric { assetId: string; assetName: string; metric: string; color: string; label?: string; uom?: string; }
 interface Widget {
   id: string; title: string; chartType: ChartType;
   assetId: string; assetName: string; metric: string;
@@ -217,6 +217,8 @@ interface Widget {
   allowOverride?: boolean;
   imageUrl?: string;
   imageMode?: "background" | "icon";
+  label?: string;
+  uom?: string;
 }
 interface Dashboard {
   id: string; name: string; description?: string;
@@ -506,8 +508,8 @@ function StateTimelineWidget({ widget, data }: { widget: Widget; data: Record<st
 
 function ChartWidget({ widget, data }: { widget: Widget; data: Record<string, any[]> }) {
   const allSeries = [
-    { metric: widget.metric, color: widget.color, label: widget.metric },
-    ...(widget.overlayMetrics ?? []).map(o => ({ metric: `${o.assetId}::${o.metric}`, color: o.color, label: `${o.assetName}/${o.metric}` })),
+    { metric: widget.metric, color: widget.color, label: widget.label || widget.metric, uom: widget.uom },
+    ...(widget.overlayMetrics ?? []).map(o => ({ metric: `${o.assetId}::${o.metric}`, color: o.color, label: o.label || `${o.assetName}/${o.metric}`, uom: o.uom })),
   ];
   const tsBuckets: Record<string, Record<string, number>> = {};
   allSeries.forEach(s => {
@@ -552,25 +554,23 @@ function ChartWidget({ widget, data }: { widget: Widget; data: Record<string, an
   const lclDashProps = (widget.lclStyle ?? "dashed") === "dashed" ? { strokeDasharray: "8 4" } : {};
   const clDashProps  = (widget.clStyle  ?? "solid")  === "dashed" ? { strokeDasharray: "8 4" } : {};
 
-  const refLines = (
-    <>
-      {typeof widget.ucl === "number" && (
-        <ReferenceLine y={widget.ucl} stroke={uclColor} strokeWidth={2}
-          {...uclDashProps} isAnimationActive={false}
-          label={{ position: "insideTopRight", value: `UCL ${widget.ucl}`, fontSize: 9, fill: uclColor }} />
-      )}
-      {typeof widget.lcl === "number" && (
-        <ReferenceLine y={widget.lcl} stroke={lclColor} strokeWidth={2}
-          {...lclDashProps} isAnimationActive={false}
-          label={{ position: "insideBottomRight", value: `LCL ${widget.lcl}`, fontSize: 9, fill: lclColor }} />
-      )}
-      {typeof widget.centerLine === "number" && (
-        <ReferenceLine y={widget.centerLine} stroke={clColor} strokeWidth={1.5}
-          {...clDashProps} isAnimationActive={false}
-          label={{ position: "insideTopRight", value: `CL ${widget.centerLine}`, fontSize: 9, fill: clColor }} />
-      )}
-    </>
-  );
+  // Inline each ReferenceLine directly — recharts does NOT flatten Fragments so wrapping
+  // in <> silently swallows all children. Each conditional must be a direct chart child.
+  const uclLine = typeof widget.ucl === "number"
+    ? <ReferenceLine key="ucl" y={widget.ucl} stroke={uclColor} strokeWidth={2}
+        {...uclDashProps} isAnimationActive={false}
+        label={{ position: "insideTopRight", value: `UCL ${widget.ucl}`, fontSize: 9, fill: uclColor }} />
+    : null;
+  const lclLine = typeof widget.lcl === "number"
+    ? <ReferenceLine key="lcl" y={widget.lcl} stroke={lclColor} strokeWidth={2}
+        {...lclDashProps} isAnimationActive={false}
+        label={{ position: "insideBottomRight", value: `LCL ${widget.lcl}`, fontSize: 9, fill: lclColor }} />
+    : null;
+  const clLine = typeof widget.centerLine === "number"
+    ? <ReferenceLine key="cl" y={widget.centerLine} stroke={clColor} strokeWidth={1.5}
+        {...clDashProps} isAnimationActive={false}
+        label={{ position: "insideTopRight", value: `CL ${widget.centerLine}`, fontSize: 9, fill: clColor }} />
+    : null;
 
   if (widget.chartType === "bar" || widget.chartType === "stackbar") {
     const stacked = widget.chartType === "stackbar";
@@ -582,7 +582,7 @@ function ChartWidget({ widget, data }: { widget: Widget; data: Record<string, an
           {allSeries.length > 1 && <Legend wrapperStyle={{ fontSize:9, color:D.muted }} />}
           {allSeries.map(s => <Bar key={s.metric} dataKey={s.metric} name={s.label} fill={s.color}
             stackId={stacked?"stack":undefined} radius={stacked?undefined:[2,2,0,0]} maxBarSize={20} />)}
-          {refLines}
+          {uclLine}{lclLine}{clLine}
         </BarChart>
       </ResponsiveContainer>
     );
@@ -602,7 +602,7 @@ function ChartWidget({ widget, data }: { widget: Widget; data: Record<string, an
           {allSeries.length > 1 && <Legend wrapperStyle={{ fontSize:9, color:D.muted }} />}
           {allSeries.map(s=><Area key={s.metric} dataKey={s.metric} name={s.label} stroke={s.color}
             fill={`url(#grad-${widget.id}-${s.metric})`} strokeWidth={1.5} dot={false} />)}
-          {refLines}
+          {uclLine}{lclLine}{clLine}
         </AreaChart>
       </ResponsiveContainer>
     );
@@ -615,7 +615,7 @@ function ChartWidget({ widget, data }: { widget: Widget; data: Record<string, an
         {allSeries.length > 1 && <Legend wrapperStyle={{ fontSize:9, color:D.muted }} />}
         {allSeries.map(s=><Line key={s.metric} dataKey={s.metric} name={s.label} stroke={s.color}
           strokeWidth={2} dot={false} activeDot={{ r:3, fill:s.color }} />)}
-        {refLines}
+        {uclLine}{lclLine}{clLine}
       </LineChart>
     </ResponsiveContainer>
   );
@@ -1226,32 +1226,50 @@ function OverlayRow({ overlay, assetList, index, onChange, onRemove }: {
     return m ? `${m.name} (${key})` : key;
   }
   return (
-    <div className="flex items-center gap-2 p-2 rounded" style={{ background: D.panel, border: `1px solid ${D.border}` }}>
-      <div className="w-3 h-3 rounded-full shrink-0" style={{ background: overlay.color }} />
-      <select value={overlay.assetId} onChange={e => onChange("assetId", e.target.value)}
-        className="flex-1 h-7 rounded border border-border bg-background px-1.5 text-[11px]">
-        <option value="">Asset…</option>
-        {assetList.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
-      </select>
-      <select value={overlay.metric} onChange={e => onChange("metric", e.target.value)}
-        disabled={!overlay.assetId}
-        className="flex-1 h-7 rounded border border-border bg-background px-1.5 text-[11px] disabled:opacity-40">
-        <option value="">Metric…</option>
-        {telemetryMetrics.length > 0
-          ? telemetryMetrics.map(k => <option key={k} value={k}>{overlayLabelForKey(k)}</option>)
-          : attrs.map((a: any) => <option key={metricKeyOf(a)} value={metricKeyOf(a)}>{a.name}</option>)
-        }
-      </select>
-      <div className="flex gap-1 shrink-0">
-        {NEON_PALETTE.slice(0,6).map(c => (
-          <button key={c} onClick={() => onChange("color", c)}
-            className={cn("w-4 h-4 rounded-full border", overlay.color===c?"border-white":"border-transparent")}
-            style={{ background: c }} />
-        ))}
+    <div className="rounded p-2 space-y-2" style={{ background: D.panel, border: `1px solid ${D.border}` }}>
+      <div className="flex items-center gap-2">
+        <div className="w-3 h-3 rounded-full shrink-0" style={{ background: overlay.color }} />
+        <select value={overlay.assetId} onChange={e => onChange("assetId", e.target.value)}
+          className="flex-1 h-7 rounded border border-border bg-background px-1.5 text-[11px]">
+          <option value="">Asset…</option>
+          {assetList.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
+        </select>
+        <select value={overlay.metric} onChange={e => onChange("metric", e.target.value)}
+          disabled={!overlay.assetId}
+          className="flex-1 h-7 rounded border border-border bg-background px-1.5 text-[11px] disabled:opacity-40">
+          <option value="">Metric…</option>
+          {telemetryMetrics.length > 0
+            ? telemetryMetrics.map(k => <option key={k} value={k}>{overlayLabelForKey(k)}</option>)
+            : attrs.map((a: any) => <option key={metricKeyOf(a)} value={metricKeyOf(a)}>{a.name}</option>)
+          }
+        </select>
+        <div className="flex gap-1 shrink-0">
+          {NEON_PALETTE.slice(0,6).map(c => (
+            <button key={c} onClick={() => onChange("color", c)}
+              className={cn("w-4 h-4 rounded-full border", overlay.color===c?"border-white":"border-transparent")}
+              style={{ background: c }} />
+          ))}
+        </div>
+        <button onClick={onRemove} className="p-0.5 rounded hover:bg-red-500/20">
+          <Trash2 className="w-3 h-3" style={{ color: D.red }} />
+        </button>
       </div>
-      <button onClick={onRemove} className="p-0.5 rounded hover:bg-red-500/20">
-        <Trash2 className="w-3 h-3" style={{ color: D.red }} />
-      </button>
+      <div className="grid grid-cols-2 gap-2">
+        <div className="space-y-0.5">
+          <span className="text-[10px]" style={{ color: D.muted }}>Label</span>
+          <input type="text" value={overlay.label ?? ""} onChange={e => onChange("label", e.target.value)}
+            placeholder="Short display name"
+            className="w-full h-6 text-[11px] rounded border px-1.5 outline-none"
+            style={{ background: "#ffffff", color: "#111827", borderColor: D.border2 }} />
+        </div>
+        <div className="space-y-0.5">
+          <span className="text-[10px]" style={{ color: D.muted }}>UoM</span>
+          <input type="text" value={overlay.uom ?? ""} onChange={e => onChange("uom", e.target.value)}
+            placeholder="e.g. °C, kWh"
+            className="w-full h-6 text-[11px] rounded border px-1.5 outline-none"
+            style={{ background: "#ffffff", color: "#111827", borderColor: D.border2 }} />
+        </div>
+      </div>
     </div>
   );
 }
@@ -1290,6 +1308,8 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
   const [uclStyle,     setUclStyle]     = useState<"solid"|"dashed">(initial?.uclStyle ?? "dashed");
   const [lclStyle,     setLclStyle]     = useState<"solid"|"dashed">(initial?.lclStyle ?? "dashed");
   const [clStyle,      setClStyle]      = useState<"solid"|"dashed">(initial?.clStyle  ?? "solid");
+  const [seriesLabel,  setSeriesLabel]  = useState(initial?.label  ?? "");
+  const [seriesUom,    setSeriesUom]    = useState(initial?.uom    ?? "");
 
   const { data: assets }     = useListAssets();
   const { data: attributes } = useListAssetAttributes(assetId, { query: { enabled: !!assetId, queryKey: ["asset-attributes", assetId] } });
@@ -1360,6 +1380,8 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
     setUclStyle(initial?.uclStyle ?? "dashed");
     setLclStyle(initial?.lclStyle ?? "dashed");
     setClStyle(initial?.clStyle  ?? "solid");
+    setSeriesLabel(initial?.label ?? "");
+    setSeriesUom(initial?.uom    ?? "");
   }, [open, initial, preselectedAssetId, nextColor]);
 
   function addOverlay() { setOverlayMetrics(prev => [...prev, { assetId:"", assetName:"", metric:"", color: NEON_PALETTE[(prev.length+1)%NEON_PALETTE.length] }]); }
@@ -1387,6 +1409,8 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
       aggType: aggType as Widget["aggType"],
       imageUrl: imageUrl.trim() || undefined,
       imageMode: imageUrl.trim() ? imageMode : undefined,
+      label: seriesLabel.trim() || undefined,
+      uom: seriesUom.trim() || undefined,
       ucl: ucl.trim() !== "" ? Number(ucl) : undefined,
       lcl: lcl.trim() !== "" ? Number(lcl) : undefined,
       centerLine: centerLine.trim() !== "" ? Number(centerLine) : undefined,
@@ -1445,23 +1469,22 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
                 {metricAttrs.length > 0 ? "Metrics from live telemetry — attribute names shown where matched." : "Showing live telemetry metrics."}
               </p>
             )}
-            {(() => {
-              if (!metric) return null;
-              const attr = metricAttrs.find((a: any) => {
-                const tag = metricKeyOf(a); if (!tag) return false;
-                return tag === metric || tag.split('.').slice(1).join('.') === metric;
-              });
-              if (!attr?.uom) return null;
-              return (
-                <div className="flex items-center gap-1.5 mt-0.5">
-                  <span className="text-[10px]" style={{ color: D.muted }}>Unit of Measurement:</span>
-                  <span className="text-[10px] font-medium px-1.5 py-0.5 rounded"
-                    style={{ background: `${D.accent}22`, color: D.accent, border: `1px solid ${D.accent}44` }}>
-                    {attr.uom}
-                  </span>
-                </div>
-              );
-            })()}
+            <div className="grid grid-cols-2 gap-2 mt-1">
+              <div className="space-y-1">
+                <Label className="text-xs">Label</Label>
+                <input type="text" value={seriesLabel} onChange={e => setSeriesLabel(e.target.value)}
+                  placeholder="Short display name"
+                  className="w-full h-7 text-xs rounded border px-2 outline-none"
+                  style={{ background: "#ffffff", color: "#111827", borderColor: D.border2 }} />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">UoM</Label>
+                <input type="text" value={seriesUom} onChange={e => setSeriesUom(e.target.value)}
+                  placeholder="e.g. kWh, °C"
+                  className="w-full h-7 text-xs rounded border px-2 outline-none"
+                  style={{ background: "#ffffff", color: "#111827", borderColor: D.border2 }} />
+              </div>
+            </div>
           </div>
           {canOverlay && (
             <div className="space-y-2">
