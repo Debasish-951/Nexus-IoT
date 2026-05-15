@@ -1,6 +1,12 @@
 import { jsPDF } from "jspdf";
 import { buildDocumentContent, PLATFORM_NAME, PLATFORM_VERSION, DOC_DATE, type ContentItem } from "./content";
 
+export type PdfGenerateOptions = {
+  items?: ContentItem[];
+  version?: string;
+  date?: string;
+};
+
 const PAGE_W = 210;
 const PAGE_H = 297;
 const MARGIN_L = 18;
@@ -42,20 +48,22 @@ interface Ctx {
   totalPages: number;
 }
 
-function addHeader(ctx: Ctx) {
+interface RenderMeta { version: string; date: string; }
+
+function addHeader(ctx: Ctx, meta: RenderMeta) {
   const doc = ctx.doc;
   if (ctx.pageNum === 1) return;
   doc.setFont("helvetica", "italic");
   doc.setFontSize(7.5);
   setColor(doc, COLOR_HEAD);
-  doc.text(`${PLATFORM_NAME} — Platform Documentation v${PLATFORM_VERSION}`, MARGIN_L, 12);
+  doc.text(`${PLATFORM_NAME} — Platform Documentation v${meta.version}`, MARGIN_L, 12);
   doc.text(`Page ${ctx.pageNum}`, PAGE_W - MARGIN_R, 12, { align: "right" });
   doc.setDrawColor(209, 213, 219);
   doc.setLineWidth(0.3);
   doc.line(MARGIN_L, 14, PAGE_W - MARGIN_R, 14);
 }
 
-function addFooter(doc: jsPDF) {
+function addFooter(doc: jsPDF, meta: RenderMeta) {
   doc.setFont("helvetica", "normal");
   doc.setFontSize(7.5);
   setColor(doc, COLOR_HEAD);
@@ -63,15 +71,15 @@ function addFooter(doc: jsPDF) {
   doc.setDrawColor(209, 213, 219);
   doc.setLineWidth(0.3);
   doc.line(MARGIN_L, footerY - 3, PAGE_W - MARGIN_R, footerY - 3);
-  doc.text(`${PLATFORM_NAME} v${PLATFORM_VERSION}  |  ${DOC_DATE}  |  Confidential`, PAGE_W / 2, footerY, { align: "center" });
+  doc.text(`${PLATFORM_NAME} v${meta.version}  |  ${meta.date}  |  Confidential`, PAGE_W / 2, footerY, { align: "center" });
 }
 
-function ensureSpace(ctx: Ctx, needed: number): void {
+function ensureSpace(ctx: Ctx, needed: number, meta: RenderMeta): void {
   if (ctx.y + needed > PAGE_H - MARGIN_B) {
-    addFooter(ctx.doc);
+    addFooter(ctx.doc, meta);
     ctx.doc.addPage();
     ctx.pageNum++;
-    addHeader(ctx);
+    addHeader(ctx, meta);
     ctx.y = MARGIN_T + 4;
   }
 }
@@ -82,29 +90,30 @@ function drawWrappedText(
   x: number,
   maxWidth: number,
   lineHeight: number,
+  meta: RenderMeta,
   indent = 0
 ): void {
   const lines = ctx.doc.splitTextToSize(text, maxWidth - indent);
   for (const line of lines) {
-    ensureSpace(ctx, lineHeight);
+    ensureSpace(ctx, lineHeight, meta);
     ctx.doc.text(line, x + indent, ctx.y);
     ctx.y += lineHeight;
   }
 }
 
-function renderItem(ctx: Ctx, item: ContentItem): void {
+function renderItem(ctx: Ctx, item: ContentItem, meta: RenderMeta): void {
   const doc = ctx.doc;
 
   switch (item.type) {
     case "h1": {
-      ensureSpace(ctx, 18);
+      ensureSpace(ctx, 18, meta);
       ctx.y += 4;
       doc.setFont("helvetica", "bold");
       doc.setFontSize(17);
       setColor(doc, COLOR_H1);
       const lines = doc.splitTextToSize(item.text, CONTENT_W);
       for (const line of lines) {
-        ensureSpace(ctx, 10);
+        ensureSpace(ctx, 10, meta);
         doc.text(line, MARGIN_L, ctx.y);
         ctx.y += 9;
       }
@@ -113,14 +122,14 @@ function renderItem(ctx: Ctx, item: ContentItem): void {
     }
 
     case "h2": {
-      ensureSpace(ctx, 14);
+      ensureSpace(ctx, 14, meta);
       ctx.y += 3;
       doc.setFont("helvetica", "bold");
       doc.setFontSize(12);
       setColor(doc, COLOR_H2);
       const lines = doc.splitTextToSize(item.text, CONTENT_W);
       for (const line of lines) {
-        ensureSpace(ctx, 7);
+        ensureSpace(ctx, 7, meta);
         doc.text(line, MARGIN_L, ctx.y);
         ctx.y += 6.5;
       }
@@ -129,14 +138,14 @@ function renderItem(ctx: Ctx, item: ContentItem): void {
     }
 
     case "h3": {
-      ensureSpace(ctx, 10);
+      ensureSpace(ctx, 10, meta);
       ctx.y += 2;
       doc.setFont("helvetica", "bold");
       doc.setFontSize(10);
       setColor(doc, COLOR_H3);
       const lines = doc.splitTextToSize(item.text, CONTENT_W);
       for (const line of lines) {
-        ensureSpace(ctx, 6);
+        ensureSpace(ctx, 6, meta);
         doc.text(line, MARGIN_L, ctx.y);
         ctx.y += 5.5;
       }
@@ -150,7 +159,7 @@ function renderItem(ctx: Ctx, item: ContentItem): void {
       setColor(doc, COLOR_BODY);
       const lines = doc.splitTextToSize(item.text, CONTENT_W);
       for (const line of lines) {
-        ensureSpace(ctx, 5.5);
+        ensureSpace(ctx, 5.5, meta);
         doc.text(line, MARGIN_L, ctx.y);
         ctx.y += 5;
       }
@@ -165,7 +174,7 @@ function renderItem(ctx: Ctx, item: ContentItem): void {
       for (const item_ of item.items) {
         const lines = doc.splitTextToSize(item_, CONTENT_W - 6);
         for (let i = 0; i < lines.length; i++) {
-          ensureSpace(ctx, 5.5);
+          ensureSpace(ctx, 5.5, meta);
           if (i === 0) doc.text("•", MARGIN_L + 1, ctx.y);
           doc.text(lines[i], MARGIN_L + 5, ctx.y);
           ctx.y += 5;
@@ -182,7 +191,7 @@ function renderItem(ctx: Ctx, item: ContentItem): void {
       for (let i = 0; i < item.items.length; i++) {
         const lines = doc.splitTextToSize(item.items[i], CONTENT_W - 8);
         for (let j = 0; j < lines.length; j++) {
-          ensureSpace(ctx, 5.5);
+          ensureSpace(ctx, 5.5, meta);
           if (j === 0) doc.text(`${i + 1}.`, MARGIN_L + 1, ctx.y);
           doc.text(lines[j], MARGIN_L + 7, ctx.y);
           ctx.y += 5;
@@ -198,7 +207,7 @@ function renderItem(ctx: Ctx, item: ContentItem): void {
       const rowH = 6.5;
       const headerH = 7.5;
 
-      ensureSpace(ctx, headerH + rowH * Math.min(item.rows.length, 3));
+      ensureSpace(ctx, headerH + rowH * Math.min(item.rows.length, 3), meta);
 
       const startX = MARGIN_L;
 
@@ -220,7 +229,7 @@ function renderItem(ctx: Ctx, item: ContentItem): void {
       for (let r = 0; r < item.rows.length; r++) {
         const row = item.rows[r];
         const isAlt = r % 2 === 1;
-        ensureSpace(ctx, rowH + 2);
+        ensureSpace(ctx, rowH + 2, meta);
 
         if (isAlt) {
           setFill(doc, COLOR_TR_ALT);
@@ -254,7 +263,7 @@ function renderItem(ctx: Ctx, item: ContentItem): void {
       const lineH = 4.5;
       const boxH = lines.length * lineH + 6;
 
-      ensureSpace(ctx, Math.min(boxH, 40));
+      ensureSpace(ctx, Math.min(boxH, 40), meta);
 
       const boxY = ctx.y - 4;
       setFill(doc, COLOR_CODE_BG);
@@ -271,7 +280,7 @@ function renderItem(ctx: Ctx, item: ContentItem): void {
       const maxLines = Math.floor((PAGE_H - MARGIN_B - ctx.y) / lineH);
       const visibleLines = lines.slice(0, Math.min(lines.length, maxLines));
       for (const ln of visibleLines) {
-        ensureSpace(ctx, lineH + 1);
+        ensureSpace(ctx, lineH + 1, meta);
         const clipped = doc.splitTextToSize(ln, CONTENT_W - 4);
         doc.text(clipped[0] ?? "", MARGIN_L + 2, ctx.y);
         ctx.y += lineH;
@@ -283,7 +292,7 @@ function renderItem(ctx: Ctx, item: ContentItem): void {
     case "note": {
       const noteLines = doc.splitTextToSize(`⚠ Note: ${item.text}`, CONTENT_W - 6);
       const boxH = noteLines.length * 4.8 + 5;
-      ensureSpace(ctx, boxH);
+      ensureSpace(ctx, boxH, meta);
 
       setFill(doc, COLOR_NOTE_BG);
       setDraw(doc, [209, 196, 233] as any);
@@ -302,7 +311,7 @@ function renderItem(ctx: Ctx, item: ContentItem): void {
     }
 
     case "divider": {
-      ensureSpace(ctx, 6);
+      ensureSpace(ctx, 6, meta);
       ctx.y += 2;
       setDraw(doc, COLOR_BORDER);
       doc.setLineWidth(0.4);
@@ -312,30 +321,37 @@ function renderItem(ctx: Ctx, item: ContentItem): void {
     }
 
     case "pagebreak": {
-      addFooter(doc);
+      addFooter(doc, meta);
       doc.addPage();
       ctx.pageNum++;
-      addHeader(ctx);
+      addHeader(ctx, meta);
       ctx.y = MARGIN_T + 4;
       break;
     }
   }
 }
 
-export async function generatePdf(_onProgress?: (msg: string) => void): Promise<void> {
+export async function generatePdf(
+  _onProgress?: (msg: string) => void,
+  opts?: PdfGenerateOptions
+): Promise<void> {
+  const meta: RenderMeta = {
+    version: opts?.version ?? PLATFORM_VERSION,
+    date: opts?.date ?? DOC_DATE,
+  };
   const doc = new jsPDF({ unit: "mm", format: "a4", orientation: "portrait" });
 
-  const items = buildDocumentContent();
+  const items = opts?.items ?? buildDocumentContent();
   const ctx: Ctx = { doc, y: MARGIN_T + 4, pageNum: 1, totalPages: 1 };
 
-  addHeader(ctx);
+  addHeader(ctx, meta);
 
   for (const item of items) {
-    renderItem(ctx, item);
+    renderItem(ctx, item, meta);
   }
 
-  addFooter(doc);
+  addFooter(doc, meta);
 
-  const filename = `${PLATFORM_NAME.replace(/\s+/g, "-")}-Documentation-v${PLATFORM_VERSION}.pdf`;
+  const filename = `${PLATFORM_NAME.replace(/\s+/g, "-")}-Documentation-v${meta.version}.pdf`;
   doc.save(filename);
 }

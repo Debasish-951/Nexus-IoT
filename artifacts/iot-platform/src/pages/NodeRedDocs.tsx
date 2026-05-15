@@ -4,10 +4,11 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Zap, Copy, CheckCircle2, Code2, ExternalLink, Lock,
   Terminal, AlertCircle, Info, GitMerge,
-  Radio, Package, FileText, FileDown, BookOpen, Loader2,
+  Radio, Package, FileText, FileDown, BookOpen, Loader2, Sparkles,
 } from "lucide-react";
 import { generatePdf } from "@/docs/pdfGenerator";
 import { generateDocx } from "@/docs/docxGenerator";
+import { buildDocumentContent_v11, PLATFORM_VERSION_V11, DOC_DATE_V11 } from "@/docs/content_v11";
 
 const BASE_URL = window.location.origin;
 const INGEST_URL = `${BASE_URL}/api/ingest/payload`;
@@ -78,7 +79,50 @@ function FormatBadge({ fmt }: { fmt: string }) {
   );
 }
 
-function DocumentationPanel() {
+function DownloadButtons({
+  pdfLabel,
+  docxLabel,
+  onPdf,
+  onDocx,
+  pdfState,
+  docxState,
+}: {
+  pdfLabel: string;
+  docxLabel: string;
+  onPdf: () => void;
+  onDocx: () => void;
+  pdfState: "idle" | "loading";
+  docxState: "idle" | "loading";
+}) {
+  return (
+    <div className="flex flex-wrap gap-3">
+      <button
+        onClick={onPdf}
+        disabled={pdfState === "loading"}
+        className="flex items-center gap-3 px-4 py-3 rounded-lg border bg-red-600 hover:bg-red-700 disabled:opacity-60 disabled:cursor-not-allowed text-white border-red-700 transition-all shadow-sm hover:shadow-md active:scale-[0.98] select-none"
+      >
+        {pdfState === "loading" ? <Loader2 className="w-5 h-5 shrink-0 animate-spin" /> : <FileDown className="w-5 h-5 shrink-0" />}
+        <div className="text-left">
+          <p className="text-sm font-semibold leading-none">{pdfState === "loading" ? "Generating PDF…" : pdfLabel}</p>
+          <p className="text-xs opacity-80 mt-0.5">Fast download · generated on demand</p>
+        </div>
+      </button>
+      <button
+        onClick={onDocx}
+        disabled={docxState === "loading"}
+        className="flex items-center gap-3 px-4 py-3 rounded-lg border bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed text-white border-blue-700 transition-all shadow-sm hover:shadow-md active:scale-[0.98] select-none"
+      >
+        {docxState === "loading" ? <Loader2 className="w-5 h-5 shrink-0 animate-spin" /> : <FileText className="w-5 h-5 shrink-0" />}
+        <div className="text-left">
+          <p className="text-sm font-semibold leading-none">{docxState === "loading" ? "Generating DOCX…" : docxLabel}</p>
+          <p className="text-xs opacity-80 mt-0.5">Compatible with MS Word &amp; LibreOffice</p>
+        </div>
+      </button>
+    </div>
+  );
+}
+
+function DocumentationPanelV10() {
   const { toast } = useToast();
   const [pdfState, setPdfState] = useState<"idle" | "loading">("idle");
   const [docxState, setDocxState] = useState<"idle" | "loading">("idle");
@@ -112,24 +156,25 @@ function DocumentationPanel() {
   }
 
   return (
-    <div className="rounded-xl border-2 border-primary/20 bg-gradient-to-br from-primary/5 via-background to-primary/5 shadow-sm overflow-hidden">
-      <div className="px-5 py-4 border-b border-primary/15 bg-primary/8 flex items-start gap-3">
-        <div className="w-10 h-10 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0 mt-0.5">
-          <BookOpen className="w-5 h-5 text-primary" />
+    <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+      <div className="px-5 py-4 border-b border-border bg-muted/30 flex items-start gap-3">
+        <div className="w-9 h-9 rounded-lg bg-muted border border-border flex items-center justify-center shrink-0 mt-0.5">
+          <BookOpen className="w-4 h-4 text-muted-foreground" />
         </div>
-        <div>
-          <h2 className="text-base font-semibold text-foreground flex items-center gap-2">
+        <div className="flex-1 min-w-0">
+          <h2 className="text-sm font-semibold text-foreground flex items-center gap-2">
             Platform Documentation
-            <Badge variant="secondary" className="text-[10px] px-1.5 py-0">v1.0</Badge>
+            <Badge variant="outline" className="text-[10px] px-1.5 py-0 text-muted-foreground">v1.0</Badge>
+            <span className="text-[10px] text-muted-foreground font-normal">· Original release</span>
           </h2>
           <p className="text-xs text-muted-foreground mt-0.5">
-            Complete user manual &amp; technical reference — covers every feature, API endpoint, database schema, and integration detail.
+            Complete user manual &amp; technical reference — 24 chapters covering every feature, API endpoint, database schema, and integration detail.
           </p>
         </div>
       </div>
 
-      <div className="px-5 py-4 border-b border-primary/10">
-        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">What's inside (24 chapters)</p>
+      <div className="px-5 py-4 border-b border-border">
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Chapters included</p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
           {[
             ["User Manual", "Dashboard, Assets, Attributes, Templates, Trends"],
@@ -144,7 +189,7 @@ function DocumentationPanel() {
             ["WebSocket Protocol", "Event types, payload formats, real-time hook internals"],
           ].map(([title, desc]) => (
             <div key={title} className="flex items-start gap-2 text-xs">
-              <CheckCircle2 className="w-3.5 h-3.5 text-green-500 shrink-0 mt-0.5" />
+              <CheckCircle2 className="w-3.5 h-3.5 text-muted-foreground shrink-0 mt-0.5" />
               <span><span className="font-medium">{title}</span> — <span className="text-muted-foreground">{desc}</span></span>
             </div>
           ))}
@@ -152,31 +197,124 @@ function DocumentationPanel() {
       </div>
 
       <div className="px-5 py-4">
-        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Download</p>
-        <div className="flex flex-wrap gap-3">
-          <button
-            onClick={handlePdf}
-            disabled={pdfState === "loading"}
-            className="flex items-center gap-3 px-4 py-3 rounded-lg border bg-red-600 hover:bg-red-700 disabled:opacity-60 disabled:cursor-not-allowed text-white border-red-700 transition-all shadow-sm hover:shadow-md active:scale-[0.98] select-none"
-          >
-            {pdfState === "loading" ? <Loader2 className="w-5 h-5 shrink-0 animate-spin" /> : <FileDown className="w-5 h-5 shrink-0" />}
-            <div className="text-left">
-              <p className="text-sm font-semibold leading-none">{pdfState === "loading" ? "Generating PDF…" : "Download PDF"}</p>
-              <p className="text-xs opacity-80 mt-0.5">Fast download · generated on demand</p>
-            </div>
-          </button>
-          <button
-            onClick={handleDocx}
-            disabled={docxState === "loading"}
-            className="flex items-center gap-3 px-4 py-3 rounded-lg border bg-blue-600 hover:bg-blue-700 disabled:opacity-60 disabled:cursor-not-allowed text-white border-blue-700 transition-all shadow-sm hover:shadow-md active:scale-[0.98] select-none"
-          >
-            {docxState === "loading" ? <Loader2 className="w-5 h-5 shrink-0 animate-spin" /> : <FileText className="w-5 h-5 shrink-0" />}
-            <div className="text-left">
-              <p className="text-sm font-semibold leading-none">{docxState === "loading" ? "Generating DOCX…" : "Download Word (.docx)"}</p>
-              <p className="text-xs opacity-80 mt-0.5">Compatible with MS Word &amp; LibreOffice</p>
-            </div>
-          </button>
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Download v1.0</p>
+        <DownloadButtons
+          pdfLabel="Download PDF v1.0"
+          docxLabel="Download Word v1.0"
+          onPdf={handlePdf}
+          onDocx={handleDocx}
+          pdfState={pdfState}
+          docxState={docxState}
+        />
+      </div>
+    </div>
+  );
+}
+
+function DocumentationPanelV11() {
+  const { toast } = useToast();
+  const [pdfState, setPdfState] = useState<"idle" | "loading">("idle");
+  const [docxState, setDocxState] = useState<"idle" | "loading">("idle");
+
+  async function handlePdf() {
+    if (pdfState === "loading") return;
+    setPdfState("loading");
+    toast({ title: "Preparing PDF v1.1…" });
+    try {
+      const items = buildDocumentContent_v11();
+      await generatePdf(undefined, { items, version: PLATFORM_VERSION_V11, date: DOC_DATE_V11 });
+      toast({ title: "PDF v1.1 Downloaded", description: "Check your downloads folder." });
+    } catch (err: any) {
+      toast({ title: "PDF generation failed", description: err?.message ?? "Unknown error", variant: "destructive" });
+    } finally {
+      setPdfState("idle");
+    }
+  }
+
+  async function handleDocx() {
+    if (docxState === "loading") return;
+    setDocxState("loading");
+    toast({ title: "Building Word document v1.1…" });
+    try {
+      const items = buildDocumentContent_v11();
+      await generateDocx(undefined, { items, version: PLATFORM_VERSION_V11, date: DOC_DATE_V11 });
+      toast({ title: "Word Document v1.1 Downloaded", description: "Check your downloads folder." });
+    } catch (err: any) {
+      toast({ title: "DOCX generation failed", description: err?.message ?? "Unknown error", variant: "destructive" });
+    } finally {
+      setDocxState("idle");
+    }
+  }
+
+  return (
+    <div className="rounded-xl border-2 border-primary/25 bg-gradient-to-br from-primary/5 via-background to-primary/5 shadow-sm overflow-hidden">
+      <div className="px-5 py-4 border-b border-primary/15 bg-primary/8 flex items-start gap-3">
+        <div className="w-9 h-9 rounded-lg bg-primary/10 border border-primary/20 flex items-center justify-center shrink-0 mt-0.5">
+          <Sparkles className="w-4 h-4 text-primary" />
         </div>
+        <div className="flex-1 min-w-0">
+          <h2 className="text-sm font-semibold text-foreground flex items-center gap-2 flex-wrap gap-y-1">
+            Platform Documentation
+            <Badge className="text-[10px] px-1.5 py-0 bg-primary text-primary-foreground">v1.1</Badge>
+            <span className="text-[10px] text-primary/80 font-normal">· Latest release</span>
+          </h2>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Complete v1.0 documentation plus all new features: SPC reference lines, per-series labels &amp; UoM, drag-to-reorder, and corner resize for widgets.
+          </p>
+        </div>
+      </div>
+
+      <div className="px-5 py-4 border-b border-primary/10">
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">What's new in v1.1 (Chapter 25)</p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+          {[
+            ["SPC Reference Lines", "UCL / LCL / CL horizontal markers on Line, Area, Bar charts"],
+            ["Per-Series Labels", "Custom display names and UoM for primary and overlay metrics"],
+            ["Drag-to-Reorder", "Rearrange widgets within a dashboard by drag-and-drop"],
+            ["Corner Resize", "Resize any widget by dragging its bottom-right corner"],
+            ["Updated Widget Schema", "New spcLines[], label, uom fields — fully backward-compatible"],
+          ].map(([title, desc]) => (
+            <div key={title} className="flex items-start gap-2 text-xs">
+              <Sparkles className="w-3.5 h-3.5 text-primary shrink-0 mt-0.5" />
+              <span><span className="font-medium">{title}</span> — <span className="text-muted-foreground">{desc}</span></span>
+            </div>
+          ))}
+        </div>
+
+        <div className="mt-3 pt-3 border-t border-primary/10">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">All v1.0 chapters also included</p>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+            {[
+              ["User Manual", "Dashboard, Assets, Attributes, Templates, Trends"],
+              ["Alarm Management", "Rules (threshold, ROC, heartbeat, deviation), webhooks"],
+              ["Broker & MQTT", "MQTT config, Azure IoT, mapping rules, destinations"],
+              ["Security & RBAC", "Users, API clients, scopes, IP allowlist, role matrix"],
+              ["Visualization", "Named dashboards, 11 widget types, live WS updates"],
+              ["System & Reports", "Data retention, telemetry aggregation, CSV/JSON export"],
+              ["API Reference", "All 50+ endpoints with request/response schemas"],
+              ["Database Schema", "All 15 tables with columns, types, and indexes"],
+              ["Pipeline & Engine", "Ingest pipeline, expression engine, alarm evaluation"],
+              ["WebSocket Protocol", "Event types, payload formats, real-time hook internals"],
+            ].map(([title, desc]) => (
+              <div key={title} className="flex items-start gap-2 text-xs">
+                <CheckCircle2 className="w-3.5 h-3.5 text-green-500 shrink-0 mt-0.5" />
+                <span><span className="font-medium">{title}</span> — <span className="text-muted-foreground">{desc}</span></span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <div className="px-5 py-4">
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-3">Download v1.1</p>
+        <DownloadButtons
+          pdfLabel="Download PDF v1.1"
+          docxLabel="Download Word v1.1"
+          onPdf={handlePdf}
+          onDocx={handleDocx}
+          pdfState={pdfState}
+          docxState={docxState}
+        />
       </div>
     </div>
   );
@@ -194,7 +332,18 @@ export default function IntegrationGuide() {
           Four payload formats are supported — the platform auto-detects on every request.
         </p>
       </div>
-      <DocumentationPanel />
+
+      {/* Documentation versions section */}
+      <div className="space-y-2">
+        <div className="flex items-center gap-2 mb-4">
+          <BookOpen className="w-4 h-4 text-muted-foreground" />
+          <h2 className="text-sm font-semibold">Platform Documentation</h2>
+          <span className="text-xs text-muted-foreground">— Both versions available for download</span>
+        </div>
+        <DocumentationPanelV11 />
+        <DocumentationPanelV10 />
+      </div>
+
       <div className="rounded-xl border-2 border-primary/30 bg-primary/5 p-4 space-y-3">
         <p className="text-xs font-semibold uppercase tracking-wide text-primary">Ingest endpoint</p>
         <div className="flex items-center gap-3 bg-background rounded-lg border border-primary/20 px-4 py-3">

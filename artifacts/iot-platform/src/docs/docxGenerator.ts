@@ -309,18 +309,27 @@ function buildDocxChildren(items: ContentItem[]): any[] {
   return children;
 }
 
+export type DocxGenerateOptions = {
+  items?: ContentItem[];
+  version?: string;
+  date?: string;
+};
+
 export async function generateDocx(
-  onProgress?: (msg: string) => void
+  onProgress?: (msg: string) => void,
+  opts?: DocxGenerateOptions
 ): Promise<void> {
+  const version = opts?.version ?? PLATFORM_VERSION;
+  const date = opts?.date ?? DOC_DATE;
   onProgress?.("Building document structure…");
-  const items = buildDocumentContent();
+  const items = opts?.items ?? buildDocumentContent();
 
   onProgress?.("Rendering Word document…");
   const children = buildDocxChildren(items);
 
   const doc = new Document({
     title: `${PLATFORM_NAME} — User Manual & Technical Documentation`,
-    description: `Version ${PLATFORM_VERSION} — ${DOC_DATE}`,
+    description: `Version ${version} — ${date}`,
     creator: PLATFORM_NAME,
     subject: "Industrial IoT Platform Documentation",
     keywords: "IoT, MQTT, Telemetry, Alarms, Dashboard",
@@ -393,7 +402,7 @@ export async function generateDocx(
                 },
                 children: [
                   new TextRun({
-                    text: `${PLATFORM_NAME} v${PLATFORM_VERSION}  |  ${DOC_DATE}  |  Confidential`,
+                    text: `${PLATFORM_NAME} v${version}  |  ${date}  |  Confidential`,
                     size: 16,
                     color: "9ca3af",
                     italics: true,
@@ -429,7 +438,7 @@ export async function generateDocx(
   const blob = await Packer.toBlob(doc);
   saveAs(
     blob,
-    `${PLATFORM_NAME.replace(/\s+/g, "-")}-Documentation-v${PLATFORM_VERSION}.docx`
+    `${PLATFORM_NAME.replace(/\s+/g, "-")}-Documentation-v${version}.docx`
   );
   onProgress?.("Done");
 }
