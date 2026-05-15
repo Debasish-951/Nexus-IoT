@@ -1,0 +1,14 @@
+uploads = []
+generated = []
+
+[[outputs]]
+id = "5NmrWkzfCENCJZoUqxKSO"
+uri = "file://docs/WS-Integrated-Suite-Documentation.docx"
+type = "word_document"
+title = "WS-Integrated Suite — Platform Documentation (Word)"
+
+[[outputs]]
+id = "MlqCgEcQfJVcFGn_cQY0Y"
+uri = "file://docs/WS-Integrated-Suite-Documentation.pdf"
+type = "pdf"
+title = "WS-Integrated Suite — Platform Documentation (PDF)"
