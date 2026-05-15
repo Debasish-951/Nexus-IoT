@@ -461,20 +461,17 @@ function ChartWidget({ widget, data }: { widget: Widget; data: Record<string, an
   }));
   if (chartData.length === 0) return <EmptyState />;
   const commonProps = { data: chartData, margin: { top: 4, right: 8, bottom: 0, left: 0 } };
-  // SPC reference lines shared across all cartesian chart types
+  // SPC reference lines — clean dashed spans, no inline labels to avoid overlapping data
   const refLines = (
     <>
       {widget.ucl !== undefined && (
-        <ReferenceLine y={widget.ucl} stroke={D.amber} strokeDasharray="6 3" strokeWidth={1.5}
-          label={{ value: `UCL ${widget.ucl}`, position: "insideTopRight", fontSize: 9, fill: D.amber }} />
+        <ReferenceLine y={widget.ucl} stroke={D.amber} strokeDasharray="8 4" strokeWidth={1.5} ifOverflow="extendDomain" />
       )}
       {widget.lcl !== undefined && (
-        <ReferenceLine y={widget.lcl} stroke={D.red} strokeDasharray="6 3" strokeWidth={1.5}
-          label={{ value: `LCL ${widget.lcl}`, position: "insideBottomRight", fontSize: 9, fill: D.red }} />
+        <ReferenceLine y={widget.lcl} stroke={D.amber} strokeDasharray="8 4" strokeWidth={1.5} ifOverflow="extendDomain" />
       )}
       {widget.centerLine !== undefined && (
-        <ReferenceLine y={widget.centerLine} stroke={D.green} strokeDasharray="3 3" strokeWidth={1}
-          label={{ value: `CL ${widget.centerLine}`, position: "insideTopRight", fontSize: 9, fill: D.green }} />
+        <ReferenceLine y={widget.centerLine} stroke={D.green} strokeWidth={1.5} ifOverflow="extendDomain" />
       )}
     </>
   );
@@ -698,12 +695,14 @@ function WidgetTimePopover({ widget, onUpdate }: { widget: Widget; onUpdate: (u:
 
 // ══════════════════════════════════════════════════════════════════════════════
 // ── Widget Card ───────────────────────────────────────────────────────────────
-function WidgetCard({ widget, onDelete, onEdit, onClone, onDuplicate, onCopy, onUpdate, fullscreen, onFullscreen, wsSignal, refreshSignal }: {
+function WidgetCard({ widget, onDelete, onEdit, onClone, onDuplicate, onCopy, onUpdate, fullscreen, onFullscreen, wsSignal, refreshSignal, onDragHandleMouseDown, onLiveSpanChange }: {
   widget: Widget; onDelete: () => void; onEdit: () => void;
   onClone: () => void; onDuplicate: () => void; onCopy: () => void;
   onUpdate: (u: Partial<Widget>) => void;
   fullscreen: boolean; onFullscreen: () => void;
   wsSignal?: number; refreshSignal?: number;
+  onDragHandleMouseDown?: () => void;
+  onLiveSpanChange?: (span: number | null) => void;
 }) {
   const [data, setData]           = useState<Record<string, any[]>>({});
   const [loading, setLoading]     = useState(true);
@@ -805,17 +804,24 @@ function WidgetCard({ widget, onDelete, onEdit, onClone, onDuplicate, onCopy, on
     resizeStartRef.current = { x: e.clientX, y: e.clientY, h: chartH, span: widget.width ?? 1 };
     const onMove = (me: MouseEvent) => {
       if (!resizeStartRef.current) return;
+      // Live height preview
       setResizeH(Math.max(60, resizeStartRef.current.h + me.clientY - resizeStartRef.current.y));
+      // Live column-span preview (threshold = 240px per step so it feels intentional)
+      const deltaX    = me.clientX - resizeStartRef.current.x;
+      const spanDelta = Math.round(deltaX / 240);
+      const liveSpan  = Math.min(4, Math.max(1, resizeStartRef.current.span + spanDelta));
+      onLiveSpanChange?.(liveSpan);
     };
     const onUp = (me: MouseEvent) => {
       if (!resizeStartRef.current) return;
       const newH      = Math.max(60, resizeStartRef.current.h + me.clientY - resizeStartRef.current.y);
       const deltaX    = me.clientX - resizeStartRef.current.x;
-      const spanDelta = Math.round(deltaX / 160);
+      const spanDelta = Math.round(deltaX / 240);
       const newSpan   = Math.min(4, Math.max(1, resizeStartRef.current.span + spanDelta));
       const updates: Partial<Widget> = { height: newH };
       if (newSpan !== resizeStartRef.current.span) updates.width = newSpan;
       onUpdate(updates);
+      onLiveSpanChange?.(null);
       setResizeH(null);
       resizeStartRef.current = null;
       window.removeEventListener("mousemove", onMove);
@@ -848,8 +854,9 @@ function WidgetCard({ widget, onDelete, onEdit, onClone, onDuplicate, onCopy, on
       <div className="flex items-center gap-2 px-3 py-2 shrink-0"
         style={{ borderBottom: `1px solid ${D.border}`, background: D.panel }}>
         <GripVertical data-drag-handle="true"
-          className="w-3.5 h-3.5 shrink-0 cursor-grab opacity-20 group-hover:opacity-50 transition-opacity select-none"
-          style={{ color: D.muted }} />
+          className="w-3.5 h-3.5 shrink-0 cursor-grab opacity-20 group-hover:opacity-60 transition-opacity select-none"
+          style={{ color: D.muted }}
+          onMouseDown={e => { e.stopPropagation(); onDragHandleMouseDown?.(); }} />
         <div className={`w-2 h-2 rounded-full shrink-0 transition-all duration-300 ${liveFlash ? "scale-150" : ""}`}
           style={{ background: widget.color, boxShadow: liveFlash ? `0 0 12px ${widget.color}, 0 0 4px ${widget.color}` : `0 0 6px ${widget.color}` }} />
         {widget.imageUrl && widget.imageMode === "icon" && (
@@ -1538,6 +1545,9 @@ export default function Visualization() {
   const [globalRange,  setGlobalRange]  = useState<number | null>(null);
   const [dragId,       setDragId]       = useState<string | null>(null);
   const [dragOverId,   setDragOverId]   = useState<string | null>(null);
+  const [liveSpans,    setLiveSpans]    = useState<Record<string, number>>({});
+  // dragAllowRef: set to widget id when the grip handle is mousedown'd, cleared after dragstart
+  const dragAllowRef = useRef<string | null>(null);
 
   // Global refresh control
   const [dashRefreshEnabled,  setDashRefreshEnabled]  = useState(false);
@@ -2084,19 +2094,23 @@ export default function Visualization() {
               )}
               <div className="flex-1 overflow-auto p-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4 auto-rows-auto">
-                  {displayWidgets.map(w => (
+                  {displayWidgets.map(w => {
+                    const span = Math.min(liveSpans[w.id] ?? w.width ?? 1, 4);
+                    return (
                     <div key={w.id}
                       draggable
                       onDragStart={e => {
-                        if (!(e.target as HTMLElement).closest('[data-drag-handle]')) { e.preventDefault(); return; }
+                        // Only allow drag when the grip handle triggered the mousedown
+                        if (dragAllowRef.current !== w.id) { e.preventDefault(); return; }
+                        dragAllowRef.current = null;
                         e.dataTransfer.effectAllowed = "move";
                         setDragId(w.id);
                       }}
                       onDragOver={e => { e.preventDefault(); if (dragId && dragId !== w.id) setDragOverId(w.id); }}
                       onDrop={e => { e.preventDefault(); if (dragId && dragId !== w.id) reorderWidgets(dragId, w.id); setDragId(null); setDragOverId(null); }}
-                      onDragEnd={() => { setDragId(null); setDragOverId(null); }}
+                      onDragEnd={() => { setDragId(null); setDragOverId(null); dragAllowRef.current = null; }}
                       style={{
-                        gridColumn: `span ${Math.min(w.width ?? 1, 4)}`,
+                        gridColumn: `span ${span}`,
                         opacity: dragId === w.id ? 0.35 : 1,
                         transition: "opacity 0.15s",
                         outline: dragOverId === w.id && dragId !== w.id ? `2px solid ${D.accent}88` : "none",
@@ -2112,9 +2126,12 @@ export default function Visualization() {
                         fullscreen={fullscreenId === w.id}
                         onFullscreen={() => setFullscreenId(prev => prev === w.id ? null : w.id)}
                         wsSignal={wsSignals[w.assetId]}
-                        refreshSignal={dashRefreshSignal} />
+                        refreshSignal={dashRefreshSignal}
+                        onDragHandleMouseDown={() => { dragAllowRef.current = w.id; }}
+                        onLiveSpanChange={s => setLiveSpans(prev => s === null ? (({ [w.id]: _, ...rest }) => rest)(prev) : { ...prev, [w.id]: s })} />
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               </div>
             </>
