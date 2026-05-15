@@ -54,6 +54,67 @@ const NEON_PALETTE = [
   "#22d3ee","#84cc16","#fb923c","#e879f9",
 ];
 
+// ── SPC control-limit helpers (module-level so React never remounts inputs) ────
+const SPC_PALETTE = ["#f59e0b","#ef4444","#10b981","#3b82f6","#a855f7","#f97316","#e2e8f0"];
+
+function StyleBtn({ active, color, dash, onClick }: { active: boolean; color: string; dash: boolean; onClick: () => void }) {
+  return (
+    <button type="button" onClick={onClick}
+      className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] transition-all"
+      style={{ background: active ? `${color}22` : "transparent", border: `1px solid ${active ? color : D.border2}`, color: active ? color : D.muted }}>
+      {dash ? (
+        <svg width="26" height="4"><line x1="0" y1="2" x2="26" y2="2" stroke="currentColor" strokeWidth="1.5" strokeDasharray="4 2" /></svg>
+      ) : (
+        <svg width="26" height="4"><line x1="0" y1="2" x2="26" y2="2" stroke="currentColor" strokeWidth="1.5" /></svg>
+      )}
+    </button>
+  );
+}
+
+function SpcRow({ label, val, setVal, col, setCol, sty, setSty }: {
+  label: string; val: string; setVal: (v: string) => void;
+  col: string; setCol: (c: string) => void;
+  sty: "solid" | "dashed"; setSty: (s: "solid" | "dashed") => void;
+}) {
+  return (
+    <div className="rounded-md p-2.5 space-y-2" style={{ background: D.panel, border: `1px solid ${D.border2}` }}>
+      <div className="flex items-center gap-2">
+        <span className="text-[11px] font-medium w-10 shrink-0" style={{ color: col }}>{label}</span>
+        <input
+          type="number"
+          value={val}
+          onChange={e => setVal(e.target.value)}
+          placeholder=""
+          className="h-7 text-xs flex-1 rounded border px-2 outline-none"
+          style={{ background: "#ffffff", color: "#111827", borderColor: D.border2 }}
+        />
+        {val.trim() !== "" && (
+          <button type="button" onClick={() => setVal("")}
+            className="shrink-0 text-[11px] hover:opacity-100 opacity-40 transition-opacity"
+            style={{ color: D.muted }}>✕</button>
+        )}
+      </div>
+      {val.trim() !== "" && (
+        <>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] w-10 shrink-0" style={{ color: D.muted }}>Color</span>
+            {SPC_PALETTE.map(c => (
+              <button type="button" key={c} onClick={() => setCol(c)}
+                className="w-4 h-4 rounded-full border-2 transition-all shrink-0"
+                style={{ background: c, borderColor: col === c ? "#fff" : "transparent", transform: col === c ? "scale(1.25)" : "scale(1)" }} />
+            ))}
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="text-[10px] w-10 shrink-0" style={{ color: D.muted }}>Style</span>
+            <StyleBtn active={sty === "dashed"} color={col} dash onClick={() => setSty("dashed")} />
+            <StyleBtn active={sty === "solid"}  color={col} dash={false} onClick={() => setSty("solid")} />
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── Time ranges ────────────────────────────────────────────────────────────────
 const REFRESH_INTERVALS = [
   { label: "1 s",   ms: 1_000 },
@@ -1384,6 +1445,23 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
                 {metricAttrs.length > 0 ? "Metrics from live telemetry — attribute names shown where matched." : "Showing live telemetry metrics."}
               </p>
             )}
+            {(() => {
+              if (!metric) return null;
+              const attr = metricAttrs.find((a: any) => {
+                const tag = metricKeyOf(a); if (!tag) return false;
+                return tag === metric || tag.split('.').slice(1).join('.') === metric;
+              });
+              if (!attr?.uom) return null;
+              return (
+                <div className="flex items-center gap-1.5 mt-0.5">
+                  <span className="text-[10px]" style={{ color: D.muted }}>Unit of Measurement:</span>
+                  <span className="text-[10px] font-medium px-1.5 py-0.5 rounded"
+                    style={{ background: `${D.accent}22`, color: D.accent, border: `1px solid ${D.accent}44` }}>
+                    {attr.uom}
+                  </span>
+                </div>
+              );
+            })()}
           </div>
           {canOverlay && (
             <div className="space-y-2">
@@ -1429,62 +1507,15 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
               Drag the grip icon (⠿) in the header to reorder widgets.
             </p>
           </div>
-          {(["line","area","bar","stackbar"] as ChartType[]).includes(chartType) && (() => {
-            const SPC_PALETTE = ["#f59e0b","#ef4444","#10b981","#3b82f6","#a855f7","#f97316","#e2e8f0"];
-            const StyleBtn = ({ active, color, dash, onClick }: { active: boolean; color: string; dash: boolean; onClick: () => void }) => (
-              <button onClick={onClick}
-                className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] transition-all"
-                style={{ background: active ? `${color}22` : "transparent", border: `1px solid ${active ? color : D.border2}`, color: active ? color : D.muted }}>
-                {dash ? (
-                  <svg width="26" height="4"><line x1="0" y1="2" x2="26" y2="2" stroke="currentColor" strokeWidth="1.5" strokeDasharray="4 2" /></svg>
-                ) : (
-                  <svg width="26" height="4"><line x1="0" y1="2" x2="26" y2="2" stroke="currentColor" strokeWidth="1.5" /></svg>
-                )}
-              </button>
-            );
-            const SpcRow = ({ label, val, setVal, col, setCol, sty, setSty }: {
-              label: string; val: string; setVal: (v:string)=>void;
-              col: string; setCol: (c:string)=>void;
-              sty: "solid"|"dashed"; setSty: (s:"solid"|"dashed")=>void;
-            }) => (
-              <div className="rounded-md p-2.5 space-y-2" style={{ background: D.panel, border: `1px solid ${D.border2}` }}>
-                <div className="flex items-center gap-2">
-                  <span className="text-[11px] font-medium w-10 shrink-0" style={{ color: col }}>{label}</span>
-                  <Input className="h-7 text-xs flex-1" type="number" value={val}
-                    onChange={e => setVal(e.target.value)} placeholder="" />
-                  {val.trim() !== "" && (
-                    <button onClick={() => setVal("")} className="shrink-0 text-[11px] hover:opacity-100 opacity-40 transition-opacity" style={{ color: D.muted }}>✕</button>
-                  )}
-                </div>
-                {val.trim() !== "" && (
-                  <>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] w-10 shrink-0" style={{ color: D.muted }}>Color</span>
-                      {SPC_PALETTE.map(c => (
-                        <button key={c} onClick={() => setCol(c)}
-                          className="w-4 h-4 rounded-full border-2 transition-all shrink-0"
-                          style={{ background: c, borderColor: col === c ? "#fff" : "transparent", transform: col === c ? "scale(1.25)" : "scale(1)" }} />
-                      ))}
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] w-10 shrink-0" style={{ color: D.muted }}>Style</span>
-                      <StyleBtn active={sty==="dashed"} color={col} dash onClick={() => setSty("dashed")} />
-                      <StyleBtn active={sty==="solid"}  color={col} dash={false} onClick={() => setSty("solid")} />
-                    </div>
-                  </>
-                )}
-              </div>
-            );
-            return (
-              <div className="space-y-2">
-                <Label className="text-xs font-medium">Control Limit Lines (SPC)</Label>
-                <p className="text-[10px]" style={{ color: D.muted }}>Enter a Y-axis value to draw a horizontal reference line on the chart. Leave blank to hide.</p>
-                <SpcRow label="UCL" val={ucl} setVal={setUcl} col={uclColor} setCol={setUclColor} sty={uclStyle} setSty={setUclStyle} />
-                <SpcRow label="LCL" val={lcl} setVal={setLcl} col={lclColor} setCol={setLclColor} sty={lclStyle} setSty={setLclStyle} />
-                <SpcRow label="CL"  val={centerLine} setVal={setCenterLine} col={clColor} setCol={setClColor} sty={clStyle} setSty={setClStyle} />
-              </div>
-            );
-          })()}
+          {(["line","area","bar","stackbar"] as ChartType[]).includes(chartType) && (
+            <div className="space-y-2">
+              <Label className="text-xs font-medium">Control Limit Lines (SPC)</Label>
+              <p className="text-[10px]" style={{ color: D.muted }}>Enter a Y-axis value to draw a horizontal reference line on the chart. Leave blank to hide.</p>
+              <SpcRow label="UCL" val={ucl} setVal={setUcl} col={uclColor} setCol={setUclColor} sty={uclStyle} setSty={setUclStyle} />
+              <SpcRow label="LCL" val={lcl} setVal={setLcl} col={lclColor} setCol={setLclColor} sty={lclStyle} setSty={setLclStyle} />
+              <SpcRow label="CL"  val={centerLine} setVal={setCenterLine} col={clColor} setCol={setClColor} sty={clStyle} setSty={setClStyle} />
+            </div>
+          )}
           <div className="space-y-1">
             <Label className="text-xs">Primary Color</Label>
             <div className="flex gap-2 flex-wrap">
