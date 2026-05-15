@@ -1234,13 +1234,13 @@ function OverlayRow({ overlay, assetList, index, onChange, onRemove }: {
       <div className="flex items-center gap-2">
         <div className="w-3 h-3 rounded-full shrink-0" style={{ background: overlay.color }} />
         <select value={overlay.assetId} onChange={e => onChange("assetId", e.target.value)}
-          className="flex-1 h-7 rounded border border-border bg-background px-1.5 text-[11px]">
+          className="flex-1 min-w-0 h-7 rounded border border-border bg-background px-1.5 text-[11px]">
           <option value="">Asset…</option>
           {assetList.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
         </select>
         <select value={overlay.metric} onChange={e => onChange("metric", e.target.value)}
           disabled={!overlay.assetId}
-          className="flex-1 h-7 rounded border border-border bg-background px-1.5 text-[11px] disabled:opacity-40">
+          className="flex-1 min-w-0 h-7 rounded border border-border bg-background px-1.5 text-[11px] disabled:opacity-40">
           <option value="">Metric…</option>
           {telemetryMetrics.length > 0
             ? telemetryMetrics.map(k => <option key={k} value={k}>{overlayLabelForKey(k)}</option>)
@@ -1430,7 +1430,7 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto overflow-x-hidden">
         <DialogHeader>
           <DialogTitle>{initial ? "Edit Widget" : "Add Widget"}</DialogTitle>
           <DialogDescription>Configure your visualization widget</DialogDescription>
