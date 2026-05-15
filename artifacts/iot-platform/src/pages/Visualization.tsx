@@ -145,6 +145,8 @@ interface Widget {
   customFrom?: string; customTo?: string;
   width?: number; height?: number;
   ucl?: number; lcl?: number; centerLine?: number;
+  uclColor?: string; lclColor?: string; clColor?: string;
+  uclStyle?: "solid" | "dashed"; lclStyle?: "solid" | "dashed"; clStyle?: "solid" | "dashed";
   overlayMetrics?: OverlayMetric[];
   aggType?: "avg" | "sum" | "min" | "max" | "count";
   granularity?: string;
@@ -461,17 +463,46 @@ function ChartWidget({ widget, data }: { widget: Widget; data: Record<string, an
   }));
   if (chartData.length === 0) return <EmptyState />;
   const commonProps = { data: chartData, margin: { top: 4, right: 8, bottom: 0, left: 0 } };
-  // SPC reference lines — clean dashed spans, no inline labels to avoid overlapping data
+  // Compute Y-axis domain that always includes UCL / LCL / CL so lines are never clipped
+  const allYValues: number[] = [];
+  for (const row of chartData) {
+    for (const s of allSeries) {
+      const v = row[s.metric];
+      if (typeof v === "number" && isFinite(v)) allYValues.push(v);
+    }
+  }
+  if (widget.ucl       !== undefined) allYValues.push(widget.ucl);
+  if (widget.lcl       !== undefined) allYValues.push(widget.lcl);
+  if (widget.centerLine !== undefined) allYValues.push(widget.centerLine);
+  const yMin  = allYValues.length ? Math.min(...allYValues) : 0;
+  const yMax  = allYValues.length ? Math.max(...allYValues) : 100;
+  const yPad  = (yMax - yMin) * 0.1 || 1;
+  const yDomain: [number, number] = [
+    Math.floor(yMin - yPad),
+    Math.ceil(yMax  + yPad),
+  ];
+
+  // SPC reference lines — use widget-level color + style (solid/dashed)
+  const uclColor = widget.uclColor ?? D.amber;
+  const lclColor = widget.lclColor ?? D.amber;
+  const clColor  = widget.clColor  ?? D.green;
+  const uclDash  = (widget.uclStyle ?? "dashed") === "dashed" ? "8 4" : undefined;
+  const lclDash  = (widget.lclStyle ?? "dashed") === "dashed" ? "8 4" : undefined;
+  const clDash   = (widget.clStyle  ?? "solid")  === "dashed" ? "8 4" : undefined;
+
   const refLines = (
     <>
       {widget.ucl !== undefined && (
-        <ReferenceLine y={widget.ucl} stroke={D.amber} strokeDasharray="8 4" strokeWidth={1.5} ifOverflow="extendDomain" />
+        <ReferenceLine y={widget.ucl} stroke={uclColor}
+          strokeDasharray={uclDash} strokeWidth={2} />
       )}
       {widget.lcl !== undefined && (
-        <ReferenceLine y={widget.lcl} stroke={D.amber} strokeDasharray="8 4" strokeWidth={1.5} ifOverflow="extendDomain" />
+        <ReferenceLine y={widget.lcl} stroke={lclColor}
+          strokeDasharray={lclDash} strokeWidth={2} />
       )}
       {widget.centerLine !== undefined && (
-        <ReferenceLine y={widget.centerLine} stroke={D.green} strokeWidth={1.5} ifOverflow="extendDomain" />
+        <ReferenceLine y={widget.centerLine} stroke={clColor}
+          strokeDasharray={clDash} strokeWidth={1.5} />
       )}
     </>
   );
@@ -481,7 +512,7 @@ function ChartWidget({ widget, data }: { widget: Widget; data: Record<string, an
     return (
       <ResponsiveContainer width="100%" height="100%">
         <BarChart {...commonProps}>
-          <CartesianGrid {...darkGrid} /><XAxis dataKey="t" {...darkAxis} /><YAxis {...darkAxis} width={36} />
+          <CartesianGrid {...darkGrid} /><XAxis dataKey="t" {...darkAxis} /><YAxis {...darkAxis} width={36} domain={yDomain} />
           <Tooltip {...darkTooltip} />
           {allSeries.length > 1 && <Legend wrapperStyle={{ fontSize:9, color:D.muted }} />}
           {allSeries.map(s => <Bar key={s.metric} dataKey={s.metric} name={s.label} fill={s.color}
@@ -501,7 +532,7 @@ function ChartWidget({ widget, data }: { widget: Widget; data: Record<string, an
               <stop offset="95%" stopColor={s.color} stopOpacity={0} />
             </linearGradient>
           ))}</defs>
-          <CartesianGrid {...darkGrid} /><XAxis dataKey="t" {...darkAxis} /><YAxis {...darkAxis} width={36} />
+          <CartesianGrid {...darkGrid} /><XAxis dataKey="t" {...darkAxis} /><YAxis {...darkAxis} width={36} domain={yDomain} />
           <Tooltip {...darkTooltip} />
           {allSeries.length > 1 && <Legend wrapperStyle={{ fontSize:9, color:D.muted }} />}
           {allSeries.map(s=><Area key={s.metric} dataKey={s.metric} name={s.label} stroke={s.color}
@@ -514,7 +545,7 @@ function ChartWidget({ widget, data }: { widget: Widget; data: Record<string, an
   return (
     <ResponsiveContainer width="100%" height="100%">
       <LineChart {...commonProps}>
-        <CartesianGrid {...darkGrid} /><XAxis dataKey="t" {...darkAxis} /><YAxis {...darkAxis} width={36} />
+        <CartesianGrid {...darkGrid} /><XAxis dataKey="t" {...darkAxis} /><YAxis {...darkAxis} width={36} domain={yDomain} />
         <Tooltip {...darkTooltip} />
         {allSeries.length > 1 && <Legend wrapperStyle={{ fontSize:9, color:D.muted }} />}
         {allSeries.map(s=><Line key={s.metric} dataKey={s.metric} name={s.label} stroke={s.color}
@@ -1188,6 +1219,12 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
   const [ucl,          setUcl]          = useState(initial?.ucl !== undefined ? String(initial.ucl) : "");
   const [lcl,          setLcl]          = useState(initial?.lcl !== undefined ? String(initial.lcl) : "");
   const [centerLine,   setCenterLine]   = useState(initial?.centerLine !== undefined ? String(initial.centerLine) : "");
+  const [uclColor,     setUclColor]     = useState(initial?.uclColor  ?? D.amber);
+  const [lclColor,     setLclColor]     = useState(initial?.lclColor  ?? D.amber);
+  const [clColor,      setClColor]      = useState(initial?.clColor   ?? D.green);
+  const [uclStyle,     setUclStyle]     = useState<"solid"|"dashed">(initial?.uclStyle ?? "dashed");
+  const [lclStyle,     setLclStyle]     = useState<"solid"|"dashed">(initial?.lclStyle ?? "dashed");
+  const [clStyle,      setClStyle]      = useState<"solid"|"dashed">(initial?.clStyle  ?? "solid");
 
   const { data: assets }     = useListAssets();
   const { data: attributes } = useListAssetAttributes(assetId, { query: { enabled: !!assetId, queryKey: ["asset-attributes", assetId] } });
@@ -1252,6 +1289,12 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
     setUcl(initial?.ucl !== undefined ? String(initial.ucl) : "");
     setLcl(initial?.lcl !== undefined ? String(initial.lcl) : "");
     setCenterLine(initial?.centerLine !== undefined ? String(initial.centerLine) : "");
+    setUclColor(initial?.uclColor  ?? D.amber);
+    setLclColor(initial?.lclColor  ?? D.amber);
+    setClColor(initial?.clColor   ?? D.green);
+    setUclStyle(initial?.uclStyle ?? "dashed");
+    setLclStyle(initial?.lclStyle ?? "dashed");
+    setClStyle(initial?.clStyle  ?? "solid");
   }, [open, initial, preselectedAssetId, nextColor]);
 
   function addOverlay() { setOverlayMetrics(prev => [...prev, { assetId:"", assetName:"", metric:"", color: NEON_PALETTE[(prev.length+1)%NEON_PALETTE.length] }]); }
@@ -1282,6 +1325,12 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
       ucl: ucl.trim() !== "" ? Number(ucl) : undefined,
       lcl: lcl.trim() !== "" ? Number(lcl) : undefined,
       centerLine: centerLine.trim() !== "" ? Number(centerLine) : undefined,
+      uclColor: ucl.trim() !== "" ? uclColor : undefined,
+      lclColor: lcl.trim() !== "" ? lclColor : undefined,
+      clColor:  centerLine.trim() !== "" ? clColor : undefined,
+      uclStyle: ucl.trim() !== "" ? uclStyle : undefined,
+      lclStyle: lcl.trim() !== "" ? lclStyle : undefined,
+      clStyle:  centerLine.trim() !== "" ? clStyle : undefined,
     });
     onOpenChange(false);
   }
@@ -1376,31 +1425,62 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
               Drag the grip icon (⠿) in the header to reorder widgets.
             </p>
           </div>
-          {(["line","area","bar","stackbar"] as ChartType[]).includes(chartType) && (
-            <div className="space-y-2">
-              <Label className="text-xs font-medium">Control Limit Lines (SPC)</Label>
-              <div className="grid grid-cols-3 gap-2">
-                <div className="space-y-1">
-                  <Label className="text-xs" style={{ color: D.amber }}>UCL</Label>
-                  <Input className="h-8 text-xs" type="number" value={ucl}
-                    onChange={e => setUcl(e.target.value)} placeholder="e.g. 90" />
+          {(["line","area","bar","stackbar"] as ChartType[]).includes(chartType) && (() => {
+            const SPC_PALETTE = ["#f59e0b","#ef4444","#10b981","#3b82f6","#a855f7","#f97316","#e2e8f0"];
+            const StyleBtn = ({ active, color, dash, onClick }: { active: boolean; color: string; dash: boolean; onClick: () => void }) => (
+              <button onClick={onClick}
+                className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] transition-all"
+                style={{ background: active ? `${color}22` : "transparent", border: `1px solid ${active ? color : D.border2}`, color: active ? color : D.muted }}>
+                {dash ? (
+                  <svg width="26" height="4"><line x1="0" y1="2" x2="26" y2="2" stroke="currentColor" strokeWidth="1.5" strokeDasharray="4 2" /></svg>
+                ) : (
+                  <svg width="26" height="4"><line x1="0" y1="2" x2="26" y2="2" stroke="currentColor" strokeWidth="1.5" /></svg>
+                )}
+              </button>
+            );
+            const SpcRow = ({ label, val, setVal, col, setCol, sty, setSty }: {
+              label: string; val: string; setVal: (v:string)=>void;
+              col: string; setCol: (c:string)=>void;
+              sty: "solid"|"dashed"; setSty: (s:"solid"|"dashed")=>void;
+            }) => (
+              <div className="rounded-md p-2.5 space-y-2" style={{ background: D.bg2, border: `1px solid ${D.border}` }}>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-medium w-10 shrink-0" style={{ color: col }}>{label}</span>
+                  <Input className="h-7 text-xs flex-1" type="number" value={val}
+                    onChange={e => setVal(e.target.value)} placeholder="Y-axis value" />
+                  {val.trim() !== "" && (
+                    <button onClick={() => setVal("")} className="shrink-0 text-[11px] hover:opacity-100 opacity-40 transition-opacity" style={{ color: D.muted }}>✕</button>
+                  )}
                 </div>
-                <div className="space-y-1">
-                  <Label className="text-xs" style={{ color: D.red }}>LCL</Label>
-                  <Input className="h-8 text-xs" type="number" value={lcl}
-                    onChange={e => setLcl(e.target.value)} placeholder="e.g. 10" />
-                </div>
-                <div className="space-y-1">
-                  <Label className="text-xs" style={{ color: D.green }}>Center Line</Label>
-                  <Input className="h-8 text-xs" type="number" value={centerLine}
-                    onChange={e => setCenterLine(e.target.value)} placeholder="e.g. 50" />
-                </div>
+                {val.trim() !== "" && (
+                  <>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] w-10 shrink-0" style={{ color: D.muted }}>Color</span>
+                      {SPC_PALETTE.map(c => (
+                        <button key={c} onClick={() => setCol(c)}
+                          className="w-4 h-4 rounded-full border-2 transition-all shrink-0"
+                          style={{ background: c, borderColor: col === c ? "#fff" : "transparent", transform: col === c ? "scale(1.25)" : "scale(1)" }} />
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-1.5">
+                      <span className="text-[10px] w-10 shrink-0" style={{ color: D.muted }}>Style</span>
+                      <StyleBtn active={sty==="dashed"} color={col} dash onClick={() => setSty("dashed")} />
+                      <StyleBtn active={sty==="solid"}  color={col} dash={false} onClick={() => setSty("solid")} />
+                    </div>
+                  </>
+                )}
               </div>
-              <p className="text-[10px]" style={{ color: D.muted }}>
-                Leave blank to hide. UCL shown in amber, LCL in red, center line in green.
-              </p>
-            </div>
-          )}
+            );
+            return (
+              <div className="space-y-2">
+                <Label className="text-xs font-medium">Control Limit Lines (SPC)</Label>
+                <p className="text-[10px]" style={{ color: D.muted }}>Enter a Y-axis value to draw a horizontal reference line on the chart. Leave blank to hide.</p>
+                <SpcRow label="UCL" val={ucl} setVal={setUcl} col={uclColor} setCol={setUclColor} sty={uclStyle} setSty={setUclStyle} />
+                <SpcRow label="LCL" val={lcl} setVal={setLcl} col={lclColor} setCol={setLclColor} sty={lclStyle} setSty={setLclStyle} />
+                <SpcRow label="CL"  val={centerLine} setVal={setCenterLine} col={clColor} setCol={setClColor} sty={clStyle} setSty={setClStyle} />
+              </div>
+            );
+          })()}
           <div className="space-y-1">
             <Label className="text-xs">Primary Color</Label>
             <div className="flex gap-2 flex-wrap">
