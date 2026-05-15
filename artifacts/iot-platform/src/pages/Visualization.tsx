@@ -21,7 +21,7 @@ import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover
 import {
   LineChart, Line, AreaChart, Area, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
-  PieChart, Pie, Cell, ScatterChart, Scatter,
+  PieChart, Pie, Cell, ScatterChart, Scatter, ReferenceLine,
 } from "recharts";
 import {
   Plus, Trash2, RefreshCw, Settings2, TrendingUp, TrendingDown,
@@ -29,7 +29,7 @@ import {
   Folder, FolderOpen, Blocks, PanelLeftOpen, PanelLeftClose,
   BarChart2, PieChart as PieIcon, Zap, Layers, Clock, Maximize2, Minimize2,
   RotateCcw, Edit2, Copy, Shield, MoreVertical, BookOpen, Gauge,
-  Clipboard, ClipboardPaste, FolderPlus, CalendarDays,
+  Clipboard, ClipboardPaste, FolderPlus, CalendarDays, GripVertical,
 } from "lucide-react";
 import { format, subMinutes, parseISO } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -144,6 +144,7 @@ interface Widget {
   minVal?: number; maxVal?: number; unit?: string;
   customFrom?: string; customTo?: string;
   width?: number; height?: number;
+  ucl?: number; lcl?: number; centerLine?: number;
   overlayMetrics?: OverlayMetric[];
   aggType?: "avg" | "sum" | "min" | "max" | "count";
   granularity?: string;
@@ -460,6 +461,24 @@ function ChartWidget({ widget, data }: { widget: Widget; data: Record<string, an
   }));
   if (chartData.length === 0) return <EmptyState />;
   const commonProps = { data: chartData, margin: { top: 4, right: 8, bottom: 0, left: 0 } };
+  // SPC reference lines shared across all cartesian chart types
+  const refLines = (
+    <>
+      {widget.ucl !== undefined && (
+        <ReferenceLine y={widget.ucl} stroke={D.amber} strokeDasharray="6 3" strokeWidth={1.5}
+          label={{ value: `UCL ${widget.ucl}`, position: "insideTopRight", fontSize: 9, fill: D.amber }} />
+      )}
+      {widget.lcl !== undefined && (
+        <ReferenceLine y={widget.lcl} stroke={D.red} strokeDasharray="6 3" strokeWidth={1.5}
+          label={{ value: `LCL ${widget.lcl}`, position: "insideBottomRight", fontSize: 9, fill: D.red }} />
+      )}
+      {widget.centerLine !== undefined && (
+        <ReferenceLine y={widget.centerLine} stroke={D.green} strokeDasharray="3 3" strokeWidth={1}
+          label={{ value: `CL ${widget.centerLine}`, position: "insideTopRight", fontSize: 9, fill: D.green }} />
+      )}
+    </>
+  );
+
   if (widget.chartType === "bar" || widget.chartType === "stackbar") {
     const stacked = widget.chartType === "stackbar";
     return (
@@ -470,6 +489,7 @@ function ChartWidget({ widget, data }: { widget: Widget; data: Record<string, an
           {allSeries.length > 1 && <Legend wrapperStyle={{ fontSize:9, color:D.muted }} />}
           {allSeries.map(s => <Bar key={s.metric} dataKey={s.metric} name={s.label} fill={s.color}
             stackId={stacked?"stack":undefined} radius={stacked?undefined:[2,2,0,0]} maxBarSize={20} />)}
+          {refLines}
         </BarChart>
       </ResponsiveContainer>
     );
@@ -489,6 +509,7 @@ function ChartWidget({ widget, data }: { widget: Widget; data: Record<string, an
           {allSeries.length > 1 && <Legend wrapperStyle={{ fontSize:9, color:D.muted }} />}
           {allSeries.map(s=><Area key={s.metric} dataKey={s.metric} name={s.label} stroke={s.color}
             fill={`url(#grad-${widget.id}-${s.metric})`} strokeWidth={1.5} dot={false} />)}
+          {refLines}
         </AreaChart>
       </ResponsiveContainer>
     );
@@ -501,6 +522,7 @@ function ChartWidget({ widget, data }: { widget: Widget; data: Record<string, an
         {allSeries.length > 1 && <Legend wrapperStyle={{ fontSize:9, color:D.muted }} />}
         {allSeries.map(s=><Line key={s.metric} dataKey={s.metric} name={s.label} stroke={s.color}
           strokeWidth={2} dot={false} activeDot={{ r:3, fill:s.color }} />)}
+        {refLines}
       </LineChart>
     </ResponsiveContainer>
   );
@@ -774,42 +796,32 @@ function WidgetCard({ widget, onDelete, onEdit, onClone, onDuplicate, onCopy, on
   const overlayCount = widget.overlayMetrics?.length ?? 0;
   const baseH  = widget.chartType === "kpi" ? 110 : widget.chartType === "gauge" ? 150 : 180;
   const [resizeH, setResizeH] = useState<number | null>(null);
-  const resizeStartRef  = useRef<{ y: number; h: number } | null>(null);
-  const widthResizeRef  = useRef<{ x: number; span: number } | null>(null);
+  const resizeStartRef = useRef<{ x: number; y: number; h: number; span: number } | null>(null);
   const chartH = resizeH ?? (widget.height ?? baseH);
 
+  // Single bottom-right corner handle: drag diagonally to resize both height and column width
   function handleResizeDown(e: React.MouseEvent) {
     e.preventDefault();
-    resizeStartRef.current = { y: e.clientY, h: chartH };
+    resizeStartRef.current = { x: e.clientX, y: e.clientY, h: chartH, span: widget.width ?? 1 };
     const onMove = (me: MouseEvent) => {
       if (!resizeStartRef.current) return;
       setResizeH(Math.max(60, resizeStartRef.current.h + me.clientY - resizeStartRef.current.y));
     };
     const onUp = (me: MouseEvent) => {
       if (!resizeStartRef.current) return;
-      const newH = Math.max(60, resizeStartRef.current.h + me.clientY - resizeStartRef.current.y);
-      onUpdate({ height: newH });
+      const newH      = Math.max(60, resizeStartRef.current.h + me.clientY - resizeStartRef.current.y);
+      const deltaX    = me.clientX - resizeStartRef.current.x;
+      const spanDelta = Math.round(deltaX / 160);
+      const newSpan   = Math.min(4, Math.max(1, resizeStartRef.current.span + spanDelta));
+      const updates: Partial<Widget> = { height: newH };
+      if (newSpan !== resizeStartRef.current.span) updates.width = newSpan;
+      onUpdate(updates);
       setResizeH(null);
       resizeStartRef.current = null;
       window.removeEventListener("mousemove", onMove);
       window.removeEventListener("mouseup", onUp);
     };
     window.addEventListener("mousemove", onMove);
-    window.addEventListener("mouseup", onUp);
-  }
-
-  function handleWidthResizeDown(e: React.MouseEvent) {
-    e.preventDefault();
-    widthResizeRef.current = { x: e.clientX, span: widget.width ?? 1 };
-    const onUp = (me: MouseEvent) => {
-      if (!widthResizeRef.current) return;
-      const deltaX   = me.clientX - widthResizeRef.current.x;
-      const spanDelta = Math.round(deltaX / 160);
-      const newSpan  = Math.min(4, Math.max(1, widthResizeRef.current.span + spanDelta));
-      if (newSpan !== widthResizeRef.current.span) onUpdate({ width: newSpan });
-      widthResizeRef.current = null;
-      window.removeEventListener("mouseup", onUp);
-    };
     window.addEventListener("mouseup", onUp);
   }
 
@@ -835,6 +847,9 @@ function WidgetCard({ widget, onDelete, onEdit, onClone, onDuplicate, onCopy, on
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2 shrink-0"
         style={{ borderBottom: `1px solid ${D.border}`, background: D.panel }}>
+        <GripVertical data-drag-handle="true"
+          className="w-3.5 h-3.5 shrink-0 cursor-grab opacity-20 group-hover:opacity-50 transition-opacity select-none"
+          style={{ color: D.muted }} />
         <div className={`w-2 h-2 rounded-full shrink-0 transition-all duration-300 ${liveFlash ? "scale-150" : ""}`}
           style={{ background: widget.color, boxShadow: liveFlash ? `0 0 12px ${widget.color}, 0 0 4px ${widget.color}` : `0 0 6px ${widget.color}` }} />
         {widget.imageUrl && widget.imageMode === "icon" && (
@@ -899,23 +914,16 @@ function WidgetCard({ widget, onDelete, onEdit, onClone, onDuplicate, onCopy, on
         <div className="relative h-full">{renderContent()}</div>
       </div>
 
-      {/* Resize handles — positioned relative to the outer card div */}
+      {/* Single corner resize — drag diagonally to adjust both height and column width */}
       {!fullscreen && (
-        <>
-          <div onMouseDown={handleResizeDown}
-            className="absolute bottom-0 right-0 w-5 h-5 z-10 cursor-se-resize flex items-end justify-end p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
-            title="Drag to resize height">
-            <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
-              <line x1="1" y1="10" x2="10" y2="1" stroke={D.border2} strokeWidth="1.5" strokeLinecap="round" />
-              <line x1="5" y1="10" x2="10" y2="5" stroke={D.border2} strokeWidth="1.5" strokeLinecap="round" />
-            </svg>
-          </div>
-          <div onMouseDown={handleWidthResizeDown}
-            className="absolute right-0 top-1/2 -translate-y-1/2 z-10 w-3 h-14 cursor-ew-resize flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-            title="Drag to change width">
-            <div className="w-0.5 h-8 rounded-full" style={{ background: D.border2 }} />
-          </div>
-        </>
+        <div onMouseDown={handleResizeDown}
+          className="absolute bottom-0 right-0 w-6 h-6 z-10 cursor-se-resize flex items-end justify-end p-1 opacity-0 group-hover:opacity-100 transition-opacity"
+          title="Drag to resize (↕ height · ↔ width)">
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
+            <line x1="1" y1="10" x2="10" y2="1" stroke={D.border2} strokeWidth="1.5" strokeLinecap="round" />
+            <line x1="5" y1="10" x2="10" y2="5" stroke={D.border2} strokeWidth="1.5" strokeLinecap="round" />
+          </svg>
+        </div>
       )}
     </div>
   );
@@ -1170,6 +1178,9 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
   const [aggType,      setAggType]      = useState<string>(initial?.aggType ?? "avg");
   const [imageUrl,     setImageUrl]     = useState(initial?.imageUrl ?? "");
   const [imageMode,    setImageMode]    = useState<"background" | "icon">(initial?.imageMode ?? "background");
+  const [ucl,          setUcl]          = useState(initial?.ucl !== undefined ? String(initial.ucl) : "");
+  const [lcl,          setLcl]          = useState(initial?.lcl !== undefined ? String(initial.lcl) : "");
+  const [centerLine,   setCenterLine]   = useState(initial?.centerLine !== undefined ? String(initial.centerLine) : "");
 
   const { data: assets }     = useListAssets();
   const { data: attributes } = useListAssetAttributes(assetId, { query: { enabled: !!assetId, queryKey: ["asset-attributes", assetId] } });
@@ -1231,6 +1242,9 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
     setAggType(initial?.aggType ?? "avg");
     setImageUrl(initial?.imageUrl ?? "");
     setImageMode(initial?.imageMode ?? "background");
+    setUcl(initial?.ucl !== undefined ? String(initial.ucl) : "");
+    setLcl(initial?.lcl !== undefined ? String(initial.lcl) : "");
+    setCenterLine(initial?.centerLine !== undefined ? String(initial.centerLine) : "");
   }, [open, initial, preselectedAssetId, nextColor]);
 
   function addOverlay() { setOverlayMetrics(prev => [...prev, { assetId:"", assetName:"", metric:"", color: NEON_PALETTE[(prev.length+1)%NEON_PALETTE.length] }]); }
@@ -1258,6 +1272,9 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
       aggType: aggType as Widget["aggType"],
       imageUrl: imageUrl.trim() || undefined,
       imageMode: imageUrl.trim() ? imageMode : undefined,
+      ucl: ucl.trim() !== "" ? Number(ucl) : undefined,
+      lcl: lcl.trim() !== "" ? Number(lcl) : undefined,
+      centerLine: centerLine.trim() !== "" ? Number(centerLine) : undefined,
     });
     onOpenChange(false);
   }
@@ -1348,9 +1365,35 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
           <div className="space-y-1">
             <Label className="text-xs">Widget Size</Label>
             <p className="text-[10px] text-muted-foreground">
-              Drag the bottom-right corner of a widget on the dashboard to resize it.
+              Drag the bottom-right corner of a widget on the dashboard to resize height and width simultaneously.
+              Drag the grip icon (⠿) in the header to reorder widgets.
             </p>
           </div>
+          {(["line","area","bar","stackbar"] as ChartType[]).includes(chartType) && (
+            <div className="space-y-2">
+              <Label className="text-xs font-medium">Control Limit Lines (SPC)</Label>
+              <div className="grid grid-cols-3 gap-2">
+                <div className="space-y-1">
+                  <Label className="text-xs" style={{ color: D.amber }}>UCL</Label>
+                  <Input className="h-8 text-xs" type="number" value={ucl}
+                    onChange={e => setUcl(e.target.value)} placeholder="e.g. 90" />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs" style={{ color: D.red }}>LCL</Label>
+                  <Input className="h-8 text-xs" type="number" value={lcl}
+                    onChange={e => setLcl(e.target.value)} placeholder="e.g. 10" />
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs" style={{ color: D.green }}>Center Line</Label>
+                  <Input className="h-8 text-xs" type="number" value={centerLine}
+                    onChange={e => setCenterLine(e.target.value)} placeholder="e.g. 50" />
+                </div>
+              </div>
+              <p className="text-[10px]" style={{ color: D.muted }}>
+                Leave blank to hide. UCL shown in amber, LCL in red, center line in green.
+              </p>
+            </div>
+          )}
           <div className="space-y-1">
             <Label className="text-xs">Primary Color</Label>
             <div className="flex gap-2 flex-wrap">
@@ -1493,6 +1536,8 @@ export default function Visualization() {
   const [treeOpen,     setTreeOpen]     = useState(true);
   const [selectedAssetId, setSelectedAssetId] = useState<string | null>(null);
   const [globalRange,  setGlobalRange]  = useState<number | null>(null);
+  const [dragId,       setDragId]       = useState<string | null>(null);
+  const [dragOverId,   setDragOverId]   = useState<string | null>(null);
 
   // Global refresh control
   const [dashRefreshEnabled,  setDashRefreshEnabled]  = useState(false);
@@ -1642,6 +1687,18 @@ export default function Visualization() {
     mutateWidgets(activeDash.id, ws => {
       const idx = ws.findIndex(x => x.id === w.id);
       return idx >= 0 ? ws.map((x, i) => i === idx ? w : x) : [...ws, w];
+    });
+  }
+  function reorderWidgets(fromId: string, toId: string) {
+    if (!activeDash || fromId === toId) return;
+    mutateWidgets(activeDash.id, ws => {
+      const arr = [...ws];
+      const fromIdx = arr.findIndex(w => w.id === fromId);
+      const toIdx   = arr.findIndex(w => w.id === toId);
+      if (fromIdx < 0 || toIdx < 0) return ws;
+      const [item] = arr.splice(fromIdx, 1);
+      arr.splice(toIdx, 0, item);
+      return arr;
     });
   }
   function removeWidget(id: string) {
@@ -2028,7 +2085,23 @@ export default function Visualization() {
               <div className="flex-1 overflow-auto p-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4 auto-rows-auto">
                   {displayWidgets.map(w => (
-                    <div key={w.id} style={{ gridColumn: `span ${Math.min(w.width ?? 1, 4)}` }}>
+                    <div key={w.id}
+                      draggable
+                      onDragStart={e => {
+                        if (!(e.target as HTMLElement).closest('[data-drag-handle]')) { e.preventDefault(); return; }
+                        e.dataTransfer.effectAllowed = "move";
+                        setDragId(w.id);
+                      }}
+                      onDragOver={e => { e.preventDefault(); if (dragId && dragId !== w.id) setDragOverId(w.id); }}
+                      onDrop={e => { e.preventDefault(); if (dragId && dragId !== w.id) reorderWidgets(dragId, w.id); setDragId(null); setDragOverId(null); }}
+                      onDragEnd={() => { setDragId(null); setDragOverId(null); }}
+                      style={{
+                        gridColumn: `span ${Math.min(w.width ?? 1, 4)}`,
+                        opacity: dragId === w.id ? 0.35 : 1,
+                        transition: "opacity 0.15s",
+                        outline: dragOverId === w.id && dragId !== w.id ? `2px solid ${D.accent}88` : "none",
+                        borderRadius: 8,
+                      }}>
                       <WidgetCard widget={w}
                         onDelete={() => removeWidget(w.id)}
                         onEdit={() => { setEditWidget(w); setDialogOpen(true); }}
