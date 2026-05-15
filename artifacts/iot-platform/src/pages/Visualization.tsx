@@ -206,6 +206,26 @@ function metricKeyOf(a: any) {
 function metricValueOf(a: any) {
   return a.tagName?.trim() || a.sourceMetric?.trim() || a.name;
 }
+// Fill missing time buckets with 0 between the first and last data points
+function gapFill(rows: { timestamp: string; value: number | null }[], bucket: string) {
+  const STEP: Record<string, number> = {
+    "1m": 60_000, "5m": 300_000, "15m": 900_000, "30m": 1_800_000,
+    "1h": 3_600_000, "6h": 21_600_000, "12h": 43_200_000, "1d": 86_400_000, "1w": 604_800_000,
+  };
+  const step = STEP[bucket];
+  if (!step || rows.length < 2) return rows.map(r => ({ ...r, value: r.value ?? 0 }));
+  const sorted = [...rows].sort((a, b) => +new Date(a.timestamp) - +new Date(b.timestamp));
+  const map = new Map(sorted.map(r => [Math.round(+new Date(r.timestamp) / step), r.value]));
+  const first = Math.round(+new Date(sorted[0].timestamp) / step);
+  const last  = Math.round(+new Date(sorted[sorted.length - 1].timestamp) / step);
+  const result: { timestamp: string; value: number }[] = [];
+  for (let i = first; i <= last; i++) {
+    const val = map.get(i);
+    result.push({ timestamp: new Date(i * step).toISOString(), value: val ?? 0 });
+  }
+  return result;
+}
+
 function widgetSeriesKeys(widget: Widget) {
   const keys = [
     widget.metric,
@@ -434,7 +454,10 @@ function ChartWidget({ widget, data }: { widget: Widget; data: Record<string, an
       tsBuckets[t][s.metric] = Number(r.value);
     });
   });
-  const chartData = Object.entries(tsBuckets).sort(([a],[b])=>a.localeCompare(b)).map(([t,vals])=>({ t,...vals }));
+  const chartData = Object.entries(tsBuckets).sort(([a],[b])=>a.localeCompare(b)).map(([t,vals])=>({
+    t,
+    ...Object.fromEntries(allSeries.map(s => [s.metric, vals[s.metric] !== undefined ? vals[s.metric] : 0])),
+  }));
   if (chartData.length === 0) return <EmptyState />;
   const commonProps = { data: chartData, margin: { top: 4, right: 8, bottom: 0, left: 0 } };
   if (widget.chartType === "bar" || widget.chartType === "stackbar") {
@@ -692,13 +715,11 @@ function WidgetCard({ widget, onDelete, onEdit, onClone, onDuplicate, onCopy, on
         const r = await fetch(`${BASE}/api/system/aggregate?${p}`, { credentials: "include" });
         if (!r.ok) return [];
         const json = await r.json();
-        return (json.data ?? []).map((d: any) => {
+        const aggRows = (json.data ?? []).map((d: any) => {
           const raw = d[aggField] ?? d.avg_val ?? d.max_val ?? d.min_val ?? null;
-          return {
-            timestamp: d.bucket,
-            value: raw !== null ? parseFloat(String(raw)) : null,
-          };
+          return { timestamp: d.bucket, value: raw !== null ? parseFloat(String(raw)) : null };
         });
+        return gapFill(aggRows, aggBucket);
       }
       const p = new URLSearchParams({ metric, from, to, limit: "2000" });
       const r = await fetch(`${BASE}/api/telemetry/${assetId}?${p}`, { credentials: "include" });
@@ -753,7 +774,8 @@ function WidgetCard({ widget, onDelete, onEdit, onClone, onDuplicate, onCopy, on
   const overlayCount = widget.overlayMetrics?.length ?? 0;
   const baseH  = widget.chartType === "kpi" ? 110 : widget.chartType === "gauge" ? 150 : 180;
   const [resizeH, setResizeH] = useState<number | null>(null);
-  const resizeStartRef = useRef<{ y: number; h: number } | null>(null);
+  const resizeStartRef  = useRef<{ y: number; h: number } | null>(null);
+  const widthResizeRef  = useRef<{ x: number; span: number } | null>(null);
   const chartH = resizeH ?? (widget.height ?? baseH);
 
   function handleResizeDown(e: React.MouseEvent) {
@@ -776,6 +798,21 @@ function WidgetCard({ widget, onDelete, onEdit, onClone, onDuplicate, onCopy, on
     window.addEventListener("mouseup", onUp);
   }
 
+  function handleWidthResizeDown(e: React.MouseEvent) {
+    e.preventDefault();
+    widthResizeRef.current = { x: e.clientX, span: widget.width ?? 1 };
+    const onUp = (me: MouseEvent) => {
+      if (!widthResizeRef.current) return;
+      const deltaX   = me.clientX - widthResizeRef.current.x;
+      const spanDelta = Math.round(deltaX / 160);
+      const newSpan  = Math.min(4, Math.max(1, widthResizeRef.current.span + spanDelta));
+      if (newSpan !== widthResizeRef.current.span) onUpdate({ width: newSpan });
+      widthResizeRef.current = null;
+      window.removeEventListener("mouseup", onUp);
+    };
+    window.addEventListener("mouseup", onUp);
+  }
+
   function renderContent() {
     if (loading && Object.keys(data).length === 0)
       return <div className="flex items-center justify-center h-full"><RefreshCw className="w-4 h-4 animate-spin" style={{ color: D.muted }} /></div>;
@@ -793,12 +830,13 @@ function WidgetCard({ widget, onDelete, onEdit, onClone, onDuplicate, onCopy, on
 
   return (
     <div
-      className="flex flex-col rounded-lg overflow-hidden group"
+      className="flex flex-col rounded-lg overflow-hidden group relative"
       style={{ background: D.card, border: `1px solid ${D.border}`, boxShadow: "0 2px 12px rgba(0,0,0,0.4)", minHeight: 260 }}>
       {/* Header */}
       <div className="flex items-center gap-2 px-3 py-2 shrink-0"
         style={{ borderBottom: `1px solid ${D.border}`, background: D.panel }}>
-        <div className="w-2 h-2 rounded-full shrink-0" style={{ background: widget.color, boxShadow: `0 0 6px ${widget.color}` }} />
+        <div className={`w-2 h-2 rounded-full shrink-0 transition-all duration-300 ${liveFlash ? "scale-150" : ""}`}
+          style={{ background: widget.color, boxShadow: liveFlash ? `0 0 12px ${widget.color}, 0 0 4px ${widget.color}` : `0 0 6px ${widget.color}` }} />
         {widget.imageUrl && widget.imageMode === "icon" && (
           <img src={widget.imageUrl} alt="" className="w-5 h-5 rounded object-cover shrink-0"
             onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
@@ -809,7 +847,6 @@ function WidgetCard({ widget, onDelete, onEdit, onClone, onDuplicate, onCopy, on
             <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ background: D.border2, color: D.accent }}>{widget.assetName}</span>
             <span className="text-[9px] px-1 rounded font-mono" style={{ background: D.border2, color: D.accent2 }}>{widget.metric}</span>
             {overlayCount > 0 && <span className="text-[9px] px-1 rounded" style={{ background: D.purple+"33", color: D.purple }}>+{overlayCount}</span>}
-            {liveFlash && <span className="text-[9px] px-1.5 py-0.5 rounded font-semibold animate-pulse" style={{ background: D.green+"33", color: D.green }}>● LIVE</span>}
           </div>
           <div className="flex items-center gap-1 mt-px">
             <Clock className="w-2.5 h-2.5" style={{ color: D.muted }} />
@@ -860,31 +897,26 @@ function WidgetCard({ widget, onDelete, onEdit, onClone, onDuplicate, onCopy, on
             onError={e => { (e.target as HTMLImageElement).style.display = "none"; }} />
         )}
         <div className="relative h-full">{renderContent()}</div>
-        {!fullscreen && (
+      </div>
+
+      {/* Resize handles — positioned relative to the outer card div */}
+      {!fullscreen && (
+        <>
           <div onMouseDown={handleResizeDown}
-            className="absolute bottom-0 right-0 w-5 h-5 cursor-se-resize flex items-end justify-end p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
-            title="Drag to resize">
+            className="absolute bottom-0 right-0 w-5 h-5 z-10 cursor-se-resize flex items-end justify-end p-0.5 opacity-0 group-hover:opacity-100 transition-opacity"
+            title="Drag to resize height">
             <svg width="10" height="10" viewBox="0 0 10 10" fill="none">
               <line x1="1" y1="10" x2="10" y2="1" stroke={D.border2} strokeWidth="1.5" strokeLinecap="round" />
               <line x1="5" y1="10" x2="10" y2="5" stroke={D.border2} strokeWidth="1.5" strokeLinecap="round" />
             </svg>
           </div>
-        )}
-      </div>
-
-      <div className="px-3 py-1 flex items-center justify-between shrink-0"
-        style={{ borderTop: `1px solid ${D.border}`, background: D.panel }}>
-        <span style={{ fontSize: 9, color: D.muted }}>
-          {getWidgetRows(widget, data).length} pts · {CHART_TYPE_OPTS.find(c=>c.value===widget.chartType)?.label}
-          {widget.granularity && widget.granularity !== "auto" && (
-            <span> · {GRANULARITY_OPTS.find(g=>g.value===widget.granularity)?.label ?? widget.granularity}</span>
-          )}
-          {widget.aggType && widget.aggType !== "avg" && (
-            <span> · {AGG_TYPE_OPTS.find(a=>a.value===widget.aggType)?.label ?? widget.aggType}</span>
-          )}
-        </span>
-        <span />
-      </div>
+          <div onMouseDown={handleWidthResizeDown}
+            className="absolute right-0 top-1/2 -translate-y-1/2 z-10 w-3 h-14 cursor-ew-resize flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+            title="Drag to change width">
+            <div className="w-0.5 h-8 rounded-full" style={{ background: D.border2 }} />
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -1996,7 +2028,7 @@ export default function Visualization() {
               <div className="flex-1 overflow-auto p-4">
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4 gap-4 auto-rows-auto">
                   {displayWidgets.map(w => (
-                    <div key={w.id}>
+                    <div key={w.id} style={{ gridColumn: `span ${Math.min(w.width ?? 1, 4)}` }}>
                       <WidgetCard widget={w}
                         onDelete={() => removeWidget(w.id)}
                         onEdit={() => { setEditWidget(w); setDialogOpen(true); }}
