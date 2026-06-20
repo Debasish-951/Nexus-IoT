@@ -24,3 +24,9 @@ id = "M3QMOzeNWtLNu2sxzbgK2"
 uri = "file://docs/Platform_Documentation_v2.0.pdf"
 type = "pdf"
 title = "Platform Documentation v2.0 (PDF)"
+
+[[outputs]]
+id = "NBDr-l06jxc32wMH_EJMm"
+uri = "file://docs/product-modernization-strategy.md"
+type = "text"
+title = "WS-Integrated Suite — Product Modernization Strategy"

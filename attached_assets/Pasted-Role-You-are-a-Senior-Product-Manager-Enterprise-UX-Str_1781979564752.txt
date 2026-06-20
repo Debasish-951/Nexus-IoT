@@ -1,0 +1,92 @@
+Role:
+You are a Senior Product Manager, Enterprise UX Strategist, and Industrial IoT Solution Architect.
+
+Context:
+I already have an existing Industrial IoT platform in production. The platform includes:
+- Home dashboard
+- Asset management
+- Asset templates
+- Reports
+- User management / access control
+- Payload simulator
+
+I want to improve the platform significantly, especially the dashboard, reporting, asset template reuse, and access-control experience. However, I do NOT want a big-bang redesign that disrupts the current product, affects current users, or forces immediate implementation of features that do not yet exist in the platform.
+
+Current challenge:
+- I like the new dashboard ideas such as live plant overview, business-relevant KPIs, live vs target comparison, action center, and clickable/interactive permission management.
+- However, many of these features are not available yet in my platform.
+- I need a practical way to move forward gradually.
+- I want to add improvements safely, incrementally, and without negatively affecting the current dashboard or breaking the existing user experience.
+
+Goal:
+Help me create a phased product enhancement strategy so I can evolve the platform step by step, starting from the current state, while preserving stability and usability.
+
+Task:
+1. Review the situation as an existing-product modernization problem, not as a greenfield redesign.
+2. Suggest how I should proceed without affecting the current dashboard and current users.
+3. Create a phased roadmap for introducing improvements gradually.
+4. Separate the recommendations into:
+   - Immediate enhancements that can be added on top of the current platform
+   - Medium-term improvements that require moderate UI/data/model work
+   - Long-term strategic features that need architecture or product expansion
+5. Recommend how to introduce advanced dashboard ideas without replacing the whole homepage immediately.
+6. Suggest safe rollout approaches such as:
+   - optional widgets
+   - role-based dashboard views
+   - feature flags
+   - pilot rollout for selected users
+   - “new dashboard beta” toggle
+   - progressive enhancement instead of full replacement
+7. Explain which ideas should be treated as:
+   - MVP
+   - Phase 2
+   - Future vision
+8. For the dashboard, recommend which new elements can realistically be introduced first, using existing data where possible.
+9. For asset templates, suggest low-risk reuse features that can be added before implementing a full template library system.
+10. For reporting, suggest how to improve the current reports incrementally before building a full executive analytics layer.
+11. For user management, suggest how to gradually move from form-based permissions to a more interactive permission matrix.
+12. Suggest how to validate each improvement before fully rolling it out.
+13. Include product and UX guidance on how to avoid user confusion during transition.
+14. Recommend how to prioritize features based on:
+   - end-user value
+   - engineering effort
+   - data availability
+   - implementation risk
+15. Include examples of “start small” enhancements inspired by modern industrial dashboards, such as:
+   - a new real-time summary strip on top of the existing dashboard
+   - a critical assets panel
+   - a pending actions panel
+   - a business-impact card section
+   - a role-based executive summary tab
+   - a beta “operations overview” page
+16. Recommend which current widgets should remain for now, which should be deprioritized, and which can later be removed.
+
+Format:
+- Section 1: Core Problem Framing
+- Section 2: Recommended Rollout Strategy
+- Section 3: Phased Roadmap
+   - Phase 0: Preserve + Assess
+   - Phase 1: Safe Additions on Top of Existing Platform
+   - Phase 2: Enhanced Role-Based Experiences
+   - Phase 3: Advanced Operational Intelligence
+- Section 4: Dashboard Evolution Plan
+- Section 5: Asset Template Reuse – Incremental Approach
+- Section 6: Reporting Improvement – Incremental Approach
+- Section 7: User Access Control – Incremental Approach
+- Section 8: Prioritization Matrix (Value vs Effort vs Risk)
+- Section 9: Rollout / Adoption Recommendations
+- Section 10: Final Recommendation – What I Should Do First
+
+Constraints:
+- Do NOT assume all advanced features already exist
+- Do NOT recommend a full redesign as the first step
+- Preserve current platform stability and existing workflows
+- Focus on incremental improvements
+- Prioritize practical, implementable steps
+- Minimize engineering and UX disruption
+- Use existing data sources wherever possible before suggesting new architecture
+- Keep the recommendations product-realistic, not idealistic
+- Make the output suitable for sharing with product, design, and engineering teams
+
+Output Style:
+Write the response as a practical modernization strategy for an existing Industrial IoT platform, with clear phases, trade-offs, and implementation-friendly guidance.
