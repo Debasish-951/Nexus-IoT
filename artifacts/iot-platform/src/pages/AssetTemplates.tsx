@@ -20,7 +20,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   Plus, Trash2, Search, FileText, Save, Braces, FileSpreadsheet,
   ChevronRight, AlertTriangle, CheckCircle2, LayoutTemplate, Zap, Info,
-  Download, HelpCircle,
+  Download, HelpCircle, Copy,
 } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -207,9 +207,31 @@ export default function AssetTemplates() {
   // Per-row UoM editing in the preview (payload mode)
   const [previewUoms, setPreviewUoms] = useState<Record<number, string>>({});
 
+  const [cloning, setCloning] = useState(false);
+
   const { data: templates } = useListAssetTemplates({ search: search || undefined });
   const createTemplate = useCreateAssetTemplate();
   const deleteTemplate = useDeleteAssetTemplate();
+
+  async function cloneTemplate(t: any) {
+    setCloning(true);
+    try {
+      const res = await createTemplate.mutateAsync({ data: { name: `Copy of ${t.name}` } });
+      const newId = (res as any).id;
+      if (newId && editedDefs.length > 0) {
+        await fetch(`${BASE}/api/asset-templates/${newId}`, {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ attributeDefinitions: editedDefs }),
+          credentials: "include",
+        });
+      }
+      qc.invalidateQueries({ queryKey: getListAssetTemplatesQueryKey() });
+      toast({ title: "Template cloned", description: `Created "Copy of ${t.name}"` });
+    } finally {
+      setCloning(false);
+    }
+  }
 
   const form = useForm({ defaultValues: { name: "" } });
   const templateList = (templates as any[] | undefined) ?? [];
@@ -393,6 +415,13 @@ export default function AssetTemplates() {
                   title="Download this template's attribute schema as JSON — useful for sharing between platforms or re-importing later">
                   <Download className="w-3 h-3 mr-1" /> Export Schema
                 </Button>
+                {can("manage_templates") && (
+                  <Button size="sm" variant="outline" className="h-7 text-xs"
+                    onClick={() => cloneTemplate(selected)} disabled={cloning}
+                    title="Duplicate this template with all its attribute definitions">
+                    <Copy className="w-3 h-3 mr-1" /> {cloning ? "Cloning…" : "Clone"}
+                  </Button>
+                )}
                 {can("manage_templates") && (
                   <Button size="sm" variant="outline" className="h-7 text-xs"
                     onClick={() => { setImportOpen(true); setImportTab("payload"); setImportText(""); setImportPreview([]); setImportError(null); }}>
