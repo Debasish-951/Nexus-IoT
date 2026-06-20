@@ -22,6 +22,7 @@ import {
   LineChart, Line, AreaChart, Area, BarChart, Bar,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
   PieChart, Pie, Cell, ScatterChart, Scatter, ReferenceLine,
+  ComposedChart,
 } from "recharts";
 import {
   Plus, Trash2, RefreshCw, Settings2, TrendingUp, TrendingDown,
@@ -176,19 +177,24 @@ const RANGES = [
 ];
 
 // ── Widget types ───────────────────────────────────────────────────────────────
-type ChartType = "line" | "area" | "bar" | "stackbar" | "kpi" | "gauge" | "pie" | "donut" | "scatter" | "heatmap" | "statetimeline";
-const CHART_TYPE_OPTS: { value: ChartType; label: string; supportsOverlay: boolean }[] = [
-  { value: "line",          label: "Line Chart",      supportsOverlay: true },
-  { value: "area",          label: "Area Chart",      supportsOverlay: true },
-  { value: "bar",           label: "Bar Chart",       supportsOverlay: true },
-  { value: "stackbar",      label: "Stack Bar Chart", supportsOverlay: true },
-  { value: "kpi",           label: "KPI Card",        supportsOverlay: false },
-  { value: "gauge",         label: "Gauge Meter",     supportsOverlay: false },
-  { value: "pie",           label: "Pie Chart",       supportsOverlay: false },
-  { value: "donut",         label: "Donut Chart",     supportsOverlay: false },
-  { value: "scatter",       label: "Scatter Plot",    supportsOverlay: false },
-  { value: "heatmap",       label: "Hour Heatmap",    supportsOverlay: false },
-  { value: "statetimeline", label: "State Timeline",  supportsOverlay: false },
+type ChartType = "line" | "area" | "bar" | "stackbar" | "kpi" | "gauge" | "pie" | "donut" | "scatter" | "heatmap" | "statetimeline"
+  | "anomaly" | "rul" | "predictive" | "forecast";
+const CHART_TYPE_OPTS: { value: ChartType; label: string; supportsOverlay: boolean; group?: string }[] = [
+  { value: "line",          label: "Line Chart",              supportsOverlay: true },
+  { value: "area",          label: "Area Chart",              supportsOverlay: true },
+  { value: "bar",           label: "Bar Chart",               supportsOverlay: true },
+  { value: "stackbar",      label: "Stack Bar Chart",         supportsOverlay: true },
+  { value: "kpi",           label: "KPI Card",                supportsOverlay: false },
+  { value: "gauge",         label: "Gauge Meter",             supportsOverlay: false },
+  { value: "pie",           label: "Pie Chart",               supportsOverlay: false },
+  { value: "donut",         label: "Donut Chart",             supportsOverlay: false },
+  { value: "scatter",       label: "Scatter Plot",            supportsOverlay: false },
+  { value: "heatmap",       label: "Hour Heatmap",            supportsOverlay: false },
+  { value: "statetimeline", label: "State Timeline",          supportsOverlay: false },
+  { value: "anomaly",       label: "🔍 Anomaly Detection",    supportsOverlay: false, group: "analytics" },
+  { value: "rul",           label: "⏳ Remaining Useful Life", supportsOverlay: false, group: "analytics" },
+  { value: "predictive",    label: "🔧 Predictive Maintenance",supportsOverlay: false, group: "analytics" },
+  { value: "forecast",      label: "📈 Trend Forecast",       supportsOverlay: false, group: "analytics" },
 ];
 
 // ── Roles ──────────────────────────────────────────────────────────────────────
@@ -501,6 +507,379 @@ function StateTimelineWidget({ widget, data }: { widget: Widget; data: Record<st
             <span style={{ fontSize:9, color:D.muted }}>{total>0?((s.n/total)*100).toFixed(0):0}%</span>
           </div>
         ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Analytics helpers ──────────────────────────────────────────────────────────
+function linReg(pts: { x: number; y: number }[]): { slope: number; intercept: number; r2: number } {
+  const n = pts.length;
+  if (n < 2) return { slope: 0, intercept: pts[0]?.y ?? 0, r2: 0 };
+  const mx = pts.reduce((s, p) => s + p.x, 0) / n;
+  const my = pts.reduce((s, p) => s + p.y, 0) / n;
+  const ssXX = pts.reduce((s, p) => s + (p.x - mx) ** 2, 0);
+  const ssXY = pts.reduce((s, p) => s + (p.x - mx) * (p.y - my), 0);
+  const slope = ssXX === 0 ? 0 : ssXY / ssXX;
+  const intercept = my - slope * mx;
+  const ssTot = pts.reduce((s, p) => s + (p.y - my) ** 2, 0);
+  const ssRes = pts.reduce((s, p) => s + (p.y - (slope * p.x + intercept)) ** 2, 0);
+  return { slope, intercept, r2: ssTot === 0 ? 1 : 1 - ssRes / ssTot };
+}
+function zScoreArr(vals: number[]): number[] {
+  if (vals.length === 0) return [];
+  const mean = vals.reduce((s, v) => s + v, 0) / vals.length;
+  const std = Math.sqrt(vals.reduce((s, v) => s + (v - mean) ** 2, 0) / vals.length);
+  return vals.map(v => std === 0 ? 0 : (v - mean) / std);
+}
+
+// ── Anomaly Detection Widget ──────────────────────────────────────────────────
+function AnomalyDetectionWidget({ widget, data }: { widget: Widget; data: Record<string, any[]> }) {
+  const rows = [...getWidgetRows(widget, data)]
+    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+    .filter(r => r.value !== null && !isNaN(Number(r.value)));
+  if (rows.length === 0) return <EmptyState />;
+
+  const vals = rows.map(r => Number(r.value));
+  const zs = zScoreArr(vals);
+  const threshold = widget.minVal != null && widget.minVal > 0 ? widget.minVal : 2.5;
+  const mean = vals.reduce((s, v) => s + v, 0) / vals.length;
+  const std  = Math.sqrt(vals.reduce((s, v) => s + (v - mean) ** 2, 0) / vals.length);
+
+  const chartData = rows.map((r, i) => ({
+    t:       fmtTs(r.timestamp, widget.rangeMinutes),
+    value:   Number(r.value),
+    anomaly: Math.abs(zs[i]) > threshold ? Number(r.value) : undefined,
+    ucl:     mean + threshold * std,
+    lcl:     mean - threshold * std,
+  }));
+
+  const anomalyCount = chartData.filter(d => d.anomaly !== undefined).length;
+  const anomalyRate  = ((anomalyCount / rows.length) * 100).toFixed(1);
+  const lastAnomaly  = chartData.filter(d => d.anomaly !== undefined).pop();
+
+  return (
+    <div className="flex flex-col h-full gap-1 p-1">
+      <div className="flex gap-4 px-1 py-1 shrink-0 flex-wrap">
+        {[
+          { label: "Anomalies",   val: anomalyCount,       col: anomalyCount > 0 ? D.red   : D.green },
+          { label: "Rate",        val: `${anomalyRate}%`,  col: Number(anomalyRate) > 5 ? D.amber : D.green },
+          { label: "Z Threshold", val: threshold.toFixed(1), col: D.muted },
+          { label: "Std Dev",     val: std.toFixed(3),     col: D.muted },
+        ].map(s => (
+          <div key={s.label} className="flex flex-col items-center">
+            <span style={{ fontSize: 9, color: D.muted }}>{s.label}</span>
+            <span style={{ fontSize: 12, fontWeight: 700, color: s.col, fontVariantNumeric: "tabular-nums" }}>{s.val}</span>
+          </div>
+        ))}
+        {lastAnomaly && (
+          <div className="flex flex-col items-center ml-auto">
+            <span style={{ fontSize: 9, color: D.muted }}>Last Anomaly</span>
+            <span style={{ fontSize: 11, color: D.red }}>{lastAnomaly.t}</span>
+          </div>
+        )}
+      </div>
+      <div className="flex-1 min-h-0">
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={chartData} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+            <CartesianGrid {...darkGrid} />
+            <XAxis dataKey="t" {...darkAxis} interval="preserveStartEnd" />
+            <YAxis {...darkAxis} width={40} />
+            <Tooltip {...darkTooltip} formatter={(v: number, name: string) => [typeof v === "number" ? v.toFixed(3) : v, name]} />
+            <ReferenceLine y={mean + threshold * std} stroke={D.red}   strokeDasharray="4 2" strokeWidth={1}
+              label={{ value: `+${threshold}σ`, position: "right", fill: D.red, fontSize: 8 }} />
+            <ReferenceLine y={mean - threshold * std} stroke={D.red}   strokeDasharray="4 2" strokeWidth={1}
+              label={{ value: `-${threshold}σ`, position: "right", fill: D.red, fontSize: 8 }} />
+            <ReferenceLine y={mean}                   stroke={D.muted} strokeDasharray="2 2" strokeWidth={1} />
+            <Line type="monotone" dataKey="value"   stroke={widget.color} strokeWidth={1.5} dot={false} name="Value" />
+            <Line type="monotone" dataKey="anomaly" stroke="none" dot={{ r: 5, fill: D.red, stroke: "#fff", strokeWidth: 1 }}
+              activeDot={false} name="Anomaly" connectNulls={false} legendType="circle" />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+      <div className="flex justify-between px-1 shrink-0" style={{ fontSize: 9 }}>
+        <span style={{ color: widget.color }}>─ Signal</span>
+        <span style={{ color: D.muted }}>── Mean ± {threshold}σ control limits</span>
+        <span style={{ color: D.red }}>● Anomaly</span>
+      </div>
+    </div>
+  );
+}
+
+// ── Remaining Useful Life Widget ──────────────────────────────────────────────
+function RulWidget({ widget, data }: { widget: Widget; data: Record<string, any[]> }) {
+  const rows = [...getWidgetRows(widget, data)]
+    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+    .filter(r => r.value !== null && !isNaN(Number(r.value)));
+  if (rows.length < 3) return <EmptyState />;
+
+  const threshold = widget.maxVal ?? null;
+  const t0  = new Date(rows[0].timestamp).getTime();
+  const pts  = rows.map(r => ({ x: (new Date(r.timestamp).getTime() - t0) / 3_600_000, y: Number(r.value) }));
+  const reg  = linReg(pts);
+
+  const tLast = pts[pts.length - 1].x;
+  let rulHours: number | null = null;
+  let rulText  = threshold === null ? "Set threshold via Max Val" : "Stable / No crossing";
+  let rulColor = D.green;
+
+  if (threshold !== null && reg.slope !== 0) {
+    rulHours = (threshold - reg.intercept) / reg.slope - tLast;
+    if (rulHours <= 0) { rulText = "⚠ Threshold exceeded"; rulColor = D.red; }
+    else if (rulHours < 24)    { rulText = `${rulHours.toFixed(1)} hrs`;  rulColor = rulHours < 6  ? D.red : D.amber; }
+    else if (rulHours < 168)   { rulText = `${(rulHours/24).toFixed(1)} days`; rulColor = rulHours < 48 ? D.amber : D.green; }
+    else                       { rulText = `${(rulHours/168).toFixed(1)} wks`; rulColor = D.green; }
+  }
+
+  const forecastHrs = Math.max(tLast * 0.3, 4);
+  const fSteps = 10;
+  const historicalData = rows.map((r, i) => ({
+    t: fmtTs(r.timestamp, widget.rangeMinutes),
+    value: Number(r.value),
+    trend: parseFloat((reg.slope * pts[i].x + reg.intercept).toFixed(4)),
+  }));
+  const forecastData = Array.from({ length: fSteps }, (_, i) => {
+    const xF = tLast + (forecastHrs * (i + 1)) / fSteps;
+    return {
+      t:     format(new Date(t0 + xF * 3_600_000), "HH:mm dd/MM"),
+      value: undefined as number | undefined,
+      trend: parseFloat((reg.slope * xF + reg.intercept).toFixed(4)),
+    };
+  });
+  const chartData = [...historicalData, ...forecastData];
+  const trendColor = reg.slope > 0.001 ? D.amber : reg.slope < -0.001 ? D.accent2 : D.green;
+  const healthPct  = rulHours !== null && rulHours > 0 ? Math.min(100, (rulHours / (rulHours + tLast)) * 100) : (rulHours !== null ? 0 : 100);
+
+  return (
+    <div className="flex flex-col h-full gap-1 p-1">
+      <div className="flex items-center gap-4 px-1 py-1 shrink-0 flex-wrap">
+        <div className="flex flex-col">
+          <span style={{ fontSize: 9, color: D.muted }}>Est. Remaining Life</span>
+          <span style={{ fontSize: 15, fontWeight: 700, color: rulColor }}>{rulText}</span>
+        </div>
+        <div className="flex flex-col">
+          <span style={{ fontSize: 9, color: D.muted }}>Slope</span>
+          <span style={{ fontSize: 11, fontWeight: 600, color: trendColor }}>
+            {reg.slope > 0.001 ? "▲" : reg.slope < -0.001 ? "▼" : "→"} {(reg.slope).toFixed(5)}/hr
+          </span>
+        </div>
+        <div className="flex flex-col">
+          <span style={{ fontSize: 9, color: D.muted }}>R² Fit</span>
+          <span style={{ fontSize: 11, color: reg.r2 > 0.7 ? D.green : D.amber }}>{(reg.r2 * 100).toFixed(0)}%</span>
+        </div>
+        {threshold !== null && (
+          <div className="flex flex-col">
+            <span style={{ fontSize: 9, color: D.muted }}>Threshold</span>
+            <span style={{ fontSize: 11, color: D.red }}>{threshold} {widget.unit ?? ""}</span>
+          </div>
+        )}
+        <div className="flex flex-col ml-auto">
+          <span style={{ fontSize: 9, color: D.muted }}>Health Index</span>
+          <span style={{ fontSize: 11, color: healthPct > 60 ? D.green : healthPct > 30 ? D.amber : D.red }}>
+            {healthPct.toFixed(0)}%
+          </span>
+        </div>
+      </div>
+      <div className="flex-1 min-h-0">
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={chartData} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+            <CartesianGrid {...darkGrid} />
+            <XAxis dataKey="t" {...darkAxis} interval="preserveStartEnd" />
+            <YAxis {...darkAxis} width={40} />
+            <Tooltip {...darkTooltip} />
+            {threshold !== null && (
+              <ReferenceLine y={threshold} stroke={D.red} strokeDasharray="5 3" strokeWidth={1.5}
+                label={{ value: "Failure Threshold", position: "insideTopRight", fill: D.red, fontSize: 9 }} />
+            )}
+            <Line type="monotone" dataKey="value" stroke={widget.color} strokeWidth={1.5} dot={false} name="Actual" connectNulls={false} />
+            <Line type="monotone" dataKey="trend"  stroke={trendColor}   strokeWidth={1.5} strokeDasharray="6 3" dot={false} name="Trend + Forecast" connectNulls />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+      <div className="flex justify-between px-1 shrink-0" style={{ fontSize: 9 }}>
+        <span style={{ color: widget.color }}>─ Actual</span>
+        <span style={{ color: trendColor }}>-- Trend / Forecast</span>
+        {threshold !== null && <span style={{ color: D.red }}>─ Failure Threshold</span>}
+      </div>
+    </div>
+  );
+}
+
+// ── Predictive Maintenance Score Widget ───────────────────────────────────────
+function PredictiveMaintenanceWidget({ widget, data }: { widget: Widget; data: Record<string, any[]> }) {
+  const rows = [...getWidgetRows(widget, data)]
+    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+    .filter(r => r.value !== null && !isNaN(Number(r.value)));
+  if (rows.length < 5) return <EmptyState />;
+
+  const vals    = rows.map(r => Number(r.value));
+  const mean    = vals.reduce((s, v) => s + v, 0) / vals.length;
+  const std     = Math.sqrt(vals.reduce((s, v) => s + (v - mean) ** 2, 0) / vals.length);
+  const recentN = Math.max(3, Math.floor(vals.length * 0.2));
+  const recent  = vals.slice(-recentN);
+  const rMean   = recent.reduce((s, v) => s + v, 0) / recent.length;
+  const rStd    = Math.sqrt(recent.reduce((s, v) => s + (v - rMean) ** 2, 0) / recent.length);
+
+  const t0 = new Date(rows[0].timestamp).getTime();
+  const pts    = rows.map(r => ({ x: (new Date(r.timestamp).getTime() - t0) / 3_600_000, y: Number(r.value) }));
+  const reg    = linReg(pts.slice(-recentN));
+  const drift  = std === 0 ? 0 : Math.abs(rMean - mean) / std;
+  const normSlope = Math.min(3, Math.abs(reg.slope) / (std === 0 ? 1 : std) * 10);
+  const cv     = Math.min(3, rMean === 0 ? 0 : (rStd / Math.abs(rMean)) * 10);
+
+  const riskScore = Math.min(100, drift * 20 + normSlope * 25 + cv * 5);
+  const risk = riskScore < 25 ? { label: "HEALTHY",  color: D.green }
+    : riskScore < 50          ? { label: "WATCH",     color: D.amber }
+    : riskScore < 75          ? { label: "WARNING",   color: D.orange }
+    :                           { label: "CRITICAL",  color: D.red };
+
+  const r = 32;
+  const circ = 2 * Math.PI * r;
+  const dash = (riskScore / 100) * circ;
+
+  const factors = [
+    { label: "Mean Drift",        score: Math.min(100, drift * 20),     desc: `${drift.toFixed(2)}σ from baseline` },
+    { label: "Degradation Rate",  score: Math.min(100, normSlope * 25), desc: `${reg.slope > 0 ? "+" : ""}${reg.slope.toFixed(5)}/hr` },
+    { label: "Signal Variability",score: Math.min(100, cv * 5),         desc: `CV ${(rStd / (Math.abs(rMean) || 1) * 100).toFixed(1)}%` },
+  ];
+
+  const sparkData = recent.map((v, i) => ({ i, v }));
+
+  return (
+    <div className="flex flex-col h-full p-2 gap-2">
+      <div className="flex items-start gap-3 shrink-0">
+        <svg width={80} height={80} viewBox="0 0 80 80" className="shrink-0">
+          <circle cx={40} cy={40} r={r} fill="none" stroke={D.border2} strokeWidth={9} />
+          <circle cx={40} cy={40} r={r} fill="none"
+            stroke={risk.color} strokeWidth={9}
+            strokeDasharray={`${dash} ${circ}`}
+            strokeLinecap="round"
+            style={{ transform: "rotate(-90deg)", transformOrigin: "50% 50%", transition: "stroke-dasharray 0.6s ease" }} />
+          <text x={40} y={36} textAnchor="middle" fill={risk.color} fontSize={17} fontWeight={700}>{Math.round(riskScore)}</text>
+          <text x={40} y={50} textAnchor="middle" fill={D.muted} fontSize={8}>/ 100</text>
+        </svg>
+        <div className="flex flex-col gap-1 flex-1 min-w-0">
+          <span style={{ fontSize: 12, fontWeight: 800, color: risk.color, letterSpacing: 1 }}>{risk.label}</span>
+          <span style={{ fontSize: 9, color: D.muted }}>Predictive Maintenance Risk</span>
+          <div style={{ height: 40 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <LineChart data={sparkData} margin={{ top: 2, right: 2, bottom: 2, left: 2 }}>
+                <Line dataKey="v" stroke={risk.color} strokeWidth={1.5} dot={false} />
+              </LineChart>
+            </ResponsiveContainer>
+          </div>
+          <span style={{ fontSize: 8, color: D.muted }}>Last {recentN} readings</span>
+        </div>
+      </div>
+      <div className="flex flex-col gap-2 flex-1">
+        {factors.map(f => (
+          <div key={f.label}>
+            <div className="flex justify-between mb-0.5">
+              <span style={{ fontSize: 9, color: D.muted }}>{f.label}</span>
+              <span style={{ fontSize: 9, color: D.text }}>{f.desc}</span>
+            </div>
+            <div className="h-2 rounded-full overflow-hidden" style={{ background: D.border2 }}>
+              <div className="h-full rounded-full"
+                style={{
+                  width: `${f.score}%`,
+                  background: f.score < 25 ? D.green : f.score < 50 ? D.amber : f.score < 75 ? D.orange : D.red,
+                  transition: "width 0.5s ease",
+                }} />
+            </div>
+          </div>
+        ))}
+      </div>
+      <div style={{ fontSize: 8, color: D.muted }}>
+        Tip: Set Max Val as failure threshold for RUL estimation.
+      </div>
+    </div>
+  );
+}
+
+// ── Trend Forecast Widget ─────────────────────────────────────────────────────
+function TrendForecastWidget({ widget, data }: { widget: Widget; data: Record<string, any[]> }) {
+  const rows = [...getWidgetRows(widget, data)]
+    .sort((a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime())
+    .filter(r => r.value !== null && !isNaN(Number(r.value)));
+  if (rows.length < 3) return <EmptyState />;
+
+  const t0  = new Date(rows[0].timestamp).getTime();
+  const pts  = rows.map(r => ({ x: (new Date(r.timestamp).getTime() - t0) / 3_600_000, y: Number(r.value) }));
+  const reg  = linReg(pts);
+
+  const resids   = pts.map(p => p.y - (reg.slope * p.x + reg.intercept));
+  const residStd = Math.sqrt(resids.reduce((s, r) => s + r * r, 0) / resids.length);
+
+  const tLast     = pts[pts.length - 1].x;
+  const forecastHrs = Math.max(tLast * 0.3, 4);
+  const fSteps    = 12;
+
+  const histData = rows.map((r, i) => ({
+    t:     fmtTs(r.timestamp, widget.rangeMinutes),
+    value: Number(r.value),
+    trend: parseFloat((reg.slope * pts[i].x + reg.intercept).toFixed(4)),
+    hi:    undefined as number | undefined,
+    lo:    undefined as number | undefined,
+  }));
+  const fcastData = Array.from({ length: fSteps }, (_, i) => {
+    const xF = tLast + (forecastHrs * (i + 1)) / fSteps;
+    const yF = reg.slope * xF + reg.intercept;
+    return {
+      t:     format(new Date(t0 + xF * 3_600_000), "HH:mm dd/MM"),
+      value: undefined as number | undefined,
+      trend: parseFloat(yF.toFixed(4)),
+      hi:    parseFloat((yF + 2 * residStd).toFixed(4)),
+      lo:    parseFloat((yF - 2 * residStd).toFixed(4)),
+    };
+  });
+  const chartData = [...histData, ...fcastData];
+  const trendColor = reg.slope > 0.001 ? D.amber : reg.slope < -0.001 ? D.accent2 : D.green;
+
+  const currentVal    = rows[rows.length - 1] ? Number(rows[rows.length - 1].value) : 0;
+  const forecastEndY  = fcastData[fcastData.length - 1]?.trend ?? currentVal;
+  const change        = forecastEndY - currentVal;
+  const changePct     = currentVal !== 0 ? (change / Math.abs(currentVal)) * 100 : 0;
+
+  return (
+    <div className="flex flex-col h-full gap-1 p-1">
+      <div className="flex items-center gap-4 px-1 py-1 shrink-0 flex-wrap">
+        <div className="flex flex-col">
+          <span style={{ fontSize: 9, color: D.muted }}>Forecast (+{forecastHrs.toFixed(1)}h)</span>
+          <span style={{ fontSize: 15, fontWeight: 700, color: trendColor }}>{forecastEndY.toFixed(3)}</span>
+        </div>
+        <div className="flex flex-col">
+          <span style={{ fontSize: 9, color: D.muted }}>Δ Expected</span>
+          <span style={{ fontSize: 11, fontWeight: 600, color: change > 0 ? D.amber : D.green }}>
+            {change > 0 ? "+" : ""}{change.toFixed(3)} ({changePct > 0 ? "+" : ""}{changePct.toFixed(1)}%)
+          </span>
+        </div>
+        <div className="flex flex-col">
+          <span style={{ fontSize: 9, color: D.muted }}>95% CI Band</span>
+          <span style={{ fontSize: 11, color: D.accent }}>±{(2 * residStd).toFixed(3)}</span>
+        </div>
+        <div className="flex flex-col ml-auto">
+          <span style={{ fontSize: 9, color: D.muted }}>R² Fit</span>
+          <span style={{ fontSize: 11, color: reg.r2 > 0.7 ? D.green : D.amber }}>{(reg.r2 * 100).toFixed(0)}%</span>
+        </div>
+      </div>
+      <div className="flex-1 min-h-0">
+        <ResponsiveContainer width="100%" height="100%">
+          <ComposedChart data={chartData} margin={{ top: 4, right: 8, bottom: 0, left: 0 }}>
+            <CartesianGrid {...darkGrid} />
+            <XAxis dataKey="t" {...darkAxis} interval="preserveStartEnd" />
+            <YAxis {...darkAxis} width={40} />
+            <Tooltip {...darkTooltip} />
+            <Area type="monotone" dataKey="hi" stroke="none" fill={trendColor} fillOpacity={0.12} name="Upper CI" legendType="none" />
+            <Area type="monotone" dataKey="lo" stroke="none" fill={D.bg}       fillOpacity={1}    name="Lower CI" legendType="none" />
+            <Line type="monotone" dataKey="value" stroke={widget.color} strokeWidth={1.5} dot={false} name="Actual"        connectNulls={false} />
+            <Line type="monotone" dataKey="trend" stroke={trendColor}   strokeWidth={1.5} strokeDasharray="6 3" dot={false} name="Forecast" connectNulls />
+          </ComposedChart>
+        </ResponsiveContainer>
+      </div>
+      <div className="flex justify-between px-1 shrink-0" style={{ fontSize: 9 }}>
+        <span style={{ color: widget.color }}>─ Actual</span>
+        <span style={{ color: trendColor, opacity: 0.6 }}>░ 95% Confidence Band</span>
+        <span style={{ color: trendColor }}>-- Forecast</span>
       </div>
     </div>
   );
@@ -942,6 +1321,10 @@ function WidgetCard({ widget, onDelete, onEdit, onClone, onDuplicate, onCopy, on
       case "scatter":       return <ScatterWidget widget={widget} data={data} />;
       case "heatmap":       return <HeatmapWidget widget={widget} data={data} />;
       case "statetimeline": return <StateTimelineWidget widget={widget} data={data} />;
+      case "anomaly":       return <AnomalyDetectionWidget widget={widget} data={data} />;
+      case "rul":           return <RulWidget widget={widget} data={data} />;
+      case "predictive":    return <PredictiveMaintenanceWidget widget={widget} data={data} />;
+      case "forecast":      return <TrendForecastWidget widget={widget} data={data} />;
       default:              return <ChartWidget widget={widget} data={data} />;
     }
   }
