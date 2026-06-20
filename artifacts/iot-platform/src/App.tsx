@@ -29,6 +29,7 @@ import DataManagement from "@/pages/DataManagement";
 import Reports from "@/pages/Reports";
 import Visualization from "@/pages/Visualization";
 import LiveFeed from "@/pages/LiveFeed";
+import AnalyticsKpi from "@/pages/AnalyticsKpi";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -61,6 +62,7 @@ function AppRouter() {
         <Route path="/reports" component={Reports} />
         <Route path="/visualization" component={Visualization} />
         <Route path="/live" component={LiveFeed} />
+        <Route path="/analytics-kpi" component={AnalyticsKpi} />
         <Route path="/settings" component={Settings} />
         <Route path="/media-library" component={MediaLibrary} />
         <Route path="/notification-groups" component={NotificationGroups} />

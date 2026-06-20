@@ -27,6 +27,8 @@ import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { ReadOnlyBanner } from "@/components/RoleGuard";
 
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+
 // ── Types ─────────────────────────────────────────────────────────────────────
 interface AttributeDefinition {
   name: string;
