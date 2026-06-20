@@ -38,9 +38,9 @@ const navItems: NavItem[] = [
     label: "Data Explorer",
     icon: BarChart2,
     children: [
+      { label: "Live Feed",        href: "/live",            icon: Activity },
       { label: "Explorer",         href: "/data-explorer",   icon: BarChart2 },
       { label: "Visualization",    href: "/visualization",   icon: PieChart },
-      { label: "Live Feed",        href: "/live",            icon: Activity },
       { label: "Analytics & KPI",  href: "/analytics-kpi",  icon: BrainCircuit },
     ],
   },
