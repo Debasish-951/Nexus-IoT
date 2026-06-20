@@ -430,6 +430,7 @@ export default function Assets() {
   const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
   const [addAssetOpen, setAddAssetOpen] = useState(false);
   const [addAssetParentId, setAddAssetParentId] = useState<string | null>(null);
+  const [showIdentifierField, setShowIdentifierField] = useState(false);
   const [addAttrOpen, setAddAttrOpen]   = useState(false);
   const [editAttr, setEditAttr]         = useState<any | null>(null);
   const [importOpen, setImportOpen]     = useState(false);
@@ -652,7 +653,9 @@ export default function Assets() {
   }
 
   function onAddAsset(data: { name: string; identifier: string; parentId?: string }) {
-    createAsset.mutate({ data: { name: data.name, identifier: data.identifier, parentId: data.parentId || null } }, {
+    const finalId = (data.identifier || "").trim()
+      || data.name.toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, "");
+    createAsset.mutate({ data: { name: data.name, identifier: finalId, parentId: data.parentId || null } }, {
       onSuccess: () => {
         toast({ title: "Asset created" });
         qc.invalidateQueries({ queryKey: getListAssetsQueryKey() });
@@ -997,7 +1000,7 @@ export default function Assets() {
       </div>
 
       {/* ── Add Asset Dialog ──────────────────────────────────────────── */}
-      <Dialog open={addAssetOpen} onOpenChange={(v) => { if (!v) { setAddAssetOpen(false); assetForm.reset(); } }}>
+      <Dialog open={addAssetOpen} onOpenChange={(v) => { if (!v) { setAddAssetOpen(false); assetForm.reset(); setShowIdentifierField(false); } }}>
         <DialogContent>
           <DialogHeader>
             <DialogTitle>
@@ -1012,16 +1015,55 @@ export default function Assets() {
           <Form {...assetForm}>
             <form onSubmit={assetForm.handleSubmit(onAddAsset)} className="space-y-4">
               <FormField control={assetForm.control} name="name" render={({ field }) => (
-                <FormItem><FormLabel>Name *</FormLabel>
-                  <FormControl><Input placeholder="e.g. Fan, Compressor, Plant 2" {...field} onChange={(e) => handleNameChange(e.target.value)} /></FormControl>
+                <FormItem>
+                  <FormLabel>Name *</FormLabel>
+                  <FormControl>
+                    <Input placeholder="e.g. Fan, Compressor, Plant 2" {...field} onChange={(e) => handleNameChange(e.target.value)} />
+                  </FormControl>
+                  {/* Auto-identifier preview */}
+                  {assetForm.watch("name") && !showIdentifierField && (
+                    <div className="flex items-center gap-2 pt-0.5">
+                      <p className="text-xs text-muted-foreground">
+                        Identifier: <code className="font-mono bg-muted px-1 rounded">
+                          {(assetForm.watch("identifier") || assetForm.watch("name").toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_]/g, ""))}
+                        </code>
+                      </p>
+                      <button
+                        type="button"
+                        className="text-xs text-primary hover:underline shrink-0"
+                        onClick={() => setShowIdentifierField(true)}
+                      >
+                        Customize
+                      </button>
+                    </div>
+                  )}
                 </FormItem>
               )} />
-              <FormField control={assetForm.control} name="identifier" render={({ field }) => (
-                <FormItem><FormLabel>Identifier *</FormLabel>
-                  <FormControl><Input placeholder="unique_key" className="font-mono" {...field} /></FormControl>
-                  <FormDescription className="text-xs">Tag name prefix when applying templates</FormDescription>
-                </FormItem>
-              )} />
+
+              {/* Identifier field — only shown when user clicks Customize */}
+              {showIdentifierField && (
+                <FormField control={assetForm.control} name="identifier" render={({ field }) => (
+                  <FormItem>
+                    <div className="flex items-center justify-between">
+                      <FormLabel>Identifier</FormLabel>
+                      <button
+                        type="button"
+                        className="text-xs text-muted-foreground hover:text-foreground"
+                        onClick={() => { setShowIdentifierField(false); }}
+                      >
+                        ✕ Hide
+                      </button>
+                    </div>
+                    <FormControl>
+                      <Input placeholder="unique_key" className="font-mono" {...field} />
+                    </FormControl>
+                    <FormDescription className="text-xs">
+                      Used as the tag name prefix when connecting live data (e.g. from Node-RED). Leave blank to auto-generate from the name.
+                    </FormDescription>
+                  </FormItem>
+                )} />
+              )}
+
               {!addAssetParentId && (
                 <FormField control={assetForm.control} name="parentId" render={({ field }) => (
                   <FormItem><FormLabel>Parent Asset <span className="text-muted-foreground font-normal">(optional)</span></FormLabel>
