@@ -1703,6 +1703,7 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
   const [seriesLabel,  setSeriesLabel]  = useState(initial?.label  ?? "");
   const [seriesUom,    setSeriesUom]    = useState(initial?.uom    ?? "");
 
+  const qcDialog = useQueryClient();
   const { data: assets }     = useListAssets();
   const { data: attributes } = useListAssetAttributes(assetId, { query: { enabled: !!assetId, queryKey: ["asset-attributes", assetId] } });
   const assetList   = (assets as any[] | undefined) ?? [];
@@ -1743,6 +1744,8 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
   useEffect(() => { if (preselectedAssetId && !initial) setAssetId(preselectedAssetId); }, [preselectedAssetId]);
   useEffect(() => {
     if (!open) return;
+    // Force-refetch assets so deleted assets never appear in the dropdown
+    qcDialog.invalidateQueries({ queryKey: getListAssetsQueryKey() });
     setTitle(initial?.title ?? "");
     setChartType(initial?.chartType ?? "line");
     setAssetId(initial?.assetId ?? preselectedAssetId ?? "");
@@ -1825,10 +1828,11 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
         </DialogHeader>
         <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden px-6 py-4 space-y-4">
           <div className="space-y-1">
-            <Label className="text-xs font-medium">Widget Type</Label>
-            <select value={chartType} onChange={e => setChartType(e.target.value as ChartType)}
-              className="w-full h-9 rounded border border-border bg-background px-2 text-sm">
-              {CHART_TYPE_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            <Label className="text-xs">Asset</Label>
+            <select value={assetId} onChange={e => { setAssetId(e.target.value); setMetric(""); }}
+              className="w-full h-8 rounded border border-border bg-background px-2 text-xs">
+              <option value="">Select asset…</option>
+              {assetList.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
             </select>
           </div>
           <div className="space-y-1">
@@ -1836,11 +1840,10 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
             <Input className="h-8 text-xs" value={title} onChange={e => setTitle(e.target.value)} placeholder="Auto-generated if blank" />
           </div>
           <div className="space-y-1">
-            <Label className="text-xs">Asset</Label>
-            <select value={assetId} onChange={e => { setAssetId(e.target.value); setMetric(""); }}
-              className="w-full h-8 rounded border border-border bg-background px-2 text-xs">
-              <option value="">Select asset…</option>
-              {assetList.map((a: any) => <option key={a.id} value={a.id}>{a.name}</option>)}
+            <Label className="text-xs font-medium">Widget Type</Label>
+            <select value={chartType} onChange={e => setChartType(e.target.value as ChartType)}
+              className="w-full h-9 rounded border border-border bg-background px-2 text-sm">
+              {CHART_TYPE_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
             </select>
           </div>
           <div className="space-y-1">
