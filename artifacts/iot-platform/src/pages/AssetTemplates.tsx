@@ -1,4 +1,6 @@
 import { useState } from "react";
+
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 import {
   useListAssetTemplates,
   useCreateAssetTemplate,

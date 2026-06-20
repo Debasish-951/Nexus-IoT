@@ -5,7 +5,7 @@ import {
   FileText, Image, BarChart2, Blocks, Cpu, Bell,
   AlarmClock, BookOpen, Settings2, Router, Plug,
   Shield, Users, KeyRound, Activity, Menu, X,
-  Wifi, Zap, Send, Database, PieChart, ClipboardList,
+  Wifi, Zap, Send, Database, PieChart, ClipboardList, BrainCircuit,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -38,9 +38,10 @@ const navItems: NavItem[] = [
     label: "Data Explorer",
     icon: BarChart2,
     children: [
-      { label: "Explorer",       href: "/data-explorer",  icon: BarChart2 },
-      { label: "Visualization",  href: "/visualization",  icon: PieChart },
-      { label: "Live Feed",      href: "/live",           icon: Activity },
+      { label: "Explorer",         href: "/data-explorer",   icon: BarChart2 },
+      { label: "Visualization",    href: "/visualization",   icon: PieChart },
+      { label: "Live Feed",        href: "/live",            icon: Activity },
+      { label: "Analytics & KPI",  href: "/analytics-kpi",  icon: BrainCircuit },
     ],
   },
   {
