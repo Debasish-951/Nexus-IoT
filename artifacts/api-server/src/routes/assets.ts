@@ -129,17 +129,35 @@ router.delete("/assets/:id", async (req, res): Promise<void> => {
   const params = DeleteAssetParams.safeParse(req.params);
   if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
 
-  const [asset] = await db.delete(assetsTable).where(eq(assetsTable.id, params.data.id)).returning();
-  if (!asset) { res.status(404).json({ error: "Asset not found" }); return; }
+  const rootId = params.data.id;
 
-  if (asset.parentId) {
+  // Fetch the root asset first (need name + parentId before we delete)
+  const [rootAsset] = await db.select().from(assetsTable).where(eq(assetsTable.id, rootId));
+  if (!rootAsset) { res.status(404).json({ error: "Asset not found" }); return; }
+
+  // Collect full subtree via recursive CTE (root + all descendants)
+  const subtree = await db.execute<{ id: string }>(sql`
+    WITH RECURSIVE tree AS (
+      SELECT id FROM assets WHERE id = ${rootId}
+      UNION ALL
+      SELECT a.id FROM assets a INNER JOIN tree t ON a.parent_id = t.id
+    )
+    SELECT id FROM tree
+  `);
+  const allIds = subtree.rows.map((r) => r.id);
+
+  // Delete the whole subtree in one statement (no FK issues since entire subtree goes)
+  await db.delete(assetsTable).where(inArray(assetsTable.id, allIds));
+
+  // Decrement parent's childCount
+  if (rootAsset.parentId) {
     await db
       .update(assetsTable)
       .set({ childCount: sql`GREATEST(${assetsTable.childCount} - 1, 0)` })
-      .where(eq(assetsTable.id, asset.parentId));
+      .where(eq(assetsTable.id, rootAsset.parentId));
   }
 
-  void logActivity("asset.deleted", "asset", asset.id, asset.name, null, req);
+  void logActivity("asset.deleted", "asset", rootId, rootAsset.name, `Deleted ${allIds.length} asset(s) in subtree`, req);
   res.sendStatus(204);
 });
 
