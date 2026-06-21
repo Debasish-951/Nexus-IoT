@@ -218,7 +218,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           </div>
           {!collapsed && (
             <span className="text-sidebar-foreground font-semibold text-sm tracking-tight">
-              WS-Integrated Suite
+              Data Collector
             </span>
           )}
           <button
