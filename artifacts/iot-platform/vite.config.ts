@@ -4,27 +4,14 @@ import tailwindcss from "@tailwindcss/vite";
 import path from "path";
 import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 
-const rawPort = process.env.PORT;
+// On Replit, PORT and BASE_PATH are injected by the platform.
+// For local development, fall back to sensible defaults so the dev server
+// starts without needing any env configuration.
+const port = Number(process.env.PORT ?? "5173");
+const basePath = process.env.BASE_PATH ?? "/";
 
-if (!rawPort) {
-  throw new Error(
-    "PORT environment variable is required but was not provided.",
-  );
-}
-
-const port = Number(rawPort);
-
-if (Number.isNaN(port) || port <= 0) {
-  throw new Error(`Invalid PORT value: "${rawPort}"`);
-}
-
-const basePath = process.env.BASE_PATH;
-
-if (!basePath) {
-  throw new Error(
-    "BASE_PATH environment variable is required but was not provided.",
-  );
-}
+const isReplit = process.env.REPL_ID !== undefined;
+const isDev = process.env.NODE_ENV !== "production";
 
 export default defineConfig({
   base: basePath,
@@ -32,8 +19,7 @@ export default defineConfig({
     react(),
     tailwindcss(),
     runtimeErrorOverlay(),
-    ...(process.env.NODE_ENV !== "production" &&
-    process.env.REPL_ID !== undefined
+    ...(isDev && isReplit
       ? [
           await import("@replit/vite-plugin-cartographer").then((m) =>
             m.cartographer({
@@ -66,6 +52,19 @@ export default defineConfig({
     fs: {
       strict: true,
     },
+    // When running locally (not on Replit), proxy /api to the backend dev server
+    // so the frontend and API can run on separate ports without CORS issues.
+    ...(isReplit
+      ? {}
+      : {
+          proxy: {
+            "/api": {
+              target: "http://localhost:8080",
+              changeOrigin: true,
+              ws: true,
+            },
+          },
+        }),
   },
   preview: {
     port,

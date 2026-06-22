@@ -1,3 +1,4 @@
+import "dotenv/config";
 import http from "http";
 import app from "./app";
 import { logger } from "./lib/logger";
@@ -5,11 +6,9 @@ import { startMqttSubscribers } from "./services/mqtt.js";
 import { initWebSocketServer } from "./lib/ws-broadcast";
 import { runPruning } from "./routes/system";
 
-const rawPort = process.env["PORT"];
-
-if (!rawPort) {
-  throw new Error("PORT environment variable is required but was not provided.");
-}
+// On Replit, PORT is injected by the platform.
+// For local development, default to 8080 so the frontend proxy works out of the box.
+const rawPort = process.env["PORT"] ?? "8080";
 const port = Number(rawPort);
 if (Number.isNaN(port) || port <= 0) {
   throw new Error(`Invalid PORT value: "${rawPort}"`);
