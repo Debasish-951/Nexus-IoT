@@ -6,7 +6,7 @@
 
 ## System Boundaries
 
-WS-Integrated Suite is a self-contained platform that accepts telemetry from external field devices and optionally pushes alarm notifications to external systems.
+Integrated Suite is a self-contained platform that accepts telemetry from external field devices and optionally pushes alarm notifications to external systems.
 
 ```mermaid
 graph LR
@@ -16,7 +16,7 @@ graph LR
         BATCH[Batch Upload Clients]
     end
 
-    subgraph "WS-Integrated Suite"
+    subgraph "Integrated Suite"
         API[API Server :8080]
         FE[Frontend SPA]
         DB[(PostgreSQL)]

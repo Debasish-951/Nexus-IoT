@@ -1,6 +1,7 @@
 # Documentation Status
 
 **Generated:** May 2026  
+**Last Updated:** June 2026 — cross-platform compatibility fixes, ADR-007 added, TD-013 resolved  
 **Overall Confidence:** High for structural and implemented-behaviour documentation; Low for compliance and test strategy (aspirational sections).
 
 ---
@@ -44,8 +45,9 @@
 | Test Strategy | `docs/review/test-strategy.md` | Low | ✅ Complete |
 | Requirements Traceability | `docs/review/requirements-traceability.md` | High | ✅ Complete |
 | Documentation Governance | `docs/governance.md` | High | ✅ Complete |
+| ADR-007: Cross-Platform Compat | `docs/adr/ADR-007-cross-platform-compatibility.md` | High | ✅ Complete |
 
-**Total documents:** 35
+**Total documents:** 36
 
 ---
 

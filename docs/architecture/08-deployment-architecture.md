@@ -44,11 +44,37 @@ graph TB
 
 ---
 
+## Local Development Topology
+
+When running outside Replit (Windows / macOS / Linux), the Vite dev server acts as a proxy for API requests so both services can run without CORS configuration:
+
+```mermaid
+graph LR
+    BROWSER[Browser\n:5173]
+    VITE[Vite Dev Server\n:5173]
+    API[Express API\n:8080]
+    PG[(Local PostgreSQL)]
+
+    BROWSER -->|UI assets| VITE
+    BROWSER -->|/api/*| VITE
+    VITE -->|proxy /api/*| API
+    API <--> PG
+```
+
+Key points:
+- Frontend defaults to port `5173`; API defaults to `8080` — no env config required
+- Copy `.env.example` → `.env` and set `DATABASE_URL` before starting
+- Vite proxy is active **only** when `REPL_ID` is not set (i.e. not on Replit)
+- On Replit the platform reverse proxy handles routing; the Vite proxy is bypassed
+
+---
+
 ## Runtime Environments
 
 | Environment | Description |
 |-------------|------------|
-| **Development** | Replit workspace — both artifacts run via workflow processes with hot reload |
+| **Local development** | Developer machine — each artifact started independently; Vite proxies `/api` to `localhost:8080` |
+| **Development (Replit)** | Replit workspace — both artifacts run via workflow processes with hot reload |
 | **Production** | Replit Deployment — artifacts built and served as production bundles |
 
 ---

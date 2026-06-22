@@ -1,4 +1,4 @@
-# WS-Integrated Suite — Product Modernization Strategy
+# Integrated Suite — Product Modernization Strategy
 **Industrial IoT Platform Enhancement Roadmap**
 
 *Prepared for: Product, Design & Engineering Teams*

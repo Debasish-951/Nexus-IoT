@@ -1,130 +1,178 @@
-# WS-Integrated Suite
+# Integrated Suite — Industrial IoT Platform
 
-An enterprise-grade Industrial IoT data acquisition and analytics platform built for real-time monitoring, alarm management, and operational intelligence across industrial asset hierarchies.
+An enterprise-grade industrial IoT data acquisition, monitoring, and analytics platform. It collects sensor telemetry from physical devices and MQTT brokers, evaluates alarm rules in real time, and presents operational data through a configurable industrial-grade web UI.
 
 ---
 
 ## Features
 
-- **Asset Management** — unlimited-depth hierarchical asset tree with attribute CRUD, templates, and media library
-- **Real-Time Telemetry Ingest** — multi-format payload normalisation (flat, nested-data, nested-metrics, nested-root)
-- **Live WebSocket Feed** — sub-second push of telemetry and alarm events to all connected clients
-- **MQTT & REST Broker Integration** — managed broker configs with payload mapping rules
-- **Alarm Engine** — threshold and rate-of-change rules with webhook delivery and deadband hysteresis
-- **Visualization Dashboard** — configurable multi-widget dashboards with SPC control lines, multi-series overlays, and 11 chart types
-- **Role-Based Access Control** — four roles (admin / engineer / operator / viewer) with per-page permission enforcement
-- **Data Management** — storage analytics, retention policies, and on-demand pruning
-- **Reports** — on-demand Telemetry Summary, Alarm, and Asset Status reports (CSV / JSON)
-- **Audit Trail** — complete activity log with actor attribution
+| Area | Highlights |
+|------|-----------|
+| **Asset management** | Unlimited-depth hierarchy, attribute CRUD, template library, maintenance mode |
+| **Telemetry ingest** | HTTP single / batch / validate and MQTT; multi-format payload normalisation |
+| **Alarm engine** | Threshold and rate-of-change rules; webhook delivery; acknowledge workflow; full history |
+| **Visualisation** | Named dashboards (CRUD), 11 widget types, global time-range, real-time WebSocket updates |
+| **Live feed** | Per-asset metric tiles, event log (200-event buffer), stale detection after 30 s |
+| **Data management** | Storage analytics, configurable retention policies, on-demand pruning |
+| **Reports** | Telemetry summary, alarm report, asset snapshot; CSV and JSON export |
+| **Brokers** | MQTT / REST / Azure IoT with payload mapping rules and connection history |
+| **API clients** | OAuth-style client credentials with scopes, IP allowlist, and usage tracking |
+| **Activity log** | Full audit trail with actor identity, category filtering, and pagination |
+| **RBAC** | Four roles: admin, engineer, operator, viewer |
 
 ---
 
-## Quick Start
+## Quick start (Replit)
 
-```bash
-# 1. Install dependencies
-pnpm install
+No local setup needed — Replit provisions the database and starts all services automatically.
 
-# 2. Set required environment variables
-#    DATABASE_URL  — PostgreSQL connection string (provisioned automatically on Replit)
-#    SESSION_SECRET — session signing secret
-#    PORT          — assigned automatically by Replit per artifact
-
-# 3. Run database migrations
-pnpm --filter @workspace/db run migrate
-
-# 4. (Optional) Seed sample data
-pnpm --filter @workspace/db run seed
-
-# 5. Start API server
-pnpm --filter @workspace/api-server run dev
-
-# 6. Start frontend (separate terminal)
-pnpm --filter @workspace/iot-platform run dev
-```
+1. Open the project in Replit.
+2. The API server and frontend start via configured workflows.
+3. Open the **web** preview pane — the UI is served at `/`.
+4. Switch roles with the profile switcher in the top bar (no login gate in development).
 
 ---
 
-## Local Setup
+## Local development setup
 
 ### Prerequisites
-| Tool | Version |
-|------|---------|
-| Node.js | ≥ 20 |
-| pnpm | ≥ 9 |
-| PostgreSQL | ≥ 15 |
 
-### Environment Variables
+| Tool | Minimum version |
+|------|----------------|
+| Node.js | 22 LTS |
+| pnpm | 10 |
+| PostgreSQL | 15 |
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `DATABASE_URL` | Yes | PostgreSQL connection string |
-| `SESSION_SECRET` | Yes | Secret for session signing |
-| `PORT` | Yes (auto) | HTTP port — set per artifact by Replit |
+### Steps
 
-### Codegen (after API spec changes)
+```bash
+# 1. Clone the repository
+git clone <repo-url>
+cd integrated-suite
+
+# 2. Install dependencies  (pnpm resolves the correct native binaries for your OS)
+pnpm install
+
+# 3. Configure environment
+cp .env.example .env
+# Edit .env — fill in DATABASE_URL and SESSION_SECRET
+# Special characters in passwords must be percent-encoded  (@→%40, #→%23)
+
+# 4. Run database migrations
+pnpm --filter @workspace/db run push
+
+# 5. Start services in separate terminals
+pnpm --filter @workspace/api-server run dev   # API  →  http://localhost:8080/api
+pnpm --filter @workspace/iot-platform run dev  # UI   →  http://localhost:5173
+```
+
+The Vite dev server proxies all `/api` requests to `localhost:8080` automatically in local mode — no CORS configuration required.
+
+### Regenerating API client code
+
+Run this after any change to the OpenAPI spec (`lib/api-spec/`):
 
 ```bash
 pnpm --filter @workspace/api-spec run codegen
 ```
 
-This regenerates React Query hooks (`lib/api-client-react`) and Zod schemas (`lib/api-zod`) from the OpenAPI 3.1 spec.
+This regenerates React Query hooks (`lib/api-client-react`) and Zod schemas (`lib/api-zod`).
 
 ---
 
-## Monorepo Structure
+## Environment variables
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `DATABASE_URL` | **Yes** | — | PostgreSQL connection string |
+| `SESSION_SECRET` | No | — | Signs HTTP sessions |
+| `PORT` | No | `8080` (API) / `5173` (UI) | Listening port; set automatically by Replit |
+| `BASE_PATH` | No | `/` | URL prefix for the frontend; set automatically by Replit |
+
+See `.env.example` for an annotated template.
+
+---
+
+## Deployment (Replit)
+
+1. Set `DATABASE_URL` and `SESSION_SECRET` as **Replit secrets** (Settings → Secrets).
+2. Click **Publish** in the Replit workspace.
+3. Replit builds both artifacts and routes them through its global reverse proxy:
+   - API → `https://<domain>/api`
+   - UI  → `https://<domain>/`
+
+See [`docs/operations/runbook.md`](docs/operations/runbook.md) for detailed deployment, monitoring, and rollback procedures.
+
+---
+
+## Monorepo structure
 
 ```
-artifacts/api-server/     — Express 5 REST + WebSocket API  (path: /api)
-artifacts/iot-platform/   — React + Vite SPA               (path: /)
-lib/api-spec/             — OpenAPI 3.1 spec + Orval config
-lib/api-client-react/     — Generated React Query hooks
-lib/api-zod/              — Generated Zod schemas
-lib/db/                   — Drizzle ORM schema + migrations
-scripts/                  — Utility scripts
+artifacts/
+  api-server/        Express 5 REST + WebSocket API  (path /api, port 8080)
+  iot-platform/      React + Vite SPA                (path /, auto port)
+lib/
+  api-spec/          OpenAPI 3.1 spec + Orval codegen config
+  api-client-react/  Generated React Query hooks + fetch client
+  api-zod/           Generated Zod schemas
+  db/                Drizzle ORM schema + migrations (PostgreSQL)
+scripts/             Utility and pre-install scripts
+docs/                Architecture, operations, API, security documentation
+.env.example         Environment variable template
+pnpm-workspace.yaml  Workspace config, catalog pins, dependency overrides
 ```
 
 ---
 
-## Deployment
+## Configuration reference
 
-The platform is designed for deployment on Replit using the built-in PostgreSQL database and path-based reverse proxy. Each artifact binds to `$PORT` and is routed through the shared proxy at `/api` and `/`.
-
-See [docs/operations/runbook.md](docs/operations/runbook.md) for full deployment, rollback, and recovery procedures.
-
----
-
-## Configuration
-
-| Area | Location |
-|------|----------|
-| DB schema | `lib/db/src/schema/` |
-| API routes | `artifacts/api-server/src/routes/` |
+| Area | Where to change |
+|------|----------------|
+| DB schema | `lib/db/src/schema/` + run `pnpm --filter @workspace/db run push` |
+| API routes | `artifacts/api-server/src/routes/` + update `lib/api-spec/` |
 | RBAC permissions | `artifacts/iot-platform/src/contexts/UserContext.tsx` |
-| API client scopes | `Security → API Clients` (UI) |
-| Retention policies | `System → Data Management` (UI) |
-| Broker mapping rules | `Broker Management` (UI) |
+| Alarm rules | UI → `/alarm-rules` or `POST /api/alarm-rules` |
+| Broker config | UI → `/brokers` |
+| Retention policies | UI → `/data-management` |
+| API client scopes | UI → `/api-clients` |
 
 ---
 
 ## Troubleshooting
 
-| Symptom | Likely Cause | Fix |
+| Symptom | Likely cause | Fix |
 |---------|-------------|-----|
-| API returns 401 | Missing or expired API key | Check `Security → API Clients` |
-| No telemetry data | deviceId not matched to asset | Run validate endpoint first |
-| MQTT not connecting | Bad credentials or topic | Check broker config in UI |
-| Alarms not firing | Asset in maintenance mode | Toggle off maintenance in asset settings |
-| Stale dashboard | WebSocket disconnected | Reload page; check `/api/ws` reachability |
+| `pnpm install` fails with native package errors | Stale lockfile from old platform-binary overrides | Delete `pnpm-lock.yaml` and re-run `pnpm install` |
+| API fails to start (`DATABASE_URL not set`) | Missing `.env` file | Copy `.env.example` → `.env` and set `DATABASE_URL` |
+| Vite 404 on `/api` requests | API server not running | Start api-server first; confirm port 8080 is free |
+| MQTT broker not connecting | Wrong host / port / credentials | Check and update broker settings at `/brokers` |
+| Drizzle migrations fail | `.env` not loaded by drizzle-kit | Confirm `.env` exists at the repo root |
+| Alarms not firing | Asset is in maintenance mode | Toggle off maintenance in the asset detail panel |
+| Dashboard shows stale data | WebSocket disconnected | Reload the page; verify `/api/ws` is reachable |
+| API returns 401 | Missing or expired API key | Check API client status at `/api-clients` |
 
 ---
 
-## Contribution Guide
+## Documentation
+
+Full architecture, data, API, security, and operations documentation lives in [`docs/`](docs/).
+
+| Document | Purpose |
+|----------|---------|
+| [`docs/overview/project-overview.md`](docs/overview/project-overview.md) | Purpose, scope, personas, goals |
+| [`docs/architecture/01-solution-architecture.md`](docs/architecture/01-solution-architecture.md) | High-level design, technology choices |
+| [`docs/api/api-reference.md`](docs/api/api-reference.md) | Full endpoint reference |
+| [`docs/security/security-architecture.md`](docs/security/security-architecture.md) | Auth, RBAC, secrets, known gaps |
+| [`docs/review/architecture-review-report.md`](docs/review/architecture-review-report.md) | Strengths, risks, roadmap |
+| [`DOCUMENTATION_STATUS.md`](DOCUMENTATION_STATUS.md) | Coverage, confidence, gaps |
+
+---
+
+## Contribution guide
 
 1. Branch from `main`.
-2. Make changes and run `pnpm run typecheck` to verify types.
-3. Update relevant docs in `docs/` for any API, schema, or behaviour changes.
-4. Submit a pull request with a description referencing any affected ADRs.
-5. Update `docs/DOCUMENTATION_STATUS.md` if documentation coverage changes.
-
-Documentation is treated as code — see [docs/governance.md](docs/governance.md).
+2. Follow existing TypeScript conventions (strict mode, avoid `any`).
+3. All new API routes require a matching entry in the OpenAPI spec — run codegen after.
+4. Run `pnpm run typecheck` before opening a pull request.
+5. Update the relevant `docs/` files for any API, schema, or behaviour changes.
+6. Documentation is treated as code — see [`docs/governance.md`](docs/governance.md).

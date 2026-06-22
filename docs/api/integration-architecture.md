@@ -6,7 +6,7 @@
 
 ## Overview
 
-WS-Integrated Suite integrates with external systems in three directions:
+Integrated Suite integrates with external systems in three directions:
 
 1. **Inbound** — field devices push telemetry via MQTT or HTTP
 2. **Outbound** — alarm events are pushed to configured webhook receivers

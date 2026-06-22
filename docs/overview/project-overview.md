@@ -6,7 +6,7 @@
 
 ## Purpose
 
-WS-Integrated Suite is an industrial IoT data acquisition and analytics platform that provides real-time visibility into physical assets, automated alarm management, and operational reporting for industrial environments such as manufacturing plants, energy facilities, and process industries.
+Integrated Suite is an industrial IoT data acquisition and analytics platform that provides real-time visibility into physical assets, automated alarm management, and operational reporting for industrial environments such as manufacturing plants, energy facilities, and process industries.
 
 ---
 

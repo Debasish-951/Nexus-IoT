@@ -8,7 +8,7 @@
 
 ```mermaid
 C4Container
-    title Container Diagram — WS-Integrated Suite
+    title Container Diagram — Integrated Suite
 
     Person(user, "Platform User", "Operator / Engineer / Admin")
 

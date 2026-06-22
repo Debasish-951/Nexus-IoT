@@ -170,6 +170,15 @@ app.use(cors({
 
 ---
 
+### TD-013: Platform Binary Overrides Blocking Cross-Platform Install ✅ RESOLVED
+
+**Severity:** High (was blocking Windows/macOS development)  
+**Resolved:** 2026-06-22  
+**Description:** `pnpm-workspace.yaml` contained ~80 lines of `"-"` overrides explicitly excluding all non-Linux-x64 native binaries (esbuild, rollup, lightningcss, @tailwindcss/oxide). This prevented `pnpm install` from completing on Windows or macOS. Additionally, `vite.config.ts` threw hard errors when `PORT`/`BASE_PATH` were absent, and no `.env.example` was provided.  
+**Fix Applied:** Removed all platform-binary overrides; pnpm now resolves correct optionals natively. Added `dotenv` support to api-server and db; added safe defaults for `PORT`/`BASE_PATH`; added Vite dev proxy; created `.env.example`. See ADR-007.
+
+---
+
 ## Summary by Priority
 
 | Priority | Count | Items |
@@ -178,3 +187,4 @@ app.use(cors({
 | High | 4 | TD-001, TD-002, TD-003, TD-004 |
 | Medium | 4 | TD-006, TD-007, TD-008, TD-012 |
 | Low | 3 | TD-009, TD-010, TD-011 |
+| Resolved | 1 | TD-013 |

@@ -1,0 +1,274 @@
+Act as an Enterprise Architect, Solution Architect, Technical Architect, DevOps Architect, Security Architect, and Documentation Lead.
+ 
+Your job is NOT only to build or modify code. Your job is to produce and continuously maintain a complete architecture and engineering documentation package.
+ 
+First:
+1. Inspect the entire repository.
+2. Understand actual implementation.
+3. Identify undocumented areas.
+4. Produce a Documentation Gap Analysis.
+5. Ask questions only when required to avoid incorrect assumptions.
+ 
+Then create and maintain the following structure.
+ 
+PROJECT ROOT
+├── README.md
+├── docs/
+│   ├── overview/
+│   ├── architecture/
+│   ├── operations/
+│   ├── api/
+│   ├── data/
+│   ├── security/
+│   ├── adr/
+│   ├── diagrams/
+│   └── review/
+ 
+=====================================
+A. PROJECT DOCUMENTATION
+=====================================
+ 
+README.md
+- Project overview
+- Features
+- Quick start
+- Local setup
+- Deployment
+- Configuration
+- Troubleshooting
+- Contribution guide
+ 
+docs/overview/project-overview.md
+- Purpose
+- Business goals
+- Scope
+- Personas
+- Functional overview
+- Assumptions
+- Constraints
+- Success criteria
+ 
+docs/overview/system-landscape.md
+- System boundaries
+- External dependencies
+- Upstream/downstream systems
+ 
+=====================================
+B. ARCHITECTURE DOCUMENTATION
+=====================================
+ 
+docs/architecture/01-solution-architecture.md
+- Executive summary
+- Architecture principles
+- High-level design
+- System decomposition
+- Technology choices
+- Architecture rationale
+ 
+docs/architecture/02-c4-context.md
+- C4 Context Diagram
+ 
+docs/architecture/03-c4-container.md
+- C4 Container Diagram
+ 
+docs/architecture/04-c4-component.md
+- C4 Component Diagram
+ 
+docs/architecture/05-code-architecture.md
+- Package/module structure
+- Internal dependencies
+ 
+docs/architecture/06-application-architecture.md
+- Layered architecture
+- Domain boundaries
+- State management
+- Design patterns
+ 
+docs/architecture/07-sequence-diagrams.md
+- Key business flows
+- Request lifecycle
+ 
+docs/architecture/08-deployment-architecture.md
+- Deployment topology
+- Runtime environments
+- Hosting model
+ 
+Use Mermaid diagrams wherever possible.
+ 
+=====================================
+C. DATA ARCHITECTURE
+=====================================
+ 
+docs/data/data-architecture.md
+- Data domains
+- Data ownership
+- Data lifecycle
+- Data governance
+ 
+docs/data/data-model.md
+- ER diagrams
+- Schema definitions
+- Relationships
+ 
+docs/data/data-flow.md
+- End-to-end data movement
+ 
+=====================================
+D. API + INTEGRATION DOCUMENTATION
+=====================================
+ 
+docs/api/api-reference.md
+- Endpoints
+- Authentication
+- Request/response examples
+- Error handling
+ 
+docs/api/integration-architecture.md
+- Internal integrations
+- External integrations
+- Event flows
+- Sequence diagrams
+ 
+=====================================
+E. INFRASTRUCTURE + DEVOPS
+=====================================
+ 
+docs/operations/infrastructure.md
+- Network architecture
+- Compute
+- Containers
+- Scaling
+- Cost considerations
+ 
+docs/operations/devops.md
+- CI/CD
+- Build pipeline
+- Release process
+ 
+docs/operations/runbook.md
+- Deployment
+- Recovery
+- Monitoring
+- Incident response
+- Rollback procedures
+ 
+docs/operations/observability.md
+- Logging
+- Metrics
+- Alerting
+- Tracing
+ 
+=====================================
+F. SECURITY ARCHITECTURE
+=====================================
+ 
+docs/security/security-architecture.md
+- Authentication
+- Authorization
+- Secrets
+- Encryption
+ 
+docs/security/threat-model.md
+- Threat analysis
+- Attack surface
+- Risk matrix
+ 
+docs/security/compliance.md
+- Compliance assumptions
+- Controls
+ 
+=====================================
+G. QUALITY ATTRIBUTES
+=====================================
+ 
+docs/architecture/quality-attributes.md
+- Availability
+- Reliability
+- Performance
+- Scalability
+- Maintainability
+- Operability
+ 
+Include measurable targets where possible.
+ 
+=====================================
+H. ARCHITECTURE DECISIONS
+=====================================
+ 
+docs/adr/
+ 
+Create Architecture Decision Records.
+ 
+Each ADR:
+- Context
+- Decision
+- Alternatives
+- Tradeoffs
+- Consequences
+ 
+=====================================
+I. TEST + TRACEABILITY
+=====================================
+ 
+docs/review/test-strategy.md
+- Testing pyramid
+- Coverage map
+ 
+docs/review/requirements-traceability.md
+- Requirement → Component → Test → Deployment
+ 
+=====================================
+J. ARCHITECTURE REVIEW PACKAGE
+=====================================
+ 
+docs/review/architecture-review-report.md
+ 
+Include:
+- Current architecture assessment
+- Strengths
+- Risks
+- Technical debt
+- Security concerns
+- Scalability concerns
+- Operational concerns
+- Maintainability assessment
+- Cost optimization opportunities
+- Developer productivity concerns
+ 
+Produce:
+- Immediate actions (30 days)
+- Mid-term roadmap (90 days)
+- Long-term roadmap (180 days)
+ 
+docs/review/technical-debt-register.md
+ 
+For each item:
+- Description
+- Severity
+- Impact
+- Recommended fix
+- Priority
+ 
+=====================================
+K. DOCUMENTATION GOVERNANCE
+=====================================
+ 
+Create docs/governance.md
+ 
+Rules:
+- Documentation is treated as code.
+- Update docs whenever implementation changes.
+- Flag outdated documentation.
+- Never document assumptions as facts.
+- Prefer actual implementation over inferred behavior.
+- Generate diagrams automatically.
+- Mark confidence level per section.
+- Maintain changelog of documentation updates.
+ 
+Final step:
+Generate DOCUMENTATION_STATUS.md containing:
+- Documents generated
+- Missing information
+- Assumptions made
+- Confidence score
+- Recommended next actions

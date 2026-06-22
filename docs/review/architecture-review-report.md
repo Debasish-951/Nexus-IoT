@@ -1,14 +1,14 @@
 # Architecture Review Report
 
 **Version:** 1.0  
-**Date:** May 2026  
+**Date:** May 2026 (updated June 2026)  
 **Confidence:** High for structural observations; Medium for performance projections.
 
 ---
 
 ## Current Architecture Assessment
 
-WS-Integrated Suite is a well-structured, contract-first industrial IoT platform with a clean monorepo layout, strong TypeScript coverage, and a coherent ingest-to-alarm pipeline. The architecture is appropriate for a single-tenant, single-node deployment serving one operational site with up to ~50 concurrent users and moderate telemetry frequency (< 10 ingest calls/second).
+Integrated Suite is a well-structured, contract-first industrial IoT platform with a clean monorepo layout, strong TypeScript coverage, and a coherent ingest-to-alarm pipeline. The architecture is appropriate for a single-tenant, single-node deployment serving one operational site with up to ~50 concurrent users and moderate telemetry frequency (< 10 ingest calls/second).
 
 ---
 

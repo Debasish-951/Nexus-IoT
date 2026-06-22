@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v3
-        with: { version: 9 }
+        with: { version: 10 }
       - run: pnpm install
       - run: pnpm run typecheck
 
@@ -29,6 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v3
+        with: { version: 10 }
       - run: pnpm install
       - run: pnpm --filter @workspace/api-spec run codegen
       - run: git diff --exit-code  # Fail if generated files are out of sync
@@ -53,7 +54,7 @@ pnpm --filter @workspace/iot-platform run build
 ```
 - Tool: Vite
 - Output: `dist/` (static HTML + JS + CSS)
-- Environment: requires `PORT` and `BASE_PATH` env vars
+- Environment: `PORT` defaults to `5173`; `BASE_PATH` defaults to `/` — no env file needed for local dev
 
 ### Codegen
 ```bash
@@ -93,8 +94,9 @@ Replit creates checkpoints on every session end and significant code change. To 
 
 | Environment | Config Location | Database |
 |-------------|----------------|---------|
-| Development | Replit workspace secrets | Replit PostgreSQL (shared) |
-| Production | Replit deployment secrets | Replit PostgreSQL (separate production DB) |
+| Local dev (non-Replit) | `.env` file at repo root (copy from `.env.example`) | Developer-provisioned PostgreSQL |
+| Development (Replit) | Replit workspace secrets | Replit PostgreSQL (shared) |
+| Production (Replit) | Replit deployment secrets | Replit PostgreSQL (separate production DB) |
 
 ### Adding a Secret
 Use the Replit Secrets panel (or `environment-secrets` skill):

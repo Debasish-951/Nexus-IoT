@@ -8,13 +8,13 @@
 
 ```mermaid
 C4Context
-    title System Context — WS-Integrated Suite
+    title System Context — Integrated Suite
 
     Person(operator, "Shift Operator", "Monitors live feeds, acknowledges alarms via browser")
     Person(engineer, "Controls Engineer", "Configures assets, brokers, alarm rules")
     Person(admin, "Plant Administrator", "Manages users, API clients, retention policies")
 
-    System(platform, "WS-Integrated Suite", "Industrial IoT data acquisition, alarm management, and analytics platform")
+    System(platform, "Integrated Suite", "Industrial IoT data acquisition, alarm management, and analytics platform")
 
     System_Ext(mqtt_broker, "MQTT Broker", "Eclipse Mosquitto, HiveMQ, Azure IoT Hub, or any MQTT 5 broker")
     System_Ext(rest_devices, "REST Field Devices", "Gateways or edge devices that push JSON payloads over HTTP")

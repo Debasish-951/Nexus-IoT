@@ -6,7 +6,7 @@
 
 ## Executive Summary
 
-WS-Integrated Suite is a three-tier industrial IoT platform composed of a React SPA frontend, an Express 5 REST/WebSocket API backend, and a PostgreSQL relational database. It is packaged as a pnpm monorepo with shared contract-first OpenAPI code generation binding the layers together. The system is designed for single-node deployment on Replit with a path-based reverse proxy providing unified access to both the API and the frontend.
+Integrated Suite is a three-tier industrial IoT platform composed of a React SPA frontend, an Express 5 REST/WebSocket API backend, and a PostgreSQL relational database. It is packaged as a pnpm monorepo with shared contract-first OpenAPI code generation binding the layers together. The system is designed for single-node deployment on Replit with a path-based reverse proxy providing unified access to both the API and the frontend.
 
 ---
 
