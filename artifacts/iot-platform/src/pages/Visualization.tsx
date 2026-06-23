@@ -2002,68 +2002,6 @@ export default function Visualization() {
                       : <PanelLeftOpen  className="w-4 h-4" style={{ color: D.accent }} />}
           </button>
 
-          {/* Dashboard selector */}
-          <div className="flex items-center gap-1 min-w-0">
-            <BookOpen className="w-3.5 h-3.5 shrink-0" style={{ color: D.accent }} />
-            {visibleDashboards.length === 0 ? (
-              <button
-                onClick={() => { setEditDashboard(null); setDbDialogOpen(true); }}
-                className="h-7 rounded px-3 text-xs font-semibold border flex items-center gap-1.5"
-                style={{ background: D.card, color: D.accent, borderColor: D.accent, borderStyle: "dashed" }}>
-                <Plus className="w-3 h-3" /> New Dashboard
-              </button>
-            ) : (
-              <select
-                value={activeDash?.id ?? ""}
-                onChange={e => setActiveDashId(e.target.value || null)}
-                className="h-7 rounded px-2 text-xs font-semibold border max-w-[200px]"
-                style={{ background: D.card, color: D.text, borderColor: D.border2 }}>
-                {visibleDashboards.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
-              </select>
-            )}
-
-            {/* Dashboard actions dropdown */}
-            <DropdownMenu>
-              <DropdownMenuTrigger asChild>
-                <button className="p-1 rounded hover:bg-white/5" style={{ color: D.muted }} title="Dashboard options">
-                  <MoreVertical className="w-3.5 h-3.5" />
-                </button>
-              </DropdownMenuTrigger>
-              <DropdownMenuContent align="start" className="w-52">
-                <DropdownMenuItem onClick={() => { setEditDashboard(null); setDbDialogOpen(true); }}>
-                  <Plus className="w-3.5 h-3.5 mr-2" /> New Dashboard
-                </DropdownMenuItem>
-                {activeDash && (<>
-                  <DropdownMenuSeparator />
-                  <DropdownMenuItem onClick={() => { setEditDashboard(activeDash); setDbDialogOpen(true); }}>
-                    <Edit2 className="w-3.5 h-3.5 mr-2" /> Edit Dashboard
-                  </DropdownMenuItem>
-                  <DropdownMenuItem onClick={() => cloneDashboard(activeDash)}>
-                    <Copy className="w-3.5 h-3.5 mr-2" /> Clone Dashboard
-                  </DropdownMenuItem>
-                  {canManage && (<>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem onClick={() => { setEditDashboard(activeDash); setDbDialogOpen(true); }}>
-                      <Shield className="w-3.5 h-3.5 mr-2" /> Access Control
-                    </DropdownMenuItem>
-                    <DropdownMenuSeparator />
-                    <DropdownMenuItem className="text-destructive focus:text-destructive"
-                      onClick={() => setDeleteConfirmId(activeDash.id)}>
-                      <Trash2 className="w-3.5 h-3.5 mr-2" /> Delete Dashboard
-                    </DropdownMenuItem>
-                  </>)}
-                </>)}
-              </DropdownMenuContent>
-            </DropdownMenu>
-          </div>
-
-          {/* Role badge */}
-          <div className="px-2 py-0.5 rounded-full text-[10px] font-medium capitalize shrink-0"
-            style={{ background: D.border2, color: ROLE_COLORS[userRole as Role] ?? D.muted }}>
-            <Shield className="w-2.5 h-2.5 inline mr-1" />
-            {userRole}
-          </div>
-
           <div className="flex-1" />
 
           {/* Clipboard paste button */}
