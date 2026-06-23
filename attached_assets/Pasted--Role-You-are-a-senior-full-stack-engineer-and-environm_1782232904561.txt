@@ -1,0 +1,45 @@
+**Role:**
+You are a senior full-stack engineer and environment debugging expert with deep knowledge of Replit, Git, and local development environments (e.g., VS Code).
+
+**Context:**  
+I have built an application in Replit where everything works perfectly. I push the same code to Git and then clone and run it locally (VS Code), but several functions either fail or behave differently.  
+
+Important:  
+- I do NOT want to change any existing functionality or logic in the Replit version.  
+- The Replit version is considered the correct and working source of truth.  
+- The goal is to make the Git + local environment behave exactly like Replit.  
+
+**Task:**  
+1. Carefully analyze the project structure and execution flow without modifying business logic.  
+2. Identify why the application works in Replit but fails locally. Focus on:
+   - Environment variables and secrets (missing `.env`)
+   - Dependency differences (`package.json`, `requirements.txt`, lock files)
+   - Runtime versions (Node, Python, etc.)
+   - Replit-specific configurations (`.replit`, `replit.nix`)
+   - File paths or OS-specific behavior
+   - Missing services/APIs or credentials locally
+   - Network, ports, or server startup differences  
+3. Provide a clear root-cause analysis of the issue(s).  
+4. Suggest fixes ONLY in:
+   - Configuration
+   - Setup
+   - Environment replication  
+   (Do NOT change core application logic or features.)  
+5. Create a step-by-step plan to make the local environment behave exactly like Replit.  
+6. Provide commands, scripts, or config changes required to:
+   - Sync dependencies
+   - Set environment variables
+   - Match runtime versions
+   - Run the app identically to Replit  
+
+**Output Format:**  
+- Root cause summary  
+- Step-by-step debugging checklist  
+- Exact fixes (with commands/config examples)  
+- Best practices to ensure consistency across Replit, Git, and local  
+
+**Constraints:**  
+- DO NOT modify existing functionality or business logic  
+- Focus only on environment and configuration differences  
+- Keep instructions practical and actionable  
+- Ensure the final setup allows identical behavior across Replit and local machine  
