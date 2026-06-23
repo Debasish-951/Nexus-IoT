@@ -1,0 +1,1 @@
+- [Local dev empty-DB UX break](local-dev-empty-db.md) — empty users table → can() always false → half UI hidden; fix is running the seed script

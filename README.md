@@ -58,15 +58,24 @@ cp .env.example .env
 # Edit .env — fill in DATABASE_URL and SESSION_SECRET
 # Special characters in passwords must be percent-encoded  (@→%40, #→%23)
 
-# 4. Run database migrations
+# 4. Create database tables
 pnpm --filter @workspace/db run push
 
-# 5. Start services in separate terminals
+# 5. Seed initial data  ← required for the UI to work
+pnpm --filter @workspace/db run seed
+
+# 6. Start services in separate terminals
 pnpm --filter @workspace/api-server run dev   # API  →  http://localhost:8080/api
 pnpm --filter @workspace/iot-platform run dev  # UI   →  http://localhost:5173
 ```
 
 The Vite dev server proxies all `/api` requests to `localhost:8080` automatically in local mode — no CORS configuration required.
+
+> **Why the seed step is required:** The platform's role switcher loads users from the database on startup.
+> With an empty database, `currentUser` stays `null` and all permission-gated UI elements (create,
+> edit, delete buttons, forms, action menus) are hidden by the role guard — making it look like
+> half the app is broken. The seed script creates three users (admin, engineer, operator) and a
+> sample asset hierarchy so the platform is immediately usable.
 
 ### Regenerating API client code
 
