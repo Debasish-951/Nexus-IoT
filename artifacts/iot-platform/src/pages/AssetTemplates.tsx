@@ -603,8 +603,9 @@ export default function AssetTemplates() {
 
       {/* ── Import / Parse dialog ────────────────────────────────────── */}
       <Dialog open={importOpen} onOpenChange={(v) => { if (!v) closeImport(); }}>
-        <DialogContent className="max-w-2xl">
-          <DialogHeader>
+        <DialogContent className="max-w-2xl flex flex-col max-h-[90vh] p-0 gap-0">
+          {/* Fixed header */}
+          <DialogHeader className="px-6 pt-6 pb-3 shrink-0">
             <DialogTitle className="flex items-center gap-2">
               <Zap className="w-4 h-4 text-primary" /> Import Attribute Definitions
             </DialogTitle>
@@ -613,142 +614,160 @@ export default function AssetTemplates() {
             </DialogDescription>
           </DialogHeader>
 
-          <Tabs value={importTab} onValueChange={(v) => { setImportTab(v as any); setImportText(""); setImportPreview([]); setImportError(null); setDetectedDeviceId(null); setPreviewUoms({}); }}>
-            <TabsList className="grid grid-cols-3 w-full">
-              <TabsTrigger value="payload" className="text-xs gap-1.5">
-                <Zap className="w-3 h-3" /> Device Payload
-              </TabsTrigger>
-              <TabsTrigger value="csv" className="text-xs gap-1.5">
-                <FileSpreadsheet className="w-3 h-3" /> CSV
-              </TabsTrigger>
-              <TabsTrigger value="json" className="text-xs gap-1.5">
-                <Braces className="w-3 h-3" /> Schema JSON
-              </TabsTrigger>
-            </TabsList>
+          <Tabs value={importTab} onValueChange={(v) => { setImportTab(v as any); setImportText(""); setImportPreview([]); setImportError(null); setDetectedDeviceId(null); setPreviewUoms({}); }}
+            className="flex flex-col flex-1 min-h-0">
+            {/* Fixed tab bar */}
+            <div className="px-6 shrink-0">
+              <TabsList className="grid grid-cols-3 w-full">
+                <TabsTrigger value="payload" className="text-xs gap-1.5">
+                  <Zap className="w-3 h-3" /> Device Payload
+                </TabsTrigger>
+                <TabsTrigger value="csv" className="text-xs gap-1.5">
+                  <FileSpreadsheet className="w-3 h-3" /> CSV
+                </TabsTrigger>
+                <TabsTrigger value="json" className="text-xs gap-1.5">
+                  <Braces className="w-3 h-3" /> Schema JSON
+                </TabsTrigger>
+              </TabsList>
+            </div>
 
             {/* ── Device Payload tab ──────────────────────────────────── */}
-            <TabsContent value="payload" className="space-y-3 mt-3">
-              <div className="rounded-md bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/40 p-3 space-y-1.5">
-                <p className="text-xs font-semibold text-blue-800 dark:text-blue-300 flex items-center gap-1.5">
-                  <Info className="w-3.5 h-3.5" /> How this works
-                </p>
-                <ul className="text-xs text-blue-700 dark:text-blue-400 space-y-1 list-none">
-                  <li>• Paste the raw JSON your device or gateway sends to the ingest endpoint</li>
-                  <li>• The platform reads every field in <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">data</code> / <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">metrics</code> and turns each one into an attribute definition</li>
-                  <li>• Numbers → <span className="font-medium">dynamic / double</span> · strings → <span className="font-medium">static / text</span> · the <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">deviceId</code> is shown for reference but not stored in the template</li>
-                  <li>• Tag names stay as relative keys (e.g. <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">temperature</code>) — the asset identifier is prepended when you apply the template to an asset</li>
-                </ul>
+            <TabsContent value="payload" className="flex flex-col flex-1 min-h-0 mt-0 data-[state=inactive]:hidden">
+              {/* Scrollable body */}
+              <div className="flex-1 overflow-y-auto px-6 py-3 space-y-3">
+                <div className="rounded-md bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/40 p-3 space-y-1.5">
+                  <p className="text-xs font-semibold text-blue-800 dark:text-blue-300 flex items-center gap-1.5">
+                    <Info className="w-3.5 h-3.5" /> How this works
+                  </p>
+                  <ul className="text-xs text-blue-700 dark:text-blue-400 space-y-1 list-none">
+                    <li>• Paste the raw JSON your device or gateway sends to the ingest endpoint</li>
+                    <li>• The platform reads every field in <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">data</code> / <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">metrics</code> and turns each one into an attribute definition</li>
+                    <li>• Numbers → <span className="font-medium">dynamic / double</span> · strings → <span className="font-medium">static / text</span> · the <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">deviceId</code> is shown for reference but not stored in the template</li>
+                    <li>• Tag names stay as relative keys (e.g. <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">temperature</code>) — the asset identifier is prepended when you apply the template to an asset</li>
+                  </ul>
+                </div>
+                <div className="space-y-1">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Paste Device Payload</label>
+                    <button className="text-xs text-primary hover:underline" onClick={() => setImportText(PAYLOAD_EXAMPLE)}>Load example</button>
+                  </div>
+                  <Textarea value={importText} onChange={(e) => { setImportText(e.target.value); setImportPreview([]); setImportError(null); }}
+                    placeholder={'{\n  "deviceId": "my-device-01",\n  "data": {\n    "temperature": 31.7,\n    "energy_kwh": 145.7\n  }\n}'}
+                    className="font-mono text-xs h-44 resize-none" />
+                </div>
+                {importError && <p className="text-xs text-destructive flex items-center gap-1.5"><AlertTriangle className="w-3 h-3 shrink-0" />{importError}</p>}
+                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleParse} disabled={!importText.trim()}>
+                  <Zap className="w-3 h-3 mr-1" /> Extract attributes from payload
+                </Button>
+
+                {importPreview.length > 0 && (
+                  <div className="space-y-2">
+                    {detectedDeviceId && (
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/40 rounded px-2.5 py-1.5">
+                        <CheckCircle2 className="w-3.5 h-3.5 text-green-500 shrink-0" />
+                        Device ID detected: <code className="font-mono font-medium text-foreground">{detectedDeviceId}</code>
+                        <span className="opacity-50 ml-1">— tag names will resolve as <code className="font-mono">{detectedDeviceId}.temperature</code> etc. when applied to an asset</span>
+                      </div>
+                    )}
+                    <ImportPreviewTable
+                      rows={importPreview}
+                      uomOverrides={previewUoms}
+                      onUomChange={(i, v) => setPreviewUoms((p) => ({ ...p, [i]: v }))}
+                      onTypeChange={(i, v) => setImportPreview((prev) => prev.map((d, idx) => idx === i ? { ...d, type: v as any } : d))}
+                      onRemove={(i) => setImportPreview((prev) => prev.filter((_, idx) => idx !== i))}
+                    />
+                  </div>
+                )}
               </div>
-              <div className="space-y-1">
+              {/* Fixed footer */}
+              <div className="px-6 py-4 border-t border-border shrink-0">
+                <DialogFooter>
+                  <Button variant="outline" onClick={closeImport}>Cancel</Button>
+                  <Button onClick={handleImportConfirm} disabled={importPreview.length === 0}>
+                    Add {importPreview.length || ""} definition{importPreview.length !== 1 ? "s" : ""} to template
+                  </Button>
+                </DialogFooter>
+              </div>
+            </TabsContent>
+
+            {/* ── CSV tab ─────────────────────────────────────────────── */}
+            <TabsContent value="csv" className="flex flex-col flex-1 min-h-0 mt-0 data-[state=inactive]:hidden">
+              <div className="flex-1 overflow-y-auto px-6 py-3 space-y-3">
+                <div className="rounded-md bg-muted/40 border border-border p-3 space-y-1 text-xs text-muted-foreground">
+                  <p className="font-semibold text-foreground">Required columns</p>
+                  <p>
+                    <code className="bg-muted px-1 rounded">name</code> (required) ·
+                    <code className="bg-muted px-1 rounded ml-1">type</code> static / dynamic / metric ·
+                    <code className="bg-muted px-1 rounded ml-1">dataType</code> text / number / double / boolean ·
+                    <code className="bg-muted px-1 rounded ml-1">tagName</code> relative key ·
+                    <code className="bg-muted px-1 rounded ml-1">uom</code>
+                  </p>
+                  <p className="text-xs opacity-60">Use this if you manage your attribute list in Excel or Google Sheets — export as CSV and paste here.</p>
+                </div>
                 <div className="flex items-center justify-between">
-                  <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Paste Device Payload</label>
-                  <button className="text-xs text-primary hover:underline" onClick={() => setImportText(PAYLOAD_EXAMPLE)}>Load example</button>
+                  <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">CSV Data</label>
+                  <button className="text-xs text-primary hover:underline" onClick={() => setImportText(CSV_EXAMPLE)}>Load example</button>
                 </div>
                 <Textarea value={importText} onChange={(e) => { setImportText(e.target.value); setImportPreview([]); setImportError(null); }}
-                  placeholder={'{\n  "deviceId": "my-device-01",\n  "data": {\n    "temperature": 31.7,\n    "energy_kwh": 145.7\n  }\n}'}
-                  className="font-mono text-xs h-44 resize-none" />
-              </div>
-              {importError && <p className="text-xs text-destructive flex items-center gap-1.5"><AlertTriangle className="w-3 h-3 shrink-0" />{importError}</p>}
-              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleParse} disabled={!importText.trim()}>
-                <Zap className="w-3 h-3 mr-1" /> Extract attributes from payload
-              </Button>
-
-              {importPreview.length > 0 && (
-                <div className="space-y-2">
-                  {detectedDeviceId && (
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/40 rounded px-2.5 py-1.5">
-                      <CheckCircle2 className="w-3.5 h-3.5 text-green-500 shrink-0" />
-                      Device ID detected: <code className="font-mono font-medium text-foreground">{detectedDeviceId}</code>
-                      <span className="opacity-50 ml-1">— tag names will resolve as <code className="font-mono">{detectedDeviceId}.temperature</code> etc. when applied to an asset</span>
-                    </div>
-                  )}
-                  <ImportPreviewTable
-                    rows={importPreview}
+                  placeholder={"name,type,dataType,tagName,uom\nTemperature,dynamic,double,temperature,°C"}
+                  className="font-mono text-xs h-40 resize-none" />
+                {importError && <p className="text-xs text-destructive flex items-center gap-1.5"><AlertTriangle className="w-3 h-3" />{importError}</p>}
+                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleParse} disabled={!importText.trim()}>Preview</Button>
+                {importPreview.length > 0 && (
+                  <ImportPreviewTable rows={importPreview}
                     uomOverrides={previewUoms}
                     onUomChange={(i, v) => setPreviewUoms((p) => ({ ...p, [i]: v }))}
                     onTypeChange={(i, v) => setImportPreview((prev) => prev.map((d, idx) => idx === i ? { ...d, type: v as any } : d))}
                     onRemove={(i) => setImportPreview((prev) => prev.filter((_, idx) => idx !== i))}
                   />
-                </div>
-              )}
-              <DialogFooter>
-                <Button variant="outline" onClick={closeImport}>Cancel</Button>
-                <Button onClick={handleImportConfirm} disabled={importPreview.length === 0}>
-                  Add {importPreview.length || ""} definition{importPreview.length !== 1 ? "s" : ""} to template
-                </Button>
-              </DialogFooter>
-            </TabsContent>
-
-            {/* ── CSV tab ─────────────────────────────────────────────── */}
-            <TabsContent value="csv" className="space-y-3 mt-3">
-              <div className="rounded-md bg-muted/40 border border-border p-3 space-y-1 text-xs text-muted-foreground">
-                <p className="font-semibold text-foreground">Required columns</p>
-                <p>
-                  <code className="bg-muted px-1 rounded">name</code> (required) ·
-                  <code className="bg-muted px-1 rounded ml-1">type</code> static / dynamic / metric ·
-                  <code className="bg-muted px-1 rounded ml-1">dataType</code> text / number / double / boolean ·
-                  <code className="bg-muted px-1 rounded ml-1">tagName</code> relative key ·
-                  <code className="bg-muted px-1 rounded ml-1">uom</code>
-                </p>
-                <p className="text-xs opacity-60">Use this if you manage your attribute list in Excel or Google Sheets — export as CSV and paste here.</p>
+                )}
               </div>
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">CSV Data</label>
-                <button className="text-xs text-primary hover:underline" onClick={() => setImportText(CSV_EXAMPLE)}>Load example</button>
+              <div className="px-6 py-4 border-t border-border shrink-0">
+                <DialogFooter>
+                  <Button variant="outline" onClick={closeImport}>Cancel</Button>
+                  <Button onClick={handleImportConfirm} disabled={importPreview.length === 0}>
+                    Add {importPreview.length || ""} definition{importPreview.length !== 1 ? "s" : ""} to template
+                  </Button>
+                </DialogFooter>
               </div>
-              <Textarea value={importText} onChange={(e) => { setImportText(e.target.value); setImportPreview([]); setImportError(null); }}
-                placeholder={"name,type,dataType,tagName,uom\nTemperature,dynamic,double,temperature,°C"}
-                className="font-mono text-xs h-40 resize-none" />
-              {importError && <p className="text-xs text-destructive flex items-center gap-1.5"><AlertTriangle className="w-3 h-3" />{importError}</p>}
-              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleParse} disabled={!importText.trim()}>Preview</Button>
-              {importPreview.length > 0 && (
-                <ImportPreviewTable rows={importPreview}
-                  uomOverrides={previewUoms}
-                  onUomChange={(i, v) => setPreviewUoms((p) => ({ ...p, [i]: v }))}
-                  onTypeChange={(i, v) => setImportPreview((prev) => prev.map((d, idx) => idx === i ? { ...d, type: v as any } : d))}
-                  onRemove={(i) => setImportPreview((prev) => prev.filter((_, idx) => idx !== i))}
-                />
-              )}
-              <DialogFooter>
-                <Button variant="outline" onClick={closeImport}>Cancel</Button>
-                <Button onClick={handleImportConfirm} disabled={importPreview.length === 0}>
-                  Add {importPreview.length || ""} definition{importPreview.length !== 1 ? "s" : ""} to template
-                </Button>
-              </DialogFooter>
             </TabsContent>
 
             {/* ── Schema JSON tab ──────────────────────────────────────── */}
-            <TabsContent value="json" className="space-y-3 mt-3">
-              <div className="rounded-md bg-muted/40 border border-border p-3 space-y-1 text-xs text-muted-foreground">
-                <p className="font-semibold text-foreground">Schema JSON format</p>
-                <p>
-                  This is the same format produced by <span className="font-medium text-foreground">Export Schema</span>. Use it to copy an attribute schema from another template or another platform instance.
-                </p>
-                <p className="opacity-60">Each object: <code className="bg-muted px-1 rounded">name</code>, <code className="bg-muted px-1 rounded">type</code>, <code className="bg-muted px-1 rounded">dataType</code>, <code className="bg-muted px-1 rounded">tagName</code>, <code className="bg-muted px-1 rounded">uom</code></p>
+            <TabsContent value="json" className="flex flex-col flex-1 min-h-0 mt-0 data-[state=inactive]:hidden">
+              <div className="flex-1 overflow-y-auto px-6 py-3 space-y-3">
+                <div className="rounded-md bg-muted/40 border border-border p-3 space-y-1 text-xs text-muted-foreground">
+                  <p className="font-semibold text-foreground">Schema JSON format</p>
+                  <p>
+                    This is the same format produced by <span className="font-medium text-foreground">Export Schema</span>. Use it to copy an attribute schema from another template or another platform instance.
+                  </p>
+                  <p className="opacity-60">Each object: <code className="bg-muted px-1 rounded">name</code>, <code className="bg-muted px-1 rounded">type</code>, <code className="bg-muted px-1 rounded">dataType</code>, <code className="bg-muted px-1 rounded">tagName</code>, <code className="bg-muted px-1 rounded">uom</code></p>
+                </div>
+                <div className="flex items-center justify-between">
+                  <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Schema JSON Array</label>
+                  <button className="text-xs text-primary hover:underline" onClick={() => setImportText(JSON_SCHEMA_EXAMPLE)}>Load example</button>
+                </div>
+                <Textarea value={importText} onChange={(e) => { setImportText(e.target.value); setImportPreview([]); setImportError(null); }}
+                  placeholder={'[\n  {"name":"Temperature","type":"dynamic","dataType":"double","tagName":"temperature","uom":"°C"}\n]'}
+                  className="font-mono text-xs h-40 resize-none" />
+                {importError && <p className="text-xs text-destructive flex items-center gap-1.5"><AlertTriangle className="w-3 h-3" />{importError}</p>}
+                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleParse} disabled={!importText.trim()}>Preview</Button>
+                {importPreview.length > 0 && (
+                  <ImportPreviewTable rows={importPreview}
+                    uomOverrides={previewUoms}
+                    onUomChange={(i, v) => setPreviewUoms((p) => ({ ...p, [i]: v }))}
+                    onTypeChange={(i, v) => setImportPreview((prev) => prev.map((d, idx) => idx === i ? { ...d, type: v as any } : d))}
+                    onRemove={(i) => setImportPreview((prev) => prev.filter((_, idx) => idx !== i))}
+                  />
+                )}
               </div>
-              <div className="flex items-center justify-between">
-                <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Schema JSON Array</label>
-                <button className="text-xs text-primary hover:underline" onClick={() => setImportText(JSON_SCHEMA_EXAMPLE)}>Load example</button>
+              <div className="px-6 py-4 border-t border-border shrink-0">
+                <DialogFooter>
+                  <Button variant="outline" onClick={closeImport}>Cancel</Button>
+                  <Button onClick={handleImportConfirm} disabled={importPreview.length === 0}>
+                    Add {importPreview.length || ""} definition{importPreview.length !== 1 ? "s" : ""} to template
+                  </Button>
+                </DialogFooter>
               </div>
-              <Textarea value={importText} onChange={(e) => { setImportText(e.target.value); setImportPreview([]); setImportError(null); }}
-                placeholder={'[\n  {"name":"Temperature","type":"dynamic","dataType":"double","tagName":"temperature","uom":"°C"}\n]'}
-                className="font-mono text-xs h-40 resize-none" />
-              {importError && <p className="text-xs text-destructive flex items-center gap-1.5"><AlertTriangle className="w-3 h-3" />{importError}</p>}
-              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleParse} disabled={!importText.trim()}>Preview</Button>
-              {importPreview.length > 0 && (
-                <ImportPreviewTable rows={importPreview}
-                  uomOverrides={previewUoms}
-                  onUomChange={(i, v) => setPreviewUoms((p) => ({ ...p, [i]: v }))}
-                  onTypeChange={(i, v) => setImportPreview((prev) => prev.map((d, idx) => idx === i ? { ...d, type: v as any } : d))}
-                  onRemove={(i) => setImportPreview((prev) => prev.filter((_, idx) => idx !== i))}
-                />
-              )}
-              <DialogFooter>
-                <Button variant="outline" onClick={closeImport}>Cancel</Button>
-                <Button onClick={handleImportConfirm} disabled={importPreview.length === 0}>
-                  Add {importPreview.length || ""} definition{importPreview.length !== 1 ? "s" : ""} to template
-                </Button>
-              </DialogFooter>
             </TabsContent>
           </Tabs>
         </DialogContent>
