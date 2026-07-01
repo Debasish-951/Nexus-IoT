@@ -129,9 +129,9 @@ export function buildDocumentContent(): ContentItem[] {
     h2("1.5 Getting Started — First Login"),
     ol([
       "Navigate to the platform URL provided by your administrator.",
-      "You will be presented with the Dashboard. The platform uses session-based authentication.",
+      "You will be presented with a login page. Sign in with your username (or email) and password. Once authenticated, the Dashboard loads.",
       "Your role (Admin, Engineer, Operator, or Viewer) determines which features and actions are available.",
-      "Check the top-right corner for your profile — you can switch between roles using the profile dropdown if you have multiple roles configured.",
+      "Check the top-right corner for your profile and role. To work as a different role, sign out from the profile menu and log back in as that user.",
       "Begin by navigating to Asset Management to create your first project and add assets.",
     ]),
     pb(),
@@ -161,13 +161,13 @@ export function buildDocumentContent(): ContentItem[] {
     ul([
       "Broker Status Bar — A compact indicator showing the connection status of configured brokers (green = connected, amber = connecting, red = error). Clicking opens the Broker Management page.",
       "Notification Bell — Displays a badge with the count of active unacknowledged alarms. Clicking opens the Active Alarms page.",
-      "User Profile Menu — Displays the logged-in user's name and role badge. Clicking opens a dropdown with options to view the profile, switch roles, and access settings.",
+      "User Profile Menu — Displays the logged-in user's name and role badge. Clicking opens a dropdown with options to change your password and sign out.",
     ]),
 
-    h2("2.3 User Profile & Role Switching"),
-    p("The platform supports multiple users with distinct roles. The User Profile menu (top-right) shows your current name and role. If your account has access to multiple roles (e.g., the platform admin has configured multiple user profiles), you can switch between them from the dropdown."),
-    p("When you switch roles, the platform automatically sends the new role identity in request headers (X-Actor-Name, X-Actor-Role, X-Actor-Username) so that all subsequent actions are recorded in the Activity Log under the correct identity."),
-    note("Switching roles does not require re-login. It is a client-side profile switch that immediately recalculates all permissions in the current session."),
+    h2("2.3 User Profile & Roles"),
+    p("Each user signs in with their own credentials and has a single role (Admin, Engineer, Operator, or Viewer). The User Profile menu (top-right) shows your current name and role. To work under a different role, sign out and log back in as that user."),
+    p("On login, the platform automatically sends your identity in request headers (X-Actor-Name, X-Actor-Role, X-Actor-Username) so that all subsequent actions are recorded in the Activity Log under the correct identity."),
+    note("Login is credential-based (username/email + password). The signed-in identity and role are held for the current browser session; permissions are recalculated from the role on login."),
 
     h2("2.4 Responsive Layout"),
     p("The platform layout consists of the fixed sidebar on the left and a main content area on the right. The content area is scrollable independently of the sidebar. All modal dialogs and dropdown menus are rendered at the document level and appear above all other content using z-index stacking contexts."),
@@ -1011,7 +1011,7 @@ export function buildDocumentContent(): ContentItem[] {
     ]),
 
     h2("14.5 Actor Headers"),
-    p("When a user switches roles in the profile dropdown, the platform automatically sets actor headers for all subsequent API requests:"),
+    p("When a user logs in, the platform automatically sets actor headers for all subsequent API requests:"),
     code("http", `X-Actor-Name: Debasish Panda
 X-Actor-Role: admin
 X-Actor-Username: Deb`),

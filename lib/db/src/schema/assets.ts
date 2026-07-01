@@ -5,7 +5,9 @@ import { z } from "zod/v4";
 export const assetsTable = pgTable("assets", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
-  identifier: text("identifier").notNull().unique(),
+  // Device ID. Null for child assets — they share the parent/root's device and
+  // have no device link of their own (telemetry is attributed to the device owner).
+  identifier: text("identifier").unique(),
   parentId: uuid("parent_id"),
   templateId: uuid("template_id"),
   templateName: text("template_name"),

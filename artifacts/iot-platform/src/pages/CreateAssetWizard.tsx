@@ -83,8 +83,9 @@ export default function CreateAssetWizard({
   const isChild = !!parentId;
   const effectiveTemplateId = childMode ? (parent?.templateId ?? "") : templateId;
   const template = templateList.find((t) => t.id === effectiveTemplateId);
-  const childIdentifier = parent ? `${parent.identifier}.${name.trim().toLowerCase().replace(/\s+/g, "_").replace(/[^a-z0-9_.-]/g, "")}` : "";
-  const finalIdentifier = isChild ? childIdentifier : deviceId.trim();
+  // Children have no device id of their own — they share the parent/root device.
+  // Server stores identifier = null for any asset with a parent.
+  const finalIdentifier = isChild ? "" : deviceId.trim();
 
   // Steps: child via "+" = Details→Review; child via dropdown = skip Device; root = full.
   const steps = useMemo(() => (
@@ -122,7 +123,7 @@ export default function CreateAssetWizard({
     if (!name.trim()) return;
     if (!childMode && !templateId) return;
     if (!isChild && !deviceId) return;
-    if (!finalIdentifier) return;
+    if (!isChild && !finalIdentifier) return;
     const tid = effectiveTemplateId;
     setSubmitting(true);
     try {
@@ -255,7 +256,7 @@ export default function CreateAssetWizard({
               </div>)}
               {isChild ? (
                 <p className="text-xs text-muted-foreground">
-                  Child of <strong>{parent?.name}</strong> — it shares the parent's device. Identifier: <code className="font-mono bg-muted px-1 rounded">{childIdentifier || "…"}</code>. No separate Device ID needed.
+                  Child of <strong>{parent?.name}</strong> — it shares the parent's device and has <strong>no Device ID</strong> of its own. Telemetry is attributed to the device owner.
                 </p>
               ) : (
                 <p className="text-xs text-muted-foreground">
@@ -334,14 +335,15 @@ export default function CreateAssetWizard({
             <div className="space-y-3">
               <p className="text-sm font-medium">Confirm binding</p>
               <div className="rounded-lg border border-border divide-y divide-border text-sm">
-                {!isChild && <Row label="Device ID" value={deviceId} mono />}
+                {!isChild
+                  ? <Row label="Device ID" value={deviceId} mono />
+                  : <Row label="Device ID" value="Inherited from parent (none)" />}
                 <Row label="Asset Name" value={name.trim()} />
                 {parentId && <Row label="Parent Asset" value={parent?.name ?? parentId} />}
-                <Row label="Identifier" value={finalIdentifier} mono />
                 <Row label="Template" value={template?.name ?? "—"} />
               </div>
               <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground pt-1">
-                <span className="font-mono">{finalIdentifier}</span><ArrowRight className="w-3 h-3" />
+                <span className="font-mono">{isChild ? (parent?.name ?? "parent") : finalIdentifier}</span><ArrowRight className="w-3 h-3" />
                 <span>{name.trim() || "Asset"}</span><ArrowRight className="w-3 h-3" />
                 <span>{template?.name ?? "Template"}</span>
               </div>

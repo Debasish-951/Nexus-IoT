@@ -321,11 +321,11 @@ export default function AssetDetails() {
         <CardContent className="p-5">
           <h2 className="text-sm font-semibold mb-3">Asset Information</h2>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3 text-sm">
-            <Info2 label="Asset Identifier" value={asset.identifier} mono />
+            <Info2 label="Asset Identifier" value={asset.identifier ?? "— (child of a device)"} mono />
             <Info2 label="Asset Name" value={asset.name} />
             <Info2 label="Template" value={asset.templateName || "—"} />
             <Info2 label="Site" value={siteOf(asset, allAssets)} />
-            <Info2 label="Device ID" value={asset.identifier} mono icon={<Cpu className="w-3.5 h-3.5" />} />
+            <Info2 label="Device ID" value={asset.identifier ?? "Inherited from parent"} mono icon={<Cpu className="w-3.5 h-3.5" />} />
             <Info2 label="Status" value={status} />
             <div>
               <p className="text-xs text-muted-foreground mb-1">Health</p>

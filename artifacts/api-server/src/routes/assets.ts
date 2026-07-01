@@ -1,8 +1,8 @@
 import { Router, type IRouter } from "express";
 import { eq, isNull, sql, and, or, inArray } from "drizzle-orm";
-import { db, assetsTable, attributesTable, assetTemplatesTable } from "@workspace/db";
+import { db, assetsTable, attributesTable, assetTemplatesTable, telemetryTable, alarmsTable } from "@workspace/db";
 import { logActivity } from "./activity_log";
-import { hasSeenDevice } from "../lib/seen-devices";
+import { hasSeenDevice, removeSeenDevice } from "../lib/seen-devices";
 import {
   CreateAssetBody,
   UpdateAssetBody,
@@ -38,10 +38,11 @@ router.post("/assets", async (req, res): Promise<void> => {
   const parsed = CreateAssetBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
 
-  // Root assets must map to a known device id (transmitting OR declared via a
-  // template payload). Child assets inherit the parent's device, so their derived
-  // identifier is exempt from the device-gate check.
-  if (!parsed.data.parentId && !hasSeenDevice(parsed.data.identifier)) {
+  // Child assets share the parent/root's device and get NO device id of their own
+  // (identifier = null). Only root assets carry a device id, and it must map to a
+  // known device (transmitting OR declared via a template payload).
+  const isChild = !!parsed.data.parentId;
+  if (!isChild && !hasSeenDevice(parsed.data.identifier)) {
     res.status(400).json({
       error: `"${parsed.data.identifier}" is not a known device id. ` +
         `Register it first by pasting its device payload into a template, or by sending telemetry for it.`,
@@ -55,7 +56,7 @@ router.post("/assets", async (req, res): Promise<void> => {
       .insert(assetsTable)
       .values({
         name:        parsed.data.name,
-        identifier:  parsed.data.identifier,
+        identifier:  isChild ? null : parsed.data.identifier,
         parentId:    parsed.data.parentId ?? null,
         templateId:  parsed.data.templateId ?? null,
         description: parsed.data.description ?? null,
@@ -148,18 +149,29 @@ router.delete("/assets/:id", async (req, res): Promise<void> => {
   if (!rootAsset) { res.status(404).json({ error: "Asset not found" }); return; }
 
   // Collect full subtree via recursive CTE (root + all descendants)
-  const subtree = await db.execute<{ id: string }>(sql`
+  const subtree = await db.execute<{ id: string; identifier: string | null }>(sql`
     WITH RECURSIVE tree AS (
-      SELECT id FROM assets WHERE id = ${rootId}
+      SELECT id, identifier FROM assets WHERE id = ${rootId}
       UNION ALL
-      SELECT a.id FROM assets a INNER JOIN tree t ON a.parent_id = t.id
+      SELECT a.id, a.identifier FROM assets a INNER JOIN tree t ON a.parent_id = t.id
     )
-    SELECT id FROM tree
+    SELECT id, identifier FROM tree
   `);
   const allIds = subtree.rows.map((r) => r.id);
+  const identifiers = subtree.rows.map((r) => r.identifier).filter((x): x is string => !!x);
 
-  // Delete the whole subtree in one statement (no FK issues since entire subtree goes)
+  // Remove dependent rows first — telemetry/attributes/alarms have no FK cascade,
+  // so without this they'd be orphaned and keep showing up (e.g. in the Live Feed).
+  await db.delete(telemetryTable).where(inArray(telemetryTable.assetId, allIds));
+  await db.delete(attributesTable).where(inArray(attributesTable.assetId, allIds));
+  await db.delete(alarmsTable).where(inArray(alarmsTable.assetId, allIds));
+
+  // Delete the whole subtree in one statement
   await db.delete(assetsTable).where(inArray(assetsTable.id, allIds));
+
+  // Drop the devices from the seen-devices registry so they leave "Connected
+  // Devices" until/unless they transmit again.
+  await Promise.all(identifiers.map((id) => removeSeenDevice(id).catch(() => {})));
 
   // Decrement parent's childCount
   if (rootAsset.parentId) {

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
 import { useCurrentUser } from "@/contexts/UserContext";
+import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -12,16 +13,57 @@ import {
 const BLUE = "#2563EB";
 const FEATURES = ["Asset Management", "Predictive Maintenance", "Live Sensor Analytics", "AI Anomaly Detection"];
 
-function BrandMark() {
+// Web Synergies wordmark recreated in markup (renders with no image file / CSP-safe).
+function WsLogo({ variant = "dark", size = "md" }: { variant?: "dark" | "light"; size?: "md" | "lg" }) {
+  const web = variant === "light" ? "text-white" : "text-slate-900";
+  const tag = variant === "light" ? "text-white/70" : "text-slate-500";
+  const reg = variant === "light" ? "text-white/60" : "text-slate-400";
+  const webSize = size === "lg" ? "text-4xl" : "text-2xl";
+  const synSize = size === "lg" ? "text-2xl px-3 py-1.5" : "text-lg px-2 py-0.5";
   return (
-    // Drop the real logo at artifacts/iot-platform/public/web-synergies-logo.png
-    // If missing, the alt text shows — swap the src if you use a different filename.
+    <div className="inline-flex flex-col leading-none select-none">
+      <div className="flex items-center">
+        <span className={cn("font-extrabold tracking-tighter", webSize, web)}>Web</span>
+        <span className={cn("ml-1 inline-block bg-[#f47b20] text-white font-bold -skew-x-6 shadow-sm", synSize)}>
+          <span className="inline-block skew-x-6">Synergies</span>
+        </span>
+        <span className={cn("text-[10px] ml-0.5 self-start", reg)}>®</span>
+      </div>
+      <span className={cn("text-[11px] mt-1.5 font-medium tracking-wide", tag)}>Bettering your Expectations</span>
+    </div>
+  );
+}
+
+// Uses the real logo file if present (drop web-synergies-logo.png in /public),
+// otherwise falls back to the recreated wordmark so a logo always shows.
+function BrandMark() {
+  const [imgOk, setImgOk] = useState(true);
+  if (!imgOk) return <WsLogo variant="dark" size="lg" />;
+  return (
     <img
       src="/web-synergies-logo.png"
       alt="Web Synergies"
-      className="h-16 w-auto object-contain select-none"
+      className="h-56 w-auto object-contain select-none -ml-4"
       draggable={false}
+      onError={() => setImgOk(false)}
     />
+  );
+}
+
+// Logo for the dark hero: the black wordmark needs a white chip to be visible.
+function HeroLogo() {
+  const [imgOk, setImgOk] = useState(true);
+  if (!imgOk) return <WsLogo variant="light" size="lg" />;
+  return (
+    <span className="inline-block bg-white rounded-lg px-4 py-3 shadow-lg">
+      <img
+        src="/web-synergies-logo.png"
+        alt="Web Synergies"
+        className="h-12 w-auto object-contain select-none"
+        draggable={false}
+        onError={() => setImgOk(false)}
+      />
+    </span>
   );
 }
 
@@ -73,9 +115,17 @@ export default function Login() {
         }} />
         {/* transparent blue digital-twin overlay */}
         <div className="absolute inset-0 bg-[#0a2a5c]/40" />
-        {/* faint binary accents */}
-        <div className="absolute top-6 left-6 font-mono text-[10px] leading-5 text-cyan-300/20 select-none hidden md:block">
+        {/* faint binary accents (top-right) */}
+        <div className="absolute top-6 right-6 font-mono text-[10px] leading-5 text-cyan-300/20 select-none hidden md:block text-right">
           1100101 0110011<br />1011001 1100110<br />0110100 1010011
+        </div>
+        {/* brand + headline (fills the upper-left space) */}
+        <div className="absolute top-8 left-8 right-8 md:max-w-md text-white hidden md:block z-10">
+          <HeroLogo />
+          <h2 className="mt-10 text-3xl font-bold leading-tight">Monitor. Predict. Optimize.</h2>
+          <p className="mt-3 text-sm text-white/70 leading-relaxed max-w-sm">
+            Real-time industrial intelligence — track asset health, catch anomalies early, and act before failures happen.
+          </p>
         </div>
         {/* stylized digital-twin (motor) */}
         <svg className="absolute inset-0 w-full h-full" viewBox="0 0 600 500" preserveAspectRatio="xMidYMid meet" aria-hidden>

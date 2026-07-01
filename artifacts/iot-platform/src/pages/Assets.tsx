@@ -64,7 +64,7 @@ export default function Assets() {
         .filter((a) => {
           if (templateFilter !== "all" && (a.templateId ?? "") !== templateFilter) return false;
           if (!q) return true;
-          return a.name.toLowerCase().includes(q) || a.identifier.toLowerCase().includes(q);
+          return a.name.toLowerCase().includes(q) || (a.identifier ?? "").toLowerCase().includes(q);
         })
         .map((a) => ({ asset: a, depth: 0 }));
     }

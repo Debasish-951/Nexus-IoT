@@ -212,14 +212,10 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           collapsed && "justify-center px-0"
         )}>
           {!collapsed && (
-            <>
-              <div className="w-6 h-6 rounded bg-sidebar-primary flex items-center justify-center shrink-0">
-                <Cpu className="w-3.5 h-3.5 text-white" />
-              </div>
-              <span className="text-sidebar-foreground font-semibold text-base tracking-tight">
-                Integrated Suite
-              </span>
-            </>
+            <span className="inline-flex items-center bg-white rounded-md px-2 py-1 shadow-sm shrink-0">
+              <img src={`${BASE}/web-synergies-logo.png`} alt="Web Synergies"
+                className="h-6 w-auto object-contain select-none" draggable={false} />
+            </span>
           )}
           <button
             onClick={() => setCollapsed((c) => !c)}
