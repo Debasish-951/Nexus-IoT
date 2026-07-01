@@ -32,7 +32,7 @@ import {
   Play, Square, Send, RefreshCw, Zap, ChevronRight,
   CheckCircle2, XCircle, Clock, Activity, Cpu, TrendingUp,
   Bell, BellOff, History, AlertTriangle,
-  Plus, Trash2, Package, Sliders,
+  Plus, Trash2, Package, Sliders, Upload, FileSpreadsheet,
 } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -985,6 +985,292 @@ function CustomAssetSender() {
   );
 }
 
+// ══════════════════════════════════════════════════════════════════════════════
+// ── CSV Upload sender ─────────────────────────────────────────────────────────
+// Parse a CSV file and push each row as a telemetry payload. deviceId is taken
+// from the selected asset's identifier (guaranteeing the match) or a deviceId
+// column in the file. Stream (one row per interval) or bulk (all at once).
+
+// Minimal CSV parser with quoted-field support.
+function parseCsvText(text: string): { headers: string[]; rows: Record<string, string>[] } {
+  const lines = text.replace(/\r\n/g, "\n").split("\n").filter((l) => l.trim().length > 0);
+  if (lines.length === 0) return { headers: [], rows: [] };
+  const parseLine = (line: string): string[] => {
+    const out: string[] = [];
+    let cur = "", q = false;
+    for (let i = 0; i < line.length; i++) {
+      const c = line[i];
+      if (q) {
+        if (c === '"') { if (line[i + 1] === '"') { cur += '"'; i++; } else q = false; }
+        else cur += c;
+      } else if (c === ",") { out.push(cur); cur = ""; }
+      else if (c === '"') q = true;
+      else cur += c;
+    }
+    out.push(cur);
+    return out.map((s) => s.trim());
+  };
+  const headers = parseLine(lines[0]);
+  const rows = lines.slice(1).map((l) => {
+    const cells = parseLine(l);
+    const o: Record<string, string> = {};
+    headers.forEach((h, i) => { o[h] = cells[i] ?? ""; });
+    return o;
+  });
+  return { headers, rows };
+}
+
+function coerceCell(raw: string): number | string | null {
+  const v = raw.trim();
+  if (v === "") return null;
+  const n = Number(v);
+  return !isNaN(n) && /^-?\d*\.?\d+(e-?\d+)?$/i.test(v) ? n : v;
+}
+
+function CsvUploader() {
+  const { toast } = useToast();
+  const qc = useQueryClient();
+  const { data: assetsData } = useListAssets();
+  const allAssets = (assetsData as any[] | undefined) ?? [];
+  const fileRef = useRef<HTMLInputElement>(null);
+
+  const [fileName, setFileName] = useState("");
+  const [headers, setHeaders] = useState<string[]>([]);
+  const [rows, setRows] = useState<Record<string, string>[]>([]);
+  const [parseError, setParseError] = useState<string | null>(null);
+
+  const [selectedAssetId, setSelectedAssetId] = useState("");
+  const [deviceCol, setDeviceCol] = useState("");      // CSV column used as deviceId (if no asset chosen)
+  const [useNow, setUseNow] = useState(true);          // timestamp: now vs CSV timestamp column
+  const [mode, setMode] = useState<"stream" | "bulk">("stream");
+  const [intervalSecs, setIntervalSecs] = useState(10);
+
+  const [pushing, setPushing] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [result, setResult] = useState<{ ok: number; fail: number } | null>(null);
+  const stopRef = useRef(false);
+
+  const selectedAsset = allAssets.find((a: any) => a.id === selectedAssetId);
+  const hasTsCol = headers.some((h) => h.toLowerCase() === "timestamp");
+
+  function onFile(file: File) {
+    setParseError(null); setResult(null); setProgress(0);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const { headers: hs, rows: rs } = parseCsvText(String(reader.result ?? ""));
+      if (hs.length === 0) { setParseError("CSV is empty or has no header row."); return; }
+      setHeaders(hs); setRows(rs); setFileName(file.name);
+      const guess = hs.find((h) => /^device[_ ]?id$/i.test(h)) ?? "";
+      setDeviceCol(guess);
+    };
+    reader.onerror = () => setParseError("Could not read the file.");
+    reader.readAsText(file);
+  }
+
+  function resolveDeviceId(row: Record<string, string>): string {
+    if (selectedAsset) return selectedAsset.identifier || selectedAsset.id;
+    return deviceCol ? (row[deviceCol] ?? "").trim() : "";
+  }
+
+  function buildPayload(row: Record<string, string>): Record<string, any> | null {
+    const deviceId = resolveDeviceId(row);
+    if (!deviceId) return null;
+    const timestamp = (!useNow && row["timestamp"]) ? row["timestamp"] : new Date().toISOString();
+    const payload: Record<string, any> = { deviceId, timestamp };
+    for (const h of headers) {
+      if (h === deviceCol || h.toLowerCase() === "timestamp") continue;
+      const v = coerceCell(row[h] ?? "");
+      if (v !== null) payload[h] = v;
+    }
+    return payload;
+  }
+
+  const metricCols = headers.filter((h) => h !== deviceCol && h.toLowerCase() !== "timestamp");
+
+  async function pushAll() {
+    if (rows.length === 0) return;
+    if (!selectedAsset && !deviceCol) {
+      toast({ title: "Choose a target asset or a deviceId column", variant: "destructive" });
+      return;
+    }
+    setPushing(true); setResult(null); setProgress(0); stopRef.current = false;
+    let ok = 0, fail = 0;
+    for (let i = 0; i < rows.length; i++) {
+      if (stopRef.current) break;
+      const payload = buildPayload(rows[i]);
+      if (!payload) { fail++; setProgress(i + 1); continue; }
+      try {
+        const res = await fetch("/api/ingest/payload", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        if (res.ok) ok++; else fail++;
+      } catch { fail++; }
+      setProgress(i + 1);
+      if (mode === "stream") {
+        qc.invalidateQueries({ queryKey: getGetRecentTelemetryQueryKey({ limit: 12 }) });
+        if (i < rows.length - 1) await new Promise((r) => setTimeout(r, intervalSecs * 1000));
+      }
+    }
+    qc.invalidateQueries({ queryKey: getGetRecentTelemetryQueryKey({ limit: 12 }) });
+    setResult({ ok, fail });
+    setPushing(false);
+    toast({ title: `Pushed ${ok} row${ok !== 1 ? "s" : ""}${fail ? `, ${fail} failed` : ""}`, variant: fail ? "destructive" : undefined });
+  }
+
+  return (
+    <div className="space-y-4">
+      {/* Upload card */}
+      <Card className="shadow-sm">
+        <CardContent className="p-4 space-y-3">
+          <input ref={fileRef} type="file" accept=".csv,text/csv" className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) onFile(f); e.target.value = ""; }} />
+          <div className="flex items-center gap-3">
+            <Button variant="outline" onClick={() => fileRef.current?.click()}>
+              <Upload className="w-4 h-4 mr-2" /> Choose CSV file
+            </Button>
+            {fileName
+              ? <span className="text-sm text-muted-foreground flex items-center gap-1.5"><FileSpreadsheet className="w-4 h-4" />{fileName} · <span className="font-medium text-foreground">{rows.length}</span> rows</span>
+              : <span className="text-sm text-muted-foreground">No file selected — CSV with a header row.</span>}
+          </div>
+          {parseError && <p className="text-xs text-destructive flex items-center gap-1.5"><XCircle className="w-3 h-3" />{parseError}</p>}
+        </CardContent>
+      </Card>
+
+      {rows.length > 0 && (
+        <>
+          {/* Config card */}
+          <Card className="shadow-sm">
+            <CardContent className="p-4 space-y-4">
+              {/* Target asset */}
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1.5 block">Target Asset (its identifier becomes the deviceId)</Label>
+                <select value={selectedAssetId} onChange={(e) => setSelectedAssetId(e.target.value)}
+                  className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring">
+                  <option value="">— use deviceId column from CSV —</option>
+                  {allAssets.map((a: any) => (
+                    <option key={a.id} value={a.id}>{a.name}{a.identifier ? ` (${a.identifier})` : ""}</option>
+                  ))}
+                </select>
+                {selectedAsset ? (
+                  <p className="text-xs text-muted-foreground mt-1.5">
+                    Every row sent with <code className="bg-muted px-1 rounded font-mono">deviceId: "{selectedAsset.identifier || selectedAsset.id}"</code> → links to this asset.
+                  </p>
+                ) : (
+                  <div className="flex items-center gap-2 mt-2">
+                    <Label className="text-xs text-muted-foreground">deviceId column:</Label>
+                    <select value={deviceCol} onChange={(e) => setDeviceCol(e.target.value)}
+                      className="h-8 rounded-md border border-input bg-background px-2 text-xs">
+                      <option value="">— none —</option>
+                      {headers.map((h) => <option key={h} value={h}>{h}</option>)}
+                    </select>
+                    {!deviceCol && <span className="text-xs text-amber-600 dark:text-amber-400">Pick an asset or a deviceId column.</span>}
+                  </div>
+                )}
+              </div>
+
+              {/* Detected columns */}
+              <div>
+                <Label className="text-xs text-muted-foreground mb-1.5 block">Metric columns ({metricCols.length})</Label>
+                <div className="flex flex-wrap gap-1.5">
+                  {metricCols.map((h) => (
+                    <span key={h} className="text-xs font-mono bg-muted/60 border border-border/60 rounded px-1.5 py-0.5">{h}</span>
+                  ))}
+                  {hasTsCol && <span className="text-xs font-mono bg-blue-100 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 rounded px-1.5 py-0.5">timestamp</span>}
+                </div>
+              </div>
+
+              {/* Mode + interval + timestamp */}
+              <div className="flex items-center gap-4 flex-wrap">
+                <div className="flex items-center gap-1 p-1 rounded-md" style={{ background: "hsl(var(--muted))" }}>
+                  <button onClick={() => setMode("stream")} disabled={pushing}
+                    className={cn("px-3 py-1 rounded text-xs font-medium transition-all", mode === "stream" ? "bg-background shadow-sm" : "text-muted-foreground")}>
+                    Stream (1 row / {intervalSecs}s)
+                  </button>
+                  <button onClick={() => setMode("bulk")} disabled={pushing}
+                    className={cn("px-3 py-1 rounded text-xs font-medium transition-all", mode === "bulk" ? "bg-background shadow-sm" : "text-muted-foreground")}>
+                    Bulk (all at once)
+                  </button>
+                </div>
+                {mode === "stream" && (
+                  <div className="flex items-center gap-2 flex-1 min-w-40">
+                    <Clock className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                    <Slider value={[intervalSecs]} onValueChange={([v]) => setIntervalSecs(v)} min={1} max={60} step={1} disabled={pushing} className="flex-1 max-w-48" />
+                    <span className="text-xs text-muted-foreground w-10 text-right">{intervalSecs}s</span>
+                  </div>
+                )}
+                <div className="flex items-center gap-2">
+                  <Switch checked={useNow} onCheckedChange={setUseNow} id="csv-use-now" disabled={pushing} />
+                  <Label htmlFor="csv-use-now" className="text-xs cursor-pointer select-none">
+                    {useNow ? "Timestamp = now" : hasTsCol ? "Use CSV timestamp" : "Timestamp = now (no ts column)"}
+                  </Label>
+                </div>
+              </div>
+
+              {/* Push controls */}
+              <div className="flex items-center gap-3 flex-wrap">
+                {!pushing ? (
+                  <Button onClick={pushAll} disabled={rows.length === 0}>
+                    <Send className="w-4 h-4 mr-2" /> Push {rows.length} row{rows.length !== 1 ? "s" : ""}
+                  </Button>
+                ) : (
+                  <Button variant="destructive" onClick={() => { stopRef.current = true; }}>
+                    <Square className="w-4 h-4 mr-2" /> Stop
+                  </Button>
+                )}
+                {(pushing || result) && (
+                  <div className="flex items-center gap-2 flex-1 min-w-48">
+                    <div className="flex-1 h-2 rounded-full bg-muted overflow-hidden">
+                      <div className="h-full bg-primary transition-all" style={{ width: `${(progress / rows.length) * 100}%` }} />
+                    </div>
+                    <span className="text-xs text-muted-foreground tabular-nums">{progress}/{rows.length}</span>
+                  </div>
+                )}
+                {result && (
+                  <span className="text-xs flex items-center gap-2">
+                    <span className="text-green-600 dark:text-green-400 flex items-center gap-1"><CheckCircle2 className="w-3.5 h-3.5" />{result.ok}</span>
+                    {result.fail > 0 && <span className="text-red-500 flex items-center gap-1"><XCircle className="w-3.5 h-3.5" />{result.fail}</span>}
+                  </span>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+
+          {/* Preview table */}
+          <Card className="shadow-sm">
+            <CardHeader className="pb-2 pt-3 px-4">
+              <CardTitle className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">Preview (first 5 rows)</CardTitle>
+            </CardHeader>
+            <CardContent className="p-0">
+              <div className="overflow-auto">
+                <table className="w-full text-xs">
+                  <thead>
+                    <tr className="border-b border-border bg-muted/50">
+                      {headers.map((h) => (
+                        <th key={h} className={cn("text-left px-3 py-2 font-medium whitespace-nowrap",
+                          h === deviceCol ? "text-primary" : "text-muted-foreground")}>
+                          {h}{h === deviceCol ? " (deviceId)" : ""}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {rows.slice(0, 5).map((r, i) => (
+                      <tr key={i} className="border-b border-border/50">
+                        {headers.map((h) => <td key={h} className="px-3 py-1.5 font-mono whitespace-nowrap">{r[h]}</td>)}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </CardContent>
+          </Card>
+        </>
+      )}
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 export default function IngestSimulator() {
   const qc = useQueryClient();
@@ -1186,7 +1472,7 @@ export default function IngestSimulator() {
   const successRate = totalSent > 0 ? Math.round((totalSuccess / totalSent) * 100) : 100;
   const telemetryList = (recentTelemetry as any[] | undefined) ?? [];
 
-  const [simMode, setSimMode] = useState<"presets" | "custom">("presets");
+  const [simMode, setSimMode] = useState<"presets" | "custom" | "csv">("presets");
 
   return (
     <div className="p-6 space-y-4">
@@ -1243,9 +1529,17 @@ export default function IngestSimulator() {
         >
           <Package className="w-3.5 h-3.5" /> Custom Asset
         </button>
+        <button
+          onClick={() => { setSimMode("csv"); setAutoSend(false); }}
+          className={cn("flex items-center gap-1.5 px-4 py-1.5 rounded-md text-sm font-medium transition-all",
+            simMode === "csv" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground")}
+        >
+          <FileSpreadsheet className="w-3.5 h-3.5" /> CSV Upload
+        </button>
       </div>
 
       {simMode === "custom" && <CustomAssetSender />}
+      {simMode === "csv" && <CsvUploader />}
 
       {simMode === "presets" && (<>
       {/* ── Main 2-panel grid ── */}

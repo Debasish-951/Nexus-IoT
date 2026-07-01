@@ -8,6 +8,7 @@ import { GetTelemetryParams, GetTelemetryQueryParams } from "@workspace/api-zod"
 import { Parser } from "expr-eval";
 import { broadcast } from "../lib/ws-broadcast";
 import { optionalApiKeyAuth } from "../middleware/apiKeyAuth";
+import { recordDevice, listSeenDevices, removeSeenDevice, pruneUnusedDevices } from "../lib/seen-devices";
 
 const router: IRouter = Router();
 
@@ -282,16 +283,15 @@ export async function processNormalised(n: NormalisedPayload, assetIdHint?: stri
   }
 
   const ts = n.timestamp ?? new Date();
+  // Remember every deviceId we receive (even unmatched) so the UI can offer real
+  // device ids and asset creation can validate against transmitting devices.
+  recordDevice(n.deviceId, !!assetId);
+  // Do NOT auto-create assets. Telemetry is only stored when its deviceId matches
+  // an existing asset's identifier; unknown deviceIds are ignored (no asset created).
   if (!assetId) {
-    const [created] = await db.insert(assetsTable).values({
-      name: assetName,
-      identifier: n.deviceId,
-      parentId: null,
-    }).returning({ id: assetsTable.id, name: assetsTable.name });
-    assetId = created.id;
-    assetName = created.name;
+    return { recordsWritten: 0, assetId: null, assetName, alarmEvents: [] };
   }
-  if (!assetId || Object.keys(n.metrics).length === 0) {
+  if (Object.keys(n.metrics).length === 0) {
     return { recordsWritten: 0, assetId, assetName, alarmEvents: [] };
   }
 
@@ -363,6 +363,32 @@ export async function processNormalised(n: NormalisedPayload, assetIdHint?: stri
 
   return { recordsWritten: records.length, assetId, assetName, alarmEvents };
 }
+
+// ── Seen devices (deviceIds received in telemetry, even if unmatched) ─────────
+router.get("/ingest/seen-devices", (_req, res): void => {
+  res.json(listSeenDevices().map((d) => ({ ...d, lastSeen: d.lastSeen.toISOString() })));
+});
+
+// Register a deviceId as a known device WITHOUT telemetry — used when a device
+// payload is pasted into a template, so the id becomes selectable for assets.
+router.post("/ingest/register-device", (req, res): void => {
+  const deviceId = (req.body?.deviceId ?? "").toString().trim();
+  if (!deviceId) { res.status(400).json({ error: "deviceId required" }); return; }
+  recordDevice(deviceId, false);
+  res.json({ ok: true, deviceId });
+});
+
+// Remove one stale device id.
+router.delete("/ingest/seen-devices/:deviceId", async (req, res): Promise<void> => {
+  await removeSeenDevice(req.params.deviceId);
+  res.json({ ok: true });
+});
+
+// Prune all device ids not bound to an existing asset (clears old/test ids).
+router.post("/ingest/seen-devices/prune", async (_req, res): Promise<void> => {
+  const removed = await pruneUnusedDevices();
+  res.json({ ok: true, removed });
+});
 
 // ── Validate (dry-run) endpoint ───────────────────────────────────────────────
 router.post("/ingest/validate", optionalApiKeyAuth("ingest:write"), async (req, res): Promise<void> => {

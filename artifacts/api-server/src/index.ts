@@ -5,6 +5,7 @@ import { logger } from "./lib/logger";
 import { startMqttSubscribers } from "./services/mqtt.js";
 import { initWebSocketServer } from "./lib/ws-broadcast";
 import { runPruning } from "./routes/system";
+import { loadSeenDevices } from "./lib/seen-devices";
 
 // On Replit, PORT is injected by the platform.
 // For local development, default to 8080 so the frontend proxy works out of the box.
@@ -19,6 +20,12 @@ initWebSocketServer(server);
 
 server.listen(port, () => {
   logger.info({ port }, "Server listening");
+
+  // Load the persisted seen-device registry (+ existing asset identifiers) so the
+  // device list and match-on-create rule survive restarts.
+  loadSeenDevices()
+    .then((n) => logger.info({ devices: n }, "Loaded seen-device registry"))
+    .catch((e) => logger.warn({ err: e }, "Seen-device load failed"));
 
   startMqttSubscribers().catch((e) => {
     logger.warn({ err: e }, "MQTT subscriber startup failed — will retry on next broker save");

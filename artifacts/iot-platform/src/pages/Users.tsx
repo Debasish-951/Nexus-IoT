@@ -29,15 +29,15 @@ import { ReadOnlyBanner } from "@/components/RoleGuard";
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const ROLE_STYLES: Record<string, string> = {
-  admin:    "bg-purple-100 text-purple-700",
-  engineer: "bg-blue-100 text-blue-700",
-  operator: "bg-green-100 text-green-700",
-  viewer:   "bg-gray-100 text-gray-700",
+  admin:    "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
+  engineer: "bg-blue-100  text-blue-700  dark:bg-blue-900/40  dark:text-blue-300",
+  operator: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
+  viewer:   "bg-slate-100 text-slate-600 dark:bg-slate-800    dark:text-slate-300",
 };
 const STATUS_STYLES: Record<string, string> = {
-  active:    "bg-green-100 text-green-700",
-  inactive:  "bg-gray-100 text-gray-600",
-  suspended: "bg-red-100 text-red-700",
+  active:    "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
+  inactive:  "bg-slate-100 text-slate-600 dark:bg-slate-800   dark:text-slate-300",
+  suspended: "bg-red-100 text-red-700 dark:bg-red-900/40 dark:text-red-300",
 };
 
 // ── Module definitions ────────────────────────────────────────────────────────

@@ -11,8 +11,9 @@ An enterprise-grade industrial IoT data acquisition, monitoring, and analytics p
 | **Asset management** | Unlimited-depth hierarchy, attribute CRUD, template library, maintenance mode |
 | **Telemetry ingest** | HTTP single / batch / validate and MQTT; multi-format payload normalisation |
 | **Alarm engine** | Threshold and rate-of-change rules; webhook delivery; acknowledge workflow; full history |
-| **Visualisation** | Named dashboards (CRUD), 11 widget types, global time-range, real-time WebSocket updates |
-| **Live feed** | Per-asset metric tiles, event log (200-event buffer), stale detection after 30 s |
+| **Visualisation** | Analytics workspace, tab-per-graph, 20 chart types (11 Recharts + 9 ECharts: heatmap, boxplot, correlation, treemap, sankey, pareto, control, calendar, FFT), real + demo overlays |
+| **Live feed** | Live Operations Center — live sensor feed, asset status, health ranking, event timeline; freshness-based live badge |
+| **Authentication** | Split-screen login page + logout; client-side session gate (`localStorage`) redirects unauthenticated users to `/login` |
 | **Data management** | Storage analytics, configurable retention policies, on-demand pruning |
 | **Reports** | Telemetry summary, alarm report, asset snapshot; CSV and JSON export |
 | **Brokers** | MQTT / REST / Azure IoT with payload mapping rules and connection history |
@@ -29,7 +30,8 @@ No local setup needed — Replit provisions the database and starts all services
 1. Open the project in Replit.
 2. The API server and frontend start via configured workflows.
 3. Open the **web** preview pane — the UI is served at `/`.
-4. Switch roles with the profile switcher in the top bar (no login gate in development).
+4. You land on the **login page** (`/login`). Enter any email + password — authentication is mocked (no auth backend), so any input signs you in.
+5. Switch roles with the profile switcher in the top bar; **Sign Out** returns you to the login page.
 
 ---
 
@@ -133,6 +135,18 @@ pnpm-workspace.yaml  Workspace config, catalog pins, dependency overrides
 
 ---
 
+## Authentication
+
+The UI has a **split-screen login page** at `/login` (Web Synergies branding, industrial hero, feature checklist).
+
+- **No auth backend** — login is mocked. Any email + password signs you in.
+- On successful login the client sets `localStorage.ws_authed = "1"`; a route gate in `App.tsx` redirects any unauthenticated request to `/login`.
+- **Sign Out** (top-right profile menu) clears the flag and returns to `/login`.
+- RBAC (admin / engineer / operator / viewer) is still enforced separately by the frontend role guard — see below.
+- Real logo: drop `web-synergies-logo.png` into `artifacts/iot-platform/public/`. Real hero photo: drop `hero.jpg` there and enable the photo block in `pages/Login.tsx`.
+
+---
+
 ## Configuration reference
 
 | Area | Where to change |
@@ -159,6 +173,7 @@ pnpm-workspace.yaml  Workspace config, catalog pins, dependency overrides
 | Alarms not firing | Asset is in maintenance mode | Toggle off maintenance in the asset detail panel |
 | Dashboard shows stale data | WebSocket disconnected | Reload the page; verify `/api/ws` is reachable |
 | API returns 401 | Missing or expired API key | Check API client status at `/api-clients` |
+| Login page never shows (app opens straight to dashboard) | `ws_authed` flag still set from a prior session | DevTools → Console → `localStorage.removeItem("ws_authed")`, then hard reload (Ctrl+Shift+R) |
 
 ---
 

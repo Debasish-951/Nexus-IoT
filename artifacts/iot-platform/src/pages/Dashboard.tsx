@@ -1,564 +1,401 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-import { useGetDashboardSummary, useGetRecentTelemetry, useGetAlarmStats, useListAssets } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
-import { getGetDashboardSummaryQueryKey, getGetAlarmStatsQueryKey } from "@workspace/api-client-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { useState, useEffect, useCallback, useMemo } from "react";
+import { useListAssets } from "@workspace/api-client-react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { useLocation } from "wouter";
 import {
-  Blocks, Bell, Activity, Clock, AlertTriangle,
-  CheckCircle2, AlertCircle, Minus, RefreshCw,
-  Zap, ShieldAlert, TrendingUp, ArrowRight, Wifi,
+  Box, Bell, AlertTriangle, Wrench, FileText, User, Settings,
+  Search, Activity as ActivityIcon, ChevronRight, Info, Maximize2, LayoutGrid,
 } from "lucide-react";
-import { format, formatDistanceToNow } from "date-fns";
+import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { useWsEvents } from "@/hooks/useWsEvents";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
-interface TelemetryEvent {
-  assetId: string;
-  assetName: string;
-  metrics: Record<string, unknown>;
-  timestamp: string;
-}
+// Pages reachable from global search (label → route).
+const PAGES: { label: string; path: string }[] = [
+  { label: "Dashboard", path: "/" }, { label: "Assets", path: "/assets" },
+  { label: "Asset Templates", path: "/asset-templates" }, { label: "Media Library", path: "/media-library" },
+  { label: "Live Feed", path: "/live" }, { label: "Data Explorer", path: "/data-explorer" },
+  { label: "Visualization", path: "/visualization" }, { label: "Analytics & KPI", path: "/analytics-kpi" },
+  { label: "Alarms", path: "/alarms" }, { label: "Alarm History", path: "/alarm-history" },
+  { label: "Alarm Rules", path: "/alarm-rules" }, { label: "Brokers", path: "/brokers" },
+  { label: "Destinations", path: "/destinations" }, { label: "Integration Hub", path: "/integrations" },
+  { label: "Users", path: "/users" }, { label: "API Clients", path: "/api-clients" },
+  { label: "Notification Groups", path: "/notification-groups" }, { label: "Reports", path: "/reports" },
+  { label: "Data Management", path: "/data-management" }, { label: "Activity Log", path: "/activity-log" },
+  { label: "Settings", path: "/settings" },
+];
 
-interface LiveReading {
-  id: string;
-  assetId: string;
-  deviceId: string;
-  metric: string;
-  value: unknown;
-  timestamp: string;
-}
+interface SearchResult { type: string; label: string; sub?: string; path: string; icon: React.ElementType }
 
+// ── Types ───────────────────────────────────────────────────────────────────────
 interface ActiveAlarm {
-  id: string;
-  name: string;
-  assetName: string;
-  severity: string;
-  status: string;
-  message: string;
-  triggeredAt: string;
+  id: string; name: string; assetId: string | null; assetName: string;
+  severity: string; status: string; message: string; triggeredAt: string;
+  alarmClass?: string | null;
 }
-
 interface AssetHealth {
-  assetId: string; assetName: string; health: "ok" | "alarm" | "stale";
-  freshnessPct: number | null; activeAlarms: number;
-  lastSeen: string | null; totalAttributes: number;
-  dynamicAttributes: number; freshAttributes: number;
-  keyMetrics: Array<{ name: string; value: unknown; uom: string | null; quality: string | null; timestamp: string | null }>;
+  health: "ok" | "alarm" | "stale";
+  freshnessPct: number | null; activeAlarms: number; lastSeen: string | null;
+}
+interface ActivityEntry {
+  id: string; action: string; category: string;
+  actorName: string; targetName: string | null; detail: string | null; timestamp: string;
+}
+type Bucket = "high" | "medium" | "low" | "missing";
+interface AssetRow {
+  assetId: string; name: string; bucket: Bucket; score: number | null;
 }
 
-const SEVERITY_ORDER: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
-const SEVERITY_STYLES: Record<string, { badge: string; dot: string }> = {
-  critical: { badge: "bg-red-100 text-red-700 border-red-200",       dot: "bg-red-500" },
-  high:     { badge: "bg-orange-100 text-orange-700 border-orange-200", dot: "bg-orange-500" },
-  medium:   { badge: "bg-yellow-100 text-yellow-700 border-yellow-200", dot: "bg-yellow-500" },
-  low:      { badge: "bg-green-100 text-green-700 border-green-200",   dot: "bg-green-500" },
-  info:     { badge: "bg-blue-100 text-blue-700 border-blue-200",      dot: "bg-blue-500" },
+// ── Severity ranking ──────────────────────────────────────────────────────────
+const SEVERITY_RANK: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
+
+// Map an asset's worst active-alarm severity + freshness into a health bucket + score.
+function classify(worstSeverity: string | null, health: AssetHealth | null): { bucket: Bucket; score: number | null } {
+  const stale = !health || health.health === "stale" || !health.lastSeen;
+  if (stale) return { bucket: "missing", score: null };
+  if (worstSeverity === "critical")           return { bucket: "high",   score: 20 };
+  if (worstSeverity === "high")               return { bucket: "high",   score: 38 };
+  if (worstSeverity === "medium")             return { bucket: "medium", score: 52 };
+  if (worstSeverity === "low" || worstSeverity === "info") return { bucket: "medium", score: 68 };
+  // No active alarm → healthy; use data freshness as the score floor.
+  return { bucket: "low", score: Math.max(85, health?.freshnessPct ?? 95) };
+}
+
+const BUCKET_META: Record<Bucket | "total", { label: string; sub: string; text: string; bg: string; dot: string; bar: string }> = {
+  high:    { label: "High",         sub: "Need for action",   text: "text-red-600",    bg: "bg-red-50",    dot: "bg-red-500",    bar: "bg-red-500" },
+  medium:  { label: "Medium",       sub: "Need for action",   text: "text-orange-500", bg: "bg-orange-50", dot: "bg-orange-500", bar: "bg-orange-500" },
+  low:     { label: "Low",          sub: "Good condition",    text: "text-green-600",  bg: "bg-green-50",  dot: "bg-green-500",  bar: "bg-green-500" },
+  missing: { label: "Missing data", sub: "No recent data",    text: "text-slate-500",  bg: "bg-slate-100", dot: "bg-slate-400",  bar: "bg-slate-400" },
+  total:   { label: "Total",        sub: "All assets",        text: "text-slate-800",  bg: "bg-slate-100", dot: "bg-slate-800",  bar: "bg-slate-800" },
 };
 
-// ── Status Banner ─────────────────────────────────────────────────────────────
-function StatusBanner({ critical, total, wsStatus }: { critical: number; total: number; wsStatus: string }) {
-  const [, navigate] = useLocation();
-  if (critical > 0) {
-    return (
-      <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <ShieldAlert className="w-5 h-5 text-red-600 shrink-0" />
-          <div>
-            <p className="text-sm font-semibold text-red-800">
-              {critical} Critical Alarm{critical !== 1 ? "s" : ""} Active
-            </p>
-            <p className="text-xs text-red-600 mt-0.5">
-              {total} total active alarm{total !== 1 ? "s" : ""} — immediate attention required
-            </p>
-          </div>
-        </div>
-        <Button size="sm" variant="destructive" className="shrink-0 text-xs h-7 gap-1.5" onClick={() => navigate("/alarms")}>
-          View Alarms <ArrowRight className="w-3 h-3" />
-        </Button>
-      </div>
-    );
-  }
-  if (total > 0) {
-    return (
-      <div className="rounded-lg border border-orange-200 bg-orange-50 px-4 py-3 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3">
-          <AlertTriangle className="w-5 h-5 text-orange-600 shrink-0" />
-          <div>
-            <p className="text-sm font-semibold text-orange-800">{total} Active Alarm{total !== 1 ? "s" : ""}</p>
-            <p className="text-xs text-orange-600 mt-0.5">No critical alarms — review and acknowledge pending alarms</p>
-          </div>
-        </div>
-        <Button size="sm" variant="outline" className="shrink-0 text-xs h-7 gap-1.5 border-orange-300 text-orange-700 hover:bg-orange-100" onClick={() => navigate("/alarms")}>
-          Review <ArrowRight className="w-3 h-3" />
-        </Button>
-      </div>
-    );
-  }
+// ── Health summary card ───────────────────────────────────────────────────────
+function HealthCard({ b, count, onClick }: { b: Bucket | "total"; count: number; onClick?: () => void }) {
+  const m = BUCKET_META[b];
   return (
-    <div className={cn("rounded-lg border px-4 py-3 flex items-center gap-3",
-      wsStatus === "connected" ? "border-green-200 bg-green-50" : "border-border bg-muted/30")}>
-      <CheckCircle2 className={cn("w-5 h-5 shrink-0", wsStatus === "connected" ? "text-green-600" : "text-muted-foreground")} />
-      <div>
-        <p className={cn("text-sm font-semibold", wsStatus === "connected" ? "text-green-800" : "text-foreground")}>
-          All Systems Operational
-        </p>
-        <p className={cn("text-xs mt-0.5", wsStatus === "connected" ? "text-green-600" : "text-muted-foreground")}>
-          No active alarms · {wsStatus === "connected" ? "Live data connected" : "Connecting to live feed…"}
-        </p>
-      </div>
-    </div>
-  );
-}
-
-// ── KPI Card ──────────────────────────────────────────────────────────────────
-function KpiCard({ icon: Icon, label, value, sub, variant = "default", loading, onClick }: {
-  icon: React.ElementType; label: string; value: string | number; sub?: string;
-  variant?: "default" | "danger" | "warning" | "success" | "neutral";
-  loading?: boolean; onClick?: () => void;
-}) {
-  const styles = {
-    default: { card: "", icon: "text-primary bg-primary/10", value: "" },
-    danger:  { card: "border-red-200 bg-red-50/30", icon: "text-red-600 bg-red-100", value: "text-red-700" },
-    warning: { card: "border-orange-200 bg-orange-50/30", icon: "text-orange-600 bg-orange-100", value: "text-orange-700" },
-    success: { card: "border-green-200 bg-green-50/30", icon: "text-green-600 bg-green-100", value: "" },
-    neutral: { card: "", icon: "text-muted-foreground bg-muted", value: "" },
-  };
-  const s = styles[variant];
-  return (
-    <Card className={cn("shadow-sm transition-all", s.card, onClick && "cursor-pointer hover:shadow-md")} onClick={onClick}>
+    <Card className={cn("shadow-sm transition-all", onClick && "cursor-pointer hover:shadow-md")} onClick={onClick}>
       <CardContent className="p-4">
-        <div className="flex items-start justify-between">
-          <div className="flex-1 min-w-0">
-            <p className="text-xs text-muted-foreground font-medium uppercase tracking-wide mb-1">{label}</p>
-            {loading ? <Skeleton className="h-7 w-16 mt-1" /> : (
-              <p className={cn("text-2xl font-bold tabular-nums", s.value)}>{value}</p>
-            )}
-            {sub && <p className="text-xs text-muted-foreground mt-0.5">{sub}</p>}
+        <p className="text-sm font-semibold text-foreground">{m.label}</p>
+        <p className="text-xs text-muted-foreground mb-3">{m.sub}</p>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <span className={cn("w-2.5 h-2.5 rounded-full shrink-0", m.dot)} />
+            <span className={cn("text-3xl font-bold tabular-nums", m.text)}>{count}</span>
+            <span className="text-xs text-muted-foreground mt-2">Assets</span>
           </div>
-          <div className={cn("p-2 rounded-lg shrink-0", s.icon)}><Icon className="w-4 h-4" /></div>
+          <Info className="w-3.5 h-3.5 text-muted-foreground/50" />
         </div>
       </CardContent>
     </Card>
   );
 }
 
-// ── Active Alarm Row ──────────────────────────────────────────────────────────
-function AlarmRow({ alarm, onAcknowledge }: { alarm: ActiveAlarm; onAcknowledge: (id: string) => void }) {
-  const sty = SEVERITY_STYLES[alarm.severity] ?? SEVERITY_STYLES.info;
+// ── Panel shell ───────────────────────────────────────────────────────────────
+function Panel({ title, onMore, children }: { title: string; onMore?: () => void; children: React.ReactNode }) {
   return (
-    <div className="flex items-center gap-3 py-2.5 px-4 border-b border-border/50 hover:bg-muted/20 transition-colors last:border-0">
-      <span className={cn("w-2 h-2 rounded-full shrink-0", sty.dot)} />
-      <div className="flex-1 min-w-0">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm font-medium truncate">{alarm.name}</span>
-          <Badge variant="outline" className={cn("text-[10px] px-1.5 py-0 h-4 border capitalize shrink-0", sty.badge)}>
-            {alarm.severity}
-          </Badge>
-          {alarm.status === "acknowledged" && (
-            <Badge variant="secondary" className="text-[10px] px-1.5 py-0 h-4">ack'd</Badge>
-          )}
+    <Card className="shadow-sm">
+      <CardContent className="p-0">
+        <div className="flex items-center justify-between px-4 py-3 border-b border-border">
+          <h3 className="text-sm font-semibold">{title}</h3>
+          {onMore && <button onClick={onMore} className="text-muted-foreground hover:text-foreground"><ChevronRight className="w-4 h-4" /></button>}
         </div>
-        <div className="flex items-center gap-2 mt-0.5">
-          <span className="text-xs text-muted-foreground truncate">{alarm.assetName}</span>
-          <span className="text-xs text-muted-foreground">·</span>
-          <span className="text-xs text-muted-foreground">
-            {formatDistanceToNow(new Date(alarm.triggeredAt), { addSuffix: true })}
-          </span>
-        </div>
-        {alarm.message && (
-          <p className="text-xs text-muted-foreground/70 truncate mt-0.5">{alarm.message}</p>
-        )}
-      </div>
-      {alarm.status === "active" && (
-        <Button size="sm" variant="outline" className="h-6 text-[11px] shrink-0 px-2"
-          onClick={() => onAcknowledge(alarm.id)}>
-          Ack
-        </Button>
-      )}
-    </div>
-  );
-}
-
-// ── Asset Health Card ─────────────────────────────────────────────────────────
-function HealthBadge({ health }: { health: string }) {
-  if (health === "ok")    return <span className="flex items-center gap-1 text-xs font-medium text-green-600"><CheckCircle2 className="w-3.5 h-3.5" />Healthy</span>;
-  if (health === "alarm") return <span className="flex items-center gap-1 text-xs font-medium text-red-500"><AlertCircle className="w-3.5 h-3.5" />Alarm</span>;
-  return <span className="flex items-center gap-1 text-xs font-medium text-yellow-600"><Minus className="w-3.5 h-3.5" />Stale</span>;
-}
-
-function AssetHealthCard({ assetId, assetName, triggerRefresh }: { assetId: string; assetName: string; triggerRefresh?: number }) {
-  const [health, setHealth] = useState<AssetHealth | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [, navigate] = useLocation();
-
-  const fetchHealth = useCallback(async () => {
-    try {
-      const res = await fetch(`${BASE}/api/assets/${assetId}/health`);
-      if (res.ok) setHealth(await res.json());
-    } finally { setLoading(false); }
-  }, [assetId]);
-
-  useEffect(() => {
-    fetchHealth();
-    const iv = setInterval(fetchHealth, 30_000);
-    return () => clearInterval(iv);
-  }, [fetchHealth]);
-
-  useEffect(() => { if (triggerRefresh) fetchHealth(); }, [triggerRefresh, fetchHealth]);
-
-  const borderColor = health?.health === "ok" ? "border-l-green-400"
-    : health?.health === "alarm" ? "border-l-red-400"
-    : "border-l-yellow-400";
-
-  return (
-    <Card className={cn("shadow-sm border-l-2 cursor-pointer hover:shadow-md transition-all", borderColor)}
-      onClick={() => navigate("/assets")}>
-      <CardContent className="p-3">
-        <div className="flex items-start justify-between mb-1.5">
-          <p className="text-sm font-semibold truncate flex-1 pr-2">{assetName}</p>
-          {loading ? <Skeleton className="h-4 w-16 shrink-0" /> : health ? <HealthBadge health={health.health} /> : null}
-        </div>
-
-        {loading ? (
-          <div className="space-y-1.5 mt-2">
-            <Skeleton className="h-3 w-full" />
-            <Skeleton className="h-3 w-3/4" />
-          </div>
-        ) : health ? (
-          <>
-            <div className="flex items-center justify-between text-xs text-muted-foreground mb-2">
-              <span>
-                {health.activeAlarms > 0
-                  ? <span className="text-red-500 font-medium">{health.activeAlarms} alarm{health.activeAlarms !== 1 ? "s" : ""}</span>
-                  : <span className="text-green-600">No alarms</span>}
-              </span>
-              {health.freshnessPct !== null && (
-                <span className={cn(health.freshnessPct < 50 ? "text-yellow-600" : "text-muted-foreground")}>
-                  {health.freshnessPct}% fresh
-                </span>
-              )}
-            </div>
-            {health.lastSeen && (
-              <p className="text-xs text-muted-foreground flex items-center gap-1 mb-2">
-                <Clock className="w-3 h-3" />
-                {formatDistanceToNow(new Date(health.lastSeen), { addSuffix: true })}
-              </p>
-            )}
-            {health.keyMetrics.length > 0 && (
-              <div className="grid grid-cols-2 gap-1">
-                {health.keyMetrics.slice(0, 4).map((m) => (
-                  <div key={m.name} className="bg-muted/50 rounded px-1.5 py-1">
-                    <p className="text-xs text-muted-foreground truncate">{m.name}</p>
-                    <p className="text-xs font-mono font-medium truncate">
-                      {m.value != null ? String(typeof m.value === "object" ? JSON.stringify(m.value) : m.value) : "—"}
-                      {m.uom && <span className="text-muted-foreground ml-0.5">{m.uom}</span>}
-                    </p>
-                  </div>
-                ))}
-              </div>
-            )}
-          </>
-        ) : null}
+        {children}
       </CardContent>
     </Card>
   );
 }
 
-// ── Main Dashboard ────────────────────────────────────────────────────────────
+const ACTIVITY_ICON: Record<string, React.ElementType> = {
+  asset: Box, alarm: AlertTriangle, user: User, system: Settings, maintenance: Wrench, template: FileText,
+};
+
+// ── Main Dashboard ──────────────────────────────────────────────────────────────
 export default function Dashboard() {
-  const qc = useQueryClient();
   const [, navigate] = useLocation();
-  const [lastRefresh, setLastRefresh] = useState(new Date());
-  const [liveReadings, setLiveReadings] = useState<LiveReading[]>([]);
-  const [healthRefreshTick, setHealthRefreshTick] = useState(0);
-  const [activeAlarms, setActiveAlarms] = useState<ActiveAlarm[]>([]);
-  const [alarmsLoading, setAlarmsLoading] = useState(true);
-  const liveReadingsRef = useRef<LiveReading[]>([]);
-
-  const { data: summary } = useGetDashboardSummary();
-  const { data: recentTelemetry } = useGetRecentTelemetry({ limit: 12 });
   const { data: assets } = useListAssets();
-
-  const s = summary as any;
   const assetList = (assets as any[] | undefined) ?? [];
-  const storedTelemetry = recentTelemetry as any[] | undefined;
 
-  // Fetch active alarms directly
+  const [alarms, setAlarms] = useState<ActiveAlarm[]>([]);
+  const [healthMap, setHealthMap] = useState<Record<string, AssetHealth>>({});
+  const [activities, setActivities] = useState<ActivityEntry[]>([]);
+  const [search, setSearch] = useState("");
+  const [searchOpen, setSearchOpen] = useState(false);
+
+  function toggleFullscreen() {
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void document.documentElement.requestFullscreen();
+  }
+
   const fetchAlarms = useCallback(async () => {
     try {
-      const res = await fetch(`${BASE}/api/alarms?limit=20`);
-      if (res.ok) {
-        const data: ActiveAlarm[] = await res.json();
-        const sorted = data
-          .filter((a) => a.status === "active" || a.status === "acknowledged")
-          .sort((a, b) => (SEVERITY_ORDER[a.severity] ?? 99) - (SEVERITY_ORDER[b.severity] ?? 99));
-        setActiveAlarms(sorted);
-      }
-    } finally { setAlarmsLoading(false); }
+      const res = await fetch(`${BASE}/api/alarms?status=active`);
+      if (res.ok) setAlarms(await res.json());
+    } catch {}
   }, []);
 
-  useEffect(() => {
-    fetchAlarms();
-    const iv = setInterval(fetchAlarms, 30_000);
-    return () => clearInterval(iv);
-  }, [fetchAlarms]);
+  const fetchActivities = useCallback(async () => {
+    try {
+      const res = await fetch(`${BASE}/api/activity-log?limit=8`);
+      if (res.ok) { const d = await res.json(); setActivities(d.entries ?? []); }
+    } catch {}
+  }, []);
 
-  async function acknowledgeAlarm(id: string) {
-    await fetch(`${BASE}/api/alarms/${id}/acknowledge`, { method: "POST" });
-    fetchAlarms();
-    void qc.invalidateQueries({ queryKey: getGetDashboardSummaryQueryKey() });
+  const fetchHealth = useCallback(async (ids: string[]) => {
+    const entries = await Promise.all(ids.map(async (id) => {
+      try {
+        const res = await fetch(`${BASE}/api/assets/${id}/health`);
+        return res.ok ? [id, await res.json()] as const : null;
+      } catch { return null; }
+    }));
+    const map: Record<string, AssetHealth> = {};
+    for (const e of entries) if (e) map[e[0]] = e[1];
+    setHealthMap(map);
+  }, []);
+
+  useEffect(() => { fetchAlarms(); fetchActivities(); }, [fetchAlarms, fetchActivities]);
+  useEffect(() => { if (assetList.length) fetchHealth(assetList.map(a => a.id)); }, [assets]); // eslint-disable-line
+
+  // Refresh on a timer + on live events.
+  useEffect(() => {
+    const iv = setInterval(() => {
+      fetchAlarms(); fetchActivities();
+      if (assetList.length) fetchHealth(assetList.map(a => a.id));
+    }, 20_000);
+    return () => clearInterval(iv);
+  }, [assets]); // eslint-disable-line
+
+  const handleEvent = useCallback(() => {
+    fetchAlarms(); fetchActivities();
+    if (assetList.length) fetchHealth(assetList.map(a => a.id));
+  }, [assets]); // eslint-disable-line
+  useWsEvents({ alarm: handleEvent, activity_log: fetchActivities, telemetry: () => {} });
+
+  // Worst active-alarm severity per asset.
+  const worstByAsset = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const a of alarms) {
+      if (!a.assetId || a.status !== "active") continue;
+      const cur = map[a.assetId];
+      if (cur === undefined || SEVERITY_RANK[a.severity] < SEVERITY_RANK[cur]) map[a.assetId] = a.severity;
+    }
+    return map;
+  }, [alarms]);
+
+  // Classify every asset into a bucket.
+  const rows: AssetRow[] = useMemo(() => assetList.map(a => {
+    const { bucket, score } = classify(worstByAsset[a.id] ?? null, healthMap[a.id] ?? null);
+    return { assetId: a.id, name: a.name, bucket, score };
+  }), [assets, worstByAsset, healthMap]); // eslint-disable-line
+
+  const counts = useMemo(() => {
+    const c = { high: 0, medium: 0, low: 0, missing: 0 } as Record<Bucket, number>;
+    for (const r of rows) c[r.bucket]++;
+    return c;
+  }, [rows]);
+  const total = rows.length;
+
+  const criticalAlarms = useMemo(() =>
+    [...alarms].filter(a => a.status === "active")
+      .sort((a, b) => (SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity]) || (new Date(b.triggeredAt).getTime() - new Date(a.triggeredAt).getTime()))
+      .slice(0, 5),
+  [alarms]);
+
+  const requiringAction = useMemo(() =>
+    rows.filter(r => r.bucket === "high" || r.bucket === "medium")
+      .sort((a, b) => (a.score ?? 999) - (b.score ?? 999))
+      .slice(0, 6),
+  [rows]);
+
+  // ── Global search across pages, assets, alarms, activities ──
+  const searchResults: SearchResult[] | null = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return null;
+    const pages = PAGES.filter(p => p.label.toLowerCase().includes(q)).slice(0, 5)
+      .map(p => ({ type: "Page", label: p.label, sub: p.path, path: p.path, icon: LayoutGrid }));
+    const assetsR = assetList.filter((a: any) =>
+      (a.name ?? "").toLowerCase().includes(q) || (a.identifier ?? "").toLowerCase().includes(q)).slice(0, 6)
+      .map((a: any) => ({ type: "Asset", label: a.name, sub: a.identifier ?? undefined, path: "/assets", icon: Box }));
+    const alarmsR = alarms.filter(a =>
+      a.name.toLowerCase().includes(q) || (a.assetName ?? "").toLowerCase().includes(q)).slice(0, 6)
+      .map(a => ({ type: "Alarm", label: a.name, sub: a.assetName, path: "/alarms", icon: AlertTriangle }));
+    const actsR = activities.filter(e =>
+      (e.detail ?? e.action ?? "").toLowerCase().includes(q) || (e.targetName ?? "").toLowerCase().includes(q)).slice(0, 5)
+      .map(e => ({ type: "Activity", label: e.detail ?? e.action, sub: `by ${e.actorName}`, path: "/activity-log", icon: ActivityIcon }));
+    return [...pages, ...assetsR, ...alarmsR, ...actsR];
+  }, [search, assets, alarms, activities]); // eslint-disable-line
+
+  function goToResult(r: SearchResult) {
+    navigate(r.path);
+    setSearch("");
+    setSearchOpen(false);
   }
 
-  const handleTelemetry = useCallback((raw: unknown) => {
-    const event = raw as TelemetryEvent;
-    setLastRefresh(new Date());
-    const newReadings: LiveReading[] = Object.entries(event.metrics).map(([metric, value]) => ({
-      id: `${event.assetId}-${metric}-${Date.now()}`,
-      assetId: event.assetId,
-      deviceId: event.assetName,
-      metric, value,
-      timestamp: event.timestamp,
-    }));
-    liveReadingsRef.current = [...newReadings, ...liveReadingsRef.current].slice(0, 12);
-    setLiveReadings([...liveReadingsRef.current]);
-    setHealthRefreshTick((t) => t + 1);
-    void qc.invalidateQueries({ queryKey: getGetDashboardSummaryQueryKey() });
-  }, [qc]);
-
-  const handleAlarm = useCallback(() => {
-    fetchAlarms();
-    void qc.invalidateQueries({ queryKey: getGetDashboardSummaryQueryKey() });
-    void qc.invalidateQueries({ queryKey: getGetAlarmStatsQueryKey() });
-  }, [fetchAlarms, qc]);
-
-  const handleBrokerStatus = useCallback(() => {
-    void qc.invalidateQueries({ queryKey: getGetDashboardSummaryQueryKey() });
-  }, [qc]);
-
-  const wsStatus = useWsEvents({ telemetry: handleTelemetry, alarm: handleAlarm, broker_status: handleBrokerStatus });
-
-  const criticalAlarms = activeAlarms.filter((a) => a.severity === "critical" && a.status === "active");
-  const totalActive = activeAlarms.filter((a) => a.status === "active").length;
-  const assetsInAlarm = [...new Set(activeAlarms.filter(a => a.status === "active").map(a => a.assetName))].length;
-  const displayTelemetry = liveReadings.length > 0 ? liveReadings : (storedTelemetry ?? []);
-
   return (
-    <div className="p-6 space-y-5 max-w-7xl mx-auto">
+    <div className="p-6 space-y-5 max-w-[1400px] mx-auto">
 
-      {/* ── Top bar ──────────────────────────────────────────────────────── */}
-      <div className="flex items-center justify-between">
+      {/* ── Header ── */}
+      <div className="flex items-center justify-between gap-4 flex-wrap">
         <div>
-          <h1 className="text-xl font-semibold">Operations Dashboard</h1>
-          <p className="text-sm text-muted-foreground mt-0.5">Real-time status · what is happening right now</p>
+          <h1 className="text-2xl font-bold">Dashboard</h1>
+          <p className="text-sm text-muted-foreground">Overview of Plant Health</p>
         </div>
         <div className="flex items-center gap-3">
-          <span className={cn(
-            "inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full border",
-            wsStatus === "connected" ? "bg-green-50 text-green-700 border-green-200"
-              : wsStatus === "reconnecting" ? "bg-yellow-50 text-yellow-700 border-yellow-200"
-              : "bg-muted text-muted-foreground border-border",
-          )}>
-            <span className={cn("w-1.5 h-1.5 rounded-full",
-              wsStatus === "connected" ? "bg-green-500 animate-pulse" :
-              wsStatus === "reconnecting" ? "bg-yellow-500" : "bg-gray-400")} />
-            {wsStatus === "connected" ? "● Live" : wsStatus === "reconnecting" ? "Reconnecting…" : "Connecting…"}
-          </span>
-          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-            <RefreshCw className="w-3 h-3" />
-            {format(lastRefresh, "HH:mm:ss")}
-          </div>
-        </div>
-      </div>
-
-      {/* ── Status Banner ────────────────────────────────────────────────── */}
-      <StatusBanner critical={criticalAlarms.length} total={totalActive} wsStatus={wsStatus} />
-
-      {/* ── KPI Cards ────────────────────────────────────────────────────── */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        <KpiCard
-          icon={ShieldAlert}
-          label="Critical Alarms"
-          value={s?.criticalAlarms ?? 0}
-          sub="require immediate action"
-          variant={s?.criticalAlarms > 0 ? "danger" : "success"}
-          loading={!s}
-          onClick={() => navigate("/alarms")}
-        />
-        <KpiCard
-          icon={Bell}
-          label="Active Alarms"
-          value={totalActive}
-          sub={`${assetsInAlarm} asset${assetsInAlarm !== 1 ? "s" : ""} affected`}
-          variant={totalActive > 0 ? "warning" : "success"}
-          loading={alarmsLoading}
-          onClick={() => navigate("/alarms")}
-        />
-        <KpiCard
-          icon={Blocks}
-          label="Assets Monitored"
-          value={s?.totalAssets ?? 0}
-          sub={`${assetsInAlarm} in alarm state`}
-          variant="default"
-          loading={!s}
-          onClick={() => navigate("/assets")}
-        />
-        <KpiCard
-          icon={Zap}
-          label="Ingest Rate"
-          value={`${((s?.telemetryRate as number) ?? 0).toFixed(1)}/min`}
-          sub={s?.connectedBrokers ? `${s.connectedBrokers} broker${s.connectedBrokers !== 1 ? "s" : ""} connected` : "no brokers"}
-          variant={s?.connectedBrokers > 0 ? "default" : "neutral"}
-          loading={!s}
-        />
-      </div>
-
-      {/* ── Active Alarms + Live Feed ─────────────────────────────────────── */}
-      <div className="grid grid-cols-1 lg:grid-cols-5 gap-4">
-
-        {/* Active Alarms panel */}
-        <Card className="lg:col-span-2 shadow-sm">
-          <CardHeader className="pb-0 pt-4 px-4">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                <Bell className="w-4 h-4 text-destructive" />
-                Active Alarms
-                {totalActive > 0 && (
-                  <span className="text-xs font-medium px-1.5 py-0.5 rounded-full bg-red-100 text-red-700 border border-red-200">
-                    {totalActive}
-                  </span>
-                )}
-              </CardTitle>
-              <Button variant="ghost" size="sm" className="h-6 text-xs text-muted-foreground px-2"
-                onClick={() => navigate("/alarms")}>
-                All <ArrowRight className="w-3 h-3 ml-1" />
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent className="p-0 mt-3">
-            {alarmsLoading ? (
-              <div className="space-y-0 px-4 pb-3">
-                {Array.from({ length: 3 }).map((_, i) => <div key={i} className="py-2.5 border-b border-border/50"><Skeleton className="h-4 w-full mb-1.5" /><Skeleton className="h-3 w-2/3" /></div>)}
-              </div>
-            ) : activeAlarms.length === 0 ? (
-              <div className="px-4 py-8 text-center">
-                <CheckCircle2 className="w-8 h-8 text-green-500 mx-auto mb-2" />
-                <p className="text-sm font-medium text-green-700">No active alarms</p>
-                <p className="text-xs text-muted-foreground mt-1">All systems are within normal operating parameters</p>
-              </div>
-            ) : (
-              <div className="max-h-72 overflow-auto">
-                {activeAlarms.slice(0, 8).map((alarm) => (
-                  <AlarmRow key={alarm.id} alarm={alarm} onAcknowledge={acknowledgeAlarm} />
-                ))}
-                {activeAlarms.length > 8 && (
-                  <button className="w-full text-xs text-muted-foreground hover:text-foreground py-2.5 text-center border-t border-border hover:bg-muted/30 transition-colors"
-                    onClick={() => navigate("/alarms")}>
-                    +{activeAlarms.length - 8} more alarms → View all
-                  </button>
+          <div className="relative">
+            <Search className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={search}
+              onChange={e => { setSearch(e.target.value); setSearchOpen(true); }}
+              onFocus={() => setSearchOpen(true)}
+              onBlur={() => setTimeout(() => setSearchOpen(false), 150)}
+              onKeyDown={e => { if (e.key === "Enter" && searchResults?.length) goToResult(searchResults[0]); if (e.key === "Escape") setSearchOpen(false); }}
+              placeholder="Search assets, alarms, pages…"
+              className="h-9 w-64 pl-8 text-sm" />
+            {searchOpen && searchResults && (
+              <div className="absolute z-50 mt-1 w-80 right-0 max-h-96 overflow-y-auto rounded-md border border-border bg-popover shadow-lg">
+                {searchResults.length === 0 ? (
+                  <div className="px-3 py-4 text-sm text-muted-foreground text-center">No matches for “{search}”</div>
+                ) : (
+                  searchResults.map((r, i) => (
+                    <button key={`${r.type}-${i}`}
+                      onMouseDown={() => goToResult(r)}
+                      className="w-full flex items-center gap-2.5 px-3 py-2 text-left hover:bg-muted transition-colors border-b border-border/40 last:border-0">
+                      <r.icon className="w-4 h-4 text-muted-foreground shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm truncate">{r.label}</p>
+                        {r.sub && <p className="text-xs text-muted-foreground truncate">{r.sub}</p>}
+                      </div>
+                      <span className="text-[10px] text-muted-foreground px-1.5 py-0.5 rounded bg-muted shrink-0">{r.type}</span>
+                    </button>
+                  ))
                 )}
               </div>
             )}
-          </CardContent>
-        </Card>
-
-        {/* Live Telemetry Feed */}
-        <Card className="lg:col-span-3 shadow-sm">
-          <CardHeader className="pb-0 pt-4 px-4">
-            <div className="flex items-center justify-between">
-              <CardTitle className="text-sm font-semibold flex items-center gap-2">
-                <Activity className="w-4 h-4 text-primary" />
-                Live Data Feed
-                {liveReadings.length > 0 && (
-                  <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-green-100 text-green-700 border border-green-200 animate-pulse">
-                    live
-                  </span>
-                )}
-              </CardTitle>
-              <Button variant="ghost" size="sm" className="h-6 text-xs text-muted-foreground px-2"
-                onClick={() => navigate("/live")}>
-                Full Feed <ArrowRight className="w-3 h-3 ml-1" />
-              </Button>
-            </div>
-          </CardHeader>
-          <CardContent className="px-0 pb-0 mt-3">
-            <div className="overflow-auto max-h-72">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-border bg-muted/50 sticky top-0">
-                    <th className="text-left px-4 py-2 font-medium text-muted-foreground">Asset</th>
-                    <th className="text-left px-4 py-2 font-medium text-muted-foreground">Metric</th>
-                    <th className="text-left px-4 py-2 font-medium text-muted-foreground">Value</th>
-                    <th className="text-left px-4 py-2 font-medium text-muted-foreground">Time</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {!storedTelemetry && liveReadings.length === 0
-                    ? Array.from({ length: 5 }).map((_, i) => (
-                        <tr key={i} className="border-b border-border/50">
-                          {[20, 24, 12, 20].map((w, j) => <td key={j} className="px-4 py-2"><Skeleton className={`h-3 w-${w}`} /></td>)}
-                        </tr>
-                      ))
-                    : displayTelemetry.length === 0
-                    ? <tr><td colSpan={4} className="px-4 py-8 text-center text-muted-foreground">No telemetry data yet. Start ingesting data to see it here.</td></tr>
-                    : displayTelemetry.map((rec: any, idx: number) => (
-                        <tr key={rec.id ?? idx} className={cn(
-                          "border-b border-border/50 hover:bg-muted/30 transition-colors",
-                          liveReadings.some((l) => l.id === rec.id) && "bg-green-50/60 dark:bg-green-950/20",
-                        )}>
-                          <td className="px-4 py-2 font-medium text-foreground/80 truncate max-w-[120px]">
-                            {rec.deviceId ?? String(rec.assetId ?? "").slice(0, 8)}
-                          </td>
-                          <td className="px-4 py-2 text-foreground/70 truncate max-w-[120px]">{rec.metric}</td>
-                          <td className="px-4 py-2 font-mono font-medium">{typeof rec.value === "object" ? JSON.stringify(rec.value) : String(rec.value ?? "-")}</td>
-                          <td className="px-4 py-2 text-muted-foreground">{format(new Date(rec.timestamp), "HH:mm:ss")}</td>
-                        </tr>
-                      ))
-                  }
-                </tbody>
-              </table>
-            </div>
-          </CardContent>
-        </Card>
+          </div>
+          <button onClick={toggleFullscreen} title="Toggle fullscreen"
+            className="w-9 h-9 flex items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-muted transition-colors">
+            <Maximize2 className="w-4 h-4" />
+          </button>
+          <button onClick={() => navigate("/alarms")} title="Active alarms"
+            className="relative w-9 h-9 flex items-center justify-center rounded-md border border-border text-muted-foreground hover:bg-muted transition-colors">
+            <Bell className="w-4 h-4" />
+            {alarms.length > 0 && (
+              <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 flex items-center justify-center rounded-full bg-red-500 text-white text-[10px] font-bold">
+                {alarms.length}
+              </span>
+            )}
+          </button>
+        </div>
       </div>
 
-      {/* ── Asset Health Grid ─────────────────────────────────────────────── */}
-      {assetList.length > 0 && (
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-semibold flex items-center gap-2">
-              <TrendingUp className="w-4 h-4 text-primary" /> Asset Health Overview
-            </h2>
-            <div className="flex items-center gap-3">
-              <span className="text-xs text-muted-foreground hidden sm:block">Click an asset to view details</span>
-              <span className="text-xs text-muted-foreground">Updates on new telemetry</span>
-            </div>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
-            {assetList.map((a: any) => (
-              <AssetHealthCard
-                key={a.id}
-                assetId={a.id}
-                assetName={a.name}
-                triggerRefresh={healthRefreshTick}
-              />
-            ))}
-          </div>
-        </div>
-      )}
+      {/* ── Health summary cards ── */}
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-3">
+        <HealthCard b="high"    count={counts.high}    onClick={() => navigate("/alarms")} />
+        <HealthCard b="medium"  count={counts.medium}  onClick={() => navigate("/alarms")} />
+        <HealthCard b="low"     count={counts.low}     onClick={() => navigate("/assets")} />
+        <HealthCard b="missing" count={counts.missing} onClick={() => navigate("/assets")} />
+        <HealthCard b="total"   count={total}          onClick={() => navigate("/assets")} />
+      </div>
 
-      {/* ── Footer ───────────────────────────────────────────────────────── */}
-      {s?.lastIngestionAt && (
-        <p className="text-xs text-muted-foreground flex items-center gap-1.5">
-          <Wifi className="w-3 h-3" />
-          Last ingestion: {format(new Date(s.lastIngestionAt), "MMM d, yyyy HH:mm:ss")}
-        </p>
-      )}
+      {/* ── Three panels ── */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+
+        {/* Recent Critical Alarms */}
+        <Panel title="Recent Critical Alarms" onMore={() => navigate("/alarms")}>
+          {criticalAlarms.length === 0 ? (
+            <div className="px-4 py-10 text-center text-sm text-muted-foreground">No active alarms</div>
+          ) : (
+            <div>
+              {criticalAlarms.map(a => {
+                const crit = a.severity === "critical";
+                return (
+                  <div key={a.id} className="flex items-start gap-2.5 px-4 py-2.5 border-b border-border/50 last:border-0">
+                    <AlertTriangle className={cn("w-4 h-4 mt-0.5 shrink-0", crit ? "text-red-500" : "text-orange-500")} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium truncate">{a.name}</p>
+                      <p className="text-xs text-muted-foreground truncate">
+                        {a.assetName}{a.alarmClass ? ` · ${a.alarmClass}` : ""}
+                      </p>
+                    </div>
+                    <span className="text-xs text-muted-foreground shrink-0 whitespace-nowrap">
+                      {formatDistanceToNow(new Date(a.triggeredAt), { addSuffix: false })}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Panel>
+
+        {/* Assets Requiring Immediate Action */}
+        <Panel title="Assets Requiring Immediate Action" onMore={() => navigate("/assets")}>
+          {requiringAction.length === 0 ? (
+            <div className="px-4 py-10 text-center text-sm text-muted-foreground">No assets need attention</div>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-xs text-muted-foreground border-b border-border/50">
+                  <th className="text-left font-medium px-4 py-2">Asset</th>
+                  <th className="text-left font-medium px-2 py-2">Health</th>
+                  <th className="text-right font-medium px-4 py-2">Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {requiringAction.map(r => {
+                  const m = BUCKET_META[r.bucket];
+                  return (
+                    <tr key={r.assetId} className="border-b border-border/50 last:border-0 hover:bg-muted/20 cursor-pointer"
+                      onClick={() => navigate("/assets")}>
+                      <td className="px-4 py-2.5 font-medium truncate max-w-[110px]">{r.name}</td>
+                      <td className="px-2 py-2.5">
+                        <div className="flex items-center gap-2">
+                          <span className="tabular-nums text-xs w-8">{r.score != null ? `${r.score}%` : "—"}</span>
+                          <div className="flex-1 h-1.5 rounded-full bg-muted overflow-hidden min-w-[40px]">
+                            <div className={cn("h-full rounded-full", m.bar)} style={{ width: `${r.score ?? 0}%` }} />
+                          </div>
+                        </div>
+                      </td>
+                      <td className="px-4 py-2.5 text-right">
+                        <span className={cn("text-[11px] font-medium px-2 py-0.5 rounded-full",
+                          r.bucket === "high" ? "bg-red-100 text-red-700" : "bg-orange-100 text-orange-700")}>
+                          {r.bucket === "high" ? "Critical" : "Warning"}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          )}
+        </Panel>
+
+        {/* Recent Activities */}
+        <Panel title="Recent Activities" onMore={() => navigate("/activity-log")}>
+          {activities.length === 0 ? (
+            <div className="px-4 py-10 text-center text-sm text-muted-foreground">No recent activity</div>
+          ) : (
+            <div>
+              {activities.slice(0, 6).map(e => {
+                const Icon = ACTIVITY_ICON[e.category] ?? ActivityIcon;
+                return (
+                  <div key={e.id} className="flex items-start gap-2.5 px-4 py-2.5 border-b border-border/50 last:border-0">
+                    <span className="p-1.5 rounded-md bg-muted shrink-0"><Icon className="w-3.5 h-3.5 text-muted-foreground" /></span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm truncate">{e.detail ?? `${e.action}${e.targetName ? ` — ${e.targetName}` : ""}`}</p>
+                      <p className="text-xs text-muted-foreground truncate">by {e.actorName}</p>
+                    </div>
+                    <span className="text-xs text-muted-foreground shrink-0 whitespace-nowrap">
+                      {formatDistanceToNow(new Date(e.timestamp), { addSuffix: false })}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </Panel>
+      </div>
     </div>
   );
 }

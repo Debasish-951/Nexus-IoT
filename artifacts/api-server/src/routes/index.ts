@@ -16,6 +16,7 @@ import brokerHistoryRouter from "./broker_history";
 import exportRouter from "./export";
 import systemRouter from "./system";
 import vizDashboardsRouter from "./viz_dashboards";
+import aiRouter from "./ai";
 
 const router: IRouter = Router();
 
@@ -36,5 +37,6 @@ router.use(brokerHistoryRouter);
 router.use(exportRouter);
 router.use(systemRouter);
 router.use(vizDashboardsRouter);
+router.use(aiRouter);
 
 export default router;

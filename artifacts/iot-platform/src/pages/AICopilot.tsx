@@ -1,0 +1,266 @@
+import { useState, useRef, useEffect } from "react";
+import { useSearch } from "wouter";
+import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
+import {
+  BrainCircuit, Send, User, Sparkles, Activity, AlertTriangle,
+  Lightbulb, MessageSquare, Loader2, Wrench,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+
+interface Msg {
+  role: "user" | "assistant";
+  content: string;
+  steps?: { tool: string; args: unknown }[];
+  error?: boolean;
+}
+
+// The four submenu actions all drive the same engine with a seeded prompt.
+const QUICK_ACTIONS = [
+  {
+    key: "ask",
+    label: "Ask Your Assets",
+    icon: MessageSquare,
+    prompt: "", // free-form — just focuses the input
+    hint: "Ask anything about your assets, telemetry, or alarms",
+  },
+  {
+    key: "health",
+    label: "Health Insights",
+    icon: Activity,
+    prompt: "Give me a health overview of all assets — which are healthy, which are in alarm, and which are stale. Summarize the fleet.",
+    hint: "Fleet-wide health summary",
+  },
+  {
+    key: "failure",
+    label: "Failure Explanations",
+    icon: AlertTriangle,
+    prompt: "Explain the most severe active alarm right now: which asset, what happened, and the likely cause based on its recent telemetry.",
+    hint: "Root-cause for the worst current alarm",
+  },
+  {
+    key: "recommend",
+    label: "Smart Recommendations",
+    icon: Lightbulb,
+    prompt: "Which assets need attention this week? Rank them and explain why, using active alarms, recent alarm history, and data freshness.",
+    hint: "Heuristic attention ranking",
+  },
+] as const;
+
+const EXAMPLES = [
+  "Why is the Fan's health dropping?",
+  "Show assets with high vibration",
+  "Compare temperature of Fan over the last 24 hours",
+  "Which assets are stale right now?",
+];
+
+export default function AICopilot() {
+  const [messages, setMessages] = useState<Msg[]>([]);
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const search = useSearch();
+  const lastAction = useRef<string | null>(null);
+
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+  }, [messages, loading]);
+
+  // Deep-link from the sidebar submenus: /ai-copilot?action=health|failure|recommend
+  useEffect(() => {
+    const action = new URLSearchParams(search).get("action");
+    if (!action || lastAction.current === action) return;
+    const qa = QUICK_ACTIONS.find((a) => a.key === action);
+    if (qa?.prompt) {
+      lastAction.current = action;
+      send(qa.prompt);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
+
+  async function send(question: string) {
+    const q = question.trim();
+    if (!q || loading) return;
+
+    const history = messages.map((m) => ({ role: m.role, content: m.content }));
+    const next: Msg[] = [...messages, { role: "user", content: q }];
+    setMessages(next);
+    setInput("");
+    setLoading(true);
+
+    try {
+      const res = await fetch(`${BASE}/api/ai/chat`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ question: q, history }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setMessages([...next, { role: "assistant", content: data.error ?? "Request failed.", error: true }]);
+      } else {
+        setMessages([...next, { role: "assistant", content: data.answer ?? "(no answer)", steps: data.steps }]);
+      }
+    } catch (err: any) {
+      setMessages([...next, { role: "assistant", content: err?.message ?? "Network error.", error: true }]);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleQuickAction(prompt: string) {
+    if (prompt) send(prompt);
+    else inputRef.current?.focus();
+  }
+
+  return (
+    <div className="flex flex-col h-full max-w-5xl mx-auto p-4 gap-4">
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <div className="p-2 rounded-lg bg-primary/10 text-primary">
+          <BrainCircuit className="w-5 h-5" />
+        </div>
+        <div>
+          <h1 className="text-xl font-semibold flex items-center gap-2">
+            AI Assistant
+            <Badge variant="secondary" className="text-[10px] gap-1">
+              <Sparkles className="w-3 h-3" /> Groq
+            </Badge>
+          </h1>
+          <p className="text-sm text-muted-foreground">Ask anything about your assets, telemetry, and alarms</p>
+        </div>
+      </div>
+
+      {/* Quick actions (the 4 submenus) */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
+        {QUICK_ACTIONS.map((a) => (
+          <button
+            key={a.key}
+            onClick={() => handleQuickAction(a.prompt)}
+            disabled={loading}
+            className="text-left p-3 rounded-lg border bg-card hover:bg-accent hover:border-primary/40 transition-colors disabled:opacity-50"
+          >
+            <div className="flex items-center gap-2 text-sm font-medium">
+              <a.icon className="w-4 h-4 text-primary shrink-0" />
+              {a.label}
+            </div>
+            <p className="text-xs text-muted-foreground mt-1">{a.hint}</p>
+          </button>
+        ))}
+      </div>
+
+      {/* Conversation */}
+      <Card className="flex-1 flex flex-col min-h-0">
+        <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto">
+          <div className="p-4 space-y-4">
+            {messages.length === 0 && (
+              <div className="text-center py-10">
+                <BrainCircuit className="w-10 h-10 text-muted-foreground/40 mx-auto mb-3" />
+                <p className="text-sm text-muted-foreground mb-4">
+                  Ask a question, or try one of these:
+                </p>
+                <div className="flex flex-wrap gap-2 justify-center max-w-xl mx-auto">
+                  {EXAMPLES.map((ex) => (
+                    <button
+                      key={ex}
+                      onClick={() => send(ex)}
+                      disabled={loading}
+                      className="text-xs px-3 py-1.5 rounded-full border bg-card hover:bg-accent transition-colors disabled:opacity-50"
+                    >
+                      {ex}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {messages.map((m, i) => (
+              <div key={i} className={cn("flex gap-3", m.role === "user" && "flex-row-reverse")}>
+                <div
+                  className={cn(
+                    "w-7 h-7 rounded-full flex items-center justify-center shrink-0",
+                    m.role === "user" ? "bg-muted" : "bg-primary/10 text-primary",
+                  )}
+                >
+                  {m.role === "user" ? <User className="w-4 h-4" /> : <BrainCircuit className="w-4 h-4" />}
+                </div>
+                <div className={cn("max-w-[80%] space-y-1.5", m.role === "user" && "items-end flex flex-col")}>
+                  <div
+                    className={cn(
+                      "rounded-lg px-3 py-2 text-sm whitespace-pre-wrap break-words",
+                      m.role === "user"
+                        ? "bg-primary text-primary-foreground"
+                        : m.error
+                          ? "bg-red-50 text-red-700 border border-red-200"
+                          : "bg-muted",
+                    )}
+                  >
+                    {m.content}
+                  </div>
+                  {m.steps && m.steps.length > 0 && (
+                    <div className="flex flex-wrap gap-1">
+                      {m.steps.map((s, j) => (
+                        <span
+                          key={j}
+                          className="inline-flex items-center gap-1 text-[10px] text-muted-foreground bg-muted/60 rounded px-1.5 py-0.5"
+                        >
+                          <Wrench className="w-2.5 h-2.5" />
+                          {s.tool}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            ))}
+
+            {loading && (
+              <div className="flex gap-3">
+                <div className="w-7 h-7 rounded-full bg-primary/10 text-primary flex items-center justify-center shrink-0">
+                  <BrainCircuit className="w-4 h-4" />
+                </div>
+                <div className="bg-muted rounded-lg px-3 py-2 text-sm text-muted-foreground flex items-center gap-2">
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  Thinking & gathering data…
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Input */}
+        <div className="border-t p-3">
+          <div className="flex gap-2 items-end">
+            <Textarea
+              ref={inputRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  send(input);
+                }
+              }}
+              placeholder="Ask about your assets, telemetry, or alarms…  (Enter to send, Shift+Enter for newline)"
+              rows={1}
+              className="resize-none min-h-[40px] max-h-32"
+              disabled={loading}
+            />
+            <Button onClick={() => send(input)} disabled={loading || !input.trim()} size="icon" className="shrink-0">
+              <Send className="w-4 h-4" />
+            </Button>
+          </div>
+          <p className="text-[11px] text-muted-foreground mt-1.5">
+            Answers come from your live platform data. <strong>Smart Recommendations</strong> use a heuristic
+            ranking (alarms, history, freshness) — not a machine-learning failure prediction. Read-only: the
+            Assistant cannot change anything.
+          </p>
+        </div>
+      </Card>
+    </div>
+  );
+}

@@ -10,11 +10,15 @@ export interface AttributeDefinition {
   tagName?: string;
   uom?: string;
   value?: string;
+  // Optional metadata (stored in the jsonb column — no DB migration needed).
+  required?: boolean;
+  description?: string;
 }
 
 export const assetTemplatesTable = pgTable("asset_templates", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
+  deviceId: text("device_id"),
   tags: text("tags").array().notNull().default([]),
   attributeCount: integer("attribute_count").notNull().default(0),
   attributeDefinitions: jsonb("attribute_definitions")

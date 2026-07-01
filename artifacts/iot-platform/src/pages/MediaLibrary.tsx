@@ -1,5 +1,6 @@
 import { useState, useRef, useCallback } from "react";
-import { Upload, Link2, Trash2, Copy, Image, ExternalLink, Plus, Search, X, CheckCircle2 } from "lucide-react";
+import { useLocation } from "wouter";
+import { Upload, Link2, Trash2, Copy, Image, ExternalLink, Plus, Search, X, CheckCircle2, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -41,6 +42,7 @@ function formatDate(iso: string) {
 
 export default function MediaLibrary() {
   const { toast } = useToast();
+  const [, navigate] = useLocation();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [items, setItems]               = useState<MediaItem[]>(loadMedia);
@@ -129,6 +131,9 @@ export default function MediaLibrary() {
 
   return (
     <div className="p-6 space-y-5">
+      <button onClick={() => (window.history.length > 1 ? window.history.back() : navigate("/asset-management"))} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+        <ArrowLeft className="w-4 h-4" /> Back
+      </button>
       {/* Header */}
       <div className="flex items-start justify-between flex-wrap gap-3">
         <div>

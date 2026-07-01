@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { useLocation } from "wouter";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { useListUsers } from "@workspace/api-client-react";
 import {
@@ -13,14 +14,15 @@ import {
 } from "@/components/ui/dialog";
 
 const ROLE_COLORS: Record<string, string> = {
-  admin:    "bg-purple-100 text-purple-700",
-  engineer: "bg-blue-100   text-blue-700",
-  operator: "bg-green-100  text-green-700",
-  viewer:   "bg-gray-100   text-gray-600",
+  admin:    "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
+  engineer: "bg-blue-100  text-blue-700  dark:bg-blue-900/40  dark:text-blue-300",
+  operator: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
+  viewer:   "bg-slate-100 text-slate-600 dark:bg-slate-800    dark:text-slate-300",
 };
 
 export default function UserProfileTopMenu() {
   const { currentUser, setCurrentUser, can } = useCurrentUser();
+  const [, navigate] = useLocation();
   const { data: users } = useListUsers();
   const userList = (users as any[] | undefined) ?? [];
 
@@ -45,8 +47,9 @@ export default function UserProfileTopMenu() {
     .split(" ").map((w: string) => w[0] ?? "").join("").toUpperCase().slice(0, 2) || "U";
 
   function handleSignOut() {
-    setCurrentUser(null);
+    localStorage.removeItem("ws_authed");
     setOpen(false);
+    navigate("/login");
   }
 
   function handleSwitchUser(u: any) {

@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { eq, isNull, sql, and, or, inArray } from "drizzle-orm";
 import { db, assetsTable, attributesTable, assetTemplatesTable } from "@workspace/db";
 import { logActivity } from "./activity_log";
+import { hasSeenDevice } from "../lib/seen-devices";
 import {
   CreateAssetBody,
   UpdateAssetBody,
@@ -36,6 +37,17 @@ router.get("/assets", async (req, res): Promise<void> => {
 router.post("/assets", async (req, res): Promise<void> => {
   const parsed = CreateAssetBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+
+  // Root assets must map to a known device id (transmitting OR declared via a
+  // template payload). Child assets inherit the parent's device, so their derived
+  // identifier is exempt from the device-gate check.
+  if (!parsed.data.parentId && !hasSeenDevice(parsed.data.identifier)) {
+    res.status(400).json({
+      error: `"${parsed.data.identifier}" is not a known device id. ` +
+        `Register it first by pasting its device payload into a template, or by sending telemetry for it.`,
+    });
+    return;
+  }
 
   let asset;
   try {

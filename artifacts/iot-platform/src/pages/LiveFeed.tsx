@@ -1,388 +1,431 @@
-import { useState, useEffect, useRef, useCallback } from "react";
-import { useListAssets } from "@workspace/api-client-react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useLocation } from "wouter";
+import { useListAssets, useGetDashboardSummary, useGetRecentTelemetry, getGetRecentTelemetryQueryKey } from "@workspace/api-client-react";
 import { useWsEvents } from "@/hooks/useWsEvents";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import {
-  Activity, Wifi, WifiOff, Filter, Trash2,
-  ChevronDown, ChevronRight, TrendingUp, TrendingDown, Minus,
-  Zap, Radio, BarChart2, Clock,
+  Activity, Wifi, WifiOff, Filter, Download, Search, Box, AlarmClock, AlertTriangle,
+  Radio, Cpu, BrainCircuit, Wrench, TrendingUp, ChevronLeft, ChevronRight, Bell,
 } from "lucide-react";
+import { AreaChart, Area, BarChart, Bar, ResponsiveContainer } from "recharts";
 
-// ── Colour palette ─────────────────────────────────────────────────────────────
-const ASSET_COLORS = [
-  "#06b6d4","#10b981","#a855f7","#f59e0b",
-  "#ef4444","#818cf8","#ec4899","#f97316","#22d3ee","#84cc16",
-];
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+const STALE_MS = 30_000;
+const MAX_EVENTS = 1000;
 
-// ── Types ──────────────────────────────────────────────────────────────────────
-interface TelemetryEvent {
-  id: string;
-  assetId: string;
-  assetName: string;
-  metrics: Record<string, number>;
-  timestamp: string;
-  receivedAt: number;
-}
+// ── light palette ──
+const C = {
+  bg: "#f7f8fa", card: "#ffffff", border: "#e2e8f0", soft: "#f1f5f9",
+  text: "#0f172a", muted: "#475569", dim: "#64748b", faint: "#94a3b8",
+  cyan: "#0891b2", green: "#059669", amber: "#d97706", red: "#dc2626", violet: "#7c3aed", blue: "#2563eb",
+};
 
-interface MetricState {
-  value: number;
-  prev: number | null;
-  lastSeen: number;
-  count: number;
-}
+interface SensorRow { id: string; ts: number; assetId: string; assetName: string; sensor: string; value: number; }
+interface AssetLatest { assetId: string; assetName: string; metrics: Record<string, number>; lastSeen: number; }
+interface AlarmRow { id: string; name: string; assetName: string; severity: string; status: string; message: string; triggeredAt: string; }
+interface ActivityRow { id: string; action: string; category: string; detail: string | null; targetName: string | null; timestamp: string; }
+interface Health { health: "ok" | "alarm" | "stale"; freshnessPct: number | null; activeAlarms: number; }
 
-interface AssetMetrics {
-  assetId: string;
-  assetName: string;
-  color: string;
-  metrics: Record<string, MetricState>;
-  lastSeen: number;
-  eventCount: number;
-}
+const sevColor = (s: string) => s === "critical" ? C.red : s === "high" ? C.amber : s === "medium" ? C.amber : C.blue;
 
-const MAX_EVENTS = 200;
-const STALE_MS   = 30_000; // 30s without update → stale
-
-// ── Metric tile ────────────────────────────────────────────────────────────────
-function MetricTile({ name, state, flash }: { name: string; state: MetricState; flash: boolean }) {
-  const delta = state.prev !== null ? state.value - state.prev : null;
-  const dir = delta === null ? 0 : delta > 0 ? 1 : delta < 0 ? -1 : 0;
-  return (
-    <div className={cn(
-      "rounded-lg p-2.5 border transition-all duration-300",
-      flash ? "border-cyan-400/60 bg-cyan-500/10 shadow-[0_0_12px_rgba(6,182,212,0.2)]" : "border-white/8 bg-white/4",
-    )}>
-      <p className="text-[9px] font-mono truncate mb-1" style={{ color: "#64748b" }}>{name}</p>
-      <div className="flex items-end gap-1">
-        <span className="text-sm font-bold tabular-nums" style={{ color: "#e2e8f0" }}>
-          {typeof state.value === "number"
-            ? Math.abs(state.value) >= 1000
-              ? state.value.toLocaleString(undefined, { maximumFractionDigits: 1 })
-              : state.value.toFixed(Math.abs(state.value) < 0.01 ? 6 : Math.abs(state.value) < 1 ? 4 : 2)
-            : "—"}
-        </span>
-        {dir !== 0 && (
-          <span className={cn("text-[10px] mb-0.5", dir > 0 ? "text-green-400" : "text-red-400")}>
-            {dir > 0 ? <TrendingUp className="w-2.5 h-2.5" /> : <TrendingDown className="w-2.5 h-2.5" />}
-          </span>
-        )}
-      </div>
-      <p className="text-[8px] mt-0.5" style={{ color: "#475569" }}>{state.count} recv</p>
-    </div>
-  );
-}
-
-// ── Asset panel ─────────────────────────────────────────────────────────────────
-function AssetPanel({ am, flashMetrics, expanded, onToggle }: {
-  am: AssetMetrics; flashMetrics: Set<string>; expanded: boolean; onToggle: () => void;
-}) {
-  const isStale = Date.now() - am.lastSeen > STALE_MS;
-  const metricEntries = Object.entries(am.metrics).sort(([a],[b]) => a.localeCompare(b));
-  const shortAgo = Date.now() - am.lastSeen;
-  const agoStr = shortAgo < 5000 ? "just now" : shortAgo < 60000 ? `${Math.round(shortAgo/1000)}s ago` : `${Math.round(shortAgo/60000)}m ago`;
-
-  return (
-    <div className="rounded-xl overflow-hidden" style={{ background: "#111827", border: `1px solid #1f2d45` }}>
-      {/* Header */}
-      <button className="w-full flex items-center gap-2 px-3 py-2.5 hover:bg-white/4 transition-colors text-left"
-        onClick={onToggle}>
-        <div className="w-2 h-2 rounded-full shrink-0 transition-all"
-          style={{ background: am.color, boxShadow: isStale ? "none" : `0 0 8px ${am.color}` }} />
-        <span className="text-xs font-semibold flex-1 truncate" style={{ color: "#e2e8f0" }}>{am.assetName}</span>
-        <span className="text-[9px] px-1.5 py-0.5 rounded-full" style={{ background: isStale ? "#1f2d45" : `${am.color}22`, color: isStale ? "#475569" : am.color }}>
-          {isStale ? "stale" : "live"}
-        </span>
-        <span className="text-[9px] mr-1" style={{ color: "#475569" }}>{agoStr}</span>
-        <span className="text-[9px] font-mono px-1.5 py-0.5 rounded" style={{ background: "#1f2d45", color: "#64748b" }}>
-          {metricEntries.length}M · {am.eventCount}E
-        </span>
-        {expanded ? <ChevronDown className="w-3 h-3 shrink-0" style={{ color: "#64748b" }} />
-                  : <ChevronRight className="w-3 h-3 shrink-0" style={{ color: "#64748b" }} />}
-      </button>
-
-      {/* Metrics grid */}
-      {expanded && (
-        <div className="px-3 pb-3 grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-1.5">
-          {metricEntries.map(([name, state]) => (
-            <MetricTile key={name} name={name} state={state}
-              flash={flashMetrics.has(`${am.assetId}::${name}`)} />
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Event log row ──────────────────────────────────────────────────────────────
-function EventRow({ ev, color }: { ev: TelemetryEvent; color: string }) {
-  const [open, setOpen] = useState(false);
-  const metricEntries = Object.entries(ev.metrics);
-  return (
-    <div className="border-b transition-colors hover:bg-white/3" style={{ borderColor: "#1f2d45" }}>
-      <button className="w-full flex items-center gap-2 px-3 py-1.5 text-left" onClick={() => setOpen(o => !o)}>
-        <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: color }} />
-        <span className="font-mono text-[9px] shrink-0 tabular-nums" style={{ color: "#475569" }}>
-          {format(new Date(ev.receivedAt), "HH:mm:ss.SSS")}
-        </span>
-        <span className="text-xs font-semibold truncate max-w-[120px]" style={{ color: "#e2e8f0" }}>{ev.assetName}</span>
-        <div className="flex-1 flex gap-1 min-w-0 overflow-hidden">
-          {metricEntries.slice(0, 4).map(([k, v]) => (
-            <span key={k} className="text-[9px] font-mono px-1 rounded shrink-0" style={{ background: "#1f2d45", color: "#06b6d4" }}>
-              {k}: <span style={{ color: "#e2e8f0" }}>{typeof v === "number" ? v.toFixed(3) : String(v)}</span>
-            </span>
-          ))}
-          {metricEntries.length > 4 && (
-            <span className="text-[9px] shrink-0" style={{ color: "#475569" }}>+{metricEntries.length - 4} more</span>
-          )}
-        </div>
-        {open ? <ChevronDown className="w-3 h-3 shrink-0" style={{ color: "#475569" }} />
-              : <ChevronRight className="w-3 h-3 shrink-0" style={{ color: "#475569" }} />}
-      </button>
-      {open && (
-        <div className="px-3 pb-2.5 flex flex-wrap gap-1">
-          {metricEntries.map(([k, v]) => (
-            <span key={k} className="text-[9px] font-mono px-1.5 py-0.5 rounded border" style={{ background: "#0b0f1a", borderColor: "#1f2d45", color: "#94a3b8" }}>
-              <span style={{ color: "#64748b" }}>{k}</span>: <span style={{ color: "#06b6d4" }}>{typeof v === "number" ? v : String(v)}</span>
-            </span>
-          ))}
-        </div>
-      )}
-    </div>
-  );
-}
-
-// ── Main component ─────────────────────────────────────────────────────────────
 export default function LiveFeed() {
+  const [, navigate] = useLocation();
   const { data: assetsData } = useListAssets();
+  const { data: summaryData } = useGetDashboardSummary();
+  const { data: recentData } = useGetRecentTelemetry({ limit: 100 }, { query: { queryKey: getGetRecentTelemetryQueryKey({ limit: 100 }), refetchInterval: 8000 } });
   const allAssets = (assetsData as any[] | undefined) ?? [];
+  const summary = (summaryData as any) ?? {};
 
-  const [events,      setEvents]      = useState<TelemetryEvent[]>([]);
-  const [assetMap,    setAssetMap]    = useState<Record<string, AssetMetrics>>({});
-  const [flashSet,    setFlashSet]    = useState<Set<string>>(new Set());
-  const [filterAsset, setFilterAsset] = useState<string>("");
-  const [expanded,    setExpanded]    = useState<Record<string, boolean>>({});
-  const [eventsPerMin,setEventsPerMin]= useState(0);
-  const [totalEvents, setTotalEvents] = useState(0);
-  const [wsStatus,    setWsStatus]    = useState<"connecting"|"connected"|"reconnecting">("connecting");
+  const [events, setEvents] = useState<SensorRow[]>([]);
+  const [latest, setLatest] = useState<Record<string, AssetLatest>>({});
+  const [alarms, setAlarms] = useState<AlarmRow[]>([]);
+  const [activities, setActivities] = useState<ActivityRow[]>([]);
+  const [healthMap, setHealthMap] = useState<Record<string, Health>>({});
+  const [devices, setDevices] = useState<number>(0);
+  const [wsStatus, setWsStatus] = useState("connecting");
+  const [liveActive, setLiveActive] = useState(false);
+  const [rateSeries, setRateSeries] = useState<{ v: number }[]>(Array.from({ length: 24 }, () => ({ v: 0 })));
+  const [search, setSearch] = useState("");
+  const [filterAsset, setFilterAsset] = useState("");
+  const [page, setPage] = useState(0);
 
-  // Color assignment per asset
-  const colorMapRef = useRef<Record<string, string>>({});
-  function getColor(assetId: string): string {
-    if (!colorMapRef.current[assetId]) {
-      const idx = Object.keys(colorMapRef.current).length;
-      colorMapRef.current[assetId] = ASSET_COLORS[idx % ASSET_COLORS.length];
-    }
-    return colorMapRef.current[assetId];
-  }
+  const tsRef = useRef<number[]>([]);
 
-  // Events per minute calculation
-  const recentTimestamps = useRef<number[]>([]);
+  // ── fetchers ──
+  const fetchAlarms = useCallback(() => {
+    fetch(`${BASE}/api/alarms?status=active`).then((r) => (r.ok ? r.json() : [])).then((d) => setAlarms(Array.isArray(d) ? d : [])).catch(() => {});
+  }, []);
+  const fetchActivities = useCallback(() => {
+    fetch(`${BASE}/api/activity-log?limit=8`).then((r) => (r.ok ? r.json() : { entries: [] })).then((d) => setActivities(d.entries ?? [])).catch(() => {});
+  }, []);
+  const fetchDevices = useCallback(() => {
+    fetch(`${BASE}/api/ingest/seen-devices`).then((r) => (r.ok ? r.json() : [])).then((d) => setDevices(Array.isArray(d) ? d.length : 0)).catch(() => {});
+  }, []);
+  const fetchHealth = useCallback((ids: string[]) => {
+    Promise.all(ids.slice(0, 12).map(async (id) => {
+      try { const r = await fetch(`${BASE}/api/assets/${id}/health`); return r.ok ? [id, await r.json()] as const : null; } catch { return null; }
+    })).then((es) => { const m: Record<string, Health> = {}; for (const e of es) if (e) m[e[0]] = e[1]; setHealthMap(m); });
+  }, []);
+
+  useEffect(() => { fetchAlarms(); fetchActivities(); fetchDevices(); }, [fetchAlarms, fetchActivities, fetchDevices]);
+  useEffect(() => { if (allAssets.length) fetchHealth(allAssets.map((a) => a.id)); }, [assetsData]); // eslint-disable-line
   useEffect(() => {
-    const interval = setInterval(() => {
+    const iv = setInterval(() => { fetchAlarms(); fetchActivities(); if (allAssets.length) fetchHealth(allAssets.map((a) => a.id)); }, 20_000);
+    return () => clearInterval(iv);
+  }, [assetsData]); // eslint-disable-line
+
+  // rolling messages/sec sampler (every 1s → bucket count)
+  useEffect(() => {
+    const iv = setInterval(() => {
       const now = Date.now();
-      recentTimestamps.current = recentTimestamps.current.filter(t => now - t < 60_000);
-      setEventsPerMin(recentTimestamps.current.length);
-    }, 2000);
-    return () => clearInterval(interval);
+      const inWindow = tsRef.current.filter((t) => now - t < 1000).length;
+      tsRef.current = tsRef.current.filter((t) => now - t < 60_000);
+      setLiveActive(tsRef.current.some((t) => now - t < 8000));
+      setRateSeries((prev) => [...prev.slice(-23), { v: inWindow }]);
+    }, 1000);
+    return () => clearInterval(iv);
   }, []);
 
   const handleTelemetry = useCallback((data: any) => {
     if (!data?.assetId || !data?.metrics) return;
-    const ev: TelemetryEvent = {
-      id: crypto.randomUUID(),
-      assetId: data.assetId,
-      assetName: data.assetName ?? data.assetId,
-      metrics: data.metrics,
-      timestamp: data.timestamp ?? new Date().toISOString(),
-      receivedAt: Date.now(),
-    };
-    recentTimestamps.current.push(Date.now());
-    setTotalEvents(n => n + 1);
-    setEvents(prev => [ev, ...prev].slice(0, MAX_EVENTS));
-
-    const color = getColor(ev.assetId);
-    setAssetMap(prev => {
-      const existing = prev[ev.assetId];
-      const updatedMetrics: Record<string, MetricState> = { ...(existing?.metrics ?? {}) };
-      for (const [k, v] of Object.entries(ev.metrics)) {
-        const num = typeof v === "number" ? v : Number(v);
-        if (!isNaN(num)) {
-          updatedMetrics[k] = {
-            value: num,
-            prev: existing?.metrics[k]?.value ?? null,
-            lastSeen: Date.now(),
-            count: (existing?.metrics[k]?.count ?? 0) + 1,
-          };
-        }
-      }
-      return {
-        ...prev,
-        [ev.assetId]: {
-          assetId: ev.assetId,
-          assetName: ev.assetName,
-          color,
-          metrics: updatedMetrics,
-          lastSeen: Date.now(),
-          eventCount: (existing?.eventCount ?? 0) + 1,
-        },
-      };
-    });
-
-    // Flash new metric keys
-    const flashKeys = Object.keys(ev.metrics).map(k => `${ev.assetId}::${k}`);
-    setFlashSet(new Set(flashKeys));
-    setTimeout(() => setFlashSet(new Set()), 800);
-
-    // Auto-expand new assets
-    setExpanded(prev => ev.assetId in prev ? prev : { ...prev, [ev.assetId]: true });
+    const now = Date.now();
+    const assetName = data.assetName ?? data.assetId;
+    const numeric: Record<string, number> = {};
+    const rows: SensorRow[] = [];
+    for (const [k, v] of Object.entries(data.metrics)) {
+      const n = typeof v === "number" ? v : Number(v);
+      if (!isNaN(n)) { numeric[k] = n; rows.push({ id: `${now}-${k}-${Math.random().toString(36).slice(2, 6)}`, ts: now, assetId: data.assetId, assetName, sensor: k, value: n }); }
+    }
+    tsRef.current.push(now);
+    setEvents((prev) => [...rows, ...prev].slice(0, MAX_EVENTS));
+    setLatest((prev) => ({ ...prev, [data.assetId]: { assetId: data.assetId, assetName, metrics: { ...(prev[data.assetId]?.metrics ?? {}), ...numeric }, lastSeen: now } }));
   }, []);
-
-  const status = useWsEvents({ telemetry: handleTelemetry });
+  const handleAlarm = useCallback(() => fetchAlarms(), [fetchAlarms]);
+  const handleActivity = useCallback(() => fetchActivities(), [fetchActivities]);
+  const status = useWsEvents({ telemetry: handleTelemetry, alarm: handleAlarm, activity_log: handleActivity });
   useEffect(() => { setWsStatus(status); }, [status]);
 
-  const assetEntries = Object.values(assetMap).sort((a, b) => b.lastSeen - a.lastSeen);
-  const filteredEvents = filterAsset ? events.filter(e => e.assetId === filterAsset) : events;
-  const liveAssetCount = assetEntries.filter(a => Date.now() - a.lastSeen < STALE_MS).length;
+  // Seed Asset Status + Sensor Feed from stored telemetry so recent data shows
+  // immediately (not just live WS events received while the page is open).
+  useEffect(() => {
+    const rows = (recentData as any[] | undefined) ?? [];
+    if (!rows.length) return;
+    const nameOf = (r: any) => allAssets.find((a) => a.id === r.assetId)?.name ?? r.deviceId ?? r.assetId;
+    setEvents((prev) => {
+      if (prev.length) return prev;
+      return rows.map((r) => ({
+        id: r.id ?? `${r.assetId}-${r.metric}-${r.timestamp}`,
+        ts: new Date(r.timestamp).getTime(), assetId: r.assetId, assetName: nameOf(r),
+        sensor: r.metric, value: Number(r.value),
+      })).filter((e) => !isNaN(e.value));
+    });
+    setLatest((prev) => {
+      const next = { ...prev };
+      for (const r of rows) {
+        const v = Number(r.value); if (isNaN(v)) continue;
+        const ts = new Date(r.timestamp).getTime();
+        if (!next[r.assetId]) next[r.assetId] = { assetId: r.assetId, assetName: nameOf(r), metrics: {}, lastSeen: ts };
+        if (!(r.metric in next[r.assetId].metrics)) next[r.assetId].metrics[r.metric] = v; // newest row wins (rows are desc)
+        next[r.assetId].lastSeen = Math.max(next[r.assetId].lastSeen, ts);
+      }
+      return next;
+    });
+  }, [recentData, assetsData]); // eslint-disable-line
+
+  async function acknowledge(id: string) {
+    await fetch(`${BASE}/api/alarms/${id}/acknowledge`, { method: "POST" }).catch(() => {});
+    fetchAlarms();
+  }
+
+  // ── derived ──
+  const liveAssets = Object.values(latest).filter((a) => Date.now() - a.lastSeen < STALE_MS);
+  const activeAlarms = alarms.filter((a) => a.status === "active");
+  const criticalCount = activeAlarms.filter((a) => a.severity === "critical").length;
+  const warningCount = activeAlarms.filter((a) => a.severity !== "critical").length;
+  const msgsPerSec = rateSeries[rateSeries.length - 1]?.v ?? 0;
+  const totalAssets = summary.totalAssets ?? allAssets.length;
+
+  // "Live" = live WS events in last 8s, OR freshest stored telemetry within 15s
+  // (covers the case where WS isn't delivering but data is actively ingesting).
+  const newestTs = useMemo(() => {
+    const rows = (recentData as any[] | undefined) ?? [];
+    let m = 0; for (const r of rows) { const t = new Date(r.timestamp).getTime(); if (t > m) m = t; }
+    return m;
+  }, [recentData]);
+  const live = liveActive || (newestTs > 0 && Date.now() - newestTs < 15000);
+
+  const statusOf = (assetId: string): { label: string; color: string } => {
+    const h = healthMap[assetId];
+    const hasAlarm = activeAlarms.some((a) => a.assetName && allAssets.find((x) => x.id === assetId)?.name === a.assetName);
+    if (hasAlarm || h?.health === "alarm") return { label: criticalCount > 0 ? "Critical" : "Warning", color: criticalCount > 0 ? C.red : C.amber };
+    if (h?.health === "stale" || Date.now() - (latest[assetId]?.lastSeen ?? 0) > STALE_MS) return { label: "Stale", color: C.dim };
+    return { label: "Running", color: C.green };
+  };
+
+  // asset status cards = most recently active assets (up to 3)
+  const statusCards = Object.values(latest).sort((a, b) => b.lastSeen - a.lastSeen).slice(0, 3);
+
+  // health ranking
+  const ranked = allAssets
+    .map((a) => ({ a, pct: healthMap[a.id]?.freshnessPct ?? null }))
+    .filter((x) => x.pct != null)
+    .sort((x, y) => (y.pct! - x.pct!));
+  const topHealthy = ranked.slice(0, 3);
+  const needsAttention = [...ranked].reverse().slice(0, 3);
+
+  // sensor feed filter + paging
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return events.filter((e) =>
+      (!filterAsset || e.assetId === filterAsset) &&
+      (!q || e.assetName.toLowerCase().includes(q) || e.sensor.toLowerCase().includes(q)));
+  }, [events, search, filterAsset]);
+  const PAGE = 8;
+  const pageRows = filtered.slice(page * PAGE, page * PAGE + PAGE);
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE));
+
+  function exportCsv() {
+    const header = "time,asset,sensor,value";
+    const rows = filtered.map((e) => `${new Date(e.ts).toISOString()},${e.assetName},${e.sensor},${e.value}`);
+    const url = URL.createObjectURL(new Blob([[header, ...rows].join("\n")], { type: "text/csv" }));
+    const a = document.createElement("a"); a.href = url; a.download = `sensor_feed_${Date.now()}.csv`; a.click(); URL.revokeObjectURL(url);
+  }
 
   return (
-    <div className="flex flex-col h-full overflow-hidden" style={{ background: "#0b0f1a" }}>
-
-      {/* ── Top bar ── */}
-      <div className="shrink-0 px-4 py-3 flex items-center gap-3 flex-wrap"
-        style={{ background: "#111827", borderBottom: "1px solid #1f2d45" }}>
-        <div className="flex items-center gap-2">
-          <Radio className="w-4 h-4" style={{ color: "#06b6d4" }} />
-          <span className="text-sm font-bold" style={{ color: "#e2e8f0" }}>Live Telemetry Feed</span>
+    <div className="h-full overflow-y-auto p-4 space-y-4" style={{ background: C.bg }}>
+      {/* Header */}
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3">
+          <h1 className="text-2xl font-bold" style={{ color: C.text }}>Live Operations Center</h1>
+          <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium"
+            style={{ background: live ? "#05966922" : "#94a3b822", color: live ? C.green : C.dim }}>
+            {live ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
+            {live && <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: C.green }} />}
+            {live ? "Live" : "No live data"}
+          </span>
         </div>
-
-        {/* WS status */}
-        <div className="flex items-center gap-1.5 px-2 py-1 rounded-full text-[10px] font-medium"
-          style={{
-            background: wsStatus === "connected" ? "#10b98122" : "#f59e0b22",
-            color: wsStatus === "connected" ? "#10b981" : "#f59e0b",
-            border: `1px solid ${wsStatus === "connected" ? "#10b98144" : "#f59e0b44"}`,
-          }}>
-          {wsStatus === "connected"
-            ? <><Wifi className="w-3 h-3" /><span className="animate-pulse w-1.5 h-1.5 rounded-full bg-green-400 inline-block" /></>
-            : <WifiOff className="w-3 h-3" />}
-          {wsStatus}
-        </div>
-
-        <div className="flex items-center gap-4 ml-2">
-          <Stat label="Events/min" value={eventsPerMin} color="#06b6d4" />
-          <Stat label="Live assets" value={liveAssetCount} color="#10b981" />
-          <Stat label="Total received" value={totalEvents} color="#818cf8" />
-          <Stat label="Metrics tracked" value={Object.values(assetMap).reduce((s,a)=>s+Object.keys(a.metrics).length,0)} color="#f59e0b" />
-        </div>
-
-        <div className="flex-1" />
-
-        {/* Asset filter */}
-        <div className="flex items-center gap-2">
-          <Filter className="w-3.5 h-3.5" style={{ color: "#64748b" }} />
-          <select value={filterAsset} onChange={e => setFilterAsset(e.target.value)}
-            className="h-7 rounded border px-2 text-xs"
-            style={{ background: "#161e2e", color: "#e2e8f0", borderColor: "#2d3f5a" }}>
-            <option value="">All assets</option>
-            {assetEntries.map(a => <option key={a.assetId} value={a.assetId}>{a.assetName}</option>)}
-          </select>
-        </div>
-
-        {events.length > 0 && (
-          <button onClick={() => { setEvents([]); setTotalEvents(0); recentTimestamps.current = []; }}
-            className="flex items-center gap-1 px-2.5 py-1 rounded text-xs"
-            style={{ background: "#ef444422", color: "#ef4444", border: "1px solid #ef444444" }}>
-            <Trash2 className="w-3 h-3" /> Clear log
-          </button>
-        )}
+        <span className="text-xs" style={{ color: C.dim }}>Real-time monitoring of assets and sensors</span>
       </div>
 
-      {/* ── Body: two panes ── */}
-      <div className="flex-1 flex overflow-hidden">
-
-        {/* ── Left: Asset metric panels ── */}
-        <div className="w-[55%] flex flex-col overflow-hidden"
-          style={{ borderRight: "1px solid #1f2d45" }}>
-          <div className="px-3 py-2 shrink-0 flex items-center gap-2"
-            style={{ borderBottom: "1px solid #1f2d45" }}>
-            <BarChart2 className="w-3.5 h-3.5" style={{ color: "#06b6d4" }} />
-            <span className="text-xs font-semibold" style={{ color: "#94a3b8" }}>Asset Metric Panels</span>
-            <span className="ml-auto text-[9px] px-1.5 py-0.5 rounded" style={{ background: "#1f2d45", color: "#64748b" }}>
-              {assetEntries.length} asset{assetEntries.length !== 1 ? "s" : ""}
-            </span>
-          </div>
-
-          <div className="flex-1 overflow-y-auto p-3 space-y-2">
-            {assetEntries.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full text-center">
-                <Radio className="w-12 h-12 mb-3 opacity-20" style={{ color: "#64748b" }} />
-                <p className="text-sm font-semibold mb-1" style={{ color: "#64748b" }}>Waiting for live data…</p>
-                <p className="text-xs max-w-xs" style={{ color: "#475569" }}>
-                  Start the Payload Simulator or send data from your device using POST /api/ingest/payload
-                </p>
-              </div>
-            ) : (
-              (filterAsset ? assetEntries.filter(a => a.assetId === filterAsset) : assetEntries).map(am => (
-                <AssetPanel key={am.assetId} am={am} flashMetrics={flashSet}
-                  expanded={expanded[am.assetId] ?? true}
-                  onToggle={() => setExpanded(prev => ({ ...prev, [am.assetId]: !prev[am.assetId] }))} />
-              ))
-            )}
-          </div>
-        </div>
-
-        {/* ── Right: Event log ── */}
-        <div className="flex-1 flex flex-col overflow-hidden">
-          <div className="px-3 py-2 shrink-0 flex items-center gap-2"
-            style={{ borderBottom: "1px solid #1f2d45" }}>
-            <Activity className="w-3.5 h-3.5" style={{ color: "#a855f7" }} />
-            <span className="text-xs font-semibold" style={{ color: "#94a3b8" }}>Event Stream</span>
-            {wsStatus === "connected" && (
-              <span className="flex items-center gap-1 text-[9px] ml-1" style={{ color: "#10b981" }}>
-                <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />LIVE
-              </span>
-            )}
-            <span className="ml-auto text-[9px] px-1.5 py-0.5 rounded" style={{ background: "#1f2d45", color: "#64748b" }}>
-              {filteredEvents.length}/{MAX_EVENTS}
-            </span>
-          </div>
-          <div className="flex-1 overflow-y-auto">
-            {filteredEvents.length === 0 ? (
-              <div className="flex flex-col items-center justify-center h-full text-center p-8">
-                <Zap className="w-10 h-10 mb-3 opacity-20" style={{ color: "#64748b" }} />
-                <p className="text-xs" style={{ color: "#475569" }}>Events will appear here as data arrives</p>
-              </div>
-            ) : (
-              filteredEvents.map(ev => (
-                <EventRow key={ev.id} ev={ev} color={getColor(ev.assetId)} />
-              ))
-            )}
-          </div>
-        </div>
+      {/* KPI row */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+        <Kpi icon={Box} label="Assets Online" value={liveAssets.length} sub={`/ ${totalAssets} total assets`} color={C.green} series={rateSeries} chart="area" />
+        <Kpi icon={Cpu} label="Connected Devices" value={devices} sub="registered device ids" color={C.violet} series={rateSeries} chart="area" />
       </div>
 
-      {/* ── Bottom status bar ── */}
-      <div className="shrink-0 px-4 py-1 flex items-center gap-3"
-        style={{ background: "#111827", borderTop: "1px solid #1f2d45" }}>
-        <span className="text-[9px]" style={{ color: "#475569" }}>
-          <Clock className="w-2.5 h-2.5 inline mr-1" />
-          Buffer: {MAX_EVENTS} events max · Stale after {STALE_MS/1000}s
-        </span>
-        <span style={{ color: "#1f2d45" }}>·</span>
-        <span className="text-[9px]" style={{ color: "#475569" }}>
-          Data flows in via WebSocket — no polling required
-        </span>
+      {/* Main grid */}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        {/* Left 2/3 */}
+        <div className="xl:col-span-2 space-y-4">
+          {/* Live Asset Status */}
+          <Panel title="Live Asset Status" right={<ViewAll onClick={() => navigate("/assets")} />}>
+            {statusCards.length === 0 ? (
+              <Empty text="Waiting for live asset data…" />
+            ) : (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3">
+                {statusCards.map((a) => {
+                  const st = statusOf(a.assetId);
+                  const hi = healthMap[a.assetId]?.freshnessPct ?? null;
+                  const metricEntries = Object.entries(a.metrics).slice(0, 4);
+                  return (
+                    <div key={a.assetId} className="rounded-xl p-3" style={{ background: C.soft, border: `1px solid ${C.border}` }}>
+                      <div className="flex items-center justify-between mb-2">
+                        <span className="text-sm font-semibold truncate" style={{ color: C.text }}>{a.assetName}</span>
+                        <span className="text-[10px] px-2 py-0.5 rounded-full font-medium" style={{ background: `${st.color}22`, color: st.color }}>{st.label}</span>
+                      </div>
+                      <div className="space-y-1">
+                        {metricEntries.map(([k, v]) => (
+                          <div key={k} className="flex items-center justify-between text-xs">
+                            <span className="truncate" style={{ color: C.dim }}>{k}</span>
+                            <span className="font-mono font-medium" style={{ color: C.text }}>{Math.abs(v) < 1 ? v.toFixed(3) : v.toFixed(1)}</span>
+                          </div>
+                        ))}
+                      </div>
+                      {hi != null && (
+                        <div className="mt-2">
+                          <div className="flex items-center justify-between text-[10px] mb-0.5"><span style={{ color: C.dim }}>Health Index</span><span style={{ color: C.text }}>{Math.round(hi)}%</span></div>
+                          <div className="h-1.5 rounded-full overflow-hidden" style={{ background: C.border }}>
+                            <div className="h-full rounded-full" style={{ width: `${hi}%`, background: hi >= 70 ? C.green : hi >= 40 ? C.amber : C.red }} />
+                          </div>
+                        </div>
+                      )}
+                      <p className="text-[10px] mt-2" style={{ color: C.faint }}>Updated {Math.max(0, Math.round((Date.now() - a.lastSeen) / 1000))}s ago</p>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </Panel>
+
+          {/* Live Sensor Feed */}
+          <Panel title="Live Sensor Feed" right={
+            <div className="flex items-center gap-2">
+              <div className="relative">
+                <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5" style={{ color: C.dim }} />
+                <input value={search} onChange={(e) => { setSearch(e.target.value); setPage(0); }} placeholder="Search sensor, asset…"
+                  className="h-7 w-44 rounded border pl-7 pr-2 text-xs" style={{ background: C.soft, color: C.text, borderColor: C.border }} />
+              </div>
+              <select value={filterAsset} onChange={(e) => { setFilterAsset(e.target.value); setPage(0); }}
+                className="h-7 rounded border px-2 text-xs" style={{ background: C.soft, color: C.text, borderColor: C.border }}>
+                <option value="">All assets</option>
+                {Object.values(latest).map((a) => <option key={a.assetId} value={a.assetId}>{a.assetName}</option>)}
+              </select>
+              <button onClick={exportCsv} className="flex items-center gap-1 h-7 px-2 rounded border text-xs" style={{ background: C.soft, color: C.muted, borderColor: C.border }}>
+                <Download className="w-3 h-3" /> Export
+              </button>
+            </div>
+          }>
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs">
+                <thead>
+                  <tr style={{ color: C.dim, borderBottom: `1px solid ${C.border}` }}>
+                    <th className="text-left px-3 py-2 font-medium">Time</th>
+                    <th className="text-left px-3 py-2 font-medium">Asset</th>
+                    <th className="text-left px-3 py-2 font-medium">Sensor</th>
+                    <th className="text-left px-3 py-2 font-medium">Value</th>
+                    <th className="text-left px-3 py-2 font-medium">Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {pageRows.length === 0 ? (
+                    <tr><td colSpan={5} className="px-3 py-10 text-center" style={{ color: C.faint }}>No sensor data yet — start ingesting telemetry.</td></tr>
+                  ) : pageRows.map((e) => (
+                    <tr key={e.id} style={{ borderBottom: `1px solid ${C.border}` }}>
+                      <td className="px-3 py-2 font-mono" style={{ color: C.faint }}>{format(new Date(e.ts), "HH:mm:ss")}</td>
+                      <td className="px-3 py-2" style={{ color: C.text }}>{e.assetName}</td>
+                      <td className="px-3 py-2" style={{ color: C.muted }}>{e.sensor}</td>
+                      <td className="px-3 py-2 font-mono" style={{ color: C.cyan }}>{Math.abs(e.value) < 1 ? e.value.toFixed(3) : e.value.toFixed(2)}</td>
+                      <td className="px-3 py-2"><span className="flex items-center gap-1.5" style={{ color: C.green }}><span className="w-1.5 h-1.5 rounded-full" style={{ background: C.green }} />Normal</span></td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            <div className="flex items-center justify-between px-3 py-2 text-[11px]" style={{ color: C.dim, borderTop: `1px solid ${C.border}` }}>
+              <span>Showing {filtered.length === 0 ? 0 : page * PAGE + 1}–{Math.min((page + 1) * PAGE, filtered.length)} of {filtered.length}</span>
+              <div className="flex items-center gap-1">
+                <button disabled={page === 0} onClick={() => setPage((p) => Math.max(0, p - 1))} className="p-1 rounded disabled:opacity-30" style={{ color: C.muted }}><ChevronLeft className="w-3.5 h-3.5" /></button>
+                <span>{page + 1}/{pageCount}</span>
+                <button disabled={page >= pageCount - 1} onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))} className="p-1 rounded disabled:opacity-30" style={{ color: C.muted }}><ChevronRight className="w-3.5 h-3.5" /></button>
+              </div>
+            </div>
+          </Panel>
+
+          {/* Health ranking + Event timeline */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <Panel title="Asset Health Ranking" right={<ViewAll onClick={() => navigate("/assets")} />}>
+              <div className="p-3 grid grid-cols-2 gap-4">
+                <div>
+                  <p className="text-[11px] font-medium mb-2" style={{ color: C.green }}>Top Healthy Assets</p>
+                  {topHealthy.length === 0 ? <p className="text-xs" style={{ color: C.faint }}>—</p> : topHealthy.map((x, i) => (
+                    <Rank key={x.a.id} i={i + 1} name={x.a.name} pct={Math.round(x.pct!)} color={C.green} />
+                  ))}
+                </div>
+                <div>
+                  <p className="text-[11px] font-medium mb-2" style={{ color: C.red }}>Needs Attention</p>
+                  {needsAttention.length === 0 ? <p className="text-xs" style={{ color: C.faint }}>—</p> : needsAttention.map((x, i) => (
+                    <Rank key={x.a.id} i={i + 1} name={x.a.name} pct={Math.round(x.pct!)} color={x.pct! < 50 ? C.red : C.amber} />
+                  ))}
+                </div>
+              </div>
+            </Panel>
+
+            <Panel title="Live Event Timeline" right={<ViewAll onClick={() => navigate("/activity-log")} />}>
+              <div className="p-3 space-y-2.5">
+                {activities.length === 0 ? <Empty text="No recent events" /> : activities.slice(0, 6).map((e, i) => (
+                  <div key={e.id} className="flex items-center gap-2.5 text-xs">
+                    <span className="font-mono shrink-0" style={{ color: C.faint }}>{format(new Date(e.timestamp), "HH:mm")}</span>
+                    <span className="w-2 h-2 rounded-full shrink-0" style={{ background: [C.green, C.amber, C.cyan, C.violet, C.blue][i % 5] }} />
+                    <span className="truncate" style={{ color: C.text }}>{e.detail ?? `${e.action}${e.targetName ? ` — ${e.targetName}` : ""}`}</span>
+                  </div>
+                ))}
+              </div>
+            </Panel>
+          </div>
+        </div>
+
+        {/* Right rail */}
+        <div className="space-y-4">
+          {/* Maintenance Recommendations — DEMO */}
+          <Panel title="Maintenance Recommendations" demo right={<ViewAll onClick={() => navigate("/assets")} />}>
+            <div className="divide-y" style={{ borderColor: C.border }}>
+              {[{ n: statusCards[0]?.assetName ?? "Motor-03", t: "Bearing inspection", d: "Due Today", c: C.red }, { n: statusCards[1]?.assetName ?? "Pump-04", t: "Lubrication", d: "Due Tomorrow", c: C.amber }].map((m, i) => (
+                <div key={i} className="p-3 flex items-center gap-3" style={{ borderBottom: `1px solid ${C.border}` }}>
+                  <div className="p-2 rounded-lg" style={{ background: C.soft }}><Wrench className="w-4 h-4" style={{ color: C.green }} /></div>
+                  <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate" style={{ color: C.text }}>{m.n}</p><p className="text-xs" style={{ color: C.dim }}>{m.t}</p></div>
+                  <span className="text-xs font-medium shrink-0" style={{ color: m.c }}>{m.d}</span>
+                </div>
+              ))}
+            </div>
+          </Panel>
+        </div>
       </div>
     </div>
   );
 }
 
-function Stat({ label, value, color }: { label: string; value: number; color: string }) {
+// ── KPI card ──
+function Kpi({ icon: Icon, label, value, sub, color, series, chart }: {
+  icon: React.ElementType; label: string; value: number; sub: string; color: string; series?: { v: number }[]; chart?: "area" | "bar";
+}) {
   return (
-    <div className="text-center">
-      <p className="text-sm font-bold tabular-nums" style={{ color }}>{value}</p>
-      <p className="text-[9px]" style={{ color: "#475569" }}>{label}</p>
+    <div className="rounded-xl p-4 relative overflow-hidden" style={{ background: C.card, border: `1px solid ${C.border}` }}>
+      <div className="flex items-center justify-between">
+        <span className="text-xs" style={{ color: C.dim }}>{label}</span>
+        <Icon className="w-4 h-4" style={{ color }} />
+      </div>
+      <p className="text-3xl font-bold tabular-nums mt-1.5" style={{ color: C.text }}>{value.toLocaleString()}</p>
+      <p className="text-[11px] mt-0.5" style={{ color: C.faint }}>{sub}</p>
+      {series && chart && (
+        <div className="h-8 mt-2 -mx-1">
+          <ResponsiveContainer width="100%" height="100%">
+            {chart === "area" ? (
+              <AreaChart data={series}><Area type="monotone" dataKey="v" stroke={color} fill={color} fillOpacity={0.15} strokeWidth={1.5} isAnimationActive={false} dot={false} /></AreaChart>
+            ) : (
+              <BarChart data={series}><Bar dataKey="v" fill={color} radius={[1, 1, 0, 0]} isAnimationActive={false} /></BarChart>
+            )}
+          </ResponsiveContainer>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function Panel({ title, right, demo, children }: { title: string; right?: React.ReactNode; demo?: boolean; children: React.ReactNode }) {
+  return (
+    <div className="rounded-xl overflow-hidden" style={{ background: C.card, border: `1px solid ${C.border}` }}>
+      <div className="flex items-center justify-between px-3 py-2.5" style={{ borderBottom: `1px solid ${C.border}` }}>
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold" style={{ color: C.text }}>{title}</span>
+          {demo && <span className="text-[9px] px-1.5 py-px rounded uppercase tracking-wide" style={{ background: "#a855f722", color: C.violet }}>demo</span>}
+        </div>
+        {right}
+      </div>
+      {children}
+    </div>
+  );
+}
+
+function ViewAll({ onClick }: { onClick: () => void }) {
+  return (
+    <button onClick={onClick} className="text-xs hover:underline" style={{ color: C.cyan }}>
+      View all
+    </button>
+  );
+}
+
+function Empty({ text }: { text: string }) {
+  return <div className="flex flex-col items-center justify-center py-10 text-center"><Activity className="w-8 h-8 mb-2 opacity-20" style={{ color: C.dim }} /><p className="text-xs" style={{ color: C.faint }}>{text}</p></div>;
+}
+
+function Rank({ i, name, pct, color }: { i: number; name: string; pct: number; color: string }) {
+  return (
+    <div className="flex items-center gap-2 mb-2">
+      <span className="text-[10px] w-3" style={{ color: C.faint }}>{i}</span>
+      <span className="text-xs flex-1 truncate" style={{ color: C.text }}>{name}</span>
+      <div className="w-12 h-1.5 rounded-full overflow-hidden" style={{ background: C.border }}><div className="h-full rounded-full" style={{ width: `${pct}%`, background: color }} /></div>
+      <span className="text-[10px] font-mono w-8 text-right" style={{ color }}>{pct}%</span>
     </div>
   );
 }

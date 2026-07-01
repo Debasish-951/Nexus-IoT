@@ -47,3 +47,19 @@ Thumbs.db
 # Replit
 .cache/
 .local/
+
+# Secrets — never commit
+.env
+.env.local
+**/.env
+!.env.example
+
+# Python tooling
+__pycache__/
+*.pyc
+
+# Local data / buffers (large, machine-specific)
+PdM_telemetry.csv
+sensor_data.csv
+energy_buffer.json
+energy_buffer.json.tmp

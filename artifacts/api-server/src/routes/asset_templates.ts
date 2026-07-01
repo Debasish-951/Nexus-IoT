@@ -23,9 +23,13 @@ router.post("/asset-templates", async (req, res): Promise<void> => {
   const parsed = CreateAssetTemplateBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
 
+  // deviceId is not in the generated body schema — read it raw (same pattern as attributeDefinitions in PUT).
+  const rawDeviceId = (req.body as any)?.deviceId;
+  const deviceId = typeof rawDeviceId === "string" && rawDeviceId.trim() ? rawDeviceId.trim() : null;
+
   const [template] = await db
     .insert(assetTemplatesTable)
-    .values({ name: parsed.data.name, tags: parsed.data.tags ?? [] })
+    .values({ name: parsed.data.name, deviceId, tags: parsed.data.tags ?? [] })
     .returning();
 
   res.status(201).json(template);
