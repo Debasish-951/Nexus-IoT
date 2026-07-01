@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { useLocation } from "wouter";
+import { useCurrentUser } from "@/contexts/UserContext";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,20 +27,37 @@ function BrandMark() {
 
 export default function Login() {
   const [, navigate] = useLocation();
+  const { setCurrentUser } = useCurrentUser();
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [error, setError] = useState<string | null>(null);
 
-  function onSubmit(e: React.FormEvent) {
+  async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
+    setError(null);
     setLoading(true);
-    // No auth backend in this platform — mock authenticate then enter the app.
-    setTimeout(() => {
+    try {
+      const res = await fetch("/api/auth/login", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ username: email.trim(), password }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        setError(body.error ?? "Login failed. Please try again.");
+        return;
+      }
+      const user = await res.json();
+      setCurrentUser(user);
       localStorage.setItem("ws_authed", "1");
-      setLoading(false);
       navigate("/");
-    }, 1200);
+    } catch {
+      setError("Network error — is the API server running?");
+    } finally {
+      setLoading(false);
+    }
   }
 
   return (
@@ -109,9 +127,9 @@ export default function Login() {
 
             <form onSubmit={onSubmit} className="mt-6 space-y-4" aria-label="Login form">
               <div className="space-y-1.5">
-                <Label htmlFor="email" className="text-slate-700">Email address</Label>
-                <Input id="email" type="email" autoComplete="email" required value={email} onChange={(e) => setEmail(e.target.value)}
-                  placeholder="you@company.com" className="h-11" />
+                <Label htmlFor="email" className="text-slate-700">Username or email</Label>
+                <Input id="email" type="text" autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)}
+                  placeholder="admin" className="h-11" />
               </div>
 
               <div className="space-y-1.5">
@@ -134,6 +152,10 @@ export default function Login() {
                 <a href="#" className="text-sm font-medium hover:underline" style={{ color: BLUE }}>Forgot password?</a>
               </div>
 
+              {error && (
+                <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2" role="alert">{error}</p>
+              )}
+
               <Button type="submit" disabled={loading}
                 className="w-full h-11 rounded-lg text-white font-medium transition-transform active:scale-[0.99] hover:brightness-110"
                 style={{ backgroundColor: BLUE }}>
@@ -146,6 +168,11 @@ export default function Login() {
 
               <div className="flex items-center justify-center gap-1.5 text-xs text-slate-400">
                 <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" /> Secure login · SSL encrypted
+              </div>
+
+              <div className="rounded-md bg-slate-50 border border-slate-200 px-3 py-2 text-[11px] leading-relaxed text-slate-500">
+                <span className="font-medium text-slate-600">Demo accounts</span><br />
+                admin / admin123 · jsmith / engineer123 · mwilson / operator123
               </div>
             </form>
 

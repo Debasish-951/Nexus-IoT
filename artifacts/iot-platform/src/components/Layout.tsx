@@ -236,7 +236,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         </div>
 
         {/* Nav */}
-        <ScrollArea className="flex-1 px-2 py-2">
+        <ScrollArea type="always" className="sidebar-scroll flex-1 px-2 py-2">
           <div className="space-y-0.5">
             {navItems.map((item) => (
               <NavGroup key={item.label} item={item} collapsed={collapsed} />

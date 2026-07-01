@@ -194,6 +194,10 @@ export default function LiveFeed() {
 
   return (
     <div className="h-full overflow-y-auto p-4 space-y-4" style={{ background: C.bg }}>
+      <button onClick={() => (window.history.length > 1 ? window.history.back() : navigate("/data-explorer"))}
+        className="flex items-center gap-1 text-sm hover:opacity-70" style={{ color: C.dim }}>
+        <ChevronLeft className="w-4 h-4" /> Back
+      </button>
       {/* Header */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-3">
@@ -370,10 +374,10 @@ function Kpi({ icon: Icon, label, value, sub, color, series, chart }: {
   icon: React.ElementType; label: string; value: number; sub: string; color: string; series?: { v: number }[]; chart?: "area" | "bar";
 }) {
   return (
-    <div className="rounded-xl p-4 relative overflow-hidden" style={{ background: C.card, border: `1px solid ${C.border}` }}>
+    <div className="rounded-xl p-4 relative overflow-hidden" style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: `4px solid ${color}` }}>
       <div className="flex items-center justify-between">
         <span className="text-xs" style={{ color: C.dim }}>{label}</span>
-        <Icon className="w-4 h-4" style={{ color }} />
+        <span className="p-1.5 rounded-lg" style={{ background: `${color}1f`, color }}><Icon className="w-4 h-4" /></span>
       </div>
       <p className="text-3xl font-bold tabular-nums mt-1.5" style={{ color: C.text }}>{value.toLocaleString()}</p>
       <p className="text-[11px] mt-0.5" style={{ color: C.faint }}>{sub}</p>

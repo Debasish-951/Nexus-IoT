@@ -14,6 +14,7 @@
  */
 
 import "dotenv/config";
+import { sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";
 import { usersTable, assetsTable, alarmRulesTable, apiClientsTable } from "./schema/index.js";
@@ -47,31 +48,38 @@ async function seed() {
   // ── Users ─────────────────────────────────────────────────────────────────
   await db.insert(usersTable).values([
     {
-      id:       IDs.userAdmin,
-      username: "admin",
-      email:    "admin@local.dev",
-      fullName: "Administrator",
-      role:     "admin",
-      status:   "active",
+      id:           IDs.userAdmin,
+      username:     "admin",
+      email:        "admin@local.dev",
+      fullName:     "Administrator",
+      role:         "admin",
+      status:       "active",
+      passwordHash: "admin123",
     },
     {
-      id:       IDs.userEngineer,
-      username: "jsmith",
-      email:    "jsmith@local.dev",
-      fullName: "Jane Smith",
-      role:     "engineer",
-      status:   "active",
+      id:           IDs.userEngineer,
+      username:     "jsmith",
+      email:        "jsmith@local.dev",
+      fullName:     "Jane Smith",
+      role:         "engineer",
+      status:       "active",
+      passwordHash: "engineer123",
     },
     {
-      id:       IDs.userOperator,
-      username: "mwilson",
-      email:    "mwilson@local.dev",
-      fullName: "Mike Wilson",
-      role:     "operator",
-      status:   "active",
+      id:           IDs.userOperator,
+      username:     "mwilson",
+      email:        "mwilson@local.dev",
+      fullName:     "Mike Wilson",
+      role:         "operator",
+      status:       "active",
+      passwordHash: "operator123",
     },
-  ]).onConflictDoNothing();
-  console.log("  ✅  Users        (admin / jsmith / mwilson)");
+  ]).onConflictDoUpdate({
+    // Ensure already-seeded DBs also get login passwords set.
+    target: usersTable.id,
+    set: { passwordHash: sql`excluded.password_hash` },
+  });
+  console.log("  ✅  Users        (admin/admin123 · jsmith/engineer123 · mwilson/operator123)");
 
   // ── Assets ────────────────────────────────────────────────────────────────
   await db.insert(assetsTable).values([

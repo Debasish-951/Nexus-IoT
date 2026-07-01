@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback } from "react";
-import { useListUsers, setActorHeaders } from "@workspace/api-client-react";
+import { setActorHeaders } from "@workspace/api-client-react";
 
 export interface CurrentUser {
   id: string;
@@ -28,29 +28,16 @@ const UserContext = createContext<UserContextValue>({
 });
 
 export function UserProvider({ children }: { children: React.ReactNode }) {
-  const { data: users } = useListUsers();
   const [currentUser, setCurrentUserState] = useState<CurrentUser | null>(null);
 
+  // Restore the logged-in identity from a prior session. Identity is only ever
+  // set by a real login (see pages/Login.tsx) — no auto-select fallback.
   useEffect(() => {
     const saved = localStorage.getItem("iot_current_user");
     if (saved) {
       try { setCurrentUserState(JSON.parse(saved)); } catch { localStorage.removeItem("iot_current_user"); }
     }
   }, []);
-
-  useEffect(() => {
-    if (!currentUser && users && Array.isArray(users) && users.length > 0) {
-      const admin = (users as any[]).find((u) => u.role === "admin") ?? (users as any[])[0];
-      const u: CurrentUser = {
-        id: admin.id,
-        fullName: admin.fullName ?? admin.full_name ?? admin.username ?? "User",
-        email: admin.email,
-        role: admin.role,
-      };
-      setCurrentUserState(u);
-      localStorage.setItem("iot_current_user", JSON.stringify(u));
-    }
-  }, [users, currentUser]);
 
   useEffect(() => {
     if (currentUser) {

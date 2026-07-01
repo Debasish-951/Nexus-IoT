@@ -11,6 +11,7 @@ const CARDS = [
     icon: FileText,
     tint: "bg-blue-50 text-blue-600 dark:bg-blue-950/40 dark:text-blue-300",
     activeBg: "active:bg-blue-50/70 dark:active:bg-blue-950/30",
+    accent: "#3b82f6",
   },
   {
     title: "Assets",
@@ -19,6 +20,7 @@ const CARDS = [
     icon: Blocks,
     tint: "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40 dark:text-emerald-300",
     activeBg: "active:bg-emerald-50/70 dark:active:bg-emerald-950/30",
+    accent: "#22c55e",
   },
   {
     title: "Media Library",
@@ -27,6 +29,7 @@ const CARDS = [
     icon: Image,
     tint: "bg-violet-50 text-violet-600 dark:bg-violet-950/40 dark:text-violet-300",
     activeBg: "active:bg-violet-50/70 dark:active:bg-violet-950/30",
+    accent: "#a855f7",
   },
 ];
 
@@ -64,6 +67,7 @@ export default function AssetManagement() {
               role="button"
               tabIndex={0}
               onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); navigate(c.href); } }}
+              style={{ borderTopColor: c.accent, borderTopWidth: 4 }}
               className={`cursor-pointer shadow-sm group select-none border min-h-[210px] h-full backdrop-blur-sm
                 transition-all duration-150 hover:shadow-xl hover:border-primary/40 ${c.activeBg}
                 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40`}

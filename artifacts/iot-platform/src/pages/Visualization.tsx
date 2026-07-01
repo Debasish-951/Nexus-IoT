@@ -1,19 +1,29 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
+import { useLocation } from "wouter";
 import * as echarts from "echarts";
-import { useListAssets } from "@workspace/api-client-react";
+import { useListAssets, useListAlarms } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Card } from "@/components/ui/card";
+import { Progress } from "@/components/ui/progress";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
+import {
+  Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger,
+} from "@/components/ui/sheet";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
-import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-import { format, subHours, subDays } from "date-fns";
+import { format, subHours, subDays, formatDistanceToNow } from "date-fns";
 import {
   Plus, Download, X, Search, Maximize2, Minimize2, Copy, Trash2, RefreshCw,
   LineChart as LineIcon, AreaChart as AreaIcon, BarChart3, ScatterChart as ScatterIcon,
-  PieChart as PieIcon, Radar as RadarIcon, Gauge as GaugeIcon, Activity, Sparkles, BarChart2, Grid3x3, Share2,
+  PieChart as PieIcon, Radar as RadarIcon, Gauge as GaugeIcon, Activity, Sparkles, BarChart2,
+  Grid3x3, Share2, SlidersHorizontal, Settings2, Filter as FilterIcon, TrendingUp, TrendingDown,
+  Minus, HeartPulse, ShieldCheck, Bell, AlertTriangle, Thermometer, Waves, Gauge,
+  Zap, BatteryCharging, Timer, Clock, Wrench, Cpu, Brain, ArrowLeft,
 } from "lucide-react";
 import {
   ResponsiveContainer, LineChart, Line, AreaChart, Area, BarChart, Bar,
@@ -93,21 +103,60 @@ function newGraph(type: ChartType, assetId: string, color: string): Graph {
   };
 }
 
+// ── KPI category matching (real telemetry where a matching metric exists) ──
+type KpiDir = "up-good" | "down-good" | "neutral";
+interface KpiDef {
+  key: string; title: string; icon: React.ElementType; unit?: string;
+  match?: RegExp; dir: KpiDir;
+}
+const METRIC_KPIS: KpiDef[] = [
+  { key: "temp",    title: "Avg Temperature",   icon: Thermometer,     unit: "°C",  match: /temp/i,              dir: "down-good" },
+  { key: "vib",     title: "Avg Vibration",     icon: Waves,           unit: "mm/s",match: /vib/i,               dir: "down-good" },
+  { key: "press",   title: "Pressure",          icon: Gauge,           unit: "bar", match: /press/i,             dir: "neutral" },
+  { key: "power",   title: "Power Consumption", icon: Zap,             unit: "kW",  match: /power|(^|_)kw($|_)/i,dir: "down-good" },
+  { key: "energy",  title: "Energy Consumption",icon: BatteryCharging, unit: "kWh", match: /energy|kwh/i,        dir: "down-good" },
+];
+
 export default function Visualization() {
+  const [, navigate] = useLocation();
   const { data: assetsData } = useListAssets();
   const allAssets = (assetsData as any[] | undefined) ?? [];
+  const { data: alarmsData } = useListAlarms();
+  const alarms = (alarmsData as any[] | undefined) ?? [];
 
   const [graphs, setGraphs] = useState<Graph[]>([]);
   const [activeId, setActiveId] = useState("");
   const [rangeHours, setRangeHours] = useState(24);
+  const [plant, setPlant] = useState("all");
+  const [shift, setShift] = useState("all");
   const [addOpen, setAddOpen] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+  const [configOpen, setConfigOpen] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
 
   const [metricsByAsset, setMetricsByAsset] = useState<Record<string, string[]>>({});
   const [series, setSeries] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
+  // KPI + health state
+  const [health, setHealth] = useState<any | null>(null);
+  const [kpiSeries, setKpiSeries] = useState<Record<string, { time: string; v: number }[]>>({});
+
   const active = graphs.find((g) => g.id === activeId) ?? null;
+  const selectedAssetId = active?.assetId ?? allAssets[0]?.id ?? "";
+  const selectedAsset = allAssets.find((a) => a.id === selectedAssetId) ?? null;
+
+  // Plant list = root assets (no parentId). Used to scope the asset dropdown.
+  const rootName = useCallback((a: any): string => {
+    let cur = a; const seen = new Set<string>();
+    while (cur?.parentId && !seen.has(cur.id)) { seen.add(cur.id); const p = allAssets.find((x) => x.id === cur.parentId); if (!p) break; cur = p; }
+    return cur?.name ?? a?.name ?? "—";
+  }, [allAssets]);
+  const plants = useMemo(() => Array.from(new Set(allAssets.filter((a) => !a.parentId).map((a) => a.name))), [allAssets]);
+  const visibleAssets = useMemo(
+    () => (plant === "all" ? allAssets : allAssets.filter((a) => rootName(a) === plant)),
+    [allAssets, plant, rootName],
+  );
 
   useEffect(() => {
     if (graphs.length === 0 && allAssets.length > 0) {
@@ -133,6 +182,41 @@ export default function Visualization() {
     }
   }, [availableParams, active?.id]); // eslint-disable-line
 
+  // ── Health fetch for the selected asset (real endpoint) ──
+  useEffect(() => {
+    if (!selectedAssetId) { setHealth(null); return; }
+    let cancelled = false;
+    fetch(`/api/ingest/assets/${selectedAssetId}/health`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((h) => { if (!cancelled) setHealth(h); })
+      .catch(() => { if (!cancelled) setHealth(null); });
+    return () => { cancelled = true; };
+  }, [selectedAssetId, rangeHours]);
+
+  // ── KPI telemetry: fetch matched metrics for the selected asset ──
+  useEffect(() => {
+    if (!selectedAssetId) { setKpiSeries({}); return; }
+    let cancelled = false;
+    (async () => {
+      const metrics: string[] = metricsByAsset[selectedAssetId]
+        ?? await fetch(`/api/telemetry/${selectedAssetId}/metrics`).then((r) => (r.ok ? r.json() : [])).catch(() => []);
+      const from = (rangeHours <= 24 ? subHours(new Date(), rangeHours) : subDays(new Date(), rangeHours / 24)).toISOString();
+      const chosen: Record<string, string> = {};
+      for (const def of METRIC_KPIS) {
+        const m = def.match && metrics.find((x: string) => def.match!.test(x));
+        if (m && !Object.values(chosen).includes(m)) chosen[def.key] = m;
+      }
+      const out: Record<string, { time: string; v: number }[]> = {};
+      await Promise.all(Object.entries(chosen).map(async ([key, metric]) => {
+        const p = new URLSearchParams({ metric, from, limit: "500" });
+        const rows: any[] = await fetch(`/api/telemetry/${selectedAssetId}?${p}`).then((r) => (r.ok ? r.json() : [])).catch(() => []);
+        out[key] = rows.map((r) => ({ time: r.timestamp, v: Number(r.value) })).filter((r) => !isNaN(r.v));
+      }));
+      if (!cancelled) setKpiSeries(out);
+    })();
+    return () => { cancelled = true; };
+  }, [selectedAssetId, rangeHours, metricsByAsset[selectedAssetId]]); // eslint-disable-line
+
   const fetchData = useCallback(async () => {
     if (!active || active.params.length === 0) { setSeries([]); return; }
     setLoading(true);
@@ -155,6 +239,14 @@ export default function Visualization() {
   }, [active?.assetId, active?.params, rangeHours]); // eslint-disable-line
 
   useEffect(() => { fetchData(); }, [fetchData]);
+
+  function refreshAll() {
+    fetchData();
+    setMetricsByAsset((prev) => { const n = { ...prev }; delete n[selectedAssetId]; return n; });
+    if (selectedAssetId) {
+      fetch(`/api/ingest/assets/${selectedAssetId}/health`).then((r) => (r.ok ? r.json() : null)).then(setHealth).catch(() => {});
+    }
+  }
 
   function patch(id: string, p: Partial<Graph>) {
     setGraphs((prev) => prev.map((g) => (g.id === id ? { ...g, ...p } : g)));
@@ -216,162 +308,247 @@ export default function Visualization() {
   const paramColor = (p: string) => PARAM_COLORS[(active?.params.indexOf(p) ?? 0) % PARAM_COLORS.length];
   const thresholdNum = active && active.overlays.thresholds && active.threshold ? Number(active.threshold) : null;
 
+  // ── Alarm counts for the selected asset (real) ──
+  const assetAlarms = useMemo(
+    () => alarms.filter((a) => a.assetId === selectedAssetId && a.status === "active"),
+    [alarms, selectedAssetId],
+  );
+  const criticalCount = assetAlarms.filter((a) => a.severity === "critical").length;
+
+  // ── Build KPI cards ──
+  const kpis = useMemo<KpiCardData[]>(() => {
+    const cards: KpiCardData[] = [];
+    const hs = health?.freshnessPct;
+    // Asset Health Score
+    cards.push({
+      key: "health", title: "Asset Health Score", icon: HeartPulse,
+      value: hs != null ? hs : 92, unit: "%", real: hs != null,
+      status: statusFromPct(hs ?? 92), dir: "up-good",
+      progress: hs ?? 92,
+    });
+    // Availability (proxy: freshness of live signals)
+    cards.push({
+      key: "availability", title: "Availability", icon: ShieldCheck,
+      value: hs != null ? hs : 98, unit: "%", real: hs != null,
+      status: statusFromPct(hs ?? 98), dir: "up-good", progress: hs ?? 98,
+    });
+    // Active alarms
+    cards.push({
+      key: "alarms", title: "Active Alarms", icon: Bell,
+      value: assetAlarms.length, real: true,
+      status: assetAlarms.length === 0 ? "good" : assetAlarms.length <= 2 ? "warn" : "bad", dir: "down-good",
+      statusLabel: assetAlarms.length === 0 ? "No alarms" : `${assetAlarms.length} Active`,
+    });
+    // Critical alarms
+    cards.push({
+      key: "critical", title: "Critical Alarms", icon: AlertTriangle,
+      value: criticalCount, real: true,
+      status: criticalCount === 0 ? "good" : "bad", dir: "down-good",
+      statusLabel: criticalCount === 0 ? "None" : `${criticalCount} Critical`,
+    });
+    // Real telemetry-driven metric KPIs
+    for (const def of METRIC_KPIS) {
+      const s = kpiSeries[def.key];
+      if (s && s.length) {
+        const spark = s.map((x) => x.v);
+        const half = Math.floor(s.length / 2) || 1;
+        const prevAvg = avg(spark.slice(0, half));
+        const curAvg = avg(spark.slice(half));
+        const delta = prevAvg ? ((curAvg - prevAvg) / Math.abs(prevAvg)) * 100 : 0;
+        cards.push({
+          key: def.key, title: def.title, icon: def.icon, unit: def.unit,
+          value: curAvg, real: true, status: "info", dir: def.dir,
+          deltaPct: delta, spark, statusLabel: "Normal",
+        });
+      }
+    }
+    // Demo KPIs (no backing signal yet)
+    cards.push({ key: "rul", title: "Remaining Useful Life", icon: Timer, value: 128, unit: "days", real: false, status: "good", dir: "up-good", deltaPct: -2.1 });
+    cards.push({ key: "downtime", title: "Downtime", icon: Clock, value: 3.2, unit: "h", real: false, status: "warn", dir: "down-good", deltaPct: 8.0 });
+    cards.push({ key: "utilization", title: "Utilization", icon: Cpu, value: 87, unit: "%", real: false, status: "good", dir: "up-good", deltaPct: 1.4, progress: 87 });
+    return cards;
+  }, [health, assetAlarms, criticalCount, kpiSeries]);
+
+  const insights = useMemo(() => buildInsights(kpis, assetAlarms, selectedAsset?.name), [kpis, assetAlarms, selectedAsset]);
+
   return (
-    <div className="flex flex-col h-full overflow-hidden bg-background">
-      <div className="px-6 py-3 border-b border-border flex items-center gap-2">
-        <BarChart2 className="w-5 h-5 text-primary" />
-        <div>
-          <h1 className="text-lg font-bold leading-tight">Visualization</h1>
-          <p className="text-xs text-muted-foreground">Analyze and visualize your industrial data</p>
-        </div>
-        <div className="flex-1" />
-        <Button variant="outline" size="sm" onClick={exportCsv} disabled={!active || series.length === 0}><Download className="w-4 h-4 mr-1.5" /> Export</Button>
-        <Button size="sm" onClick={() => setAddOpen(true)}><Plus className="w-4 h-4 mr-1.5" /> Add Graph</Button>
-      </div>
-
-      <div className="px-6 py-2.5 border-b border-border flex items-end gap-4 flex-wrap bg-muted/20">
-        <Field label="Asset">
-          <Select value={active?.assetId ?? ""} onValueChange={(v) => active && patch(active.id, { assetId: v, params: [] })}>
-            <SelectTrigger className="h-9 w-44 text-sm"><SelectValue placeholder="Select asset" /></SelectTrigger>
-            <SelectContent>{allAssets.map((a) => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}</SelectContent>
-          </Select>
-        </Field>
-        <Field label="Time Range">
-          <Select value={String(rangeHours)} onValueChange={(v) => setRangeHours(Number(v))}>
-            <SelectTrigger className="h-9 w-36 text-sm"><SelectValue /></SelectTrigger>
-            <SelectContent>{TIME_RANGES.map((t) => <SelectItem key={t.label} value={String(t.hours)}>{t.label}</SelectItem>)}</SelectContent>
-          </Select>
-        </Field>
-        <Field label="Parameters"><span className="h-9 inline-flex items-center text-sm text-muted-foreground">{active?.params.length ?? 0} selected</span></Field>
-        <div className="flex-1" />
-        <Button variant="ghost" size="sm" className="h-9" onClick={fetchData}><RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} /></Button>
-      </div>
-
-      <div className="px-4 pt-2 border-b border-border flex items-center gap-1 overflow-x-auto">
-        {graphs.map((g) => (
-          <div key={g.id} onClick={() => setActiveId(g.id)}
-            className={cn("flex items-center gap-2 px-3 py-2 rounded-t-md cursor-pointer text-sm border-b-2 -mb-px shrink-0",
-              activeId === g.id ? "border-primary text-foreground font-medium bg-card" : "border-transparent text-muted-foreground hover:bg-muted/40")}>
-            <span className="w-2 h-2 rounded-full" style={{ background: g.color }} />
-            {g.name}
-            <button onClick={(e) => { e.stopPropagation(); closeGraph(g.id); }} className="hover:text-destructive"><X className="w-3.5 h-3.5" /></button>
+    <div className="h-full overflow-auto bg-background">
+      {/* ── 1. Header ── */}
+      <div className="px-6 pt-5 pb-4 border-b border-border">
+        <button onClick={() => (window.history.length > 1 ? window.history.back() : navigate("/data-explorer"))}
+          className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-3">
+          <ArrowLeft className="w-4 h-4" /> Back
+        </button>
+        <div className="flex items-start gap-3">
+          <div className="p-2 rounded-lg bg-primary/10 text-primary shrink-0"><BarChart2 className="w-5 h-5" /></div>
+          <div className="flex-1 min-w-0">
+            <h1 className="text-xl font-bold leading-tight">Visualization</h1>
+            <p className="text-sm text-muted-foreground">Analyze and visualize industrial data.</p>
           </div>
-        ))}
-        <button onClick={() => setAddOpen(true)} className="px-2.5 py-2 text-muted-foreground hover:text-primary shrink-0"><Plus className="w-4 h-4" /></button>
-      </div>
-
-      {!active ? (
-        <div className="flex-1 flex items-center justify-center text-muted-foreground">
-          <div className="text-center"><BarChart2 className="w-10 h-10 mx-auto mb-3 opacity-20" /><p className="text-sm">Add a graph to start analyzing.</p>
-            <Button size="sm" className="mt-3" onClick={() => setAddOpen(true)}><Plus className="w-4 h-4 mr-1" /> Add Graph</Button></div>
+          <div className="flex items-center gap-2">
+            <Button variant="ghost" size="sm" onClick={refreshAll}><RefreshCw className={cn("w-4 h-4 mr-1.5", loading && "animate-spin")} /> Refresh</Button>
+            <Button variant="outline" size="sm" onClick={exportCsv} disabled={!active || series.length === 0}><Download className="w-4 h-4 mr-1.5" /> Export</Button>
+          </div>
         </div>
-      ) : (
-        <div className="flex-1 flex overflow-hidden">
-          <div className="w-60 border-r border-border overflow-y-auto p-4 space-y-4 shrink-0 bg-card">
-            <p className="text-sm font-semibold">Graph Settings</p>
-            <Setting label="Graph Type">
-              <Select value={active.type} onValueChange={(v) => patch(active.id, { type: v as ChartType })}>
-                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-                <SelectContent>{ALL_TYPES.map((c) => <SelectItem key={c.type} value={c.type} className="text-xs">{c.label}</SelectItem>)}</SelectContent>
-              </Select>
-            </Setting>
-            <Setting label="Y Axis">
-              <Select value={active.yMode} onValueChange={(v) => patch(active.id, { yMode: v as any })}>
-                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+
+        {/* Top filters */}
+        <div className="mt-4 flex items-end gap-3 flex-wrap">
+          <Field label="Asset">
+            <Select value={selectedAssetId} onValueChange={(v) => active && patch(active.id, { assetId: v, params: [] })}>
+              <SelectTrigger className="h-9 w-48 text-sm"><SelectValue placeholder="Select asset" /></SelectTrigger>
+              <SelectContent>{visibleAssets.map((a) => <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>)}</SelectContent>
+            </Select>
+          </Field>
+          <Field label="Time Range">
+            <Select value={String(rangeHours)} onValueChange={(v) => setRangeHours(Number(v))}>
+              <SelectTrigger className="h-9 w-36 text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>{TIME_RANGES.map((t) => <SelectItem key={t.label} value={String(t.hours)}>{t.label}</SelectItem>)}</SelectContent>
+            </Select>
+          </Field>
+          {plants.length > 0 && (
+            <Field label="Plant">
+              <Select value={plant} onValueChange={setPlant}>
+                <SelectTrigger className="h-9 w-40 text-sm"><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="multi" className="text-xs">Multiple Y Axis</SelectItem>
-                  <SelectItem value="single" className="text-xs">Single Y Axis</SelectItem>
-                  <SelectItem value="normalized" className="text-xs">Normalized (0–100%)</SelectItem>
+                  <SelectItem value="all">All plants</SelectItem>
+                  {plants.map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
                 </SelectContent>
               </Select>
-            </Setting>
-            <Setting label="Aggregation">
-              <Select value={active.agg} onValueChange={(v) => patch(active.id, { agg: v as any })}>
-                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="avg" className="text-xs">Average</SelectItem>
-                  <SelectItem value="max" className="text-xs">Max</SelectItem>
-                  <SelectItem value="min" className="text-xs">Min</SelectItem>
-                  <SelectItem value="last" className="text-xs">Last</SelectItem>
-                </SelectContent>
-              </Select>
-            </Setting>
+            </Field>
+          )}
+          <Field label={<span className="flex items-center gap-1">Shift <DemoTag /></span>}>
+            <Select value={shift} onValueChange={setShift}>
+              <SelectTrigger className="h-9 w-32 text-sm"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All shifts</SelectItem>
+                <SelectItem value="A">Shift A</SelectItem>
+                <SelectItem value="B">Shift B</SelectItem>
+                <SelectItem value="C">Shift C</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
+          <div className="flex-1" />
+          {health?.lastSeen && (
+            <span className="text-xs text-muted-foreground h-9 inline-flex items-center">
+              Last data {formatDistanceToNow(new Date(health.lastSeen), { addSuffix: true })}
+            </span>
+          )}
+        </div>
+      </div>
 
-            <div>
-              <p className="text-xs font-medium mb-1.5">Parameters ({active.params.length}/{availableParams.length})</p>
-              <div className="space-y-1 max-h-52 overflow-y-auto pr-1">
-                {availableParams.length === 0 ? <p className="text-xs text-muted-foreground">No telemetry for this asset.</p> :
-                  availableParams.map((p) => (
-                    <label key={p} className="flex items-center gap-2 text-xs cursor-pointer">
-                      <input type="checkbox" checked={active.params.includes(p)} onChange={() => toggleParam(p)} />
-                      <span className="w-2 h-2 rounded-full" style={{ background: active.params.includes(p) ? paramColor(p) : "#cbd5e1" }} />
-                      <span className="truncate">{p}</span>
-                    </label>
-                  ))}
-              </div>
-            </div>
-
-            <div>
-              <p className="text-xs font-medium mb-1.5">Overlays</p>
-              <div className="space-y-1.5">
-                <OverlayToggle label="Threshold line" on={active.overlays.thresholds} set={(v) => patch(active.id, { overlays: { ...active.overlays, thresholds: v } })} />
-                {active.overlays.thresholds && (
-                  <Input value={active.threshold} onChange={(e) => patch(active.id, { threshold: e.target.value })} placeholder="value" className="h-7 text-xs" />
-                )}
-                <OverlayToggle label="Alarm overlay" on={active.overlays.alarms} set={(v) => patch(active.id, { overlays: { ...active.overlays, alarms: v } })} />
-                <OverlayToggle label="AI anomaly" demo on={active.overlays.ai} set={(v) => patch(active.id, { overlays: { ...active.overlays, ai: v } })} />
-                <OverlayToggle label="Health Index" demo on={active.overlays.health} set={(v) => patch(active.id, { overlays: { ...active.overlays, health: v } })} />
-                <OverlayToggle label="RUL" demo on={active.overlays.rul} set={(v) => patch(active.id, { overlays: { ...active.overlays, rul: v } })} />
-                <OverlayToggle label="Maintenance" demo on={active.overlays.maintenance} set={(v) => patch(active.id, { overlays: { ...active.overlays, maintenance: v } })} />
-              </div>
-            </div>
+      <div className="p-6 space-y-8">
+        {/* ── 2. KPI cards ── */}
+        <section>
+          <SectionTitle icon={Activity} title="Operational KPIs"
+            subtitle={selectedAsset ? selectedAsset.name : "Select an asset"} />
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6 gap-3">
+            {kpis.map((k) => <KpiCard key={k.key} kpi={k} />)}
           </div>
+        </section>
 
-          <div className={cn("flex-1 flex flex-col overflow-hidden", fullscreen && "fixed inset-0 z-50 bg-background")}>
-            <div className="px-4 py-2 border-b border-border flex items-center gap-2">
-              <span className="text-sm font-semibold flex-1 truncate">{active.name}</span>
-              <Select value={active.type} onValueChange={(v) => patch(active.id, { type: v as ChartType })}>
-                <SelectTrigger className="h-7 w-32 text-xs"><SelectValue /></SelectTrigger>
-                <SelectContent>{ALL_TYPES.map((c) => <SelectItem key={c.type} value={c.type} className="text-xs">{c.label}</SelectItem>)}</SelectContent>
-              </Select>
-              <button title="Duplicate" onClick={() => duplicate(active.id)} className="p-1.5 rounded hover:bg-muted text-muted-foreground"><Copy className="w-4 h-4" /></button>
-              <button title="Export" onClick={exportCsv} className="p-1.5 rounded hover:bg-muted text-muted-foreground"><Download className="w-4 h-4" /></button>
-              <button title="Fullscreen" onClick={() => setFullscreen((f) => !f)} className="p-1.5 rounded hover:bg-muted text-muted-foreground">{fullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}</button>
-              <button title="Delete" onClick={() => closeGraph(active.id)} className="p-1.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"><Trash2 className="w-4 h-4" /></button>
-            </div>
+        {/* ── 3. AI Insights ── */}
+        <section>
+          <SectionTitle icon={Brain} title="AI Insights" subtitle="Automated observations" trailing={<DemoTag label="preview" />} />
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+            {insights.map((ins, i) => <InsightCard key={i} insight={ins} />)}
+          </div>
+        </section>
 
-            <div className="flex-1 overflow-auto p-4">
-              {active.params.length === 0 ? (
-                <Placeholder text="Select parameters on the left to plot." />
-              ) : series.length === 0 ? (
-                <Placeholder text={loading ? "Loading telemetry…" : "No data in this time range."} />
-              ) : (
-                <div className="h-[420px]">
-                  {ECHART_SET.has(active.type)
-                    ? <EChartView graph={active} data={series} stats={stats} paramColor={paramColor} assetName={allAssets.find((a) => a.id === active.assetId)?.name ?? active.assetId} />
-                    : <ChartView graph={active} data={plotData} stats={stats} paramColor={paramColor} thresholdNum={thresholdNum} />}
+        {/* ── 4. Trend charts ── */}
+        <section>
+          <SectionTitle icon={LineIcon} title="Trend Charts" subtitle="Detailed time-series analysis"
+            trailing={
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={() => setConfigOpen(true)} disabled={!active}>
+                  <Settings2 className="w-4 h-4 mr-1.5" /> Configure
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => setFiltersOpen(true)}>
+                  <SlidersHorizontal className="w-4 h-4 mr-1.5" /> Filters
+                </Button>
+                <Button size="sm" onClick={() => setAddOpen(true)}><Plus className="w-4 h-4 mr-1.5" /> Add Graph</Button>
+              </div>
+            } />
+
+          <Card className="overflow-hidden">
+            {/* graph tabs */}
+            <div className="px-3 pt-2 border-b border-border flex items-center gap-1 overflow-x-auto">
+              {graphs.map((g) => (
+                <div key={g.id} onClick={() => setActiveId(g.id)}
+                  className={cn("flex items-center gap-2 px-3 py-2 rounded-t-md cursor-pointer text-sm border-b-2 -mb-px shrink-0",
+                    activeId === g.id ? "border-primary text-foreground font-medium bg-muted/40" : "border-transparent text-muted-foreground hover:bg-muted/30")}>
+                  <span className="w-2 h-2 rounded-full" style={{ background: g.color }} />
+                  {g.name}
+                  <button onClick={(e) => { e.stopPropagation(); closeGraph(g.id); }} className="hover:text-destructive"><X className="w-3.5 h-3.5" /></button>
                 </div>
-              )}
+              ))}
+              <button onClick={() => setAddOpen(true)} className="px-2.5 py-2 text-muted-foreground hover:text-primary shrink-0"><Plus className="w-4 h-4" /></button>
+            </div>
 
-              {active.params.length > 0 && Object.keys(stats).length > 0 && (
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mt-4">
-                  {active.params.filter((p) => stats[p]).map((p) => (
-                    <div key={p} className="rounded-lg border border-border p-3" style={{ borderLeftColor: paramColor(p), borderLeftWidth: 3 }}>
-                      <p className="text-xs font-medium truncate" style={{ color: paramColor(p) }}>{p}</p>
-                      <p className="text-xl font-bold tabular-nums">{stats[p].avg.toFixed(2)} <span className="text-[10px] text-muted-foreground font-normal">avg</span></p>
-                      <div className="flex justify-between text-[10px] text-muted-foreground mt-0.5">
-                        <span>{stats[p].max.toFixed(2)} max</span><span>{stats[p].min.toFixed(2)} min</span>
-                      </div>
+            {!active ? (
+              <div className="flex items-center justify-center py-24 text-muted-foreground">
+                <div className="text-center"><BarChart2 className="w-10 h-10 mx-auto mb-3 opacity-20" /><p className="text-sm">Add a graph to start analyzing.</p>
+                  <Button size="sm" className="mt-3" onClick={() => setAddOpen(true)}><Plus className="w-4 h-4 mr-1" /> Add Graph</Button></div>
+              </div>
+            ) : (
+              <div className={cn("flex flex-col", fullscreen && "fixed inset-0 z-50 bg-background")}>
+                <div className="px-4 py-2 border-b border-border flex items-center gap-2">
+                  <span className="text-sm font-semibold flex-1 truncate">{active.name}</span>
+                  <Select value={active.type} onValueChange={(v) => patch(active.id, { type: v as ChartType })}>
+                    <SelectTrigger className="h-7 w-36 text-xs"><SelectValue /></SelectTrigger>
+                    <SelectContent>{ALL_TYPES.map((c) => <SelectItem key={c.type} value={c.type} className="text-xs">{c.label}</SelectItem>)}</SelectContent>
+                  </Select>
+                  <button title="Configure" onClick={() => setConfigOpen(true)} className="p-1.5 rounded hover:bg-muted text-muted-foreground"><Settings2 className="w-4 h-4" /></button>
+                  <button title="Duplicate" onClick={() => duplicate(active.id)} className="p-1.5 rounded hover:bg-muted text-muted-foreground"><Copy className="w-4 h-4" /></button>
+                  <button title="Export" onClick={exportCsv} className="p-1.5 rounded hover:bg-muted text-muted-foreground"><Download className="w-4 h-4" /></button>
+                  <button title="Fullscreen" onClick={() => setFullscreen((f) => !f)} className="p-1.5 rounded hover:bg-muted text-muted-foreground">{fullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}</button>
+                  <button title="Delete" onClick={() => closeGraph(active.id)} className="p-1.5 rounded hover:bg-destructive/10 text-muted-foreground hover:text-destructive"><Trash2 className="w-4 h-4" /></button>
+                </div>
+
+                <div className="flex-1 overflow-auto p-4">
+                  {active.params.length === 0 ? (
+                    <Placeholder text="Open Configure to select parameters." />
+                  ) : series.length === 0 ? (
+                    <Placeholder text={loading ? "Loading telemetry…" : "No data in this time range."} />
+                  ) : (
+                    <div className="h-[440px]">
+                      {ECHART_SET.has(active.type)
+                        ? <EChartView graph={active} data={series} stats={stats} paramColor={paramColor} assetName={allAssets.find((a) => a.id === active.assetId)?.name ?? active.assetId} />
+                        : <ChartView graph={active} data={plotData} stats={stats} paramColor={paramColor} thresholdNum={thresholdNum} />}
                     </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
+                  )}
 
-          <div className="w-56 border-l border-border overflow-y-auto p-4 space-y-3 shrink-0 bg-card">
-            <p className="text-sm font-semibold">Filters</p>
-            <div className="relative"><Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" /><Input placeholder="Search…" className="pl-8 h-8 text-xs" /></div>
+                  {active.params.length > 0 && Object.keys(stats).length > 0 && (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mt-4">
+                      {active.params.filter((p) => stats[p]).map((p) => (
+                        <div key={p} className="rounded-lg border border-border p-3" style={{ borderLeftColor: paramColor(p), borderLeftWidth: 3 }}>
+                          <p className="text-xs font-medium truncate" style={{ color: paramColor(p) }}>{p}</p>
+                          <p className="text-xl font-bold tabular-nums">{stats[p].avg.toFixed(2)} <span className="text-[10px] text-muted-foreground font-normal">avg</span></p>
+                          <div className="flex justify-between text-[10px] text-muted-foreground mt-0.5">
+                            <span>{stats[p].max.toFixed(2)} max</span><span>{stats[p].min.toFixed(2)} min</span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+          </Card>
+        </section>
+
+        {/* ── 5. Event Summary ── */}
+        <section>
+          <SectionTitle icon={Bell} title="Event Summary" subtitle="Recent activity for this asset" />
+          <EventSummary assetId={selectedAssetId} alarms={assetAlarms} rangeHours={rangeHours} />
+        </section>
+      </div>
+
+      {/* ── 6. Filters drawer (right) ── */}
+      <Sheet open={filtersOpen} onOpenChange={setFiltersOpen}>
+        <SheetContent side="right" className="w-80">
+          <SheetHeader><SheetTitle className="flex items-center gap-2"><FilterIcon className="w-4 h-4" /> Advanced Filters</SheetTitle></SheetHeader>
+          <div className="mt-4 space-y-3">
+            <div className="relative"><Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" /><Input placeholder="Search…" className="pl-8 h-9 text-sm" /></div>
             <FilterSelect label="Alarm Status" options={["All", "Active", "Cleared"]} />
             <FilterSelect label="Data Quality" options={["All", "Good", "Bad", "Uncertain"]} />
             <FilterSelect label="Maintenance Status" options={["All", "In maintenance", "Operational"]} demo />
@@ -379,8 +556,75 @@ export default function Visualization() {
             <FilterSelect label="Gateway" options={["All"]} demo />
             <FilterSelect label="Protocol" options={["All", "MQTT", "REST", "OPC-UA"]} demo />
           </div>
-        </div>
-      )}
+        </SheetContent>
+      </Sheet>
+
+      {/* ── Graph settings drawer (right) ── */}
+      <Sheet open={configOpen} onOpenChange={setConfigOpen}>
+        <SheetContent side="right" className="w-80 overflow-y-auto">
+          <SheetHeader><SheetTitle className="flex items-center gap-2"><Settings2 className="w-4 h-4" /> Graph Settings</SheetTitle></SheetHeader>
+          {active && (
+            <div className="mt-4 space-y-4">
+              <Setting label="Graph Type">
+                <Select value={active.type} onValueChange={(v) => patch(active.id, { type: v as ChartType })}>
+                  <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>{ALL_TYPES.map((c) => <SelectItem key={c.type} value={c.type} className="text-xs">{c.label}</SelectItem>)}</SelectContent>
+                </Select>
+              </Setting>
+              <Setting label="Y Axis">
+                <Select value={active.yMode} onValueChange={(v) => patch(active.id, { yMode: v as any })}>
+                  <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="multi" className="text-xs">Multiple Y Axis</SelectItem>
+                    <SelectItem value="single" className="text-xs">Single Y Axis</SelectItem>
+                    <SelectItem value="normalized" className="text-xs">Normalized (0–100%)</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Setting>
+              <Setting label="Aggregation">
+                <Select value={active.agg} onValueChange={(v) => patch(active.id, { agg: v as any })}>
+                  <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="avg" className="text-xs">Average</SelectItem>
+                    <SelectItem value="max" className="text-xs">Max</SelectItem>
+                    <SelectItem value="min" className="text-xs">Min</SelectItem>
+                    <SelectItem value="last" className="text-xs">Last</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Setting>
+
+              <div>
+                <p className="text-xs font-medium mb-1.5">Parameters ({active.params.length}/{availableParams.length})</p>
+                <div className="space-y-1 max-h-60 overflow-y-auto pr-1">
+                  {availableParams.length === 0 ? <p className="text-xs text-muted-foreground">No telemetry for this asset.</p> :
+                    availableParams.map((p) => (
+                      <label key={p} className="flex items-center gap-2 text-xs cursor-pointer">
+                        <input type="checkbox" checked={active.params.includes(p)} onChange={() => toggleParam(p)} />
+                        <span className="w-2 h-2 rounded-full" style={{ background: active.params.includes(p) ? paramColor(p) : "#cbd5e1" }} />
+                        <span className="truncate">{p}</span>
+                      </label>
+                    ))}
+                </div>
+              </div>
+
+              <div>
+                <p className="text-xs font-medium mb-1.5">Overlays</p>
+                <div className="space-y-1.5">
+                  <OverlayToggle label="Threshold line" on={active.overlays.thresholds} set={(v) => patch(active.id, { overlays: { ...active.overlays, thresholds: v } })} />
+                  {active.overlays.thresholds && (
+                    <Input value={active.threshold} onChange={(e) => patch(active.id, { threshold: e.target.value })} placeholder="value" className="h-7 text-xs" />
+                  )}
+                  <OverlayToggle label="Alarm overlay" on={active.overlays.alarms} set={(v) => patch(active.id, { overlays: { ...active.overlays, alarms: v } })} />
+                  <OverlayToggle label="AI anomaly" demo on={active.overlays.ai} set={(v) => patch(active.id, { overlays: { ...active.overlays, ai: v } })} />
+                  <OverlayToggle label="Health Index" demo on={active.overlays.health} set={(v) => patch(active.id, { overlays: { ...active.overlays, health: v } })} />
+                  <OverlayToggle label="RUL" demo on={active.overlays.rul} set={(v) => patch(active.id, { overlays: { ...active.overlays, rul: v } })} />
+                  <OverlayToggle label="Maintenance" demo on={active.overlays.maintenance} set={(v) => patch(active.id, { overlays: { ...active.overlays, maintenance: v } })} />
+                </div>
+              </div>
+            </div>
+          )}
+        </SheetContent>
+      </Sheet>
 
       <Dialog open={addOpen} onOpenChange={setAddOpen}>
         <DialogContent className="max-w-2xl">
@@ -406,6 +650,242 @@ export default function Visualization() {
     </div>
   );
 }
+
+// ═══════════════════════ KPI + Insights + Events ═══════════════════════
+
+type KpiStatus = "good" | "warn" | "bad" | "info";
+interface KpiCardData {
+  key: string; title: string; icon: React.ElementType; unit?: string;
+  value: number; real: boolean; status: KpiStatus; dir: KpiDir;
+  deltaPct?: number; spark?: number[]; progress?: number; statusLabel?: string;
+}
+
+// Color = meaning only. green=healthy, amber=warning, red=critical, blue=info, gray=neutral.
+const STATUS_STYLES: Record<KpiStatus, { dot: string; text: string; bar: string; chip: string; border: string; label: string }> = {
+  good: { dot: "bg-emerald-500", text: "text-emerald-600", bar: "#22c55e", chip: "bg-emerald-50 text-emerald-600 dark:bg-emerald-950/40", border: "#22c55e", label: "Healthy" },
+  warn: { dot: "bg-amber-500",   text: "text-amber-600",   bar: "#f59e0b", chip: "bg-amber-50 text-amber-600 dark:bg-amber-950/40",     border: "#f59e0b", label: "Warning" },
+  bad:  { dot: "bg-red-500",     text: "text-red-600",     bar: "#ef4444", chip: "bg-red-50 text-red-600 dark:bg-red-950/40",           border: "#ef4444", label: "Critical" },
+  info: { dot: "bg-blue-500",    text: "text-blue-600",    bar: "#3b82f6", chip: "bg-blue-50 text-blue-600 dark:bg-blue-950/40",         border: "#3b82f6", label: "Info" },
+};
+
+function statusFromPct(p: number): KpiStatus { return p >= 85 ? "good" : p >= 60 ? "warn" : "bad"; }
+function avg(a: number[]): number { return a.length ? a.reduce((s, x) => s + x, 0) / a.length : 0; }
+function fmtVal(v: number): string {
+  if (!isFinite(v)) return "—";
+  if (Math.abs(v) >= 1000) return v.toLocaleString(undefined, { maximumFractionDigits: 0 });
+  return v.toFixed(Math.abs(v) < 10 ? 1 : 0) === String(Math.round(v)) ? String(Math.round(v)) : v.toFixed(1);
+}
+
+function KpiCard({ kpi }: { kpi: KpiCardData }) {
+  const s = STATUS_STYLES[kpi.status];
+  const dirGood = kpi.dir === "up-good";
+  const up = (kpi.deltaPct ?? 0) > 0.05;
+  const down = (kpi.deltaPct ?? 0) < -0.05;
+  const trendGood = kpi.dir === "neutral" ? null : (up && dirGood) || (down && !dirGood);
+  const trendColor = trendGood == null ? "text-muted-foreground" : trendGood ? "text-emerald-600" : "text-red-600";
+  const TrendIcon = up ? TrendingUp : down ? TrendingDown : Minus;
+
+  return (
+    <Card className="p-4 relative border-l-4" style={{ borderLeftColor: s.border }}>
+      <div className="flex items-start justify-between">
+        <span className="text-xs text-muted-foreground font-medium leading-tight pr-2">{kpi.title}</span>
+        <span className={cn("p-1.5 rounded-lg shrink-0", s.chip)}><kpi.icon className="w-4 h-4" /></span>
+      </div>
+      <div className="mt-2 flex items-baseline gap-1">
+        <span className="text-2xl font-bold tabular-nums">{fmtVal(kpi.value)}</span>
+        {kpi.unit && <span className="text-xs text-muted-foreground">{kpi.unit}</span>}
+      </div>
+
+      {kpi.progress != null && (
+        <Progress value={Math.max(0, Math.min(100, kpi.progress))} className="h-1.5 mt-2"
+          style={{ ["--progress-foreground" as any]: s.bar }} />
+      )}
+
+      {kpi.spark && kpi.spark.length > 1 && (
+        <div className="h-8 mt-2 -mx-1">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={kpi.spark.map((v, i) => ({ i, v }))}>
+              <Line dataKey="v" stroke={s.bar} strokeWidth={1.5} dot={false} isAnimationActive={false} />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      )}
+
+      <div className="mt-2 flex items-center justify-between">
+        <span className="flex items-center gap-1.5">
+          <span className={cn("w-1.5 h-1.5 rounded-full", s.dot)} />
+          <span className={cn("text-[11px] font-medium", s.text)}>{kpi.statusLabel ?? s.label}</span>
+          {!kpi.real && <DemoTag />}
+        </span>
+        {kpi.deltaPct != null && (up || down) && (
+          <span className={cn("flex items-center gap-0.5 text-[11px] font-medium", trendColor)}>
+            <TrendIcon className="w-3 h-3" />{Math.abs(kpi.deltaPct).toFixed(1)}%
+          </span>
+        )}
+      </div>
+    </Card>
+  );
+}
+
+interface Insight { tone: KpiStatus; text: string; icon: React.ElementType; }
+function buildInsights(kpis: KpiCardData[], alarms: any[], assetName?: string): Insight[] {
+  const out: Insight[] = [];
+  const name = assetName ?? "Asset";
+  // Metric trends
+  for (const k of kpis) {
+    if (k.deltaPct != null && k.spark && Math.abs(k.deltaPct) >= 10) {
+      const rising = k.deltaPct > 0;
+      const good = (k.dir === "up-good" && rising) || (k.dir === "down-good" && !rising);
+      out.push({
+        tone: good ? "good" : "warn",
+        icon: rising ? TrendingUp : TrendingDown,
+        text: `${k.title} ${rising ? "increased" : "decreased"} ${Math.abs(k.deltaPct).toFixed(0)}% over the selected period on ${name}.`,
+      });
+    }
+  }
+  // Health
+  const health = kpis.find((k) => k.key === "health");
+  if (health) out.push({
+    tone: health.status, icon: HeartPulse,
+    text: `Health score is ${fmtVal(health.value)}% — ${health.status === "good" ? "operating normally" : health.status === "warn" ? "monitor closely" : "attention required"}.`,
+  });
+  // Alarms
+  if (alarms.length === 0) out.push({ tone: "good", icon: ShieldCheck, text: "No active alarms detected." });
+  else {
+    const crit = alarms.filter((a) => a.severity === "critical").length;
+    out.push({
+      tone: crit ? "bad" : "warn", icon: AlertTriangle,
+      text: crit ? `${crit} critical alarm${crit > 1 ? "s" : ""} active — investigate ${name} immediately.`
+                 : `${alarms.length} active alarm${alarms.length > 1 ? "s" : ""} on ${name}.`,
+    });
+  }
+  // Maintenance suggestion (heuristic on vibration/temp rise)
+  const risky = kpis.find((k) => (k.key === "vib" || k.key === "temp") && (k.deltaPct ?? 0) >= 12);
+  if (risky) out.push({ tone: "warn", icon: Wrench, text: `${name} may require maintenance soon — rising ${risky.title.toLowerCase()}.` });
+  return out.slice(0, 4);
+}
+
+function InsightCard({ insight }: { insight: Insight }) {
+  const s = STATUS_STYLES[insight.tone];
+  return (
+    <Card className="p-4 flex items-start gap-3">
+      <div className={cn("p-2 rounded-lg bg-muted shrink-0", s.text)}><insight.icon className="w-4 h-4" /></div>
+      <p className="text-sm leading-snug">{insight.text}</p>
+    </Card>
+  );
+}
+
+function EventSummary({ assetId, alarms, rangeHours }: { assetId: string; alarms: any[]; rangeHours: number }) {
+  const [telemetry, setTelemetry] = useState<any[]>([]);
+  useEffect(() => {
+    if (!assetId) { setTelemetry([]); return; }
+    let cancelled = false;
+    const from = (rangeHours <= 24 ? subHours(new Date(), rangeHours) : subDays(new Date(), rangeHours / 24)).toISOString();
+    fetch(`/api/telemetry/${assetId}?${new URLSearchParams({ from, limit: "12" })}`)
+      .then((r) => (r.ok ? r.json() : [])).then((rows) => { if (!cancelled) setTelemetry(Array.isArray(rows) ? rows.slice(-12).reverse() : []); })
+      .catch(() => { if (!cancelled) setTelemetry([]); });
+    return () => { cancelled = true; };
+  }, [assetId, rangeHours]);
+
+  return (
+    <Card className="p-4">
+      <Tabs defaultValue="alarms">
+        <TabsList>
+          <TabsTrigger value="alarms">Alarms {alarms.length > 0 && <Badge variant="secondary" className="ml-1.5">{alarms.length}</Badge>}</TabsTrigger>
+          <TabsTrigger value="telemetry">Telemetry</TabsTrigger>
+          <TabsTrigger value="maintenance">Maintenance <DemoTag /></TabsTrigger>
+          <TabsTrigger value="anomalies">Anomalies <DemoTag /></TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="alarms" className="mt-3">
+          {alarms.length === 0 ? <Empty text="No active alarms." /> : (
+            <ul className="divide-y divide-border">
+              {alarms.slice(0, 8).map((a) => (
+                <li key={a.id} className="py-2 flex items-center gap-3 text-sm">
+                  <span className={cn("w-2 h-2 rounded-full shrink-0", a.severity === "critical" ? "bg-red-500" : a.severity === "high" ? "bg-orange-500" : "bg-amber-500")} />
+                  <span className="font-medium truncate">{a.name}</span>
+                  <span className="text-muted-foreground truncate flex-1">{a.message ?? a.assetName}</span>
+                  <Badge variant="outline" className="capitalize shrink-0">{a.severity}</Badge>
+                  <span className="text-xs text-muted-foreground shrink-0">{a.triggeredAt ? formatDistanceToNow(new Date(a.triggeredAt), { addSuffix: true }) : ""}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </TabsContent>
+
+        <TabsContent value="telemetry" className="mt-3">
+          {telemetry.length === 0 ? <Empty text="No recent telemetry." /> : (
+            <ul className="divide-y divide-border">
+              {telemetry.map((t, i) => (
+                <li key={i} className="py-2 flex items-center gap-3 text-sm">
+                  <Activity className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                  <span className="font-medium">{t.metric ?? "value"}</span>
+                  <span className="tabular-nums flex-1">{Number(t.value).toFixed(2)}</span>
+                  <span className="text-xs text-muted-foreground shrink-0">{t.timestamp ? formatDistanceToNow(new Date(t.timestamp), { addSuffix: true }) : ""}</span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </TabsContent>
+
+        <TabsContent value="maintenance" className="mt-3">
+          <ul className="divide-y divide-border">
+            {[
+              { t: "Scheduled inspection", d: "Bearing lubrication due", when: "in 6 days" },
+              { t: "Last service", d: "Filter replacement completed", when: "22 days ago" },
+            ].map((m, i) => (
+              <li key={i} className="py-2 flex items-center gap-3 text-sm">
+                <Wrench className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
+                <span className="font-medium">{m.t}</span>
+                <span className="text-muted-foreground flex-1 truncate">{m.d}</span>
+                <span className="text-xs text-muted-foreground shrink-0">{m.when}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="text-[11px] text-muted-foreground mt-2">Demo data — connect a CMMS/maintenance source to populate.</p>
+        </TabsContent>
+
+        <TabsContent value="anomalies" className="mt-3">
+          <ul className="divide-y divide-border">
+            {[
+              { t: "Vibration spike", d: "Short deviation above baseline", when: "3 h ago" },
+              { t: "Temperature drift", d: "Gradual upward trend detected", when: "9 h ago" },
+            ].map((m, i) => (
+              <li key={i} className="py-2 flex items-center gap-3 text-sm">
+                <Sparkles className="w-3.5 h-3.5 text-violet-500 shrink-0" />
+                <span className="font-medium">{m.t}</span>
+                <span className="text-muted-foreground flex-1 truncate">{m.d}</span>
+                <span className="text-xs text-muted-foreground shrink-0">{m.when}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="text-[11px] text-muted-foreground mt-2">Demo data — enable AI anomaly detection to populate.</p>
+        </TabsContent>
+      </Tabs>
+    </Card>
+  );
+}
+
+function SectionTitle({ icon: Icon, title, subtitle, trailing }: { icon: React.ElementType; title: string; subtitle?: string; trailing?: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-2 mb-3">
+      <Icon className="w-4 h-4 text-primary" />
+      <div className="flex-1 min-w-0">
+        <h2 className="text-sm font-semibold leading-tight">{title}</h2>
+        {subtitle && <p className="text-xs text-muted-foreground truncate">{subtitle}</p>}
+      </div>
+      {trailing}
+    </div>
+  );
+}
+function DemoTag({ label = "demo" }: { label?: string }) {
+  return <span className="text-[8px] px-1 rounded bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300 align-middle">{label}</span>;
+}
+function Empty({ text }: { text: string }) {
+  return <div className="py-8 text-center text-sm text-muted-foreground">{text}</div>;
+}
+
+// ═══════════════════════ Chart engine (unchanged) ═══════════════════════
 
 function ChartView({ graph, data, stats, paramColor, thresholdNum }: {
   graph: Graph; data: any[]; stats: Record<string, any>; paramColor: (p: string) => string; thresholdNum: number | null;
@@ -526,7 +1006,7 @@ function EChartView({ graph, data, stats, paramColor, assetName }: {
   graph: Graph; data: any[]; stats: Record<string, any>; paramColor: (p: string) => string; assetName: string;
 }) {
   const option = useMemo(() => buildEchartOption(graph, data, stats, paramColor, assetName), [graph, data, stats, assetName]); // eslint-disable-line
-  if (graph.params.length === 0) return <Placeholder text="Select parameters on the left." />;
+  if (graph.params.length === 0) return <Placeholder text="Select parameters in Configure." />;
   return <EChart option={option} />;
 }
 
@@ -606,7 +1086,7 @@ function buildEchartOption(graph: Graph, data: any[], stats: Record<string, any>
   return {};
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, children }: { label: React.ReactNode; children: React.ReactNode }) {
   return <div className="flex flex-col gap-1"><span className="text-[10px] uppercase tracking-wide text-muted-foreground">{label}</span>{children}</div>;
 }
 function Setting({ label, children }: { label: string; children: React.ReactNode }) {
@@ -615,7 +1095,7 @@ function Setting({ label, children }: { label: string; children: React.ReactNode
 function OverlayToggle({ label, on, set, demo }: { label: string; on: boolean; set: (v: boolean) => void; demo?: boolean }) {
   return (
     <div className="flex items-center justify-between">
-      <span className="text-xs flex items-center gap-1">{label}{demo && <span className="text-[8px] px-1 rounded bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300">demo</span>}</span>
+      <span className="text-xs flex items-center gap-1">{label}{demo && <DemoTag />}</span>
       <Switch checked={on} onCheckedChange={set} className="scale-75" />
     </div>
   );
@@ -623,7 +1103,7 @@ function OverlayToggle({ label, on, set, demo }: { label: string; on: boolean; s
 function FilterSelect({ label, options, demo }: { label: string; options: string[]; demo?: boolean }) {
   return (
     <div className="space-y-1">
-      <Label className="text-xs flex items-center gap-1">{label}{demo && <span className="text-[8px] px-1 rounded bg-violet-100 text-violet-700 dark:bg-violet-950 dark:text-violet-300">demo</span>}</Label>
+      <Label className="text-xs flex items-center gap-1">{label}{demo && <DemoTag />}</Label>
       <Select defaultValue={options[0]}>
         <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
         <SelectContent>{options.map((o) => <SelectItem key={o} value={o} className="text-xs">{o}</SelectItem>)}</SelectContent>
@@ -632,5 +1112,5 @@ function FilterSelect({ label, options, demo }: { label: string; options: string
   );
 }
 function Placeholder({ text }: { text: string }) {
-  return <div className="h-[420px] flex flex-col items-center justify-center text-muted-foreground"><Activity className="w-10 h-10 mb-3 opacity-20" /><p className="text-sm">{text}</p></div>;
+  return <div className="h-[440px] flex flex-col items-center justify-center text-muted-foreground"><Activity className="w-10 h-10 mb-3 opacity-20" /><p className="text-sm">{text}</p></div>;
 }

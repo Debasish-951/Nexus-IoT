@@ -11,6 +11,7 @@ const CARDS = [
     icon: Activity,
     tint: "bg-cyan-50 text-cyan-600 dark:bg-cyan-950/40 dark:text-cyan-300",
     activeBg: "active:bg-cyan-50/70 dark:active:bg-cyan-950/30",
+    accent: "#06b6d4",
   },
   {
     title: "Visualization",
@@ -19,6 +20,7 @@ const CARDS = [
     icon: PieChart,
     tint: "bg-violet-50 text-violet-600 dark:bg-violet-950/40 dark:text-violet-300",
     activeBg: "active:bg-violet-50/70 dark:active:bg-violet-950/30",
+    accent: "#a855f7",
   },
 ];
 
@@ -52,6 +54,7 @@ export default function DataExplorerHome() {
                 role="button"
                 tabIndex={0}
                 onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); navigate(c.href); } }}
+                style={{ borderTopColor: c.accent, borderTopWidth: 4 }}
                 className={`cursor-pointer shadow-sm group select-none border min-h-[210px] h-full
                   transition-shadow duration-200 hover:shadow-xl hover:border-primary/40 ${c.activeBg}
                   focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/40`}

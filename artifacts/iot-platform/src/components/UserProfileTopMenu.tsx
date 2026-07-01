@@ -1,9 +1,8 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useLocation } from "wouter";
 import { useCurrentUser } from "@/contexts/UserContext";
-import { useListUsers } from "@workspace/api-client-react";
 import {
-  User2, KeyRound, LogOut, ChevronDown, Check, ArrowLeftRight, Eye, EyeOff,
+  KeyRound, LogOut, ChevronDown, Check, Eye, EyeOff,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -21,10 +20,8 @@ const ROLE_COLORS: Record<string, string> = {
 };
 
 export default function UserProfileTopMenu() {
-  const { currentUser, setCurrentUser, can } = useCurrentUser();
+  const { currentUser, setCurrentUser } = useCurrentUser();
   const [, navigate] = useLocation();
-  const { data: users } = useListUsers();
-  const userList = (users as any[] | undefined) ?? [];
 
   const [open, setOpen] = useState(false);
   const [showPasswordModal, setShowPasswordModal] = useState(false);
@@ -48,16 +45,10 @@ export default function UserProfileTopMenu() {
 
   function handleSignOut() {
     localStorage.removeItem("ws_authed");
+    setCurrentUser(null);
     setOpen(false);
     navigate("/login");
   }
-
-  function handleSwitchUser(u: any) {
-    setCurrentUser({ id: u.id, fullName: u.fullName, email: u.email, role: u.role });
-    setOpen(false);
-  }
-
-  const otherUsers = userList.filter((u: any) => u.id !== currentUser.id);
 
   return (
     <>
@@ -110,34 +101,6 @@ export default function UserProfileTopMenu() {
                 Change Password
               </button>
             </div>
-
-            {/* Switch user */}
-            {otherUsers.length > 0 && (
-              <div className="border-t border-border py-1">
-                <p className="px-4 py-1.5 text-[10px] text-muted-foreground font-medium uppercase tracking-wide">
-                  Switch Profile
-                </p>
-                {otherUsers.map((u: any) => {
-                  const uName = u.fullName ?? u.username ?? "User";
-                  const uInitials = uName.split(" ").map((w: string) => w[0] ?? "").join("").toUpperCase().slice(0, 2) || "U";
-                  return (
-                    <button
-                      key={u.id}
-                      onClick={() => handleSwitchUser(u)}
-                      className="w-full flex items-center gap-2.5 px-4 py-2 text-sm hover:bg-muted transition-colors text-left"
-                    >
-                      <div className="w-6 h-6 rounded-full bg-muted flex items-center justify-center text-[10px] font-bold shrink-0">
-                        {uInitials}
-                      </div>
-                      <span className="flex-1 truncate text-xs">{uName}</span>
-                      <span className={cn("text-[10px] px-1.5 py-0.5 rounded-full capitalize", ROLE_COLORS[u.role])}>
-                        {u.role}
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            )}
 
             {/* Sign out */}
             <div className="border-t border-border py-1">

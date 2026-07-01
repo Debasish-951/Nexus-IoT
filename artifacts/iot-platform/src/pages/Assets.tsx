@@ -10,6 +10,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import {
+  ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, ContextMenuSeparator,
+} from "@/components/ui/context-menu";
+import {
   Blocks, Plus, Search, ChevronLeft, ChevronRight, ChevronDown, Filter, ArrowLeft, Trash2, Pencil,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -81,8 +84,7 @@ export default function Assets() {
   const pageRows = rows.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
   const healthMap = useAssetHealthMap(pageRows.map((r) => r.asset.id));
 
-  function handleDelete(e: React.MouseEvent, a: Asset) {
-    e.stopPropagation();
+  function handleDelete(a: Asset) {
     if (!confirm(`Delete asset "${a.name}"? This also removes its child assets.`)) return;
     deleteAsset.mutate({ id: a.id }, {
       onSuccess: () => { toast({ title: "Asset deleted" }); qc.invalidateQueries({ queryKey: getListAssetsQueryKey() }); },
@@ -93,7 +95,7 @@ export default function Assets() {
   const [editAsset, setEditAsset] = useState<Asset | null>(null);
   const [editName, setEditName] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
-  function openEdit(e: React.MouseEvent, a: Asset) { e.stopPropagation(); setEditAsset(a); setEditName(a.name); }
+  function openEdit(a: Asset) { setEditAsset(a); setEditName(a.name); }
   async function saveEdit() {
     if (!editAsset || !editName.trim()) return;
     setSavingEdit(true);
@@ -140,6 +142,9 @@ export default function Assets() {
             </SelectContent>
           </Select>
         </div>
+        {can("manage_assets") && (
+          <span className="text-xs text-muted-foreground ml-auto">Right-click a row for actions</span>
+        )}
       </div>
 
       {/* Table */}
@@ -154,16 +159,15 @@ export default function Assets() {
                 <th className="text-left px-4 py-2.5 font-medium">Health</th>
                 <th className="text-left px-4 py-2.5 font-medium">Status</th>
                 <th className="text-left px-4 py-2.5 font-medium">Last Updated</th>
-                <th className="px-4 py-2.5 w-10" />
               </tr>
             </thead>
             <tbody>
               {!assets ? (
                 Array.from({ length: 6 }).map((_, i) => (
-                  <tr key={i} className="border-b border-border/50"><td colSpan={7} className="px-4 py-3"><Skeleton className="h-4 w-full" /></td></tr>
+                  <tr key={i} className="border-b border-border/50"><td colSpan={6} className="px-4 py-3"><Skeleton className="h-4 w-full" /></td></tr>
                 ))
               ) : pageRows.length === 0 ? (
-                <tr><td colSpan={7} className="px-4 py-16 text-center text-muted-foreground">
+                <tr><td colSpan={6} className="px-4 py-16 text-center text-muted-foreground">
                   <Blocks className="w-8 h-8 mx-auto mb-2 opacity-20" />
                   <p className="text-sm">{allAssets.length === 0 ? "No assets yet" : "No assets match your filters"}</p>
                   {allAssets.length === 0 && can("manage_assets") && (
@@ -174,11 +178,11 @@ export default function Assets() {
                 pageRows.map(({ asset: a, depth }) => {
                   const h = healthMap[a.id] ?? null;
                   const status = deriveStatus(a, h);
-                  return (
+                  const row = (
                     <tr key={a.id} onClick={() => navigate(`/assets/${a.id}`)}
                       className="border-b border-border/50 hover:bg-muted/30 transition-colors cursor-pointer group">
                       <td className="px-4 py-2.5 font-medium">
-                        <span className="flex items-center gap-1 group/name" style={{ paddingLeft: depth * 18 }}>
+                        <span className="flex items-center gap-1" style={{ paddingLeft: depth * 18 }}>
                           {!isFiltering && hasKids(a.id) ? (
                             <button onClick={(e) => { e.stopPropagation(); toggle(a.id); }}
                               className="p-0.5 rounded hover:bg-muted text-muted-foreground shrink-0" title={collapsed.has(a.id) ? "Expand" : "Collapse"}>
@@ -188,13 +192,6 @@ export default function Assets() {
                             <span className="w-[18px] shrink-0 text-center text-muted-foreground/40">{depth > 0 ? "└" : ""}</span>
                           )}
                           <span className="truncate">{a.name}</span>
-                          {!isFiltering && can("manage_assets") && (
-                            <button onClick={(e) => { e.stopPropagation(); openAddChild(a.id); }}
-                              title="Add child asset"
-                              className="p-0.5 rounded hover:bg-primary/10 text-muted-foreground hover:text-primary shrink-0 opacity-0 group-hover/name:opacity-100 transition-opacity">
-                              <Plus className="w-3.5 h-3.5" />
-                            </button>
-                          )}
                         </span>
                       </td>
                       <td className="px-4 py-2.5 text-muted-foreground">{a.templateName || "—"}</td>
@@ -202,21 +199,25 @@ export default function Assets() {
                       <td className="px-4 py-2.5"><HealthBar pct={h?.freshnessPct ?? null} /></td>
                       <td className="px-4 py-2.5"><span className={cn("text-xs px-2 py-0.5 rounded-full font-medium", STATUS_STYLES[status])}>{status}</span></td>
                       <td className="px-4 py-2.5 text-xs text-muted-foreground">{a.updatedAt ? format(new Date(a.updatedAt), "MM/dd HH:mm") : "—"}</td>
-                      <td className="px-4 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
-                        {can("manage_assets") && (
-                          <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-                            <button title="Edit asset" onClick={(e) => openEdit(e, a)}
-                              className="text-muted-foreground hover:text-primary transition-colors">
-                              <Pencil className="w-4 h-4" />
-                            </button>
-                            <button title="Delete asset" onClick={(e) => handleDelete(e, a)}
-                              className="text-muted-foreground hover:text-destructive transition-colors">
-                              <Trash2 className="w-4 h-4" />
-                            </button>
-                          </div>
-                        )}
-                      </td>
                     </tr>
+                  );
+                  if (!can("manage_assets")) return row;
+                  return (
+                    <ContextMenu key={a.id}>
+                      <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
+                      <ContextMenuContent className="w-48">
+                        <ContextMenuItem onSelect={() => openAddChild(a.id)}>
+                          <Plus className="w-4 h-4 mr-2" /> Add Child Asset
+                        </ContextMenuItem>
+                        <ContextMenuItem onSelect={() => openEdit(a)}>
+                          <Pencil className="w-4 h-4 mr-2" /> Edit
+                        </ContextMenuItem>
+                        <ContextMenuSeparator />
+                        <ContextMenuItem onSelect={() => handleDelete(a)} className="text-destructive focus:text-destructive">
+                          <Trash2 className="w-4 h-4 mr-2" /> Delete
+                        </ContextMenuItem>
+                      </ContextMenuContent>
+                    </ContextMenu>
                   );
                 })
               )}

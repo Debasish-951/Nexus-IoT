@@ -248,3 +248,8 @@
   .border.hover-elevate-2:not(.no-hover-interaction-elevate)::after,
   .border.active-elevate-2:not(.no-active-interaction-elevate)::after { inset: -1px; }
 }
+
+/* Brown scrollbar for the left sidebar */
+.sidebar-scroll .scroll-thumb { background-color: #8b5e34 !important; }
+.sidebar-scroll .scroll-thumb:hover { background-color: #6f4a29 !important; }
+.sidebar-scroll [data-orientation="vertical"] { width: 10px; }
