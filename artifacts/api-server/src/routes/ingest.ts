@@ -77,32 +77,42 @@ export function normalise(body: Record<string, unknown>): NormalisedPayload | nu
   }
 
   // ── Flat / nested-root payload ────────────────────────────────────────────
-  // Extracts root-level primitives AND dot-flattens nested objects one level deep.
-  // Nested-root style (e.g. energy gateway with subsystems):
-  //   { deviceId, timestamp, chiller: { energy_kWh: 15.2, load_percent: 82 }, lighting: { ... } }
-  // becomes: { "chiller.energy_kWh": 15.2, "chiller.load_percent": 82, ... }
+  // Recursively dot-flattens ANY depth of nested objects and arrays into flat
+  // metric keys. Array elements are keyed by their "machine"/"name" field (else
+  // index), matching how templates flatten a hierarchy, e.g. a Node-RED tree:
+  //   { "Unit 1": { "Synthetic Dyeing": { "Preparation": [{ machine:"Creel Machine", powerKW:5 }] } } }
+  //   → { "Unit 1.Synthetic Dyeing.Preparation.Creel Machine.powerKW": 5, ... }
+  // Simple one-level payloads (chiller.energy_kWh) still flatten the same way.
   const flatMetrics: Record<string, unknown> = {};
-  let hasNestedRoot = false;
-  for (const [k, v] of Object.entries(body)) {
-    if (ENVELOPE_FIELDS.has(k)) continue;
-    if (typeof v === "number" || typeof v === "string" || typeof v === "boolean") {
-      flatMetrics[k] = v;
-    } else if (v && typeof v === "object" && !Array.isArray(v)) {
-      // Dot-flatten one level: chiller.energy_kWh, lighting.power_factor, etc.
-      for (const [k2, v2] of Object.entries(v as Record<string, unknown>)) {
-        if (typeof v2 === "number" || typeof v2 === "string" || typeof v2 === "boolean") {
-          flatMetrics[`${k}.${k2}`] = v2;
-          hasNestedRoot = true;
-        }
-      }
-    }
-  }
+  deepFlatten(body, "", flatMetrics);
   if (Object.keys(flatMetrics).length > 0) {
+    const nested = Object.keys(flatMetrics).some((k) => k.includes("."));
     return { deviceId: body.deviceId, timestamp: ts,
-      payloadFormat: hasNestedRoot ? "nested-root" : "flat", metrics: flatMetrics };
+      payloadFormat: nested ? "nested-root" : "flat", metrics: flatMetrics };
   }
 
   return { deviceId: body.deviceId, timestamp: ts, payloadFormat: "unknown", metrics: {} };
+}
+
+// Recursively flatten nested objects/arrays into dotted metric keys.
+function deepFlatten(v: unknown, prefix: string, out: Record<string, unknown>): void {
+  if (v && typeof v === "object" && !Array.isArray(v)) {
+    for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+      if (ENVELOPE_FIELDS.has(k)) continue; // skip deviceId/timestamp/sensor/… at every level
+      deepFlatten(val, prefix ? `${prefix}.${k}` : k, out);
+    }
+  } else if (Array.isArray(v)) {
+    v.forEach((item, i) => {
+      const label = (item && typeof item === "object" && typeof (item as any).machine === "string" && (item as any).machine.trim())
+        ? (item as any).machine
+        : (item && typeof item === "object" && typeof (item as any).name === "string" && (item as any).name.trim())
+          ? (item as any).name
+          : String(i);
+      deepFlatten(item, prefix ? `${prefix}.${label}` : label, out);
+    });
+  } else if (typeof v === "number" || typeof v === "string" || typeof v === "boolean") {
+    if (prefix) out[prefix] = v;
+  }
 }
 
 // ── Operator evaluation ───────────────────────────────────────────────────────

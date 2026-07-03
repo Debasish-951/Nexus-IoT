@@ -144,7 +144,12 @@ export default function LiveFeed() {
   const criticalCount = activeAlarms.filter((a) => a.severity === "critical").length;
   const warningCount = activeAlarms.filter((a) => a.severity !== "critical").length;
   const msgsPerSec = rateSeries[rateSeries.length - 1]?.v ?? 0;
-  const totalAssets = summary.totalAssets ?? allAssets.length;
+  // Count only root/device-owning assets — children share the parent's device.
+  const rootAssets = allAssets.filter((a) => !a.parentId);
+  const totalAssets = rootAssets.length;
+  // Connected devices = distinct device ids actually linked to an asset (ignores
+  // orphan seen-devices that transmitted but were never turned into an asset).
+  const linkedDevices = new Set(allAssets.map((a) => a.identifier).filter(Boolean)).size;
 
   // "Live" = live WS events in last 8s, OR freshest stored telemetry within 15s
   // (covers the case where WS isn't delivering but data is actively ingesting).
@@ -215,7 +220,7 @@ export default function LiveFeed() {
       {/* KPI row */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <Kpi icon={Box} label="Assets Online" value={liveAssets.length} sub={`/ ${totalAssets} total assets`} color={C.green} series={rateSeries} chart="area" />
-        <Kpi icon={Cpu} label="Connected Devices" value={devices} sub="registered device ids" color={C.violet} series={rateSeries} chart="area" />
+        <Kpi icon={Cpu} label="Connected Devices" value={linkedDevices} sub="devices linked to assets" color={C.violet} series={rateSeries} chart="area" />
       </div>
 
       {/* Main grid */}

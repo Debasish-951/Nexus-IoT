@@ -29,6 +29,7 @@ export default function AssetTemplates() {
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [deletingAll, setDeletingAll] = useState(false);
 
   const { data: templates } = useListAssetTemplates();
   const { data: assets } = useListAssets();
@@ -55,6 +56,24 @@ export default function AssetTemplates() {
       onSuccess: () => { toast({ title: "Template deleted" }); qc.invalidateQueries({ queryKey: getListAssetTemplatesQueryKey() }); },
       onError: () => toast({ title: "Delete failed", variant: "destructive" }),
     });
+  }
+
+  async function handleDeleteAll() {
+    if (!allTemplates.length) return;
+    if (!confirm(`Delete ALL ${allTemplates.length} templates? This cannot be undone.`)) return;
+    setDeletingAll(true);
+    let ok = 0, fail = 0;
+    await Promise.all(allTemplates.map(async (t) => {
+      const r = await fetch(`${BASE}/api/asset-templates/${t.id}`, { method: "DELETE" }).catch(() => null);
+      if (r && r.ok) ok++; else fail++;
+    }));
+    qc.invalidateQueries({ queryKey: getListAssetTemplatesQueryKey() });
+    toast({
+      title: `Deleted ${ok} template${ok !== 1 ? "s" : ""}`,
+      description: fail ? `${fail} could not be deleted (may be in use by assets).` : undefined,
+      variant: fail ? "destructive" : undefined,
+    });
+    setDeletingAll(false);
   }
 
   const form = useForm({ defaultValues: { name: "" } });
@@ -85,7 +104,13 @@ export default function AssetTemplates() {
           <p className="text-sm text-muted-foreground">Create and manage reusable attribute templates</p>
         </div>
         {can("manage_templates") && (
-          <Button onClick={() => setCreateOpen(true)}><Plus className="w-4 h-4 mr-1.5" /> Create Template</Button>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={handleDeleteAll} disabled={deletingAll || allTemplates.length === 0}
+              className="text-destructive hover:text-destructive">
+              <Trash2 className="w-4 h-4 mr-1.5" /> {deletingAll ? "Deleting…" : "Delete All"}
+            </Button>
+            <Button onClick={() => setCreateOpen(true)}><Plus className="w-4 h-4 mr-1.5" /> Create Template</Button>
+          </div>
         )}
       </div>
 

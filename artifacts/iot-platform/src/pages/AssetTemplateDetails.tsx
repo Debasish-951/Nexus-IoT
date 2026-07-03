@@ -50,8 +50,23 @@ function extractFromPayload(text: string): { defs: Def[]; deviceId: string | nul
     for (const [k, v] of Object.entries(obj)) {
       if (PAYLOAD_SKIP_KEYS.has(k) || ["metrics","data","values","payload"].includes(k)) continue;
       const key = prefix ? `${prefix}.${k}` : k;
-      if (v && typeof v === "object" && !Array.isArray(v)) collect(v as Record<string, any>, key);
-      else if (typeof v !== "undefined") seen[key] = v;
+      if (Array.isArray(v)) {
+        // Descend into arrays of objects (e.g. a sub-process holding one or more
+        // machine readings). Label each element by its "machine" name (or index)
+        // so every machine's fields become distinct attributes.
+        v.forEach((item, i) => {
+          if (item && typeof item === "object" && !Array.isArray(item)) {
+            const label = typeof item.machine === "string" && item.machine.trim() ? item.machine : String(i);
+            collect(item as Record<string, any>, `${key}.${label}`);
+          } else if (typeof item !== "undefined" && typeof item !== "object") {
+            seen[`${key}.${i}`] = item;
+          }
+        });
+      } else if (v && typeof v === "object") {
+        collect(v as Record<string, any>, key);
+      } else if (typeof v !== "undefined") {
+        seen[key] = v;
+      }
     }
   }
   for (const p of payloads) {
@@ -60,7 +75,10 @@ function extractFromPayload(text: string): { defs: Def[]; deviceId: string | nul
       : (p.metrics && typeof p.metrics === "object" && !Array.isArray(p.metrics)) ? p.metrics
       : (p.payload && typeof p.payload === "object" && !Array.isArray(p.payload)) ? p.payload
       : (p.values && typeof p.values === "object" && !Array.isArray(p.values)) ? p.values : null;
-    if (dataObj) { for (const [k, v] of Object.entries(dataObj)) if (typeof v !== "object" || v === null) seen[k] = v; }
+    // Recurse into the wrapper so NESTED metrics flatten to dot keys
+    // (e.g. metrics:{grid:{cost_INR:170}} → "grid.cost_INR"), matching how the
+    // server normalises nested-data / nested-metrics payloads.
+    if (dataObj) collect(dataObj);
     else collect(p);
   }
   const defs: Def[] = Object.entries(seen).map(([key, val]) => {
@@ -174,11 +192,39 @@ export default function AssetTemplateDetails() {
     } finally { setSavingDefs(false); }
   }
 
-  function exportDefsJson() {
+  function exportDefsExcel() {
     if (!editedDefs.length) return;
-    const url = URL.createObjectURL(new Blob([JSON.stringify(editedDefs, null, 2)], { type: "application/json" }));
+    const esc = (s: any) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const headers = ["Attribute Name", "Type", "Data Type", "Tag", "UoM", "Required", "Description"];
+    const rows = editedDefs.map((d) => [
+      d.name, d.type, d.dataType, d.tagName ?? "", d.uom ?? "", d.required ? "true" : "", d.description ?? "",
+    ]);
+    // HTML-table workbook — opens natively in Excel with proper columns, no deps/CSP issues.
+    const table =
+      `<table border="1"><thead><tr>${headers.map((h) => `<th>${esc(h)}</th>`).join("")}</tr></thead>` +
+      `<tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
+    const html = `<html xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"></head><body>${table}</body></html>`;
+    const url = URL.createObjectURL(new Blob([html], { type: "application/vnd.ms-excel" }));
     const a = document.createElement("a");
-    a.href = url; a.download = `${template?.name ?? "template"}_schema.json`;
+    a.href = url; a.download = `${template?.name ?? "template"}_schema.xls`;
+    a.click(); URL.revokeObjectURL(url);
+  }
+
+  function exportDefsCsv() {
+    if (!editedDefs.length) return;
+    const esc = (s: any) => {
+      const v = String(s ?? "");
+      return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+    };
+    // Header matches the CSV import parser (parseCsvDefs) so it round-trips.
+    const headers = ["name", "type", "dataType", "tagName", "uom", "required", "description"];
+    const rows = editedDefs.map((d) => [
+      d.name, d.type, d.dataType, d.tagName ?? "", d.uom ?? "", d.required ? "true" : "", d.description ?? "",
+    ]);
+    const csv = [headers, ...rows].map((r) => r.map(esc).join(",")).join("\n");
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const a = document.createElement("a");
+    a.href = url; a.download = `${template?.name ?? "template"}_schema.csv`;
     a.click(); URL.revokeObjectURL(url);
   }
 
@@ -277,8 +323,11 @@ export default function AssetTemplateDetails() {
           <span className="text-foreground font-medium">{template.name}</span>
         </div>
         <div className="flex items-center gap-2">
-          <Button size="sm" variant="outline" className="h-8 text-xs" onClick={exportDefsJson} disabled={editedDefs.length === 0}>
-            <Download className="w-3.5 h-3.5 mr-1" /> Export Schema
+          <Button size="sm" variant="outline" className="h-8 text-xs" onClick={exportDefsExcel} disabled={editedDefs.length === 0}>
+            <Download className="w-3.5 h-3.5 mr-1" /> Export to Excel
+          </Button>
+          <Button size="sm" variant="outline" className="h-8 text-xs" onClick={exportDefsCsv} disabled={editedDefs.length === 0}>
+            <Download className="w-3.5 h-3.5 mr-1" /> Export to CSV
           </Button>
           {can("manage_templates") && (
             <Button size="sm" variant="outline" className="h-8 text-xs" onClick={cloneTemplate} disabled={cloning}>

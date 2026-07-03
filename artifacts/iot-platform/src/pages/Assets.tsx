@@ -79,10 +79,14 @@ export default function Assets() {
     return out;
   }, [allAssets, search, templateFilter, isFiltering, collapsed]);
 
-  const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
-  const safePage = Math.min(page, pageCount - 1);
-  const pageRows = rows.slice(safePage * PAGE_SIZE, safePage * PAGE_SIZE + PAGE_SIZE);
+  // Show the whole tree on one page — pagination would split parents from their
+  // children. The list scrolls; use expand/collapse to manage depth.
+  const pageRows = rows;
   const healthMap = useAssetHealthMap(pageRows.map((r) => r.asset.id));
+
+  const allParentIds = useMemo(() => allAssets.filter((a) => childrenOf[a.id]).map((a) => a.id), [allAssets, childrenOf]);
+  const expandAll = () => setCollapsed(new Set());
+  const collapseAll = () => setCollapsed(new Set(allParentIds));
 
   function handleDelete(a: Asset) {
     if (!confirm(`Delete asset "${a.name}"? This also removes its child assets.`)) return;
@@ -142,17 +146,23 @@ export default function Assets() {
             </SelectContent>
           </Select>
         </div>
+        {!isFiltering && (
+          <div className="flex items-center gap-1">
+            <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={expandAll}>Expand all</Button>
+            <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={collapseAll}>Collapse all</Button>
+          </div>
+        )}
         {can("manage_assets") && (
           <span className="text-xs text-muted-foreground ml-auto">Right-click a row for actions</span>
         )}
       </div>
 
-      {/* Table */}
+      {/* Table — full tree on one page, scrolls vertically */}
       <Card className="shadow-sm overflow-hidden">
-        <div className="overflow-x-auto">
+        <div className="overflow-auto max-h-[calc(100vh-260px)]">
           <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-border bg-muted/50 text-xs text-muted-foreground">
+            <thead className="sticky top-0 z-10">
+              <tr className="border-b border-border bg-muted text-xs text-muted-foreground">
                 <th className="text-left px-4 py-2.5 font-medium">Asset Name</th>
                 <th className="text-left px-4 py-2.5 font-medium">Template</th>
                 <th className="text-left px-4 py-2.5 font-medium">Site</th>
@@ -224,18 +234,7 @@ export default function Assets() {
             </tbody>
           </table>
         </div>
-
-        {/* Pagination */}
-        {rows.length > PAGE_SIZE && (
-          <div className="flex items-center justify-between px-4 py-2.5 border-t border-border text-xs text-muted-foreground">
-            <span>{safePage * PAGE_SIZE + 1}–{Math.min((safePage + 1) * PAGE_SIZE, rows.length)} of {rows.length}</span>
-            <div className="flex items-center gap-1">
-              <Button size="sm" variant="outline" className="h-7 w-7 p-0" disabled={safePage === 0} onClick={() => setPage((p) => Math.max(0, p - 1))}><ChevronLeft className="w-3.5 h-3.5" /></Button>
-              <span className="px-2">{safePage + 1} / {pageCount}</span>
-              <Button size="sm" variant="outline" className="h-7 w-7 p-0" disabled={safePage >= pageCount - 1} onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}><ChevronRight className="w-3.5 h-3.5" /></Button>
-            </div>
-          </div>
-        )}
+        <div className="px-4 py-2 border-t border-border text-xs text-muted-foreground">{rows.length} asset{rows.length !== 1 ? "s" : ""}</div>
       </Card>
 
       <CreateAssetWizard open={wizardOpen} onOpenChange={setWizardOpen} initialParentId={wizardParent} onCreated={(id) => navigate(`/assets/${id}`)} />

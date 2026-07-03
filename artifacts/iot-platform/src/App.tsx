@@ -13,6 +13,7 @@ import Dashboard from "@/pages/Dashboard";
 import Assets from "@/pages/Assets";
 import AssetDetails from "@/pages/AssetDetails";
 import AssetManagement from "@/pages/AssetManagement";
+import HierarchyGenerator from "@/pages/HierarchyGenerator";
 import AssetTemplates from "@/pages/AssetTemplates";
 import AssetTemplateDetails from "@/pages/AssetTemplateDetails";
 import Alarms from "@/pages/Alarms";
@@ -63,6 +64,7 @@ function AppRouter() {
           <Switch>
             <Route path="/" component={Dashboard} />
         <Route path="/asset-management" component={AssetManagement} />
+        <Route path="/hierarchy-generator" component={HierarchyGenerator} />
         <Route path="/assets" component={Assets} />
         <Route path="/assets/:id" component={AssetDetails} />
         <Route path="/asset-templates" component={AssetTemplates} />

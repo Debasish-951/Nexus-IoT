@@ -16,6 +16,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/hooks/use-toast";
+import { useWsEvents } from "@/hooks/useWsEvents";
 import { format, subHours, subDays, formatDistanceToNow } from "date-fns";
 import {
   Plus, Download, X, Search, Maximize2, Minimize2, Copy, Trash2, RefreshCw,
@@ -24,6 +26,7 @@ import {
   Grid3x3, Share2, SlidersHorizontal, Settings2, Filter as FilterIcon, TrendingUp, TrendingDown,
   Minus, HeartPulse, ShieldCheck, Bell, AlertTriangle, Thermometer, Waves, Gauge,
   Zap, BatteryCharging, Timer, Clock, Wrench, Cpu, Brain, ArrowLeft,
+  LayoutDashboard, Save, Radio,
 } from "lucide-react";
 import {
   ResponsiveContainer, LineChart, Line, AreaChart, Area, BarChart, Bar,
@@ -138,6 +141,15 @@ export default function Visualization() {
   const [series, setSeries] = useState<any[]>([]);
   const [loading, setLoading] = useState(false);
 
+  // ── Dashboard management (persisted via /api/viz-dashboards) ──
+  const { toast } = useToast();
+  const [dashboards, setDashboards] = useState<any[]>([]);
+  const [dashId, setDashId] = useState<string>("");   // current dashboard id ("" = unsaved)
+  const [dashName, setDashName] = useState<string>("Untitled dashboard");
+  const [dashRole, setDashRole] = useState<string>("all");
+  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [liveWs, setLiveWs] = useState(false);
+
   // KPI + health state
   const [health, setHealth] = useState<any | null>(null);
   const [kpiSeries, setKpiSeries] = useState<Record<string, { time: string; v: number }[]>>({});
@@ -246,6 +258,91 @@ export default function Visualization() {
     if (selectedAssetId) {
       fetch(`/api/ingest/assets/${selectedAssetId}/health`).then((r) => (r.ok ? r.json() : null)).then(setHealth).catch(() => {});
     }
+  }
+
+  // ── Auto-refresh: refetch active chart every 30s while enabled ──
+  useEffect(() => {
+    if (!autoRefresh) return;
+    const iv = setInterval(() => fetchData(), 30_000);
+    return () => clearInterval(iv);
+  }, [autoRefresh, fetchData]);
+
+  // ── Live WebSocket: refetch when telemetry arrives for the active asset ──
+  const onWsTelemetry = useCallback((data: any) => {
+    if (liveWs && data?.assetId && data.assetId === active?.assetId) fetchData();
+  }, [liveWs, active?.assetId, fetchData]);
+  useWsEvents({ telemetry: onWsTelemetry });
+
+  // ── Dashboard CRUD (persisted via /api/viz-dashboards) ──
+  const loadDashboards = useCallback(() => {
+    fetch("/api/viz-dashboards").then((r) => (r.ok ? r.json() : [])).then((d) => setDashboards(Array.isArray(d) ? d : [])).catch(() => {});
+  }, []);
+  useEffect(() => { loadDashboards(); }, [loadDashboards]);
+
+  // Map the single role picker ↔ the server's roleAccess array (higher roles included).
+  const ALL_ROLES = ["admin", "engineer", "operator", "viewer"];
+  function rolesFromSel(sel: string): string[] {
+    if (sel === "all" || sel === "viewer") return ALL_ROLES;
+    if (sel === "operator") return ["admin", "engineer", "operator"];
+    if (sel === "engineer") return ["admin", "engineer"];
+    if (sel === "admin") return ["admin"];
+    return ALL_ROLES;
+  }
+  function selFromRoles(arr: string[]): string {
+    if (!Array.isArray(arr) || arr.length >= 4) return "all";
+    if (arr.includes("operator")) return "operator";
+    if (arr.includes("engineer")) return "engineer";
+    if (arr.includes("admin")) return "admin";
+    return "all";
+  }
+
+  function applyDashboard(d: any) {
+    setDashId(d.id);
+    setDashName(d.name ?? "Dashboard");
+    setDashRole(selFromRoles(d.roleAccess));
+    const w = Array.isArray(d.widgets) ? d.widgets : [];
+    if (w.length) {
+      // Re-id widgets so local edits don't collide, keep the rest of the config.
+      const restored: Graph[] = w.map((g: any) => ({ ...g, id: `g${gid++}` }));
+      setGraphs(restored);
+      setActiveId(restored[0]?.id ?? "");
+      if (typeof d.rangeHours === "number") setRangeHours(d.rangeHours);
+    }
+  }
+  function newDashboard() {
+    setDashId(""); setDashName("Untitled dashboard"); setDashRole("all");
+    const g = newGraph("multiaxis", allAssets[0]?.id ?? "", PARAM_COLORS[0]); g.name = "Trend 1";
+    setGraphs([g]); setActiveId(g.id);
+  }
+  async function saveDashboard() {
+    const body = { name: dashName.trim() || "Untitled dashboard", roleAccess: rolesFromSel(dashRole), widgets: graphs };
+    const url = dashId ? `/api/viz-dashboards/${dashId}` : "/api/viz-dashboards";
+    const res = await fetch(url, { method: dashId ? "PUT" : "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }).catch(() => null);
+    if (!res || !res.ok) { toast({ title: "Save failed", variant: "destructive" }); return; }
+    const saved = await res.json().catch(() => null);
+    if (saved?.id) setDashId(saved.id);
+    toast({ title: dashId ? "Dashboard saved" : "Dashboard created" });
+    loadDashboards();
+  }
+  async function cloneDashboard() {
+    const res = await fetch("/api/viz-dashboards", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: `${dashName} (copy)`, roleAccess: rolesFromSel(dashRole), widgets: graphs }),
+    }).catch(() => null);
+    if (!res || !res.ok) { toast({ title: "Clone failed", variant: "destructive" }); return; }
+    const saved = await res.json().catch(() => null);
+    if (saved?.id) { setDashId(saved.id); setDashName(saved.name); }
+    toast({ title: "Dashboard cloned" });
+    loadDashboards();
+  }
+  async function deleteDashboard() {
+    if (!dashId) { newDashboard(); return; }
+    if (!confirm(`Delete dashboard "${dashName}"?`)) return;
+    const res = await fetch(`/api/viz-dashboards/${dashId}`, { method: "DELETE" }).catch(() => null);
+    if (!res || !res.ok) { toast({ title: "Delete failed", variant: "destructive" }); return; }
+    toast({ title: "Dashboard deleted" });
+    newDashboard();
+    loadDashboards();
   }
 
   function patch(id: string, p: Partial<Graph>) {
@@ -386,10 +483,45 @@ export default function Visualization() {
             <p className="text-sm text-muted-foreground">Analyze and visualize industrial data.</p>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="ghost" size="sm" onClick={refreshAll}><RefreshCw className={cn("w-4 h-4 mr-1.5", loading && "animate-spin")} /> Refresh</Button>
-            <Button variant="outline" size="sm" onClick={exportCsv} disabled={!active || series.length === 0}><Download className="w-4 h-4 mr-1.5" /> Export</Button>
+            <Button variant="ghost" size="sm" onClick={refreshAll} title="Reload data now"><RefreshCw className={cn("w-4 h-4 mr-1.5", loading && "animate-spin")} /> Refresh</Button>
+            <Button variant="outline" size="sm" onClick={exportCsv} disabled={!active || series.length === 0} title="Download the active chart's data as CSV"><Download className="w-4 h-4 mr-1.5" /> Export</Button>
           </div>
         </div>
+
+        {/* ── Dashboard bar — save this view, switch between saved dashboards ── */}
+        <div className="mt-4 flex items-center gap-2 flex-wrap rounded-lg border border-border bg-muted/30 p-2">
+          <LayoutDashboard className="w-4 h-4 text-primary ml-1 shrink-0" />
+          <Select value={dashId || "__unsaved"} onValueChange={(v) => { if (v === "__new") { newDashboard(); return; } const d = dashboards.find((x) => x.id === v); if (d) applyDashboard(d); }}>
+            <SelectTrigger className="h-9 w-52 text-sm" title="Switch dashboard"><SelectValue placeholder="Select dashboard" /></SelectTrigger>
+            <SelectContent className="max-h-72 overflow-y-auto">
+              {dashId === "" && <SelectItem value="__unsaved">Untitled (unsaved)</SelectItem>}
+              {dashboards.map((d) => <SelectItem key={d.id} value={d.id}>{d.name}</SelectItem>)}
+              <SelectItem value="__new">＋ New dashboard…</SelectItem>
+            </SelectContent>
+          </Select>
+          <Input value={dashName} onChange={(e) => setDashName(e.target.value)} placeholder="Dashboard name" className="h-9 w-44 text-sm" title="Rename this dashboard" />
+          <Select value={dashRole} onValueChange={setDashRole}>
+            <SelectTrigger className="h-9 w-36 text-sm" title="Which roles can see this dashboard"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All roles</SelectItem>
+              <SelectItem value="admin">Admin only</SelectItem>
+              <SelectItem value="engineer">Engineer+</SelectItem>
+              <SelectItem value="operator">Operator+</SelectItem>
+              <SelectItem value="viewer">Viewer+</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button size="sm" onClick={saveDashboard} title="Save the current charts + layout"><Save className="w-4 h-4 mr-1.5" /> Save</Button>
+          <Button variant="outline" size="sm" onClick={cloneDashboard} title="Duplicate this dashboard"><Copy className="w-4 h-4 mr-1.5" /> Clone</Button>
+          <Button variant="outline" size="sm" onClick={deleteDashboard} className="text-destructive hover:text-destructive" title="Delete this dashboard"><Trash2 className="w-4 h-4 mr-1.5" /> Delete</Button>
+          <div className="flex-1" />
+          <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" title="Reload data every 30 seconds">
+            <Switch checked={autoRefresh} onCheckedChange={setAutoRefresh} className="scale-90" /> Auto-refresh 30s
+          </label>
+          <label className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none" title="Update instantly when new telemetry arrives (WebSocket)">
+            <Switch checked={liveWs} onCheckedChange={setLiveWs} className="scale-90" /> <Radio className={cn("w-3.5 h-3.5", liveWs && "text-emerald-500")} /> Live
+          </label>
+        </div>
+        <p className="mt-1.5 text-[11px] text-muted-foreground">Build charts below, then <strong>Save</strong> to keep this view as a dashboard. <strong>Clone</strong> copies it; <strong>Live</strong> auto-updates from the WebSocket; <strong>Auto-refresh</strong> reloads every 30s.</p>
 
         {/* Top filters */}
         <div className="mt-4 flex items-end gap-3 flex-wrap">
@@ -497,6 +629,7 @@ export default function Visualization() {
                     <SelectTrigger className="h-7 w-36 text-xs"><SelectValue /></SelectTrigger>
                     <SelectContent>{ALL_TYPES.map((c) => <SelectItem key={c.type} value={c.type} className="text-xs">{c.label}</SelectItem>)}</SelectContent>
                   </Select>
+                  <button title="Refresh this chart" onClick={() => fetchData()} className="p-1.5 rounded hover:bg-muted text-muted-foreground"><RefreshCw className={cn("w-4 h-4", loading && "animate-spin")} /></button>
                   <button title="Configure" onClick={() => setConfigOpen(true)} className="p-1.5 rounded hover:bg-muted text-muted-foreground"><Settings2 className="w-4 h-4" /></button>
                   <button title="Duplicate" onClick={() => duplicate(active.id)} className="p-1.5 rounded hover:bg-muted text-muted-foreground"><Copy className="w-4 h-4" /></button>
                   <button title="Export" onClick={exportCsv} className="p-1.5 rounded hover:bg-muted text-muted-foreground"><Download className="w-4 h-4" /></button>

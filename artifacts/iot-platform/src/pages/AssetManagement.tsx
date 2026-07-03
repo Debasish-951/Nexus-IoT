@@ -1,7 +1,7 @@
 import { useLocation } from "wouter";
 import { motion } from "framer-motion";
 import { Card, CardContent } from "@/components/ui/card";
-import { Blocks, FileText, Image, ArrowRight, ArrowLeft, Boxes } from "lucide-react";
+import { Blocks, FileText, Image, ArrowRight, ArrowLeft, Boxes, Workflow } from "lucide-react";
 
 const CARDS = [
   {
@@ -30,6 +30,15 @@ const CARDS = [
     tint: "bg-violet-50 text-violet-600 dark:bg-violet-950/40 dark:text-violet-300",
     activeBg: "active:bg-violet-50/70 dark:active:bg-violet-950/30",
     accent: "#a855f7",
+  },
+  {
+    title: "Hierarchy Generator",
+    description: "Paste an asset hierarchy (text, JSON, CSV) and auto-generate reusable templates.",
+    href: "/hierarchy-generator",
+    icon: Workflow,
+    tint: "bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-300",
+    activeBg: "active:bg-amber-50/70 dark:active:bg-amber-950/30",
+    accent: "#f59e0b",
   },
 ];
 

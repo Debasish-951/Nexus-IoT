@@ -184,8 +184,9 @@ export default function Dashboard() {
     return map;
   }, [alarms]);
 
-  // Classify every asset into a bucket.
-  const rows: AssetRow[] = useMemo(() => assetList.map(a => {
+  // Classify every ROOT asset into a bucket. Child assets share their parent's
+  // device (no telemetry of their own), so counting them would double-count.
+  const rows: AssetRow[] = useMemo(() => assetList.filter(a => !a.parentId).map(a => {
     const { bucket, score } = classify(worstByAsset[a.id] ?? null, healthMap[a.id] ?? null);
     return { assetId: a.id, name: a.name, bucket, score };
   }), [assets, worstByAsset, healthMap]); // eslint-disable-line

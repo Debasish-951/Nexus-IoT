@@ -649,7 +649,7 @@ export default function AssetDetails() {
                 <p className="font-semibold text-blue-800 dark:text-blue-300 flex items-center gap-1.5 mb-1.5"><Info className="w-3.5 h-3.5" /> How Apply Template works</p>
                 <ul className="text-blue-700 dark:text-blue-400 space-y-1">
                   <li>• Schema defined in Asset Templates → stamped onto this asset</li>
-                  <li>• Tag names resolved: <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">temperature</code> → <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">{asset.identifier}.temperature</code></li>
+                  <li>• Tag names resolved: <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">temperature</code> → <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">{asset.identifier ? `${asset.identifier}.` : ""}temperature</code></li>
                   <li>• Existing attributes are skipped, not duplicated</li>
                 </ul>
               </div>
@@ -657,7 +657,7 @@ export default function AssetDetails() {
                 <label className="text-xs font-medium">Select Template</label>
                 <Select value={selectedTemplateId || asset.templateId || ""} onValueChange={setSelectedTemplateId}>
                   <SelectTrigger><SelectValue placeholder="Choose a template…" /></SelectTrigger>
-                  <SelectContent>{templateList.map((t: any) => (<SelectItem key={t.id} value={t.id}>{t.name} <span className="text-muted-foreground ml-1">({t.attributeCount} attrs)</span></SelectItem>))}</SelectContent>
+                  <SelectContent className="max-h-72 overflow-y-auto">{templateList.map((t: any) => (<SelectItem key={t.id} value={t.id}>{t.name} <span className="text-muted-foreground ml-1">({t.attributeCount} attrs)</span></SelectItem>))}</SelectContent>
                 </Select>
               </div>
               {(() => {
@@ -667,10 +667,10 @@ export default function AssetDetails() {
                 if (!tmpl || defs.length === 0) return null;
                 return (
                   <div className="rounded border border-border overflow-hidden">
-                    <div className="bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground">{defs.length} attribute{defs.length !== 1 ? "s" : ""} · prefix: <code className="font-mono">{asset.identifier}.</code></div>
+                    <div className="bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground">{defs.length} attribute{defs.length !== 1 ? "s" : ""} · prefix: <code className="font-mono">{asset.identifier ? `${asset.identifier}.` : "(none — grouping asset)"}</code></div>
                     <div className="max-h-40 overflow-auto"><table className="w-full text-xs">
                       <thead><tr className="border-b border-border/50 bg-muted/30"><th className="text-left px-3 py-1.5 font-medium text-muted-foreground">Name</th><th className="text-left px-3 py-1.5 font-medium text-muted-foreground">Resolved Tag</th><th className="text-left px-3 py-1.5 font-medium text-muted-foreground">UoM</th></tr></thead>
-                      <tbody>{defs.map((d: any, i: number) => (<tr key={i} className="border-b border-border/50 last:border-0"><td className="px-3 py-1.5 font-medium">{d.name}</td><td className="px-3 py-1.5 font-mono text-muted-foreground">{d.tagName ? `${asset.identifier}.${d.tagName}` : "—"}</td><td className="px-3 py-1.5">{d.uom || "—"}</td></tr>))}</tbody>
+                      <tbody>{defs.map((d: any, i: number) => (<tr key={i} className="border-b border-border/50 last:border-0"><td className="px-3 py-1.5 font-medium">{d.name}</td><td className="px-3 py-1.5 font-mono text-muted-foreground">{d.tagName ? `${asset.identifier ? `${asset.identifier}.` : ""}${d.tagName}` : "—"}</td><td className="px-3 py-1.5">{d.uom || "—"}</td></tr>))}</tbody>
                     </table></div>
                   </div>
                 );
