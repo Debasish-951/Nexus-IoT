@@ -214,6 +214,22 @@ function removeNode(nodes: HNode[], id: string): HNode[] {
   return nodes.filter((n) => n.id !== id).map((n) => ({ ...n, children: removeNode(n.children, id) }));
 }
 
+// Machine → Device ID mapping. Applied ONLY to matching machine (leaf) assets
+// during Generate Asset Tree; unmatched machines get no device id (blank).
+const MACHINE_DEVICE_MAP: Record<string, string> = {
+  "creel machine": "CREEL_01", "soft flow dyeing machine": "SFDM_01", "overflow washer": "OW_01", "rf dryer": "RF_DRYER_01",
+  "auto bale opener": "ABO_01", "rectilinear comber": "COMBER_01", "draw frame": "DRAWFRAME_01", "ring spinning frame": "RINGSPIN_01",
+  "auto cone winder": "CONEWINDER_01", "packing machine": "PACKING_01", "pet bottle washer": "PETWASHER_01", "extruder": "EXTRUDER_01",
+  "melt filtration system": "MFS_01", "spinning machine": "SPINNING_01", "stenter dryer": "STENTER_01", "crimping machine": "CRIMPER_01",
+  "baler": "BALER_01", "blending hopper": "HOPPER_01", "rotor spinning machine": "ROTORSPIN_01", "yarn doubler": "YARNDOUBLER_01",
+};
+// Carding Machine is ambiguous → resolve by unit ancestor (Unit 1 vs Unit 2).
+function deviceIdFor(name: string, ancestors: string[]): string {
+  const key = name.trim().toLowerCase();
+  if (key === "carding machine") return ancestors.some((a) => /unit\s*2/i.test(a)) ? "CARDING_02" : "CARDING_01";
+  return MACHINE_DEVICE_MAP[key] ?? "";
+}
+
 // ─────────────────────────── Page ───────────────────────────
 export default function HierarchyGenerator() {
   const [, navigate] = useLocation();
@@ -235,6 +251,7 @@ export default function HierarchyGenerator() {
   const [rootDevice, setRootDevice] = useState("");
   const [genAssets, setGenAssets] = useState(false);
   const [genProgress, setGenProgress] = useState("");
+  const [deviceIds, setDeviceIds] = useState<Record<string, string>>({}); // machine nodeId -> device id
 
   useEffect(() => {
     fetch(`${BASE}/api/asset-templates`).then((r) => (r.ok ? r.json() : [])).then((d) => setTemplates(Array.isArray(d) ? d : [])).catch(() => {});
@@ -309,6 +326,31 @@ export default function HierarchyGenerator() {
   const reusableCount = templatePlan.length;
   const totalNodes = flat.length;
 
+  // Machine (leaf) nodes that can carry a Device ID — non-attribute nodes with
+  // no non-attribute children (units/processes are excluded).
+  const machineNodes = useMemo(() => {
+    const f = flatten(tree);
+    const parentOf = new Map(f.map((x) => [x.n, x.parent]));
+    const out: { node: HNode; name: string; ancestors: string[] }[] = [];
+    for (const { n, parent } of f) {
+      if (isAttribute(n, parent)) continue;
+      if (n.children.some((c) => !isAttribute(c, n))) continue; // has child assets → grouping
+      const anc: string[] = []; let p = parent; const seen = new Set<string>();
+      while (p && !seen.has(p.id)) { seen.add(p.id); anc.push(p.name); p = parentOf.get(p) ?? null; }
+      out.push({ node: n, name: n.name, ancestors: anc });
+    }
+    return out;
+  }, [tree]);
+
+  // Prefill device ids from the mapping; keep any manual edits (keyed by node id).
+  useEffect(() => {
+    setDeviceIds((prev) => {
+      const next: Record<string, string> = {};
+      for (const m of machineNodes) next[m.node.id] = prev[m.node.id] ?? deviceIdFor(m.name, m.ancestors);
+      return next;
+    });
+  }, [machineNodes]);
+
   function toggle(id: string) { setCollapsed((p) => { const s = new Set(p); s.has(id) ? s.delete(id) : s.add(id); return s; }); }
   function rename(id: string, name: string) {
     const walk = (ns: HNode[]): HNode[] => ns.map((n) => n.id === id ? { ...n, name } : { ...n, children: walk(n.children) });
@@ -359,7 +401,6 @@ export default function HierarchyGenerator() {
   // Machines get their matching template applied (attributes stamped).
   async function generateAssets() {
     if (!can("manage_assets")) { toast({ title: "Not allowed", description: "You need asset management permission.", variant: "destructive" }); return; }
-    if (!rootDevice) { toast({ title: "Pick a device id for the root", variant: "destructive" }); return; }
     if (validation.errors.length) { toast({ title: "Fix validation errors first", variant: "destructive" }); return; }
     setGenAssets(true);
     setGenProgress("");
@@ -368,6 +409,12 @@ export default function HierarchyGenerator() {
 
     async function makeAsset(name: string, parentId: string | null, identifier: string): Promise<string | null> {
       const t = tmplByName.get(name.toLowerCase());
+      // A machine device id must be a known device — register it before create.
+      if (identifier) {
+        await fetch(`${BASE}/api/ingest/register-device`, {
+          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ deviceId: identifier }),
+        }).catch(() => {});
+      }
       const body: any = { name, parentId, identifier };
       if (t) { body.templateId = t.id; body.templateName = t.name; }
       const res = await fetch(`${BASE}/api/assets`, {
@@ -386,13 +433,13 @@ export default function HierarchyGenerator() {
       return a.id;
     }
 
-    async function walk(n: HNode, parentId: string) {
-      // Attribute leaves are stamped via templates, not created as assets.
-      const id = await makeAsset(n.name, parentId, ""); // children → identifier null
+    async function walk(n: HNode, parentId: string, ancestors: string[]) {
+      // Machine (leaf) nodes use the Device ID assigned in the panel below.
+      const id = await makeAsset(n.name, parentId, (deviceIds[n.id] ?? "").trim());
       if (!id) return;
       for (const c of n.children) {
-        if (isAttribute(c, n)) continue;
-        await walk(c, id);
+        if (isAttribute(c, n)) continue;   // attribute leaves are template-stamped, not assets
+        await walk(c, id, [...ancestors, n.name]);
       }
     }
 
@@ -405,7 +452,7 @@ export default function HierarchyGenerator() {
       }
       for (const r of tree) {
         if (isAttribute(r, null)) continue;
-        await walk(r, rootId);
+        await walk(r, rootId, [rootName]);
       }
       qc.invalidateQueries({ queryKey: getListAssetsQueryKey() });
       toast({ title: `Created ${created} assets`, description: failed ? `${failed} failed.` : "Full hierarchy built." });
@@ -518,22 +565,42 @@ export default function HierarchyGenerator() {
                     <Input value={rootName} onChange={(e) => setRootName(e.target.value)} className="h-8 text-sm" />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-xs">Root device id</Label>
-                    <Select value={rootDevice} onValueChange={setRootDevice}>
-                      <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Select device…" /></SelectTrigger>
+                    <Label className="text-xs">Root device id (optional)</Label>
+                    <Select value={rootDevice || "__none"} onValueChange={(v) => setRootDevice(v === "__none" ? "" : v)}>
+                      <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
                       <SelectContent className="max-h-60 overflow-y-auto">
-                        {freeDevices.length === 0 ? <div className="px-2 py-1.5 text-xs text-muted-foreground">No free device ids</div>
-                          : freeDevices.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+                        <SelectItem value="__none">— None (grouping root) —</SelectItem>
+                        {freeDevices.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </div>
                 </div>
+                {machineNodes.length > 0 && (
+                  <div className="border border-border rounded-md">
+                    <div className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground border-b border-border">
+                      Machine Device IDs ({machineNodes.length}) — prefilled, editable
+                    </div>
+                    <div className="max-h-52 overflow-auto divide-y divide-border">
+                      {machineNodes.map((m) => (
+                        <div key={m.node.id} className="flex items-center gap-2 px-3 py-1.5">
+                          <span className="text-xs flex-1 truncate" title={m.name}>{m.name}</span>
+                          <Input
+                            value={deviceIds[m.node.id] ?? ""}
+                            onChange={(e) => setDeviceIds((prev) => ({ ...prev, [m.node.id]: e.target.value }))}
+                            placeholder="device id"
+                            className="h-7 w-40 text-xs font-mono"
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
                 <Button variant="outline" className="w-full" onClick={generateAssets}
-                  disabled={genAssets || !rootDevice || validation.errors.length > 0 || !can("manage_assets")}>
+                  disabled={genAssets || validation.errors.length > 0 || !can("manage_assets")}>
                   {genAssets ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> {genProgress || "Building…"}</> : <><Layers className="w-4 h-4 mr-1.5" /> Generate Asset Tree</>}
                 </Button>
                 <p className="text-[11px] text-muted-foreground">
-                  The root owns the device id (telemetry for it attaches to the root). Only free device ids are listed — if yours isn't there, it's already used by another asset.
+                  Each machine's Device ID (above) is prefilled from the mapping — edit any of them, then Generate. Grouping levels stay device-less. Leave root device <strong>None</strong> for per-machine mode.
                 </p>
               </div>
             </>

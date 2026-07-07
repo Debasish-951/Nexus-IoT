@@ -38,13 +38,13 @@ router.post("/assets", async (req, res): Promise<void> => {
   const parsed = CreateAssetBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
 
-  // Child assets share the parent/root's device and get NO device id of their own
-  // (identifier = null). Only root assets carry a device id, and it must map to a
+  // Device ID is optional per asset. Any asset MAY own a device id (machines,
+  // gateways, etc.); grouping assets leave it blank. If provided it must map to a
   // known device (transmitting OR declared via a template payload).
-  const isChild = !!parsed.data.parentId;
-  if (!isChild && !hasSeenDevice(parsed.data.identifier)) {
+  const devId = (parsed.data.identifier ?? "").trim();
+  if (devId && !hasSeenDevice(devId)) {
     res.status(400).json({
-      error: `"${parsed.data.identifier}" is not a known device id. ` +
+      error: `"${devId}" is not a known device id. ` +
         `Register it first by pasting its device payload into a template, or by sending telemetry for it.`,
     });
     return;
@@ -56,7 +56,7 @@ router.post("/assets", async (req, res): Promise<void> => {
       .insert(assetsTable)
       .values({
         name:        parsed.data.name,
-        identifier:  isChild ? null : parsed.data.identifier,
+        identifier:  devId || null,
         parentId:    parsed.data.parentId ?? null,
         templateId:  parsed.data.templateId ?? null,
         description: parsed.data.description ?? null,
@@ -95,15 +95,30 @@ router.put("/assets/:id", async (req, res): Promise<void> => {
   const parsed = UpdateAssetBody.safeParse(req.body);
   if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
 
-  const [asset] = await db
-    .update(assetsTable)
-    .set({
-      ...(parsed.data.name        !== undefined ? { name:        parsed.data.name }        : {}),
-      ...(parsed.data.description !== undefined ? { description: parsed.data.description } : {}),
-      ...(parsed.data.tags        !== undefined ? { tags:        parsed.data.tags }        : {}),
-    })
-    .where(eq(assetsTable.id, params.data.id))
-    .returning();
+  const updateData: Record<string, unknown> = {};
+  if (parsed.data.name        !== undefined) updateData.name        = parsed.data.name;
+  if (parsed.data.description !== undefined) updateData.description = parsed.data.description;
+  if (parsed.data.tags        !== undefined) updateData.tags        = parsed.data.tags;
+
+  // identifier (device id) — not in the generated body schema; read raw. Setting
+  // it must reference a known device; empty string clears it (grouping asset).
+  const rawIdentifier = (req.body as any)?.identifier;
+  if (typeof rawIdentifier === "string") {
+    const devId = rawIdentifier.trim();
+    if (devId && !hasSeenDevice(devId)) {
+      res.status(400).json({ error: `"${devId}" is not a known device id.` });
+      return;
+    }
+    updateData.identifier = devId || null;
+  }
+
+  let asset;
+  try {
+    [asset] = await db.update(assetsTable).set(updateData).where(eq(assetsTable.id, params.data.id)).returning();
+  } catch (err: any) {
+    res.status(400).json({ error: err?.message ?? "Update failed (device id may already be in use)" });
+    return;
+  }
 
   if (!asset) { res.status(404).json({ error: "Asset not found" }); return; }
   res.json(asset);

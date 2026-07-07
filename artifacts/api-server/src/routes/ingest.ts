@@ -115,6 +115,34 @@ function deepFlatten(v: unknown, prefix: string, out: Record<string, unknown>): 
   }
 }
 
+// Extract per-machine records from a nested payload where each machine object
+// carries its own `deviceId` (e.g. a Node-RED factory tree). Each becomes a flat
+// telemetry record attributed to the asset whose identifier == that deviceId.
+export function extractMachineRecords(body: unknown): { deviceId: string; timestamp?: Date; metrics: Record<string, unknown> }[] {
+  const recs: { deviceId: string; timestamp?: Date; metrics: Record<string, unknown> }[] = [];
+  function walk(v: unknown) {
+    if (Array.isArray(v)) {
+      for (const item of v) {
+        if (item && typeof item === "object" && !Array.isArray(item) && typeof (item as any).deviceId === "string") {
+          const o = item as Record<string, unknown>;
+          const metrics: Record<string, unknown> = {};
+          for (const [k, val] of Object.entries(o)) {
+            if (k === "deviceId" || k === "machine" || ENVELOPE_FIELDS.has(k)) continue;
+            if (val != null && typeof val !== "object") metrics[k] = val;
+          }
+          let ts: Date | undefined;
+          if (typeof o.timestamp === "string") { const d = new Date((o.timestamp as string).replace(" ", "T")); if (!isNaN(d.getTime())) ts = d; }
+          recs.push({ deviceId: o.deviceId as string, timestamp: ts, metrics });
+        } else walk(item);
+      }
+    } else if (v && typeof v === "object") {
+      for (const val of Object.values(v as Record<string, unknown>)) walk(val);
+    }
+  }
+  walk(body);
+  return recs;
+}
+
 // ── Operator evaluation ───────────────────────────────────────────────────────
 function evalOp(value: number, op: string, threshold: number): boolean {
   switch (op) {
@@ -326,14 +354,20 @@ export async function processNormalised(n: NormalisedPayload, assetIdHint?: stri
   }));
   await db.insert(telemetryTable).values(records as any[]);
 
-  // Update dynamic attributes — match by tagName OR sourceMetric
+  // Update dynamic attributes — match by tagName OR sourceMetric, case-insensitively
+  // (telemetry keys can be camelCase while stored tagNames are lowercased). Match
+  // both the full "deviceId.metric" tag and a bare "metric" tag.
   for (const [metric, value] of Object.entries(n.metrics)) {
-    // Primary: tagName-based match (e.g. "device-id.metric_name")
+    const full = `${n.deviceId}.${metric}`.toLowerCase();
+    const bare = metric.toLowerCase();
     await db.update(attributesTable).set({ value, timestamp: ts })
-      .where(and(eq(attributesTable.assetId, assetId as string), eq(attributesTable.tagName, `${n.deviceId}.${metric}`)));
+      .where(and(
+        eq(attributesTable.assetId, assetId as string),
+        sql`(lower(${attributesTable.tagName}) = ${full} OR lower(${attributesTable.tagName}) = ${bare})`,
+      ));
     // Secondary: explicit sourceMetric remapping (attribute.sourceMetric = "energy_meter_kwh")
     await db.update(attributesTable).set({ value, timestamp: ts })
-      .where(and(eq(attributesTable.assetId, assetId as string), eq(attributesTable.sourceMetric, metric)));
+      .where(and(eq(attributesTable.assetId, assetId as string), sql`lower(${attributesTable.sourceMetric}) = ${bare}`));
   }
   if (n.sensorSerial) {
     await db.update(attributesTable).set({ value: n.sensorSerial, timestamp: ts })
@@ -444,6 +478,27 @@ router.post("/ingest/validate", optionalApiKeyAuth("ingest:write"), async (req, 
 // ── Routes ────────────────────────────────────────────────────────────────────
 router.post("/ingest/payload", optionalApiKeyAuth("ingest:write"), async (req, res): Promise<void> => {
   const body = req.body as Record<string, unknown>;
+
+  // Multi-device tree: each machine object has its own deviceId → ingest one
+  // record per machine (attributed to its own asset). Per-machine only.
+  const machineRecords = extractMachineRecords(body);
+  if (machineRecords.length > 0) {
+    let written = 0;
+    const events: any[] = [];
+    for (const rec of machineRecords) {
+      const r = await processNormalised({ deviceId: rec.deviceId, timestamp: rec.timestamp, metrics: rec.metrics, payloadFormat: "flat" });
+      written += r.recordsWritten;
+      events.push(...r.alarmEvents);
+    }
+    res.json({
+      success: true, machines: machineRecords.length, recordsWritten: written,
+      message: `Ingested ${machineRecords.length} machine(s), ${written} metric(s)`,
+      alarmsTriggered: events.filter((e) => e.event === "triggered").length,
+      alarmsCleared: events.filter((e) => e.event === "cleared").length, alarmEvents: events,
+    });
+    return;
+  }
+
   const normalised = normalise(body);
   if (!normalised) {
     if (Array.isArray(req.body) && req.body.length > 0) {

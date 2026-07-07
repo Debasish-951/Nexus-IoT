@@ -34,9 +34,30 @@ import {
   deriveStatus, STATUS_STYLES, siteOf, HealthBar,
 } from "./assetShared";
 
-export default function AssetDetails() {
+// Suggested Device ID per machine name (auto-prefill; user can edit).
+const MACHINE_DEVICE_MAP: Record<string, string> = {
+  "creel machine": "CREEL_01", "soft flow dyeing machine": "SFDM_01", "overflow washer": "OW_01", "rf dryer": "RF_DRYER_01",
+  "auto bale opener": "ABO_01", "rectilinear comber": "COMBER_01", "draw frame": "DRAWFRAME_01", "ring spinning frame": "RINGSPIN_01",
+  "auto cone winder": "CONEWINDER_01", "packing machine": "PACKING_01", "pet bottle washer": "PETWASHER_01", "extruder": "EXTRUDER_01",
+  "melt filtration system": "MFS_01", "spinning machine": "SPINNING_01", "stenter dryer": "STENTER_01", "crimping machine": "CRIMPER_01",
+  "baler": "BALER_01", "blending hopper": "HOPPER_01", "rotor spinning machine": "ROTORSPIN_01", "yarn doubler": "YARNDOUBLER_01",
+};
+function suggestDeviceId(asset: Asset, allAssets: Asset[]): string {
+  const key = asset.name.trim().toLowerCase();
+  if (key === "carding machine") {
+    const byId = new Map(allAssets.map((a) => [a.id, a]));
+    let cur: Asset | null = asset; const seen = new Set<string>();
+    while (cur && !seen.has(cur.id)) { seen.add(cur.id); if (/unit\s*2/i.test(cur.name)) return "CARDING_02"; cur = cur.parentId ? (byId.get(cur.parentId) ?? null) : null; }
+    return "CARDING_01";
+  }
+  return MACHINE_DEVICE_MAP[key] ?? "";
+}
+
+export default function AssetDetails({ assetId: assetIdProp, embedded }: { assetId?: string; embedded?: boolean } = {}) {
   const [, params] = useRoute("/assets/:id");
-  const assetId = params?.id ?? "";
+  // When embedded (e.g. in the Assets tree right panel) the id comes as a prop;
+  // otherwise it's read from the route.
+  const assetId = assetIdProp ?? params?.id ?? "";
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const qc = useQueryClient();
@@ -56,6 +77,29 @@ export default function AssetDetails() {
   const createAttr = useCreateAssetAttribute();
   const deleteAttr = useDeleteAttribute();
   const deleteAsset = useDeleteAsset();
+
+  // ── Device ID edit ──
+  const [devOpen, setDevOpen] = useState(false);
+  const [devVal, setDevVal] = useState("");
+  const [savingDev, setSavingDev] = useState(false);
+  function openDeviceDialog() {
+    if (!asset) return;
+    setDevVal(asset.identifier ?? suggestDeviceId(asset, allAssets));
+    setDevOpen(true);
+  }
+  async function saveDeviceId() {
+    if (!asset) return;
+    setSavingDev(true);
+    try {
+      const id = devVal.trim();
+      if (id) await fetch(`/api/ingest/register-device`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ deviceId: id }) }).catch(() => {});
+      const res = await fetch(`/api/assets/${asset.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ identifier: id }) });
+      if (!res.ok) { const e = await res.json().catch(() => ({})); toast({ title: "Failed to set Device ID", description: e.error, variant: "destructive" }); return; }
+      toast({ title: id ? "Device ID set" : "Device ID cleared" });
+      qc.invalidateQueries({ queryKey: getListAssetsQueryKey() });
+      setDevOpen(false);
+    } finally { setSavingDev(false); }
+  }
 
   const [health, setHealth] = useState<AssetHealth | null>(null);
   useEffect(() => {
@@ -274,10 +318,12 @@ export default function AssetDetails() {
   const status = deriveStatus(asset, health);
 
   return (
-    <div className="p-6 space-y-4 max-w-6xl mx-auto">
-      <button onClick={() => (window.history.length > 1 ? window.history.back() : navigate("/assets"))} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
-        <ArrowLeft className="w-4 h-4" /> Back
-      </button>
+    <div className={cn("space-y-4", embedded ? "p-5" : "p-6 max-w-6xl mx-auto")}>
+      {!embedded && (
+        <button onClick={() => (window.history.length > 1 ? window.history.back() : navigate("/assets"))} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+          <ArrowLeft className="w-4 h-4" /> Back
+        </button>
+      )}
       {/* Breadcrumb + actions */}
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
@@ -325,7 +371,15 @@ export default function AssetDetails() {
             <Info2 label="Asset Name" value={asset.name} />
             <Info2 label="Template" value={asset.templateName || "—"} />
             <Info2 label="Site" value={siteOf(asset, allAssets)} />
-            <Info2 label="Device ID" value={asset.identifier ?? "Inherited from parent"} mono icon={<Cpu className="w-3.5 h-3.5" />} />
+            <div>
+              <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1"><Cpu className="w-3.5 h-3.5" /> Device ID</p>
+              <div className="flex items-center gap-1.5">
+                <span className="text-sm font-mono">{asset.identifier ?? "—"}</span>
+                {can("manage_assets") && (
+                  <button onClick={openDeviceDialog} title="Set Device ID" className="p-0.5 rounded text-muted-foreground hover:text-primary"><Edit2 className="w-3.5 h-3.5" /></button>
+                )}
+              </div>
+            </div>
             <Info2 label="Status" value={status} />
             <div>
               <p className="text-xs text-muted-foreground mb-1">Health</p>
@@ -709,6 +763,26 @@ export default function AssetDetails() {
               </DialogFooter>
             </TabsContent>
           </Tabs>
+        </DialogContent>
+      </Dialog>
+
+      {/* Set Device ID */}
+      <Dialog open={devOpen} onOpenChange={setDevOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader><DialogTitle className="flex items-center gap-2"><Cpu className="w-4 h-4" /> Set Device ID</DialogTitle></DialogHeader>
+          <div className="space-y-1.5">
+            <Label className="text-sm">Device ID</Label>
+            <Input value={devVal} onChange={(e) => setDevVal(e.target.value)} placeholder="e.g. CREEL_01" autoFocus
+              onKeyDown={(e) => { if (e.key === "Enter") saveDeviceId(); }} />
+            <p className="text-xs text-muted-foreground">
+              {asset && suggestDeviceId(asset, allAssets) ? <>Suggested: <code className="font-mono bg-muted px-1 rounded">{suggestDeviceId(asset, allAssets)}</code>. </> : null}
+              Telemetry with this deviceId attaches to <strong>{asset?.name}</strong>. Leave blank to clear.
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDevOpen(false)}>Cancel</Button>
+            <Button onClick={saveDeviceId} disabled={savingDev}>{savingDev ? "Saving…" : "Save"}</Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </div>

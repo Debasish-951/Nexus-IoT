@@ -1,30 +1,23 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useCallback } from "react";
 import { useLocation } from "wouter";
-import { useListAssets, useListAssetTemplates, useDeleteAsset, getListAssetsQueryKey } from "@workspace/api-client-react";
+import { useListAssets, useDeleteAsset, getListAssetsQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
-import { Skeleton } from "@/components/ui/skeleton";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
-import {
-  ContextMenu, ContextMenuTrigger, ContextMenuContent, ContextMenuItem, ContextMenuSeparator,
-} from "@/components/ui/context-menu";
-import {
-  Blocks, Plus, Search, ChevronLeft, ChevronRight, ChevronDown, Filter, ArrowLeft, Trash2, Pencil,
-} from "lucide-react";
-import { cn } from "@/lib/utils";
-import { format } from "date-fns";
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
+import { Blocks, ArrowLeft } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useCurrentUser } from "@/contexts/UserContext";
-import {
-  Asset, deriveStatus, STATUS_STYLES, siteOf, useAssetHealthMap, HealthBar,
-} from "./assetShared";
+import { Asset } from "./assetShared";
 import CreateAssetWizard from "./CreateAssetWizard";
-
-const PAGE_SIZE = 10;
+import { AssetTreeProvider } from "@/components/asset-tree/AssetTreeContext";
+import { AssetTree } from "@/components/asset-tree/AssetTree";
+import { TreeToolbar } from "@/components/asset-tree/TreeToolbar";
+import AssetDetails from "./AssetDetails";
+import { MousePointerClick } from "lucide-react";
 
 export default function Assets() {
   const [, navigate] = useLocation();
@@ -33,65 +26,65 @@ export default function Assets() {
   const qc = useQueryClient();
   const deleteAsset = useDeleteAsset();
   const { data: assets } = useListAssets();
-  const { data: templates } = useListAssetTemplates();
   const allAssets = (assets as Asset[] | undefined) ?? [];
-  const templateList = (templates as any[] | undefined) ?? [];
+  const canManage = can("manage_assets");
 
   const [search, setSearch] = useState("");
-  const [templateFilter, setTemplateFilter] = useState("all");
-  const [page, setPage] = useState(0);
   const [wizardOpen, setWizardOpen] = useState(false);
-  const [wizardParent, setWizardParent] = useState("");      // preset parent for the wizard
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set()); // collapsed tree nodes
+  const [wizardParent, setWizardParent] = useState("");
+  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());  // empty = all expanded
+  const [selectedId, setSelectedId] = useState<string | null>(null);
 
-  const childrenOf = useMemo(() => {
-    const m: Record<string, number> = {};
-    for (const a of allAssets) if (a.parentId) m[a.parentId] = (m[a.parentId] ?? 0) + 1;
+  // Group children by parent once (memoized) — supports large/deep trees.
+  const childrenByParent = useMemo(() => {
+    const m: Record<string, Asset[]> = {};
+    for (const a of allAssets) {
+      const k = a.parentId ?? "root";
+      (m[k] ||= []).push(a);
+    }
+    for (const k in m) m[k].sort((x, y) => x.name.localeCompare(y.name));
     return m;
   }, [allAssets]);
-  const hasKids = (id: string) => (childrenOf[id] ?? 0) > 0;
-  const toggle = (id: string) => setCollapsed((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
-  const openAddChild = (parentId: string) => { setWizardParent(parentId); setWizardOpen(true); };
 
-  const isFiltering = search.trim().length > 0 || templateFilter !== "all";
+  const allParentIds = useMemo(
+    () => allAssets.filter((a) => (childrenByParent[a.id]?.length ?? 0) > 0).map((a) => a.id),
+    [allAssets, childrenByParent],
+  );
 
-  // Rows: when filtering → flat matches; otherwise → hierarchical (parents then
-  // their children indented beneath, depth-first).
-  const rows = useMemo<{ asset: Asset; depth: number }[]>(() => {
-    if (isFiltering) {
-      const q = search.trim().toLowerCase();
-      return allAssets
-        .filter((a) => {
-          if (templateFilter !== "all" && (a.templateId ?? "") !== templateFilter) return false;
-          if (!q) return true;
-          return a.name.toLowerCase().includes(q) || (a.identifier ?? "").toLowerCase().includes(q);
-        })
-        .map((a) => ({ asset: a, depth: 0 }));
+  // Search filter: show matches + their ancestors (so the path stays visible),
+  // and force-expand while filtering.
+  const visibleIds = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return null;
+    const byId = new Map(allAssets.map((a) => [a.id, a]));
+    const vis = new Set<string>();
+    for (const a of allAssets) {
+      if (!(a.name.toLowerCase().includes(q) || (a.identifier ?? "").toLowerCase().includes(q))) continue;
+      vis.add(a.id);
+      let p = a.parentId ?? null;
+      while (p) { vis.add(p); p = byId.get(p)?.parentId ?? null; }
     }
-    const out: { asset: Asset; depth: number }[] = [];
-    const walk = (parentId: string | null, depth: number) => {
-      allAssets
-        .filter((a) => (a.parentId ?? null) === parentId)
-        .sort((x, y) => x.name.localeCompare(y.name))
-        .forEach((a) => { out.push({ asset: a, depth }); if (!collapsed.has(a.id)) walk(a.id, depth + 1); });
-    };
-    walk(null, 0);
-    return out;
-  }, [allAssets, search, templateFilter, isFiltering, collapsed]);
+    return vis;
+  }, [allAssets, search]);
 
-  // Show the whole tree on one page — pagination would split parents from their
-  // children. The list scrolls; use expand/collapse to manage depth.
-  const pageRows = rows;
-  const healthMap = useAssetHealthMap(pageRows.map((r) => r.asset.id));
-
-  const allParentIds = useMemo(() => allAssets.filter((a) => childrenOf[a.id]).map((a) => a.id), [allAssets, childrenOf]);
+  const filtering = visibleIds !== null;
+  const isExpanded = useCallback(
+    (id: string) => (filtering ? true : !collapsed.has(id)),
+    [filtering, collapsed],
+  );
+  const toggle = useCallback(
+    (id: string) => setCollapsed((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; }),
+    [],
+  );
   const expandAll = () => setCollapsed(new Set());
   const collapseAll = () => setCollapsed(new Set(allParentIds));
+
+  const openAddChild = (parentId: string) => { setWizardParent(parentId); setWizardOpen(true); };
 
   function handleDelete(a: Asset) {
     if (!confirm(`Delete asset "${a.name}"? This also removes its child assets.`)) return;
     deleteAsset.mutate({ id: a.id }, {
-      onSuccess: () => { toast({ title: "Asset deleted" }); qc.invalidateQueries({ queryKey: getListAssetsQueryKey() }); },
+      onSuccess: () => { toast({ title: "Asset deleted" }); if (selectedId === a.id) setSelectedId(null); qc.invalidateQueries({ queryKey: getListAssetsQueryKey() }); },
       onError: () => toast({ title: "Delete failed", variant: "destructive" }),
     });
   }
@@ -114,139 +107,72 @@ export default function Assets() {
     } finally { setSavingEdit(false); }
   }
 
+  const selectedAsset = selectedId ? allAssets.find((a) => a.id === selectedId) ?? null : null;
+
+  const ctx = {
+    childrenByParent, selectedId, setSelectedId, isExpanded, toggle, visibleIds, canManage,
+    onAddChild: openAddChild,
+    onRename: openEdit,
+    onDelete: handleDelete,
+    onAssignTemplate: (a: Asset) => navigate(`/assets/${a.id}`),
+  };
+
   return (
-    <div className="p-6 space-y-4 max-w-7xl mx-auto">
-      <button onClick={() => (window.history.length > 1 ? window.history.back() : navigate("/asset-management"))} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+    <div className="p-6 space-y-3 h-full flex flex-col">
+      <button onClick={() => (window.history.length > 1 ? window.history.back() : navigate("/asset-management"))} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground shrink-0">
         <ArrowLeft className="w-4 h-4" /> Back
       </button>
-      {/* Header */}
-      <div className="flex items-center justify-between gap-3 flex-wrap">
-        <div>
-          <h1 className="text-xl font-bold flex items-center gap-2"><Blocks className="w-5 h-5 text-primary" /> Assets</h1>
-          <p className="text-sm text-muted-foreground">View, search and manage all assets</p>
-        </div>
-        {can("manage_assets") && (
-          <Button onClick={() => { setWizardParent(""); setWizardOpen(true); }}><Plus className="w-4 h-4 mr-1.5" /> Create Asset</Button>
-        )}
+      <div className="shrink-0">
+        <h1 className="text-xl font-bold flex items-center gap-2"><Blocks className="w-5 h-5 text-primary" /> Assets</h1>
+        <p className="text-sm text-muted-foreground">Browse the asset hierarchy — select a node to see its details.</p>
       </div>
 
-      {/* Toolbar */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <div className="relative flex-1 min-w-56 max-w-md">
-          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
-          <Input placeholder="Search assets…" value={search} onChange={(e) => { setSearch(e.target.value); setPage(0); }} className="pl-8 h-9" />
-        </div>
-        <div className="flex items-center gap-2">
-          <Filter className="w-4 h-4 text-muted-foreground" />
-          <Select value={templateFilter} onValueChange={(v) => { setTemplateFilter(v); setPage(0); }}>
-            <SelectTrigger className="h-9 w-48 text-sm"><SelectValue placeholder="All templates" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All templates</SelectItem>
-              {templateList.map((t) => <SelectItem key={t.id} value={t.id}>{t.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
-        {!isFiltering && (
-          <div className="flex items-center gap-1">
-            <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={expandAll}>Expand all</Button>
-            <Button variant="ghost" size="sm" className="h-8 text-xs" onClick={collapseAll}>Collapse all</Button>
-          </div>
-        )}
-        {can("manage_assets") && (
-          <span className="text-xs text-muted-foreground ml-auto">Right-click a row for actions</span>
-        )}
-      </div>
-
-      {/* Table — full tree on one page, scrolls vertically */}
-      <Card className="shadow-sm overflow-hidden">
-        <div className="overflow-auto max-h-[calc(100vh-260px)]">
-          <table className="w-full text-sm">
-            <thead className="sticky top-0 z-10">
-              <tr className="border-b border-border bg-muted text-xs text-muted-foreground">
-                <th className="text-left px-4 py-2.5 font-medium">Asset Name</th>
-                <th className="text-left px-4 py-2.5 font-medium">Template</th>
-                <th className="text-left px-4 py-2.5 font-medium">Site</th>
-                <th className="text-left px-4 py-2.5 font-medium">Health</th>
-                <th className="text-left px-4 py-2.5 font-medium">Status</th>
-                <th className="text-left px-4 py-2.5 font-medium">Last Updated</th>
-              </tr>
-            </thead>
-            <tbody>
-              {!assets ? (
-                Array.from({ length: 6 }).map((_, i) => (
-                  <tr key={i} className="border-b border-border/50"><td colSpan={6} className="px-4 py-3"><Skeleton className="h-4 w-full" /></td></tr>
-                ))
-              ) : pageRows.length === 0 ? (
-                <tr><td colSpan={6} className="px-4 py-16 text-center text-muted-foreground">
-                  <Blocks className="w-8 h-8 mx-auto mb-2 opacity-20" />
-                  <p className="text-sm">{allAssets.length === 0 ? "No assets yet" : "No assets match your filters"}</p>
-                  {allAssets.length === 0 && can("manage_assets") && (
-                    <Button size="sm" variant="outline" className="mt-3" onClick={() => { setWizardParent(""); setWizardOpen(true); }}><Plus className="w-3.5 h-3.5 mr-1" /> Create your first asset</Button>
-                  )}
-                </td></tr>
-              ) : (
-                pageRows.map(({ asset: a, depth }) => {
-                  const h = healthMap[a.id] ?? null;
-                  const status = deriveStatus(a, h);
-                  const row = (
-                    <tr key={a.id} onClick={() => navigate(`/assets/${a.id}`)}
-                      className="border-b border-border/50 hover:bg-muted/30 transition-colors cursor-pointer group">
-                      <td className="px-4 py-2.5 font-medium">
-                        <span className="flex items-center gap-1" style={{ paddingLeft: depth * 18 }}>
-                          {!isFiltering && hasKids(a.id) ? (
-                            <button onClick={(e) => { e.stopPropagation(); toggle(a.id); }}
-                              className="p-0.5 rounded hover:bg-muted text-muted-foreground shrink-0" title={collapsed.has(a.id) ? "Expand" : "Collapse"}>
-                              {collapsed.has(a.id) ? <ChevronRight className="w-3.5 h-3.5" /> : <ChevronDown className="w-3.5 h-3.5" />}
-                            </button>
-                          ) : (
-                            <span className="w-[18px] shrink-0 text-center text-muted-foreground/40">{depth > 0 ? "└" : ""}</span>
-                          )}
-                          <span className="truncate">{a.name}</span>
-                        </span>
-                      </td>
-                      <td className="px-4 py-2.5 text-muted-foreground">{a.templateName || "—"}</td>
-                      <td className="px-4 py-2.5 text-muted-foreground">{siteOf(a, allAssets)}</td>
-                      <td className="px-4 py-2.5"><HealthBar pct={h?.freshnessPct ?? null} /></td>
-                      <td className="px-4 py-2.5"><span className={cn("text-xs px-2 py-0.5 rounded-full font-medium", STATUS_STYLES[status])}>{status}</span></td>
-                      <td className="px-4 py-2.5 text-xs text-muted-foreground">{a.updatedAt ? format(new Date(a.updatedAt), "MM/dd HH:mm") : "—"}</td>
-                    </tr>
-                  );
-                  if (!can("manage_assets")) return row;
-                  return (
-                    <ContextMenu key={a.id}>
-                      <ContextMenuTrigger asChild>{row}</ContextMenuTrigger>
-                      <ContextMenuContent className="w-48">
-                        <ContextMenuItem onSelect={() => openAddChild(a.id)}>
-                          <Plus className="w-4 h-4 mr-2" /> Add Child Asset
-                        </ContextMenuItem>
-                        <ContextMenuItem onSelect={() => openEdit(a)}>
-                          <Pencil className="w-4 h-4 mr-2" /> Edit
-                        </ContextMenuItem>
-                        <ContextMenuSeparator />
-                        <ContextMenuItem onSelect={() => handleDelete(a)} className="text-destructive focus:text-destructive">
-                          <Trash2 className="w-4 h-4 mr-2" /> Delete
-                        </ContextMenuItem>
-                      </ContextMenuContent>
-                    </ContextMenu>
-                  );
-                })
-              )}
-            </tbody>
-          </table>
-        </div>
-        <div className="px-4 py-2 border-t border-border text-xs text-muted-foreground">{rows.length} asset{rows.length !== 1 ? "s" : ""}</div>
+      <Card className="flex-1 min-h-0 overflow-hidden shadow-sm">
+        <AssetTreeProvider value={ctx}>
+          <ResizablePanelGroup direction="horizontal" className="h-full">
+            <ResizablePanel defaultSize={28} minSize={18} maxSize={45}>
+              <div className="flex flex-col h-full border-r border-border">
+                <TreeToolbar
+                  query={search} setQuery={setSearch}
+                  onExpandAll={expandAll} onCollapseAll={collapseAll}
+                  onAdd={() => { setWizardParent(""); setWizardOpen(true); }}
+                  canManage={canManage}
+                />
+                {/* independent scroll for the hierarchy */}
+                <div className="flex-1 overflow-auto">
+                  <AssetTree loading={!assets} />
+                </div>
+                <div className="px-3 py-1.5 border-t border-border text-[11px] text-muted-foreground shrink-0">{allAssets.length} asset{allAssets.length !== 1 ? "s" : ""}</div>
+              </div>
+            </ResizablePanel>
+            <ResizableHandle withHandle />
+            <ResizablePanel defaultSize={72}>
+              {/* Full asset details inline — no separate page. */}
+              <div className="h-full overflow-auto">
+                {selectedAsset ? (
+                  <AssetDetails assetId={selectedAsset.id} embedded />
+                ) : (
+                  <div className="flex flex-col items-center justify-center h-full text-muted-foreground p-8 text-center">
+                    <MousePointerClick className="w-10 h-10 mb-3 opacity-20" />
+                    <p className="text-sm">Select an asset from the tree to view its full details.</p>
+                  </div>
+                )}
+              </div>
+            </ResizablePanel>
+          </ResizablePanelGroup>
+        </AssetTreeProvider>
       </Card>
 
-      <CreateAssetWizard open={wizardOpen} onOpenChange={setWizardOpen} initialParentId={wizardParent} onCreated={(id) => navigate(`/assets/${id}`)} />
+      <CreateAssetWizard open={wizardOpen} onOpenChange={setWizardOpen} initialParentId={wizardParent} onCreated={(id) => { setSelectedId(id); }} />
 
       <Dialog open={!!editAsset} onOpenChange={(v) => { if (!v) setEditAsset(null); }}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Edit Asset</DialogTitle></DialogHeader>
+          <DialogHeader><DialogTitle>Rename Asset</DialogTitle></DialogHeader>
           <div className="space-y-1.5">
             <Label className="text-sm">Asset Name</Label>
             <Input value={editName} onChange={(e) => setEditName(e.target.value)} autoFocus
               onKeyDown={(e) => { if (e.key === "Enter") saveEdit(); }} />
-            {editAsset && <p className="text-xs text-muted-foreground">Identifier <code className="font-mono bg-muted px-1 rounded">{editAsset.identifier}</code> can't be changed (it's the device link).</p>}
+            {editAsset && <p className="text-xs text-muted-foreground">Identifier <code className="font-mono bg-muted px-1 rounded">{editAsset.identifier ?? "—"}</code> can't be changed (it's the device link).</p>}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditAsset(null)}>Cancel</Button>
