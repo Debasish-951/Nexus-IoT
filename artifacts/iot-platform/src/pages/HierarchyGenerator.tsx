@@ -40,7 +40,10 @@ function node(name: string, children: HNode[] = []): HNode { return { id: `n${ni
 function attrNode(name: string, dataType: string, uom: string): HNode {
   return { id: `n${nid++}`, name: name.trim(), children: [], attr: true, dataType, uom };
 }
-const ENVELOPE = new Set(["deviceid", "device_id", "timestamp", "timestampunix", "capturedat", "captured_at", "receivedat", "id", "version", "source"]);
+const ENVELOPE = new Set(["deviceid", "device_id", "timestamp", "timestampunix", "capturedat", "captured_at", "receivedat", "id", "version", "source", "machineid", "machine_id", "assetid", "asset_id"]);
+// Ordered hierarchy level keys recognised in FLAT rows. The path to a machine is
+// built from whichever of these the row has, in this order, then the machine name.
+const LEVEL_KEYS = ["site", "plant", "factory", "building", "unit", "area", "zone", "department", "dept", "division", "process", "subprocess", "sub_process", "stage", "line", "station", "cell", "section"];
 function guessUom(name: string): string {
   const l = name.toLowerCase();
   return Object.entries(UOM_GUESS).find(([w]) => l.includes(w))?.[1] ?? "";
@@ -111,8 +114,64 @@ function parseText(t: string): HNode[] {
   return roots;
 }
 
+// The hierarchy-level columns of a flat row = the string columns that come BEFORE
+// the `machine` column (position-based, so renamed/custom level names like
+// "department"→"Wet Processing" still count as levels, not attributes). Known
+// LEVEL_KEYS anywhere are also accepted as a fallback.
+function levelKeysOf(row: any): string[] {
+  const keys = Object.keys(row);
+  const mIdx = keys.indexOf("machine");
+  const before = mIdx >= 0 ? keys.slice(0, mIdx) : keys;
+  const out = before.filter((k) => !ENVELOPE.has(k.toLowerCase()) && typeof row[k] === "string" && (row[k] as string).trim());
+  for (const k of keys) {
+    if (LEVEL_KEYS.includes(k.toLowerCase()) && !out.includes(k) && typeof row[k] === "string" && (row[k] as string).trim()) out.push(k);
+  }
+  return out;
+}
+
+// Detect a FLAT array of machine rows: [{ unit, department, process, machine, powerKW, … }, …].
+// Each row is one machine reading with its location as sibling columns (no nesting).
+function isFlatRows(arr: any[]): boolean {
+  return arr.length > 0 && arr.every((r) =>
+    r && typeof r === "object" && !Array.isArray(r) &&
+    typeof r.machine === "string" && !("children" in r) &&
+    levelKeysOf(r).length > 0);
+}
+
+// Convert flat machine rows into the nested tree. Level columns become grouping
+// nodes (in column order); the machine name is the leaf; every remaining scalar
+// column becomes an attribute (metric) on that machine.
+function parseFlatRows(rows: any[]): HNode[] {
+  const roots: HNode[] = [];
+  for (const row of rows) {
+    const levelKeys = levelKeysOf(row);
+    const path = levelKeys.map((k) => (row[k] as string).trim());
+    let level = roots;
+    for (const name of path) {
+      let f = level.find((n) => !n.attr && n.name.toLowerCase() === name.toLowerCase());
+      if (!f) { f = node(name); level.push(f); }
+      level = f.children;
+    }
+    const mName = (typeof row.machine === "string" && row.machine.trim()) || "Machine";
+    let m = level.find((n) => n.name.toLowerCase() === mName.toLowerCase());
+    if (!m) { m = node(mName); level.push(m); }
+    for (const [k, v] of Object.entries(row)) {
+      const lk = k.toLowerCase();
+      if (lk === "machine" || lk === "name" || ENVELOPE.has(lk) || levelKeys.includes(k)) continue;
+      if (v != null && typeof v === "object") continue;
+      if (m.children.some((c) => c.name.toLowerCase() === lk)) continue;
+      const dt = typeof v === "number" ? (Number.isInteger(v) ? "number" : "double") : typeof v === "boolean" ? "boolean" : "text";
+      m.children.push(attrNode(k, dt, guessUom(k)));
+    }
+  }
+  return roots;
+}
+
 function parseJson(t: string): HNode[] {
   const raw = JSON.parse(t);
+
+  // Flat array of machine rows → rebuild the nested hierarchy.
+  if (Array.isArray(raw) && isFlatRows(raw)) return parseFlatRows(raw);
 
   // A leaf "machine/reading" object: its `machine`/`name` is the node name and
   // every scalar field becomes an ATTRIBUTE (temperature, status, batchId, …).
@@ -230,6 +289,30 @@ function deviceIdFor(name: string, ancestors: string[]): string {
   return MACHINE_DEVICE_MAP[key] ?? "";
 }
 
+// Read each machine's deviceId straight from the pasted JSON payload, keyed by
+// its full path (so it maps exactly to the tree node). This is the source of truth.
+const PAYLOAD_ENV = new Set(["deviceid", "timestamp", "timestampunix", "capturedat", "receivedat", "machine", "assetid", "name"]);
+function extractPayloadDevices(text: string): Record<string, string> {
+  const map: Record<string, string> = {};
+  let raw: any;
+  try { raw = JSON.parse(text); } catch { return map; }
+  function walk(node: any, path: string[]) {
+    if (Array.isArray(node)) {
+      for (const item of node) {
+        if (item && typeof item === "object" && !Array.isArray(item) && typeof item.deviceId === "string") {
+          const name = (typeof item.machine === "string" && item.machine) || (typeof item.name === "string" && item.name) || "Machine";
+          map[[...path, name].join("/").toLowerCase()] = item.deviceId;
+        } else walk(item, path);
+      }
+    } else if (node && typeof node === "object") {
+      for (const [k, v] of Object.entries(node)) { if (PAYLOAD_ENV.has(k.toLowerCase())) continue; if (v && typeof v === "object") walk(v, [...path, k]); }
+    }
+  }
+  walk(raw, []);
+  return map;
+}
+const machinePathKey = (name: string, ancestors: string[]) => [...[...ancestors].reverse(), name].join("/").toLowerCase();
+
 // ─────────────────────────── Page ───────────────────────────
 export default function HierarchyGenerator() {
   const [, navigate] = useLocation();
@@ -252,6 +335,8 @@ export default function HierarchyGenerator() {
   const [genAssets, setGenAssets] = useState(false);
   const [genProgress, setGenProgress] = useState("");
   const [deviceIds, setDeviceIds] = useState<Record<string, string>>({}); // machine nodeId -> device id
+  const [payloadDev, setPayloadDev] = useState<Record<string, string>>({}); // payload pathKey -> device id
+  const [payloadRootDevice, setPayloadRootDevice] = useState(""); // top-level deviceId from the payload (the only valid root device)
 
   useEffect(() => {
     fetch(`${BASE}/api/asset-templates`).then((r) => (r.ok ? r.json() : [])).then((d) => setTemplates(Array.isArray(d) ? d : [])).catch(() => {});
@@ -262,7 +347,6 @@ export default function HierarchyGenerator() {
       const used = new Set((assets as any[]).map((a) => a.identifier).filter(Boolean));
       const free = (seen as any[]).map((d) => d.deviceId).filter((id: string) => !used.has(id));
       setFreeDevices(free);
-      setRootDevice((cur) => cur || free[0] || "");
     }).catch(() => {});
   }, []);
 
@@ -272,6 +356,20 @@ export default function HierarchyGenerator() {
       const parsed = parseHierarchy(text);
       if (parsed.length === 0) { setParseError("No nodes found in the input."); return; }
       setTree(parsed); setAnalyzed(true); setCollapsed(new Set());
+      // Root device id + per-machine device ids come straight from the payload.
+      setPayloadDev(extractPayloadDevices(text));
+      try {
+        const raw = JSON.parse(text);
+        // Root device id: top-level `deviceId` (nested payload) or the first row's
+        // `deviceId` (flat array of rows — they all share the same root device).
+        const dev = (raw && typeof raw.deviceId === "string" && raw.deviceId.trim())
+          ? raw.deviceId.trim()
+          : (Array.isArray(raw) && raw[0] && typeof raw[0].deviceId === "string" && raw[0].deviceId.trim())
+            ? raw[0].deviceId.trim()
+            : "";
+        if (dev) { setPayloadRootDevice(dev); setRootDevice(dev); }
+        else { setPayloadRootDevice(""); }
+      } catch { setPayloadRootDevice(""); }
     } catch (e: any) {
       setParseError(`Could not parse input: ${e?.message ?? "invalid format"}`);
     }
@@ -342,14 +440,14 @@ export default function HierarchyGenerator() {
     return out;
   }, [tree]);
 
-  // Prefill device ids from the mapping; keep any manual edits (keyed by node id).
+  // Device ids come from the payload (by path); fall back to the name mapping.
   useEffect(() => {
-    setDeviceIds((prev) => {
+    setDeviceIds(() => {
       const next: Record<string, string> = {};
-      for (const m of machineNodes) next[m.node.id] = prev[m.node.id] ?? deviceIdFor(m.name, m.ancestors);
+      for (const m of machineNodes) next[m.node.id] = payloadDev[machinePathKey(m.name, m.ancestors)] ?? deviceIdFor(m.name, m.ancestors);
       return next;
     });
-  }, [machineNodes]);
+  }, [machineNodes, payloadDev]);
 
   function toggle(id: string) { setCollapsed((p) => { const s = new Set(p); s.has(id) ? s.delete(id) : s.add(id); return s; }); }
   function rename(id: string, name: string) {
@@ -401,6 +499,11 @@ export default function HierarchyGenerator() {
   // Machines get their matching template applied (attributes stamped).
   async function generateAssets() {
     if (!can("manage_assets")) { toast({ title: "Not allowed", description: "You need asset management permission.", variant: "destructive" }); return; }
+    if (!rootDevice.trim()) { toast({ title: "Root device id is required", variant: "destructive" }); return; }
+    if (payloadRootDevice && rootDevice.trim() !== payloadRootDevice) {
+      toast({ title: "Wrong device id", description: `Must match the payload's device id "${payloadRootDevice}".`, variant: "destructive" });
+      return;
+    }
     if (validation.errors.length) { toast({ title: "Fix validation errors first", variant: "destructive" }); return; }
     setGenAssets(true);
     setGenProgress("");
@@ -434,8 +537,9 @@ export default function HierarchyGenerator() {
     }
 
     async function walk(n: HNode, parentId: string, ancestors: string[]) {
-      // Machine (leaf) nodes use the Device ID assigned in the panel below.
-      const id = await makeAsset(n.name, parentId, (deviceIds[n.id] ?? "").trim());
+      // Single-device model: only the root owns a device; every other node
+      // (units/processes/machines) is device-less and inherits the root device.
+      const id = await makeAsset(n.name, parentId, "");
       if (!id) return;
       for (const c of n.children) {
         if (isAttribute(c, n)) continue;   // attribute leaves are template-stamped, not assets
@@ -565,42 +669,35 @@ export default function HierarchyGenerator() {
                     <Input value={rootName} onChange={(e) => setRootName(e.target.value)} className="h-8 text-sm" />
                   </div>
                   <div className="space-y-1">
-                    <Label className="text-xs">Root device id (optional)</Label>
-                    <Select value={rootDevice || "__none"} onValueChange={(v) => setRootDevice(v === "__none" ? "" : v)}>
-                      <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
-                      <SelectContent className="max-h-60 overflow-y-auto">
-                        <SelectItem value="__none">— None (grouping root) —</SelectItem>
-                        {freeDevices.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
-                      </SelectContent>
-                    </Select>
+                    <Label className="text-xs">Root device id <span className="text-destructive">*</span></Label>
+                    <Input value={rootDevice} onChange={(e) => setRootDevice(e.target.value)}
+                      placeholder="e.g. testing" className={cn("h-8 text-sm font-mono", payloadRootDevice && rootDevice.trim() !== payloadRootDevice && "border-destructive focus-visible:ring-destructive/40")} />
+                    {payloadRootDevice && rootDevice.trim() !== payloadRootDevice && (
+                      <p className="text-[11px] text-destructive">Wrong device id — must match the payload's device id <code className="font-mono">{payloadRootDevice}</code>.</p>
+                    )}
                   </div>
                 </div>
                 {machineNodes.length > 0 && (
                   <div className="border border-border rounded-md">
                     <div className="px-3 py-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground border-b border-border">
-                      Machine Device IDs ({machineNodes.length}) — prefilled, editable
+                      Machines ({machineNodes.length}) — inherit the root device
                     </div>
                     <div className="max-h-52 overflow-auto divide-y divide-border">
                       {machineNodes.map((m) => (
                         <div key={m.node.id} className="flex items-center gap-2 px-3 py-1.5">
                           <span className="text-xs flex-1 truncate" title={m.name}>{m.name}</span>
-                          <Input
-                            value={deviceIds[m.node.id] ?? ""}
-                            onChange={(e) => setDeviceIds((prev) => ({ ...prev, [m.node.id]: e.target.value }))}
-                            placeholder="device id"
-                            className="h-7 w-40 text-xs font-mono"
-                          />
+                          <code className="text-xs font-mono text-slate-500 bg-muted rounded px-2 py-1 w-40 text-right truncate" title="Inherited from root device">{(rootDevice || "root") + " (inherited)"}</code>
                         </div>
                       ))}
                     </div>
                   </div>
                 )}
                 <Button variant="outline" className="w-full" onClick={generateAssets}
-                  disabled={genAssets || validation.errors.length > 0 || !can("manage_assets")}>
+                  disabled={genAssets || !rootDevice.trim() || (!!payloadRootDevice && rootDevice.trim() !== payloadRootDevice) || validation.errors.length > 0 || !can("manage_assets")}>
                   {genAssets ? <><Loader2 className="w-4 h-4 mr-1.5 animate-spin" /> {genProgress || "Building…"}</> : <><Layers className="w-4 h-4 mr-1.5" /> Generate Asset Tree</>}
                 </Button>
                 <p className="text-[11px] text-muted-foreground">
-                  Each machine's Device ID (above) is prefilled from the mapping — edit any of them, then Generate. Grouping levels stay device-less. Leave root device <strong>None</strong> for per-machine mode.
+                  Root device id is required (prefilled from the payload's top-level <code>deviceId</code>). Each machine's Device ID (above) is prefilled from the mapping — edit any, then Generate.
                 </p>
               </div>
             </>

@@ -64,7 +64,12 @@ router.post("/assets", async (req, res): Promise<void> => {
       })
       .returning();
   } catch (err: any) {
-    res.status(400).json({ error: err?.message ?? "Failed to create asset" });
+    const msg = String(err?.message ?? "");
+    // Unique violation on identifier → device already bound to another asset.
+    const friendly = /unique|duplicate key/i.test(msg) && devId
+      ? `Device id "${devId}" is already linked to another asset. Each device id can belong to only one asset — leave the Device ID blank for grouping assets.`
+      : (msg || "Failed to create asset");
+    res.status(400).json({ error: friendly });
     return;
   }
 

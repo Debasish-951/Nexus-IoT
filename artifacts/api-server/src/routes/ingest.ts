@@ -143,6 +143,56 @@ export function extractMachineRecords(body: unknown): { deviceId: string; timest
   return recs;
 }
 
+// Extract per-machine records from a nested tree keyed by NAME (not per-machine
+// deviceId). Each leaf machine object (has a `machine` field) yields its metrics
+// plus the name path to it, e.g.
+//   { "Unit 1": { "Synthetic Dyeing": { "Drying": [{ machine:"RF Dryer", powerKW:8.85 }] } } }
+//   → { namePath: ["Unit 1","Synthetic Dyeing","Drying","RF Dryer"], metrics: { powerKW:8.85, … } }
+// Used by the single-device model: the whole tree belongs to the root device, and
+// each machine's slice is attributed to the asset resolved by this name path.
+export function extractMachineRecordsByName(body: unknown): { namePath: string[]; metrics: Record<string, unknown> }[] {
+  const out: { namePath: string[]; metrics: Record<string, unknown> }[] = [];
+  function walk(v: unknown, path: string[]): void {
+    if (Array.isArray(v)) {
+      for (const item of v) {
+        if (item && typeof item === "object" && !Array.isArray(item)) {
+          const o = item as Record<string, unknown>;
+          const machine = typeof o.machine === "string" && o.machine.trim() ? o.machine.trim() : null;
+          if (machine) {
+            const metrics: Record<string, unknown> = {};
+            for (const [k, val] of Object.entries(o)) {
+              if (k === "deviceId" || k === "machine" || ENVELOPE_FIELDS.has(k)) continue;
+              if (val != null && typeof val !== "object") metrics[k] = val;
+            }
+            out.push({ namePath: [...path, machine], metrics });
+          } else walk(o, path);
+        }
+      }
+    } else if (v && typeof v === "object") {
+      for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
+        if (ENVELOPE_FIELDS.has(k)) continue;
+        walk(val, [...path, k]);
+      }
+    }
+  }
+  walk(body, []);
+  return out;
+}
+
+// Resolve an asset id by walking a name path down from a root asset.
+function resolveAssetByPath(
+  rootId: string, names: string[], childrenOf: Map<string | null, { id: string; name: string }[]>
+): string | null {
+  let cur = rootId;
+  for (const name of names) {
+    const kids = childrenOf.get(cur) ?? [];
+    const match = kids.find((k) => k.name === name);
+    if (!match) return null;
+    cur = match.id;
+  }
+  return cur;
+}
+
 // ── Operator evaluation ───────────────────────────────────────────────────────
 function evalOp(value: number, op: string, threshold: number): boolean {
   switch (op) {
@@ -354,9 +404,10 @@ export async function processNormalised(n: NormalisedPayload, assetIdHint?: stri
   }));
   await db.insert(telemetryTable).values(records as any[]);
 
-  // Update dynamic attributes — match by tagName OR sourceMetric, case-insensitively
-  // (telemetry keys can be camelCase while stored tagNames are lowercased). Match
-  // both the full "deviceId.metric" tag and a bare "metric" tag.
+  // Update dynamic attributes — match either the full "deviceId.metric" tag OR the
+  // bare metric name (case-insensitive; telemetry keys are camelCase, tagNames lower).
+  // Safe because the caller (/ingest/payload) only reaches this after the payload's
+  // root deviceId matched an asset — wrong device id ⇒ no asset ⇒ no values.
   for (const [metric, value] of Object.entries(n.metrics)) {
     const full = `${n.deviceId}.${metric}`.toLowerCase();
     const bare = metric.toLowerCase();
@@ -367,7 +418,7 @@ export async function processNormalised(n: NormalisedPayload, assetIdHint?: stri
       ));
     // Secondary: explicit sourceMetric remapping (attribute.sourceMetric = "energy_meter_kwh")
     await db.update(attributesTable).set({ value, timestamp: ts })
-      .where(and(eq(attributesTable.assetId, assetId as string), sql`lower(${attributesTable.sourceMetric}) = ${bare}`));
+      .where(and(eq(attributesTable.assetId, assetId as string), sql`lower(${attributesTable.sourceMetric}) = ${metric.toLowerCase()}`));
   }
   if (n.sensorSerial) {
     await db.update(attributesTable).set({ value: n.sensorSerial, timestamp: ts })
@@ -479,26 +530,9 @@ router.post("/ingest/validate", optionalApiKeyAuth("ingest:write"), async (req, 
 router.post("/ingest/payload", optionalApiKeyAuth("ingest:write"), async (req, res): Promise<void> => {
   const body = req.body as Record<string, unknown>;
 
-  // Multi-device tree: each machine object has its own deviceId → ingest one
-  // record per machine (attributed to its own asset). Per-machine only.
-  const machineRecords = extractMachineRecords(body);
-  if (machineRecords.length > 0) {
-    let written = 0;
-    const events: any[] = [];
-    for (const rec of machineRecords) {
-      const r = await processNormalised({ deviceId: rec.deviceId, timestamp: rec.timestamp, metrics: rec.metrics, payloadFormat: "flat" });
-      written += r.recordsWritten;
-      events.push(...r.alarmEvents);
-    }
-    res.json({
-      success: true, machines: machineRecords.length, recordsWritten: written,
-      message: `Ingested ${machineRecords.length} machine(s), ${written} metric(s)`,
-      alarmsTriggered: events.filter((e) => e.event === "triggered").length,
-      alarmsCleared: events.filter((e) => e.event === "cleared").length, alarmEvents: events,
-    });
-    return;
-  }
-
+  // Single-device model: the whole tree is attributed to the top-level deviceId
+  // (e.g. "testing" = the root). normalise() deep-flattens the nested tree into
+  // dotted metric keys; per-machine views resolve their slice by name.
   const normalised = normalise(body);
   if (!normalised) {
     if (Array.isArray(req.body) && req.body.length > 0) {
@@ -519,12 +553,42 @@ router.post("/ingest/payload", optionalApiKeyAuth("ingest:write"), async (req, r
     return;
   }
   const assetIdHint = typeof body.assetId === "string" ? body.assetId : undefined;
+  // 1) Attribute the whole flattened tree to the root device owner (identifier ==
+  //    payload deviceId). By-Asset dashboards read these dotted keys and filter by name.
   const result = await processNormalised(normalised, assetIdHint);
+
+  // 2) Distribute each machine's own slice to its asset, resolved by NAME path under
+  //    the root. This populates every machine's own Attributes/Telemetry. Gated on the
+  //    root device having matched an asset — a wrong root device id ⇒ no root asset ⇒
+  //    nothing distributed (no values anywhere), which is the intended behaviour.
+  let machinesAttributed = 0;
+  if (result.assetId) {
+    const recs = extractMachineRecordsByName(body);
+    if (recs.length > 0) {
+      const all = await db.select({ id: assetsTable.id, name: assetsTable.name, parentId: assetsTable.parentId }).from(assetsTable);
+      const childrenOf = new Map<string | null, { id: string; name: string }[]>();
+      for (const a of all) {
+        const arr = childrenOf.get(a.parentId) ?? [];
+        arr.push({ id: a.id, name: a.name });
+        childrenOf.set(a.parentId, arr);
+      }
+      for (const rec of recs) {
+        const machineAssetId = resolveAssetByPath(result.assetId, rec.namePath, childrenOf);
+        if (!machineAssetId) continue;
+        await processNormalised(
+          { deviceId: normalised.deviceId, timestamp: normalised.timestamp, metrics: rec.metrics, payloadFormat: "flat" },
+          machineAssetId,
+        );
+        machinesAttributed++;
+      }
+    }
+  }
 
   const triggered = result.alarmEvents.filter((e) => e.event === "triggered");
   const cleared   = result.alarmEvents.filter((e) => e.event === "cleared");
   res.json({ success: true, recordsWritten: result.recordsWritten, assetId: result.assetId,
-    assetName: result.assetName, message: `Ingested ${result.recordsWritten} metric(s)`,
+    assetName: result.assetName, machinesAttributed,
+    message: `Ingested ${result.recordsWritten} metric(s); ${machinesAttributed} machine(s) attributed`,
     alarmsTriggered: triggered.length, alarmsCleared: cleared.length, alarmEvents: result.alarmEvents });
 });
 

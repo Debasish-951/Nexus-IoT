@@ -27,7 +27,17 @@ interface NavItem {
 
 const navItems: NavItem[] = [
   { label: "Home", href: "/", icon: Home },
-  { label: "Asset Management", href: "/asset-management", icon: LayoutDashboard },
+  {
+    label: "Asset Management",
+    href: "/asset-management",
+    icon: LayoutDashboard,
+    children: [
+      { label: "Asset Templates",     href: "/asset-templates",     icon: FileText },
+      { label: "Assets",              href: "/assets",              icon: Blocks },
+      { label: "Media Library",       href: "/media-library",       icon: Image },
+      { label: "Hierarchy Generator", href: "/hierarchy-generator", icon: Cpu },
+    ],
+  },
   { label: "Data Explorer", href: "/data-explorer", icon: BarChart2 },
   {
     label: "AI Assistant",
@@ -116,26 +126,40 @@ function NavGroup({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
     );
   }
 
+  const headerClasses = cn(
+    "flex items-center gap-2.5 px-3 py-2.5 rounded-md text-[15px] cursor-pointer transition-colors",
+    isActive
+      ? item.href ? "bg-sidebar-accent text-sidebar-primary font-medium" : "text-sidebar-primary font-medium"
+      : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
+  );
+  const testId = `nav-group-${item.label.toLowerCase().replace(/\s/g, "-")}`;
+
   return (
     <div>
-      <button
-        onClick={() => setOpen((o) => !o)}
-        data-testid={`nav-group-${item.label.toLowerCase().replace(/\s/g, "-")}`}
-        className={cn(
-          "w-full flex items-center gap-2.5 px-3 py-2.5 rounded-md text-[15px] cursor-pointer transition-colors",
-          isActive
-            ? "text-sidebar-primary font-medium"
-            : "text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground"
-        )}
-      >
-        <item.icon className="w-[18px] h-[18px] shrink-0" />
-        {!collapsed && (
-          <>
-            <span className="flex-1 text-left">{item.label}</span>
-            {open ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
-          </>
-        )}
-      </button>
+      {item.href ? (
+        // Group with a landing page: label navigates, chevron toggles the children.
+        <div className={cn(headerClasses, "w-full")}>
+          <Link href={item.href} className="flex items-center gap-2.5 flex-1 min-w-0" data-testid={testId}>
+            <item.icon className="w-[18px] h-[18px] shrink-0" />
+            {!collapsed && <span className="flex-1 text-left truncate">{item.label}</span>}
+          </Link>
+          {!collapsed && (
+            <button onClick={(e) => { e.preventDefault(); setOpen((o) => !o); }} className="shrink-0" aria-label="Toggle section">
+              {open ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+            </button>
+          )}
+        </div>
+      ) : (
+        <button onClick={() => setOpen((o) => !o)} data-testid={testId} className={cn(headerClasses, "w-full")}>
+          <item.icon className="w-[18px] h-[18px] shrink-0" />
+          {!collapsed && (
+            <>
+              <span className="flex-1 text-left">{item.label}</span>
+              {open ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
+            </>
+          )}
+        </button>
+      )}
       {open && !collapsed && (
         <div className="ml-5 mt-0.5 border-l border-sidebar-border pl-2 space-y-0.5">
           {item.children.map((child) => {

@@ -42,6 +42,7 @@ export default function CreateAssetWizard({
   const [name, setName] = useState("");
   const [parentId, setParentId] = useState("");
   const [deviceId, setDeviceId] = useState("");
+  const [hasDevice, setHasDevice] = useState(false);
   const [deviceSearch, setDeviceSearch] = useState("");
   const [devices, setDevices] = useState<SeenDevice[]>([]);
   const [submitting, setSubmitting] = useState(false);
@@ -69,7 +70,7 @@ export default function CreateAssetWizard({
   // Reset on open; refresh templates + load transmitting devices.
   useEffect(() => {
     if (!open) return;
-    setStep(0); setTemplateId(""); setTemplateSearch(""); setName(""); setParentId(initialParentId ?? ""); setDeviceId(""); setDeviceSearch("");
+    setStep(0); setTemplateId(""); setTemplateSearch(""); setName(""); setParentId(initialParentId ?? ""); setDeviceId(""); setHasDevice(false); setDeviceSearch("");
     qc.invalidateQueries({ queryKey: getListAssetTemplatesQueryKey() });
     qc.invalidateQueries({ queryKey: getListAssetsQueryKey() });
     reloadDevices();
@@ -83,16 +84,20 @@ export default function CreateAssetWizard({
   const isChild = !!parentId;
   const effectiveTemplateId = childMode ? (parent?.templateId ?? "") : templateId;
   const template = templateList.find((t) => t.id === effectiveTemplateId);
-  // Children have no device id of their own — they share the parent/root device.
-  // Server stores identifier = null for any asset with a parent.
-  const finalIdentifier = isChild ? "" : deviceId.trim();
+  // Device id is OPTIONAL. Children never own one (they inherit the parent/root
+  // device). A root-level asset only owns one if the user opts in via `hasDevice`.
+  // Otherwise identifier = null (grouping asset) and any number can be created.
+  const wantsDevice = !isChild && hasDevice;
+  const finalIdentifier = wantsDevice ? deviceId.trim() : "";
 
-  // Steps: child via "+" = Details→Review; child via dropdown = skip Device; root = full.
+  // Steps: child via "+" = Details→Review; child via dropdown = skip Device; root =
+  // full only when the user opts into a device id.
   const steps = useMemo(() => (
     childMode ? ["Details", "Review"]
       : isChild ? ["Template", "Details", "Review"]
-        : ["Template", "Details", "Device", "Review"]
-  ), [childMode, isChild]);
+        : wantsDevice ? ["Template", "Details", "Device", "Review"]
+          : ["Template", "Details", "Review"]
+  ), [childMode, isChild, wantsDevice]);
   const current = steps[Math.min(step, steps.length - 1)];
   useEffect(() => { if (step > steps.length - 1) setStep(steps.length - 1); }, [steps.length, step]);
 
@@ -122,8 +127,8 @@ export default function CreateAssetWizard({
   async function handleCreate() {
     if (!name.trim()) return;
     if (!childMode && !templateId) return;
-    if (!isChild && !deviceId) return;
-    if (!isChild && !finalIdentifier) return;
+    // Only require a device when the user opted into one.
+    if (wantsDevice && (!deviceId.trim() || linkedIds.has(deviceId.trim()))) return;
     const tid = effectiveTemplateId;
     setSubmitting(true);
     try {
@@ -147,7 +152,7 @@ export default function CreateAssetWizard({
         } catch { /* non-fatal */ }
       }
       qc.invalidateQueries({ queryKey: getListAssetsQueryKey() });
-      toast({ title: "Asset created", description: `${name.trim()} bound to device ${deviceId}` });
+      toast({ title: "Asset created", description: finalIdentifier ? `${name.trim()} bound to device ${finalIdentifier}` : `${name.trim()} created` });
       onOpenChange(false);
       onCreated?.(data.id);
     } catch (err: any) {
@@ -259,9 +264,17 @@ export default function CreateAssetWizard({
                   Child of <strong>{parent?.name}</strong> — it shares the parent's device and has <strong>no Device ID</strong> of its own. Telemetry is attributed to the device owner.
                 </p>
               ) : (
-                <p className="text-xs text-muted-foreground">
-                  The asset <strong>Identifier</strong> will be the Device ID you pick next — it links incoming telemetry to this asset.
-                </p>
+                <div className="space-y-1.5">
+                  <label className="flex items-start gap-2.5 rounded-lg border border-border p-3 cursor-pointer hover:bg-muted/40">
+                    <input type="checkbox" checked={hasDevice} onChange={(e) => setHasDevice(e.target.checked)} className="mt-0.5 h-4 w-4 accent-primary" />
+                    <span className="text-sm">
+                      This asset has its own <strong>Device ID</strong>
+                      <span className="block text-xs text-muted-foreground">
+                        Tick to bind a transmitting device (you'll pick it next). Leave unticked for a grouping asset (Site / Unit / Process) — it stays device-less, and you can create as many as you like.
+                      </span>
+                    </span>
+                  </label>
+                </div>
               )}
             </div>
           )}
@@ -335,15 +348,15 @@ export default function CreateAssetWizard({
             <div className="space-y-3">
               <p className="text-sm font-medium">Confirm binding</p>
               <div className="rounded-lg border border-border divide-y divide-border text-sm">
-                {!isChild
+                {wantsDevice
                   ? <Row label="Device ID" value={deviceId} mono />
-                  : <Row label="Device ID" value="Inherited from parent (none)" />}
+                  : <Row label="Device ID" value={isChild ? "Inherited from parent (none)" : "None (grouping asset)"} />}
                 <Row label="Asset Name" value={name.trim()} />
                 {parentId && <Row label="Parent Asset" value={parent?.name ?? parentId} />}
                 <Row label="Template" value={template?.name ?? "—"} />
               </div>
               <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground pt-1">
-                <span className="font-mono">{isChild ? (parent?.name ?? "parent") : finalIdentifier}</span><ArrowRight className="w-3 h-3" />
+                <span className="font-mono">{isChild ? (parent?.name ?? "parent") : (finalIdentifier || "root")}</span><ArrowRight className="w-3 h-3" />
                 <span>{name.trim() || "Asset"}</span><ArrowRight className="w-3 h-3" />
                 <span>{template?.name ?? "Template"}</span>
               </div>

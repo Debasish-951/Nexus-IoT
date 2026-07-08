@@ -78,29 +78,6 @@ export default function AssetDetails({ assetId: assetIdProp, embedded }: { asset
   const deleteAttr = useDeleteAttribute();
   const deleteAsset = useDeleteAsset();
 
-  // ── Device ID edit ──
-  const [devOpen, setDevOpen] = useState(false);
-  const [devVal, setDevVal] = useState("");
-  const [savingDev, setSavingDev] = useState(false);
-  function openDeviceDialog() {
-    if (!asset) return;
-    setDevVal(asset.identifier ?? suggestDeviceId(asset, allAssets));
-    setDevOpen(true);
-  }
-  async function saveDeviceId() {
-    if (!asset) return;
-    setSavingDev(true);
-    try {
-      const id = devVal.trim();
-      if (id) await fetch(`/api/ingest/register-device`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ deviceId: id }) }).catch(() => {});
-      const res = await fetch(`/api/assets/${asset.id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ identifier: id }) });
-      if (!res.ok) { const e = await res.json().catch(() => ({})); toast({ title: "Failed to set Device ID", description: e.error, variant: "destructive" }); return; }
-      toast({ title: id ? "Device ID set" : "Device ID cleared" });
-      qc.invalidateQueries({ queryKey: getListAssetsQueryKey() });
-      setDevOpen(false);
-    } finally { setSavingDev(false); }
-  }
-
   const [health, setHealth] = useState<AssetHealth | null>(null);
   useEffect(() => {
     if (!assetId) return;
@@ -373,12 +350,12 @@ export default function AssetDetails({ assetId: assetIdProp, embedded }: { asset
             <Info2 label="Site" value={siteOf(asset, allAssets)} />
             <div>
               <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1"><Cpu className="w-3.5 h-3.5" /> Device ID</p>
-              <div className="flex items-center gap-1.5">
-                <span className="text-sm font-mono">{asset.identifier ?? "—"}</span>
-                {can("manage_assets") && (
-                  <button onClick={openDeviceDialog} title="Set Device ID" className="p-0.5 rounded text-muted-foreground hover:text-primary"><Edit2 className="w-3.5 h-3.5" /></button>
-                )}
-              </div>
+              <span className="text-sm font-mono">{asset.identifier ?? (() => {
+                const byId = new Map(allAssets.map((a) => [a.id, a]));
+                let cur = asset.parentId ? byId.get(asset.parentId) : null; const seen = new Set<string>();
+                while (cur && !seen.has(cur.id)) { seen.add(cur.id); if (cur.identifier) return `${cur.identifier} (inherited)`; cur = cur.parentId ? byId.get(cur.parentId) : null; }
+                return "—";
+              })()}</span>
             </div>
             <Info2 label="Status" value={status} />
             <div>
@@ -766,25 +743,6 @@ export default function AssetDetails({ assetId: assetIdProp, embedded }: { asset
         </DialogContent>
       </Dialog>
 
-      {/* Set Device ID */}
-      <Dialog open={devOpen} onOpenChange={setDevOpen}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader><DialogTitle className="flex items-center gap-2"><Cpu className="w-4 h-4" /> Set Device ID</DialogTitle></DialogHeader>
-          <div className="space-y-1.5">
-            <Label className="text-sm">Device ID</Label>
-            <Input value={devVal} onChange={(e) => setDevVal(e.target.value)} placeholder="e.g. CREEL_01" autoFocus
-              onKeyDown={(e) => { if (e.key === "Enter") saveDeviceId(); }} />
-            <p className="text-xs text-muted-foreground">
-              {asset && suggestDeviceId(asset, allAssets) ? <>Suggested: <code className="font-mono bg-muted px-1 rounded">{suggestDeviceId(asset, allAssets)}</code>. </> : null}
-              Telemetry with this deviceId attaches to <strong>{asset?.name}</strong>. Leave blank to clear.
-            </p>
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setDevOpen(false)}>Cancel</Button>
-            <Button onClick={saveDeviceId} disabled={savingDev}>{savingDev ? "Saving…" : "Save"}</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
