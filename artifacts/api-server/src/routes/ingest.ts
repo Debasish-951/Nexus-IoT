@@ -179,6 +179,72 @@ export function extractMachineRecordsByName(body: unknown): { namePath: string[]
   return out;
 }
 
+// Recognised hierarchy-level columns (mirrors the Hierarchy Generator). Only these
+// nest; categorical metrics (status, operatorShift, …) stay as metrics.
+const LEVEL_SET = new Set([
+  "enterprise", "company", "organization", "org", "corporation", "group",
+  "site", "campus", "facility", "location", "region",
+  "plant", "factory", "building", "fab", "block",
+  "area", "zone", "workshop", "shop", "cleanroom", "room", "bay",
+  "unit", "department", "dept", "division", "section",
+  "line", "cell", "station",
+  "process", "processmodule", "module", "manufacturingstep", "step", "stage",
+  "subprocess", "sub_process", "substep",
+]);
+
+function rowLevelKeys(row: Record<string, unknown>): string[] {
+  return Object.keys(row).filter((k) =>
+    LEVEL_SET.has(k.toLowerCase()) && typeof row[k] === "string" && (row[k] as string).trim());
+}
+function leafNameOf(row: Record<string, unknown>): string {
+  const idKey = Object.keys(row).find((k) => k.toLowerCase() === "machineid" || k.toLowerCase() === "machine_id");
+  if (idKey && typeof row[idKey] === "string" && (row[idKey] as string).trim()) return (row[idKey] as string).trim();
+  if (typeof row.machine === "string" && row.machine.trim()) return row.machine.trim();
+  return "Machine";
+}
+function objLevelPath(obj: Record<string, unknown>): string[] {
+  return Object.keys(obj)
+    .filter((k) => LEVEL_SET.has(k.toLowerCase()) && typeof obj[k] === "string" && (obj[k] as string).trim())
+    .map((k) => (obj[k] as string).trim());
+}
+
+// Extract per-machine records from FLAT rows (a top-level array, or an object that
+// wraps a rows array, e.g. { enterprise, site, machines:[…] }). Level columns +
+// wrapping-object levels form the name path; the leaf is the MachineId. Mirrors the
+// Hierarchy Generator's parseFlatRows so telemetry lands on the generated assets.
+export function extractFlatRowRecords(body: unknown): { namePath: string[]; metrics: Record<string, unknown> }[] {
+  let rows: unknown[] | null = null;
+  let prefix: string[] = [];
+  const looksLikeRows = (v: unknown): v is Record<string, unknown>[] =>
+    Array.isArray(v) && v.length > 0 && v.every((r) => r && typeof r === "object" && !Array.isArray(r) && typeof (r as any).machine === "string");
+
+  if (looksLikeRows(body)) {
+    rows = body;
+  } else if (body && typeof body === "object") {
+    for (const [k, v] of Object.entries(body as Record<string, unknown>)) {
+      if (ENVELOPE_FIELDS.has(k)) continue;
+      if (looksLikeRows(v)) { rows = v; prefix = objLevelPath(body as Record<string, unknown>); break; }
+    }
+  }
+  if (!rows) return [];
+
+  const out: { namePath: string[]; metrics: Record<string, unknown> }[] = [];
+  for (const r of rows) {
+    if (!r || typeof r !== "object") continue;
+    const row = r as Record<string, unknown>;
+    const levelKeys = rowLevelKeys(row);
+    const namePath = [...prefix, ...levelKeys.map((k) => (row[k] as string).trim()), leafNameOf(row)];
+    const metrics: Record<string, unknown> = {};
+    for (const [k, val] of Object.entries(row)) {
+      const lk = k.toLowerCase();
+      if (lk === "machine" || lk === "name" || lk === "machineid" || lk === "machine_id" || ENVELOPE_FIELDS.has(k) || levelKeys.includes(k)) continue;
+      if (val != null && typeof val !== "object") metrics[k] = val;
+    }
+    out.push({ namePath, metrics });
+  }
+  return out;
+}
+
 // Resolve an asset id by walking a name path down from a root asset.
 function resolveAssetByPath(
   rootId: string, names: string[], childrenOf: Map<string | null, { id: string; name: string }[]>
@@ -563,7 +629,10 @@ router.post("/ingest/payload", optionalApiKeyAuth("ingest:write"), async (req, r
   //    nothing distributed (no values anywhere), which is the intended behaviour.
   let machinesAttributed = 0;
   if (result.assetId) {
-    const recs = extractMachineRecordsByName(body);
+    // Prefer flat-row extraction (array / {…,machines:[…]} with level columns +
+    // MachineId leaves); fall back to the nested name-tree walker.
+    const flatRecs = extractFlatRowRecords(body);
+    const recs = flatRecs.length > 0 ? flatRecs : extractMachineRecordsByName(body);
     if (recs.length > 0) {
       const all = await db.select({ id: assetsTable.id, name: assetsTable.name, parentId: assetsTable.parentId }).from(assetsTable);
       const childrenOf = new Map<string | null, { id: string; name: string }[]>();
