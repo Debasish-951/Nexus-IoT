@@ -172,6 +172,14 @@ function parseJson(t: string): HNode[] {
 
   // Flat array of machine rows → rebuild the nested hierarchy.
   if (Array.isArray(raw) && isFlatRows(raw)) return parseFlatRows(raw);
+  // Flat rows wrapped in an envelope object, e.g. { deviceId, timestamp, machines: [ …rows… ] }.
+  // Use the first non-envelope array property whose elements look like flat rows.
+  if (raw && typeof raw === "object" && !Array.isArray(raw)) {
+    for (const [k, v] of Object.entries(raw)) {
+      if (ENVELOPE.has(k.toLowerCase())) continue;
+      if (Array.isArray(v) && isFlatRows(v)) return parseFlatRows(v);
+    }
+  }
 
   // A leaf "machine/reading" object: its `machine`/`name` is the node name and
   // every scalar field becomes an ATTRIBUTE (temperature, status, batchId, …).
