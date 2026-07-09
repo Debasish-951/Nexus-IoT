@@ -41,9 +41,21 @@ function attrNode(name: string, dataType: string, uom: string): HNode {
   return { id: `n${nid++}`, name: name.trim(), children: [], attr: true, dataType, uom };
 }
 const ENVELOPE = new Set(["deviceid", "device_id", "timestamp", "timestampunix", "capturedat", "captured_at", "receivedat", "id", "version", "source", "machineid", "machine_id", "assetid", "asset_id"]);
-// Ordered hierarchy level keys recognised in FLAT rows. The path to a machine is
-// built from whichever of these the row has, in this order, then the machine name.
-const LEVEL_KEYS = ["site", "plant", "factory", "building", "unit", "area", "zone", "department", "dept", "division", "process", "subprocess", "sub_process", "stage", "line", "station", "cell", "section"];
+// Hierarchy-level column names recognised in FLAT rows (and in the wrapping
+// envelope object). ONLY these become grouping nodes — categorical metrics like
+// `status`/`operatorShift` are NOT levels. Order is coarse→fine so a level path
+// nests sensibly even if the source lists columns out of order.
+const LEVEL_KEYS = [
+  "enterprise", "company", "organization", "org", "corporation", "group",
+  "site", "campus", "facility", "location", "region",
+  "plant", "factory", "building", "fab", "block",
+  "area", "zone", "workshop", "shop", "cleanroom", "room", "bay",
+  "unit", "department", "dept", "division", "section",
+  "line", "cell", "station",
+  "process", "processmodule", "module", "manufacturingstep", "step", "stage",
+  "subprocess", "sub_process", "substep",
+];
+const LEVEL_SET = new Set(LEVEL_KEYS);
 function guessUom(name: string): string {
   const l = name.toLowerCase();
   return Object.entries(UOM_GUESS).find(([w]) => l.includes(w))?.[1] ?? "";
@@ -115,21 +127,24 @@ function parseText(t: string): HNode[] {
 }
 
 // The hierarchy-level columns of a flat row = the string columns that come BEFORE
-// the `machine` column (position-based, so renamed/custom level names like
-// "department"→"Wet Processing" still count as levels, not attributes). Known
-// LEVEL_KEYS anywhere are also accepted as a fallback.
+// the recognised LEVEL_KEYS (whitelist). Categorical metrics such as `status` or
+// `operatorShift` are deliberately excluded — only true location/org columns nest.
+// Returned in the object's own key order (author intent).
 function levelKeysOf(row: any): string[] {
-  const keys = Object.keys(row);
-  const mIdx = keys.indexOf("machine");
-  const before = mIdx >= 0 ? keys.slice(0, mIdx) : keys;
-  const out = before.filter((k) => !ENVELOPE.has(k.toLowerCase()) && typeof row[k] === "string" && (row[k] as string).trim());
-  for (const k of keys) {
-    if (LEVEL_KEYS.includes(k.toLowerCase()) && !out.includes(k) && typeof row[k] === "string" && (row[k] as string).trim()) out.push(k);
-  }
-  return out;
+  return Object.keys(row).filter((k) =>
+    LEVEL_SET.has(k.toLowerCase()) && typeof row[k] === "string" && (row[k] as string).trim());
 }
 
-// Detect a FLAT array of machine rows: [{ unit, department, process, machine, powerKW, … }, …].
+// The leaf node name for a row: its MachineId (e.g. LITHO_01) if present, else the
+// machine (type) name. The `machine` value stays as the machine's type/template.
+function leafNameOf(row: any): string {
+  const idKey = Object.keys(row).find((k) => k.toLowerCase() === "machineid" || k.toLowerCase() === "machine_id");
+  if (idKey && typeof row[idKey] === "string" && (row[idKey] as string).trim()) return (row[idKey] as string).trim();
+  if (typeof row.machine === "string" && row.machine.trim()) return row.machine.trim();
+  return "Machine";
+}
+
+// Detect a FLAT array of machine rows: [{ unit, process, machine, powerKW, … }, …].
 // Each row is one machine reading with its location as sibling columns (no nesting).
 function isFlatRows(arr: any[]): boolean {
   return arr.length > 0 && arr.every((r) =>
@@ -138,21 +153,29 @@ function isFlatRows(arr: any[]): boolean {
     levelKeysOf(r).length > 0);
 }
 
-// Convert flat machine rows into the nested tree. Level columns become grouping
-// nodes (in column order); the machine name is the leaf; every remaining scalar
-// column becomes an attribute (metric) on that machine.
-function parseFlatRows(rows: any[]): HNode[] {
+// Location/org level values on the WRAPPING object (e.g. { enterprise, site,
+// machines:[…] }) — become the top ancestors shared by every row.
+function objectLevelPath(obj: any): string[] {
+  return Object.keys(obj)
+    .filter((k) => LEVEL_SET.has(k.toLowerCase()) && typeof obj[k] === "string" && (obj[k] as string).trim())
+    .map((k) => (obj[k] as string).trim());
+}
+
+// Convert flat machine rows into the nested tree. `prefix` = ancestor level values
+// from the wrapping envelope. Level columns become grouping nodes (in column
+// order); the leaf is the MachineId; every remaining scalar column is an attribute.
+function parseFlatRows(rows: any[], prefix: string[] = []): HNode[] {
   const roots: HNode[] = [];
   for (const row of rows) {
     const levelKeys = levelKeysOf(row);
-    const path = levelKeys.map((k) => (row[k] as string).trim());
+    const path = [...prefix, ...levelKeys.map((k) => (row[k] as string).trim())];
     let level = roots;
     for (const name of path) {
       let f = level.find((n) => !n.attr && n.name.toLowerCase() === name.toLowerCase());
       if (!f) { f = node(name); level.push(f); }
       level = f.children;
     }
-    const mName = (typeof row.machine === "string" && row.machine.trim()) || "Machine";
+    const mName = leafNameOf(row);
     let m = level.find((n) => n.name.toLowerCase() === mName.toLowerCase());
     if (!m) { m = node(mName); level.push(m); }
     for (const [k, v] of Object.entries(row)) {
@@ -177,7 +200,7 @@ function parseJson(t: string): HNode[] {
   if (raw && typeof raw === "object" && !Array.isArray(raw)) {
     for (const [k, v] of Object.entries(raw)) {
       if (ENVELOPE.has(k.toLowerCase())) continue;
-      if (Array.isArray(v) && isFlatRows(v)) return parseFlatRows(v);
+      if (Array.isArray(v) && isFlatRows(v)) return parseFlatRows(v, objectLevelPath(raw));
     }
   }
 
