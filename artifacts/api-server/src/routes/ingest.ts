@@ -179,22 +179,25 @@ export function extractMachineRecordsByName(body: unknown): { namePath: string[]
   return out;
 }
 
-// Recognised hierarchy-level columns (mirrors the Hierarchy Generator). Only these
-// nest; categorical metrics (status, operatorShift, …) stay as metrics.
-const LEVEL_SET = new Set([
-  "enterprise", "company", "organization", "org", "corporation", "group",
-  "site", "campus", "facility", "location", "region",
-  "plant", "factory", "building", "fab", "block",
-  "area", "zone", "workshop", "shop", "cleanroom", "room", "bay",
-  "unit", "department", "dept", "division", "section",
-  "line", "cell", "station",
-  "process", "processmodule", "module", "manufacturingstep", "step", "stage",
-  "subprocess", "sub_process", "substep",
+// Hierarchy-level detection mirrors the Hierarchy Generator: BLACKLIST, not
+// whitelist. Any string column is a level EXCEPT known categorical metrics, the
+// leaf fields (machine/MachineId), and envelope fields. Numbers are never levels.
+const NON_LEVEL = new Set([
+  "machine", "name", "machineid", "machine_id",
+  "status", "state", "mode", "runstate", "machinestatus", "alarmstate",
+  "operatorshift", "shift", "operator",
+  "batchid", "batch_id", "batchno", "batchnumber", "lot", "lotno", "lotnumber",
+  "quality", "grade", "health", "condition", "direction",
+  "uom", "unit_of_measure", "recipe", "sku", "color", "colour",
+  "description", "note", "notes", "label", "comment", "remark",
 ]);
+function isLevelKV(k: string, v: unknown): boolean {
+  const lk = k.toLowerCase();
+  return typeof v === "string" && (v as string).trim().length > 0 && !NON_LEVEL.has(lk) && !ENVELOPE_FIELDS.has(k);
+}
 
 function rowLevelKeys(row: Record<string, unknown>): string[] {
-  return Object.keys(row).filter((k) =>
-    LEVEL_SET.has(k.toLowerCase()) && typeof row[k] === "string" && (row[k] as string).trim());
+  return Object.keys(row).filter((k) => isLevelKV(k, row[k]));
 }
 function leafNameOf(row: Record<string, unknown>): string {
   const idKey = Object.keys(row).find((k) => k.toLowerCase() === "machineid" || k.toLowerCase() === "machine_id");
@@ -203,9 +206,7 @@ function leafNameOf(row: Record<string, unknown>): string {
   return "Machine";
 }
 function objLevelPath(obj: Record<string, unknown>): string[] {
-  return Object.keys(obj)
-    .filter((k) => LEVEL_SET.has(k.toLowerCase()) && typeof obj[k] === "string" && (obj[k] as string).trim())
-    .map((k) => (obj[k] as string).trim());
+  return Object.keys(obj).filter((k) => isLevelKV(k, obj[k])).map((k) => (obj[k] as string).trim());
 }
 
 // Extract per-machine records from FLAT rows (a top-level array, or an object that
@@ -419,7 +420,7 @@ async function evaluateRuntimeAttributes(assetId: string, ts: Date): Promise<voi
 }
 
 // ── Core ingest logic ─────────────────────────────────────────────────────────
-export async function processNormalised(n: NormalisedPayload, assetIdHint?: string) {
+export async function processNormalised(n: NormalisedPayload, assetIdHint?: string, emitBroadcast = true) {
   let assetId: string | null = assetIdHint ?? null;
   let assetName = n.externalAssetName ?? n.deviceId;
 
@@ -499,12 +500,16 @@ export async function processNormalised(n: NormalisedPayload, assetIdHint?: stri
     ? []
     : await evaluateAlarmRules(assetId as string, assetName, n.metrics, prevMetrics, ts);
 
-  broadcast("telemetry", {
-    assetId,
-    assetName,
-    metrics: n.metrics,
-    timestamp: ts.toISOString(),
-  });
+  // Skip the WS fan-out for the per-machine distribution — one payload attributes
+  // to ~22 machines, and broadcasting each would flood every WS-listening page.
+  if (emitBroadcast) {
+    broadcast("telemetry", {
+      assetId,
+      assetName,
+      metrics: n.metrics,
+      timestamp: ts.toISOString(),
+    });
+  }
 
   for (const ev of alarmEvents) {
     broadcast("alarm", {
@@ -647,6 +652,7 @@ router.post("/ingest/payload", optionalApiKeyAuth("ingest:write"), async (req, r
         await processNormalised(
           { deviceId: normalised.deviceId, timestamp: normalised.timestamp, metrics: rec.metrics, payloadFormat: "flat" },
           machineAssetId,
+          false, // no WS broadcast per machine — avoids flooding the UI
         );
         machinesAttributed++;
       }

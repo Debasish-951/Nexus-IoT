@@ -32,7 +32,7 @@ export default function Assets() {
   const [search, setSearch] = useState("");
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardParent, setWizardParent] = useState("");
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());  // empty = all expanded
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());  // empty = all collapsed (default)
   const [selectedId, setSelectedId] = useState<string | null>(null);
 
   // Group children by parent once (memoized) — supports large/deep trees.
@@ -69,15 +69,15 @@ export default function Assets() {
 
   const filtering = visibleIds !== null;
   const isExpanded = useCallback(
-    (id: string) => (filtering ? true : !collapsed.has(id)),
-    [filtering, collapsed],
+    (id: string) => (filtering ? true : expanded.has(id)),
+    [filtering, expanded],
   );
   const toggle = useCallback(
-    (id: string) => setCollapsed((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; }),
+    (id: string) => setExpanded((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; }),
     [],
   );
-  const expandAll = () => setCollapsed(new Set());
-  const collapseAll = () => setCollapsed(new Set(allParentIds));
+  const expandAll = () => setExpanded(new Set(allParentIds));
+  const collapseAll = () => setExpanded(new Set());
 
   const openAddChild = (parentId: string) => { setWizardParent(parentId); setWizardOpen(true); };
 

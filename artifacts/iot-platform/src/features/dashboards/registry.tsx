@@ -6,7 +6,7 @@ import {
 } from "lucide-react";
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell,
-  RadialBarChart, RadialBar, XAxis, YAxis, Tooltip, Legend, ScatterChart as RScatterChart, Scatter,
+  RadialBarChart, RadialBar, XAxis, YAxis, Tooltip, Legend, ScatterChart as RScatterChart, Scatter, ReferenceLine,
 } from "recharts";
 import type { Widget } from "./types";
 import { useMultiSeries, aggregate } from "./useWidgetData";
@@ -37,6 +37,8 @@ export const WIDGET_CATEGORIES: { name: string; items: WidgetDef[] }[] = [
     { type: "line",  label: "Line Chart",  icon: LineIcon,  category: "Charts", w: 6, h: 5, defaults: { title: "Line Chart", color: PALETTE.primary } },
     { type: "area",  label: "Area Chart",  icon: AreaIcon,  category: "Charts", w: 6, h: 5, defaults: { title: "Area Chart", color: PALETTE.primary } },
     { type: "bar",   label: "Bar Chart",   icon: BarChart3, category: "Charts", w: 6, h: 5, defaults: { title: "Bar Chart", color: PALETTE.primary } },
+    { type: "stackbar", label: "Stacked Bar", icon: BarChart3, category: "Charts", w: 6, h: 5, defaults: { title: "Stacked Bar", color: PALETTE.primary } },
+    { type: "sparkline", label: "Sparkline", icon: LineIcon,  category: "Charts", w: 3, h: 2, defaults: { title: "Sparkline", color: PALETTE.primary } },
     { type: "pie",   label: "Pie Chart",   icon: PieIcon,   category: "Charts", w: 4, h: 5, defaults: { title: "Pie Chart" } },
     { type: "donut", label: "Donut Chart", icon: PieIcon,   category: "Charts", w: 4, h: 5, defaults: { title: "Donut Chart" } },
     { type: "scatter", label: "Scatter",   icon: ScatterChart, category: "Charts", w: 6, h: 5, defaults: { title: "Scatter" } },
@@ -105,6 +107,26 @@ export function WidgetView({ widget }: { widget: Widget }) {
   const seriesTags = bound ? tags : ["v"];
   const aggVal = bound ? aggregate(singleSeries as any, c.agg ?? "last") : null;
 
+  // Control-limit (SPC) reference lines — drawn on time-series charts when set.
+  const num = (x: any) => (x === "" || x == null || isNaN(Number(x)) ? null : Number(x));
+  const spc = [
+    { v: num(c.ucl), col: PALETTE.critical, lbl: "UCL" },
+    { v: num(c.lcl), col: PALETTE.critical, lbl: "LCL" },
+    { v: num(c.cl),  col: PALETTE.neutral,  lbl: "CL" },
+  ].filter((s) => s.v != null) as { v: number; col: string; lbl: string }[];
+  const spcLines = spc.map((s) => (
+    <ReferenceLine key={s.lbl} y={s.v} stroke={s.col} strokeDasharray="4 3" ifOverflow="extendDomain"
+      label={{ value: `${s.lbl} ${s.v}`, position: "right", fill: s.col, fontSize: 10 }} />
+  ));
+
+  // Bound to an asset+tag but no rows in range → show a real "no data" note instead
+  // of misleading demo data. Only unbound (builder preview) widgets use demo data.
+  const wantsData = !!c.assetId && tags.length > 0;
+  const CHART_TYPES = ["line", "area", "bar", "stackbar", "sparkline", "scatter", "heatmap", "table"];
+  if (wantsData && !bound && CHART_TYPES.includes(t)) {
+    return <div className="h-full w-full flex items-center justify-center text-slate-400 text-xs">No data in selected range</div>;
+  }
+
   if (["kpi", "health", "availability", "oee", "downtime", "runtime", "energy", "alarmcount", "assetcount"].includes(t)) {
     const value = bound ? aggVal : (c.value ?? 0);
     const color = statusColor(value, c);
@@ -125,6 +147,7 @@ export function WidgetView({ widget }: { widget: Widget }) {
         <Chart data={chartData} margin={{ top: 6, right: 8, left: -18, bottom: 0 }}>
           <XAxis dataKey="t" tick={{ fontSize: 9 }} /><YAxis tick={{ fontSize: 9 }} /><Tooltip contentStyle={{ fontSize: 11 }} />
           {seriesTags.length > 1 && <Legend wrapperStyle={{ fontSize: 10 }} />}
+          {spcLines}
           {seriesTags.map((tg, i) => {
             const col = seriesTags.length > 1 ? COLORS[i % COLORS.length] : baseColor;
             return <Series key={tg} type="monotone" dataKey={tg} name={String(tg).split(".").pop()} stroke={col} fill={col} fillOpacity={0.15} strokeWidth={1.8} dot={false} isAnimationActive={false} />;
@@ -133,15 +156,30 @@ export function WidgetView({ widget }: { widget: Widget }) {
       </ResponsiveContainer>
     );
   }
-  if (t === "bar") {
+  if (t === "bar" || t === "stackbar") {
     const baseColor = c.color ?? PALETTE.primary;
+    const stackId = t === "stackbar" ? "s" : undefined;
     return (
       <ResponsiveContainer width="100%" height="100%">
         <BarChart data={bound ? rows : demoSeries(12)} margin={{ top: 6, right: 8, left: -18, bottom: 0 }}>
           <XAxis dataKey="t" tick={{ fontSize: 9 }} /><YAxis tick={{ fontSize: 9 }} /><Tooltip contentStyle={{ fontSize: 11 }} />
           {seriesTags.length > 1 && <Legend wrapperStyle={{ fontSize: 10 }} />}
-          {seriesTags.map((tg, i) => <Bar key={tg} dataKey={tg} name={String(tg).split(".").pop()} fill={seriesTags.length > 1 ? COLORS[i % COLORS.length] : baseColor} isAnimationActive={false} />)}
+          {spcLines}
+          {seriesTags.map((tg, i) => <Bar key={tg} dataKey={tg} name={String(tg).split(".").pop()} stackId={stackId} fill={seriesTags.length > 1 ? COLORS[i % COLORS.length] : baseColor} isAnimationActive={false} />)}
         </BarChart>
+      </ResponsiveContainer>
+    );
+  }
+  if (t === "sparkline") {
+    const baseColor = c.color ?? PALETTE.primary;
+    return (
+      <ResponsiveContainer width="100%" height="100%">
+        <LineChart data={chartData} margin={{ top: 4, right: 4, left: 4, bottom: 4 }}>
+          <Tooltip contentStyle={{ fontSize: 11 }} />
+          {seriesTags.map((tg, i) => (
+            <Line key={tg} type="monotone" dataKey={tg} stroke={seriesTags.length > 1 ? COLORS[i % COLORS.length] : baseColor} strokeWidth={1.5} dot={false} isAnimationActive={false} />
+          ))}
+        </LineChart>
       </ResponsiveContainer>
     );
   }

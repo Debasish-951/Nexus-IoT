@@ -271,7 +271,16 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       {/* Main content column */}
       <div className="flex-1 flex flex-col overflow-hidden">
         {/* Top bar */}
-        <header className="h-12 shrink-0 border-b border-border bg-background/95 backdrop-blur-sm flex items-center justify-end px-4 gap-2 relative z-20">
+        <header className="h-12 shrink-0 border-b border-border bg-background/95 backdrop-blur-sm flex items-center px-4 gap-2 relative z-20">
+          <button
+            onClick={() => setCollapsed((c) => !c)}
+            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            className="flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+          >
+            <Menu className="w-4 h-4" />
+          </button>
+          <div className="flex-1" />
           <BrokerStatusBar />
           <div className="w-px h-5 bg-border" />
           <ThemeToggle />

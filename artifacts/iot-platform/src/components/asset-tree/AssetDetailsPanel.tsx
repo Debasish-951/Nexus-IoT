@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import {
-  Asset, deriveStatus, STATUS_STYLES, siteOf, useAssetHealthMap, HealthBar,
+  Asset, deriveStatus, STATUS_STYLES, siteOf, useAssetHealthMap, HealthBar, STALE_AFTER_MS,
 } from "@/pages/assetShared";
 
 function Info({ label, value, mono }: { label: string; value: React.ReactNode; mono?: boolean }) {
@@ -57,15 +57,12 @@ export function AssetDetailsPanel({
       <div className="rounded-lg border border-border p-4">
         <h3 className="text-sm font-semibold mb-3">Asset Information</h3>
         <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3">
-          <Info label="Asset Identifier" value={asset.identifier ?? "— (child of a device)"} mono />
-          <Info label="Device ID" value={asset.identifier ?? "Inherited from parent"} mono />
-          <Info label="Template" value={asset.templateName || "—"} />
           <Info label="Site" value={siteOf(asset, allAssets)} />
           <Info label="Sub-assets" value={String(childCount)} />
           <Info label="Status" value={status} />
           <div>
-            <p className="text-xs text-muted-foreground mb-1">Health</p>
-            <HealthBar pct={h?.freshnessPct ?? null} />
+            <p className="text-xs text-muted-foreground mb-1">Availability</p>
+            <HealthBar pct={(!!h?.lastSeen && (Date.now() - new Date(h.lastSeen).getTime()) <= STALE_AFTER_MS) ? 100 : 0} />
           </div>
           <Info label="Created / Installed" value={asset.createdAt ? format(new Date(asset.createdAt), "yyyy-MM-dd") : "—"} />
           <Info label="Last Updated" value={asset.updatedAt ? format(new Date(asset.updatedAt), "yyyy-MM-dd HH:mm") : "—"} />

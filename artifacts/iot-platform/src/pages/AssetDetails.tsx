@@ -23,7 +23,7 @@ import { useToast } from "@/hooks/use-toast";
 import {
   ChevronRight, Blocks, Plus, Trash2, Edit2, ArrowLeft, Download,
   FileSpreadsheet, Braces, LayoutTemplate, Calculator, AlertTriangle, Info,
-  TrendingUp, Wrench, Cpu,
+  TrendingUp, Wrench,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
@@ -31,7 +31,7 @@ import { useCurrentUser } from "@/contexts/UserContext";
 import {
   Asset, AttrDef, AssetHealth, AttributeType, TrendsPanel, ExpressionEditor, ImportPreviewTable,
   parseCsv, flattenPayload, CSV_EXAMPLE, JSON_EXAMPLE,
-  deriveStatus, STATUS_STYLES, siteOf, HealthBar,
+  deriveStatus, STATUS_STYLES, siteOf, HealthBar, STALE_AFTER_MS,
 } from "./assetShared";
 
 // Suggested Device ID per machine name (auto-prefill; user can edit).
@@ -101,7 +101,6 @@ export default function AssetDetails({ assetId: assetIdProp, embedded }: { asset
   const [importing, setImporting] = useState(false);
   const [applyingTemplate, setApplyingTemplate] = useState(false);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
-  const [maintenanceLoading, setMaintenanceLoading] = useState(false);
   const [attrUseExpr, setAttrUseExpr] = useState(false);
   const [editAttrUseExpr, setEditAttrUseExpr] = useState(false);
 
@@ -110,25 +109,6 @@ export default function AssetDetails({ assetId: assetIdProp, embedded }: { asset
 
   const attrNames = attrList.filter((a: any) => a.type !== "runtime").map((a: any) => a.name as string);
 
-  async function toggleMaintenance() {
-    if (!asset) return;
-    setMaintenanceLoading(true);
-    try {
-      const res = await fetch(`/api/assets/${asset.id}/maintenance`, {
-        method: "POST", credentials: "include", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ enabled: !asset.maintenanceMode }),
-      });
-      if (!res.ok) throw new Error(await res.text());
-      const updated = await res.json() as Asset;
-      qc.invalidateQueries({ queryKey: getListAssetsQueryKey() });
-      toast({
-        title: updated.maintenanceMode ? "Maintenance mode ON" : "Maintenance mode OFF",
-        description: updated.maintenanceMode ? "Alarm evaluation is suspended for this asset." : "Alarm evaluation resumed for this asset.",
-      });
-    } catch {
-      toast({ title: "Failed to toggle maintenance mode", variant: "destructive" });
-    } finally { setMaintenanceLoading(false); }
-  }
 
   function handleParse() {
     setParseError(null); setPreviewRows([]);
@@ -293,6 +273,11 @@ export default function AssetDetails({ assetId: assetIdProp, embedded }: { asset
   }
 
   const status = deriveStatus(asset, health);
+  // Availability = live or not. 100% only while telemetry is flowing now; 0% if the
+  // source is offline (even if old values are still stored on the asset).
+  const live = !!health?.lastSeen && !isNaN(new Date(health.lastSeen).getTime())
+    && (Date.now() - new Date(health.lastSeen).getTime()) <= STALE_AFTER_MS;
+  const availabilityPct = live ? 100 : 0;
 
   return (
     <div className={cn("space-y-4", embedded ? "p-5" : "p-6 max-w-6xl mx-auto")}>
@@ -309,13 +294,6 @@ export default function AssetDetails({ assetId: assetIdProp, embedded }: { asset
           <span className="text-foreground font-medium">{asset.name}</span>
         </div>
         <div className="flex items-center gap-2">
-          {can("manage_assets") && (
-            <div className="flex items-center gap-1.5 border border-border rounded-md px-2 py-1">
-              <Wrench className={`w-3 h-3 ${asset.maintenanceMode ? "text-amber-500" : "text-muted-foreground"}`} />
-              <Switch checked={!!asset.maintenanceMode} onCheckedChange={toggleMaintenance} disabled={maintenanceLoading} className="scale-75 -my-0.5" aria-label="Maintenance mode" />
-              {asset.maintenanceMode && <span className="text-xs text-amber-600 dark:text-amber-400 font-medium">Maintenance</span>}
-            </div>
-          )}
           {can("manage_assets") && (
             <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive h-8 text-xs"
               onClick={() => deleteAsset.mutate({ id: asset.id }, {
@@ -344,23 +322,12 @@ export default function AssetDetails({ assetId: assetIdProp, embedded }: { asset
         <CardContent className="p-5">
           <h2 className="text-sm font-semibold mb-3">Asset Information</h2>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-x-6 gap-y-3 text-sm">
-            <Info2 label="Asset Identifier" value={asset.identifier ?? "— (child of a device)"} mono />
             <Info2 label="Asset Name" value={asset.name} />
-            <Info2 label="Template" value={asset.templateName || "—"} />
             <Info2 label="Site" value={siteOf(asset, allAssets)} />
-            <div>
-              <p className="text-xs text-muted-foreground mb-1 flex items-center gap-1"><Cpu className="w-3.5 h-3.5" /> Device ID</p>
-              <span className="text-sm font-mono">{asset.identifier ?? (() => {
-                const byId = new Map(allAssets.map((a) => [a.id, a]));
-                let cur = asset.parentId ? byId.get(asset.parentId) : null; const seen = new Set<string>();
-                while (cur && !seen.has(cur.id)) { seen.add(cur.id); if (cur.identifier) return `${cur.identifier} (inherited)`; cur = cur.parentId ? byId.get(cur.parentId) : null; }
-                return "—";
-              })()}</span>
-            </div>
             <Info2 label="Status" value={status} />
             <div>
-              <p className="text-xs text-muted-foreground mb-1">Health</p>
-              <HealthBar pct={health?.freshnessPct ?? null} />
+              <p className="text-xs text-muted-foreground mb-1">Availability</p>
+              <HealthBar pct={availabilityPct} />
             </div>
             <Info2 label="Created / Installed" value={asset.createdAt ? format(new Date(asset.createdAt), "yyyy-MM-dd") : "—"} />
             <Info2 label="Last Updated" value={asset.updatedAt ? format(new Date(asset.updatedAt), "yyyy-MM-dd HH:mm") : "—"} />
@@ -372,8 +339,6 @@ export default function AssetDetails({ assetId: assetIdProp, embedded }: { asset
       <Tabs defaultValue="attributes">
         <TabsList>
           <TabsTrigger value="attributes" className="text-xs">Attributes</TabsTrigger>
-          <TabsTrigger value="trends" className="text-xs gap-1"><TrendingUp className="w-3 h-3" /> Telemetry</TabsTrigger>
-          <TabsTrigger value="maintenance" className="text-xs">Maintenance</TabsTrigger>
           <TabsTrigger value="media" className="text-xs">Media</TabsTrigger>
         </TabsList>
 
@@ -487,31 +452,6 @@ export default function AssetDetails({ assetId: assetIdProp, embedded }: { asset
                 </tbody>
               </table>
             </div>
-          </Card>
-        </TabsContent>
-
-        {/* Telemetry / Trends */}
-        <TabsContent value="trends" className="mt-3">
-          <Card className="shadow-sm"><TrendsPanel assetId={asset.id} attrList={attrList} /></Card>
-        </TabsContent>
-
-        {/* Maintenance */}
-        <TabsContent value="maintenance" className="mt-3">
-          <Card className="shadow-sm">
-            <CardContent className="p-5 space-y-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-medium">Maintenance Mode</p>
-                  <p className="text-xs text-muted-foreground">While ON, alarm evaluation is suspended for this asset.</p>
-                </div>
-                {can("manage_assets") && (
-                  <Switch checked={!!asset.maintenanceMode} onCheckedChange={toggleMaintenance} disabled={maintenanceLoading} />
-                )}
-              </div>
-              {asset.maintenanceMode && asset.maintenanceSince && (
-                <p className="text-xs text-amber-600 dark:text-amber-400">In maintenance since {format(new Date(asset.maintenanceSince), "yyyy-MM-dd HH:mm")}</p>
-              )}
-            </CardContent>
           </Card>
         </TabsContent>
 

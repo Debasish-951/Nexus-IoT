@@ -6,7 +6,7 @@ import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import {
   Activity, Wifi, WifiOff, Filter, Download, Search, Box, AlarmClock, AlertTriangle,
-  Radio, Cpu, BrainCircuit, Wrench, TrendingUp, ChevronLeft, ChevronRight, Bell,
+  Radio, Cpu, BrainCircuit, TrendingUp, ChevronLeft, ChevronRight, Bell,
 } from "lucide-react";
 import { AreaChart, Area, BarChart, Bar, ResponsiveContainer } from "recharts";
 
@@ -164,7 +164,7 @@ export default function LiveFeed() {
     const h = healthMap[assetId];
     const hasAlarm = activeAlarms.some((a) => a.assetName && allAssets.find((x) => x.id === assetId)?.name === a.assetName);
     if (hasAlarm || h?.health === "alarm") return { label: criticalCount > 0 ? "Critical" : "Warning", color: criticalCount > 0 ? C.red : C.amber };
-    if (h?.health === "stale" || Date.now() - (latest[assetId]?.lastSeen ?? 0) > STALE_MS) return { label: "Stale", color: C.dim };
+    if (h?.health === "stale" || Date.now() - (latest[assetId]?.lastSeen ?? 0) > STALE_MS) return { label: "Offline", color: C.dim };
     return { label: "Running", color: C.green };
   };
 
@@ -224,9 +224,8 @@ export default function LiveFeed() {
       </div>
 
       {/* Main grid */}
-      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-        {/* Left 2/3 */}
-        <div className="xl:col-span-2 space-y-4">
+      <div className="grid grid-cols-1 gap-4">
+        <div className="space-y-4">
           {/* Live Asset Status */}
           <Panel title="Live Asset Status" right={<ViewAll onClick={() => navigate("/assets")} />}>
             {statusCards.length === 0 ? (
@@ -352,22 +351,6 @@ export default function LiveFeed() {
               </div>
             </Panel>
           </div>
-        </div>
-
-        {/* Right rail */}
-        <div className="space-y-4">
-          {/* Maintenance Recommendations — DEMO */}
-          <Panel title="Maintenance Recommendations" demo right={<ViewAll onClick={() => navigate("/assets")} />}>
-            <div className="divide-y" style={{ borderColor: C.border }}>
-              {[{ n: statusCards[0]?.assetName ?? "Motor-03", t: "Bearing inspection", d: "Due Today", c: C.red }, { n: statusCards[1]?.assetName ?? "Pump-04", t: "Lubrication", d: "Due Tomorrow", c: C.amber }].map((m, i) => (
-                <div key={i} className="p-3 flex items-center gap-3" style={{ borderBottom: `1px solid ${C.border}` }}>
-                  <div className="p-2 rounded-lg" style={{ background: C.soft }}><Wrench className="w-4 h-4" style={{ color: C.green }} /></div>
-                  <div className="flex-1 min-w-0"><p className="text-sm font-medium truncate" style={{ color: C.text }}>{m.n}</p><p className="text-xs" style={{ color: C.dim }}>{m.t}</p></div>
-                  <span className="text-xs font-medium shrink-0" style={{ color: m.c }}>{m.d}</span>
-                </div>
-              ))}
-            </div>
-          </Panel>
         </div>
       </div>
     </div>

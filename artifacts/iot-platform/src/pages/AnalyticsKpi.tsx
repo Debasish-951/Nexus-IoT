@@ -193,7 +193,6 @@ const CHART_TYPE_OPTS: { value: ChartType; label: string; supportsOverlay: boole
   { value: "statetimeline", label: "State Timeline",          supportsOverlay: false },
   { value: "anomaly",       label: "🔍 Anomaly Detection",    supportsOverlay: false, group: "analytics" },
   { value: "rul",           label: "⏳ Remaining Useful Life", supportsOverlay: false, group: "analytics" },
-  { value: "predictive",    label: "🔧 Predictive Maintenance",supportsOverlay: false, group: "analytics" },
   { value: "forecast",      label: "📈 Trend Forecast",       supportsOverlay: false, group: "analytics" },
 ];
 
@@ -1323,7 +1322,6 @@ function WidgetCard({ widget, onDelete, onEdit, onClone, onDuplicate, onCopy, on
       case "statetimeline": return <StateTimelineWidget widget={widget} data={data} />;
       case "anomaly":       return <AnomalyDetectionWidget widget={widget} data={data} />;
       case "rul":           return <RulWidget widget={widget} data={data} />;
-      case "predictive":    return <PredictiveMaintenanceWidget widget={widget} data={data} />;
       case "forecast":      return <TrendForecastWidget widget={widget} data={data} />;
       default:              return <ChartWidget widget={widget} data={data} />;
     }

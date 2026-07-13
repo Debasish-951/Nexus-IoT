@@ -34,23 +34,33 @@ export default function Visualization() {
   const { data: assetsData } = useListAssets();
   const allAssets = (assetsData as Asset[] | undefined) ?? [];
   const [assetSelId, setAssetSelId] = useState<string | null>(null);
-  const [assetCollapsed, setAssetCollapsed] = useState<Set<string>>(new Set());
+  const [assetExpanded, setAssetExpanded] = useState<Set<string>>(new Set()); // empty = all collapsed (default)
   const assetChildren = useMemo(() => {
     const m: Record<string, Asset[]> = {};
     for (const a of allAssets) { const k = a.parentId ?? "root"; (m[k] ||= []).push(a); }
     for (const k in m) m[k].sort((x, y) => x.name.localeCompare(y.name));
     return m;
   }, [allAssets]);
+  const allParentIds = useMemo(() => Object.keys(assetChildren).filter((k) => k !== "root"), [assetChildren]);
+  const expandAllAssets = () => setAssetExpanded(new Set(allParentIds));
+  const collapseAllAssets = () => setAssetExpanded(new Set());
+  const treeControls = (
+    <div className="flex items-center gap-3 px-3 py-1.5 border-b border-border text-xs">
+      <button onClick={expandAllAssets} className="text-muted-foreground hover:text-foreground">Expand all</button>
+      <button onClick={collapseAllAssets} className="text-muted-foreground hover:text-foreground">Collapse all</button>
+    </div>
+  );
+
   const assetTreeCtx = {
     childrenByParent: assetChildren,
     selectedId: assetSelId,
     setSelectedId: setAssetSelId,
-    isExpanded: (id: string) => !assetCollapsed.has(id),
-    toggle: (id: string) => setAssetCollapsed((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; }),
+    isExpanded: (id: string) => assetExpanded.has(id),
+    toggle: (id: string) => setAssetExpanded((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; }),
     visibleIds: null,
     canManage: false,
     onAddChild: () => {}, onRename: () => {}, onDelete: () => {}, onAssignTemplate: () => {},
-    onOpenBuilder: (a: Asset) => { setAssetSelId(a.id); openBuilderFor(a); },
+    onOpenBuilder: undefined,
   };
   const selectedAsset = assetSelId ? allAssets.find((a) => a.id === assetSelId) ?? null : null;
 
@@ -220,7 +230,17 @@ export default function Visualization() {
           <LayoutDashboard className="w-5 h-5 text-primary" />
           <h1 className="text-lg font-bold">Visualization</h1>
         </div>
-        {mode === "explore" && <span className="ml-2 text-xs text-muted-foreground">Right-click an asset → <strong>Dashboard Builder</strong></span>}
+        {/* View toggle — pick By Asset or the Dashboard Builder */}
+        <div className="ml-2 inline-flex rounded-md border border-border p-0.5 bg-muted/40">
+          <button
+            onClick={() => setMode("explore")}
+            className={cn("px-3 py-1 text-xs rounded font-medium transition-colors", mode === "explore" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground")}
+          >By Asset</button>
+          <button
+            onClick={() => setMode("build")}
+            className={cn("px-3 py-1 text-xs rounded font-medium transition-colors", mode === "build" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground")}
+          >Dashboard Builder</button>
+        </div>
       </div>
 
       {mode === "explore" ? (
@@ -228,6 +248,7 @@ export default function Visualization() {
           <ResizablePanelGroup direction="horizontal" className="h-full">
             <ResizablePanel defaultSize={26} minSize={18} maxSize={40}>
               <div className="h-full border-r border-border overflow-auto">
+                {treeControls}
                 <AssetTreeProvider value={assetTreeCtx}>
                   <AssetTree loading={!assetsData} />
                 </AssetTreeProvider>
@@ -283,6 +304,7 @@ export default function Visualization() {
                 <>
                   <ResizablePanel defaultSize={22} minSize={15} maxSize={32}>
                     <div className="h-full border-r border-border overflow-auto">
+                      {treeControls}
                       <AssetTreeProvider value={buildAssetCtx}><AssetTree loading={!assetsData} /></AssetTreeProvider>
                     </div>
                   </ResizablePanel>

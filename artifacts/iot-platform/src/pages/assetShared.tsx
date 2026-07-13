@@ -38,13 +38,20 @@ export interface AssetHealth {
 }
 
 // ── Status / Health / Site derivation ─────────────────────────────────────────
-export type AssetStatus = "Running" | "Warning" | "Critical" | "Stale" | "Maintenance" | "Unknown";
+export type AssetStatus = "Running" | "Warning" | "Critical" | "Offline" | "Unknown";
 
-export function deriveStatus(asset: Asset, health: AssetHealth | null): AssetStatus {
-  if (asset.maintenanceMode) return "Maintenance";
+// A machine is "live" only if telemetry arrived within this window. Once the source
+// (Node-RED / simulator) stops, the status flips to Stale (grey) within ~this long.
+export const STALE_AFTER_MS = 60_000;
+
+export function deriveStatus(_asset: Asset, health: AssetHealth | null): AssetStatus {
   if (!health) return "Unknown";
+  // No telemetry ever → Offline. Telemetry that stopped arriving → Offline after the window.
+  if (!health.lastSeen) return "Offline";
+  const age = Date.now() - new Date(health.lastSeen).getTime();
+  if (isNaN(age) || age > STALE_AFTER_MS) return "Offline";
   if (health.health === "alarm") return health.activeAlarms > 1 ? "Critical" : "Warning";
-  if (health.health === "stale") return "Stale";
+  if (health.health === "stale") return "Offline";
   return "Running";
 }
 
@@ -52,8 +59,7 @@ export const STATUS_STYLES: Record<AssetStatus, string> = {
   Running:     "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300",
   Warning:     "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300",
   Critical:    "bg-red-100 text-red-700 dark:bg-red-950 dark:text-red-300",
-  Stale:       "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
-  Maintenance: "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300",
+  Offline:     "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
   Unknown:     "bg-muted text-muted-foreground",
 };
 

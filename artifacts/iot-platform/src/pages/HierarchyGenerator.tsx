@@ -41,21 +41,24 @@ function attrNode(name: string, dataType: string, uom: string): HNode {
   return { id: `n${nid++}`, name: name.trim(), children: [], attr: true, dataType, uom };
 }
 const ENVELOPE = new Set(["deviceid", "device_id", "timestamp", "timestampunix", "capturedat", "captured_at", "receivedat", "id", "version", "source", "machineid", "machine_id", "assetid", "asset_id"]);
-// Hierarchy-level column names recognised in FLAT rows (and in the wrapping
-// envelope object). ONLY these become grouping nodes — categorical metrics like
-// `status`/`operatorShift` are NOT levels. Order is coarse→fine so a level path
-// nests sensibly even if the source lists columns out of order.
-const LEVEL_KEYS = [
-  "enterprise", "company", "organization", "org", "corporation", "group",
-  "site", "campus", "facility", "location", "region",
-  "plant", "factory", "building", "fab", "block",
-  "area", "zone", "workshop", "shop", "cleanroom", "room", "bay",
-  "unit", "department", "dept", "division", "section",
-  "line", "cell", "station",
-  "process", "processmodule", "module", "manufacturingstep", "step", "stage",
-  "subprocess", "sub_process", "substep",
-];
-const LEVEL_SET = new Set(LEVEL_KEYS);
+// FLAT-row hierarchy detection uses a BLACKLIST, not a whitelist: any STRING column
+// is treated as a hierarchy level EXCEPT these known categorical metrics, the leaf
+// fields (machine/MachineId), and envelope fields. Numbers/booleans are never
+// levels. This auto-handles any industry's level names (chemicalComplex, processArea,
+// productionLine, cleanroom, …) without needing to enumerate them.
+const NON_LEVEL = new Set([
+  "machine", "name", "machineid", "machine_id",
+  "status", "state", "mode", "runstate", "machinestatus", "alarmstate",
+  "operatorshift", "shift", "operator",
+  "batchid", "batch_id", "batchno", "batchnumber", "lot", "lotno", "lotnumber",
+  "quality", "grade", "health", "condition", "direction",
+  "uom", "unit_of_measure", "recipe", "sku", "color", "colour",
+  "description", "note", "notes", "label", "comment", "remark",
+]);
+function isLevelKV(k: string, v: unknown): boolean {
+  const lk = k.toLowerCase();
+  return typeof v === "string" && v.trim().length > 0 && !NON_LEVEL.has(lk) && !ENVELOPE.has(lk);
+}
 function guessUom(name: string): string {
   const l = name.toLowerCase();
   return Object.entries(UOM_GUESS).find(([w]) => l.includes(w))?.[1] ?? "";
@@ -126,13 +129,11 @@ function parseText(t: string): HNode[] {
   return roots;
 }
 
-// The hierarchy-level columns of a flat row = the string columns that come BEFORE
-// the recognised LEVEL_KEYS (whitelist). Categorical metrics such as `status` or
-// `operatorShift` are deliberately excluded — only true location/org columns nest.
-// Returned in the object's own key order (author intent).
+// Hierarchy-level columns of a flat row = string columns that aren't blacklisted
+// metrics/leaf/envelope (see NON_LEVEL). Returned in the row's own key order
+// (author intent → nesting order).
 function levelKeysOf(row: any): string[] {
-  return Object.keys(row).filter((k) =>
-    LEVEL_SET.has(k.toLowerCase()) && typeof row[k] === "string" && (row[k] as string).trim());
+  return Object.keys(row).filter((k) => isLevelKV(k, row[k]));
 }
 
 // The leaf node name for a row: its MachineId (e.g. LITHO_01) if present, else the
@@ -157,7 +158,7 @@ function isFlatRows(arr: any[]): boolean {
 // machines:[…] }) — become the top ancestors shared by every row.
 function objectLevelPath(obj: any): string[] {
   return Object.keys(obj)
-    .filter((k) => LEVEL_SET.has(k.toLowerCase()) && typeof obj[k] === "string" && (obj[k] as string).trim())
+    .filter((k) => isLevelKV(k, obj[k]))
     .map((k) => (obj[k] as string).trim());
 }
 
