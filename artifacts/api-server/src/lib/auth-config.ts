@@ -80,7 +80,7 @@ export const authConfig = {
   },
 
   password: {
-    minLength: num("AUTH_PASSWORD_MIN_LENGTH", 12),
+    minLength: num("AUTH_PASSWORD_MIN_LENGTH", 8),
     maxLength: num("AUTH_PASSWORD_MAX_LENGTH", 128),
     requireUppercase: bool("AUTH_PASSWORD_REQUIRE_UPPERCASE", true),
     requireLowercase: bool("AUTH_PASSWORD_REQUIRE_LOWERCASE", true),

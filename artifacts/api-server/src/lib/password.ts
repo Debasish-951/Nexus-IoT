@@ -151,27 +151,6 @@ export function isPasswordExpired(passwordExpiresAt: Date | null): boolean {
 
 // ── Password policy ──────────────────────────────────────────────────────────
 
-/**
- * Local breached/common password list.
- *
- * This is a pragmatic stand-in for a Pwned Passwords (HIBP) k-anonymity lookup,
- * which ASVS V2.1.7 prefers but which adds an outbound network dependency to the
- * activation path. It covers the passwords that actually show up in credential
- * stuffing against industrial platforms. Swapping in HIBP is a one-function
- * change inside `validatePassword`.
- */
-const COMMON_PASSWORDS = new Set([
-  "password", "password1", "password123", "passw0rd", "p@ssw0rd", "p@ssword",
-  "123456", "1234567", "12345678", "123456789", "1234567890", "12345",
-  "qwerty", "qwerty123", "qwertyuiop", "asdfghjkl", "1q2w3e4r", "zaq12wsx",
-  "admin", "admin123", "administrator", "root", "toor", "letmein", "welcome",
-  "welcome1", "welcome123", "changeme", "changeit", "default", "guest",
-  "iloveyou", "monkey", "dragon", "sunshine", "princess", "football",
-  "abc123", "abcd1234", "test123", "temp123", "secret", "master",
-  "operator", "operator123", "engineer", "engineer123", "manager", "supervisor",
-  "scada", "plc", "modbus", "siemens", "rockwell", "honeywell",
-]);
-
 /** Words that must not appear in a password for this product. */
 const PRODUCT_WORDS = ["integrated", "suite", "websynergies", "web synergies", "nexus", "iot", "nexusiot"];
 
@@ -196,7 +175,6 @@ export function getPasswordPolicy(): PasswordPolicy {
     ...(p.requireLowercase ? ["One lowercase letter (a–z)"] : []),
     ...(p.requireDigit ? ["One number (0–9)"] : []),
     ...(p.requireSymbol ? ["One symbol (!@#$…)"] : []),
-    "Not a common or previously breached password",
     ...(p.blockContextual ? ["Must not contain your name, username, or email"] : []),
   ];
   return {
@@ -206,7 +184,7 @@ export function getPasswordPolicy(): PasswordPolicy {
     requireLowercase: p.requireLowercase,
     requireDigit: p.requireDigit,
     requireSymbol: p.requireSymbol,
-    blockCommon: true,
+    blockCommon: false,
     blockContextual: p.blockContextual,
     description,
   };
@@ -239,19 +217,6 @@ export function validatePassword(password: string, context: PasswordContext = {}
   if (/^\s|\s$/.test(password)) errors.push("Password must not begin or end with whitespace");
 
   const lower = password.toLowerCase();
-
-  // Common-password check, including the trivial "append digits" variants that
-  // a raw set lookup would miss (Password1! → password).
-  const stripped = lower.replace(/[^a-z0-9]/g, "").replace(/[0-9]+$/, "");
-  if (COMMON_PASSWORDS.has(lower) || COMMON_PASSWORDS.has(stripped)) {
-    errors.push("This password is too common — choose something less predictable");
-  }
-
-  // Long runs of one character, or straight keyboard/alphabet sequences.
-  if (/(.)\1{3,}/.test(password)) errors.push("Password must not repeat the same character four or more times");
-  if (/(0123|1234|2345|3456|4567|5678|6789|abcd|bcde|cdef|qwer|wert|erty|asdf|sdfg|zxcv)/.test(lower)) {
-    errors.push("Password must not contain a simple sequence (1234, abcd, qwer…)");
-  }
 
   if (p.blockContextual) {
     const needles = [
