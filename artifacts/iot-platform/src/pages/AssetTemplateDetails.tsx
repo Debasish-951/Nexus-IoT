@@ -25,6 +25,7 @@ import { useCurrentUser } from "@/contexts/UserContext";
 import {
   Asset, deriveStatus, STATUS_STYLES, siteOf, useAssetHealthMap, HealthBar,
 } from "./assetShared";
+import { apiFetch } from "@/lib/auth-api";
 
 interface Def {
   name: string; type: string; dataType: string;
@@ -152,7 +153,7 @@ export default function AssetTemplateDetails() {
     if (!id) return;
     let cancelled = false;
     setLoading(true);
-    fetch(`/api/asset-templates/${id}`, { credentials: "include" })
+    apiFetch(`/api/asset-templates/${id}`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : null))
       .then((t) => {
         if (cancelled) return;
@@ -179,7 +180,7 @@ export default function AssetTemplateDetails() {
     if (!template) return;
     setSavingDefs(true);
     try {
-      const res = await fetch(`/api/asset-templates/${template.id}`, {
+      const res = await apiFetch(`/api/asset-templates/${template.id}`, {
         method: "PUT", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ attributeDefinitions: editedDefs }),
       });
@@ -235,7 +236,7 @@ export default function AssetTemplateDetails() {
       const res = await createTemplate.mutateAsync({ data: { name: `Copy of ${template.name}` } });
       const newId = (res as any).id;
       if (newId && editedDefs.length > 0) {
-        await fetch(`/api/asset-templates/${newId}`, {
+        await apiFetch(`/api/asset-templates/${newId}`, {
           method: "PUT", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ attributeDefinitions: editedDefs }), credentials: "include",
         });
@@ -282,7 +283,7 @@ export default function AssetTemplateDetails() {
     closeImport();
     if (did) {
       // Register the payload's deviceId so it can be bound to an asset in the wizard.
-      void fetch("/api/ingest/register-device", {
+      void apiFetch("/api/ingest/register-device", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ deviceId: did }),
       }).catch(() => {});
       toast({ title: `Added ${finalDefs.length} definition(s)`, description: `Device "${did}" registered — you can now create an asset for it. Click Save to persist the template.` });

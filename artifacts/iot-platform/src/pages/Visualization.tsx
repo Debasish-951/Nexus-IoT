@@ -1,40 +1,49 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { useLocation } from "wouter";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Switch } from "@/components/ui/switch";
 import { Card } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
 import { useToast } from "@/hooks/use-toast";
-import { cn } from "@/lib/utils";
-import {
-  ArrowLeft, Save, Copy, Eye, EyeOff, Maximize2, Minimize2, Download, Undo2, Redo2, LayoutDashboard,
-  Upload, Share2, ShieldCheck, LayoutTemplate, Trash2,
-} from "lucide-react";
+import { ArrowLeft, LayoutDashboard, Blocks } from "lucide-react";
 import { useListAssets } from "@workspace/api-client-react";
-import { useDashboards } from "@/features/dashboards/useDashboards";
-import { DashboardCanvas } from "@/features/dashboards/DashboardCanvas";
-import { WidgetPanel } from "@/features/dashboards/WidgetPanel";
 import { AssetVizPanel } from "@/features/dashboards/AssetVizPanel";
-import type { Widget } from "@/features/dashboards/types";
-import { resolveTags } from "@/features/dashboards/assetBinding";
-import { AssetTreeProvider } from "@/components/asset-tree/AssetTreeContext";
+import { AssetTreeProvider, type DashboardActions } from "@/components/asset-tree/AssetTreeContext";
 import { AssetTree } from "@/components/asset-tree/AssetTree";
+import { newId } from "@/features/dashboards/useDashboards";
 import type { Asset } from "@/pages/assetShared";
 
+// ── Per-asset dashboard storage helpers (localStorage; same key AssetVizPanel uses) ──
+const WKEY = (id: string) => `wsviz:widgets:${id}`;
+const DASH_CLIP = "wsviz:dashboard-clipboard";
+const BOOKMARKS_KEY = "wsviz:bookmarks";
+function readWidgets(id: string): any[] { try { const r = localStorage.getItem(WKEY(id)); return r ? JSON.parse(r) : []; } catch { return []; } }
+function writeWidgets(id: string, widgets: any[]) { try { localStorage.setItem(WKEY(id), JSON.stringify(widgets)); } catch { /* quota */ } }
+function withFreshIds(widgets: any[]): any[] { return widgets.map((w) => ({ ...w, id: newId("w") })); }
+function downloadJson(data: unknown, filename: string) {
+  const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
+  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = filename; a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// Visualization is a READ-ONLY consumer of the asset hierarchy. The hierarchy
+// itself is owned by the Asset section (Asset Template → Asset → Visualization);
+// this page never creates, renames, or deletes assets — it only selects an
+// existing asset and builds its dashboard. Dashboards/widgets are stored per
+// asset in localStorage (wsviz:widgets:*) and are the only thing this page writes.
 export default function Visualization() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
-  const api = useDashboards();
 
-  // ── Mode: "By Asset" explorer vs Dashboard Builder ──
-  const [mode, setMode] = useState<"explore" | "build">("explore");
   const { data: assetsData } = useListAssets();
   const allAssets = (assetsData as Asset[] | undefined) ?? [];
   const [assetSelId, setAssetSelId] = useState<string | null>(null);
   const [assetExpanded, setAssetExpanded] = useState<Set<string>>(new Set()); // empty = all collapsed (default)
+  const [bookmarks, setBookmarks] = useState<Set<string>>(() => {
+    try { const r = localStorage.getItem(BOOKMARKS_KEY); return new Set(r ? JSON.parse(r) : []); } catch { return new Set(); }
+  });
+  const [futuristicIds, setFuturisticIds] = useState<Set<string>>(new Set());
+  const [dashReloadNonce, setDashReloadNonce] = useState(0);
+  const importInputRef = useRef<HTMLInputElement>(null);
+  const importTargetRef = useRef<string | null>(null);
   const assetChildren = useMemo(() => {
     const m: Record<string, Asset[]> = {};
     for (const a of allAssets) { const k = a.parentId ?? "root"; (m[k] ||= []).push(a); }
@@ -44,13 +53,141 @@ export default function Visualization() {
   const allParentIds = useMemo(() => Object.keys(assetChildren).filter((k) => k !== "root"), [assetChildren]);
   const expandAllAssets = () => setAssetExpanded(new Set(allParentIds));
   const collapseAllAssets = () => setAssetExpanded(new Set());
+
+  function subtreeIdsOf(rootId: string) {
+    const ids = new Set<string>([rootId]);
+    const stack = [rootId];
+    while (stack.length) {
+      const id = stack.pop()!;
+      for (const child of assetChildren[id] ?? []) {
+        if (ids.has(child.id)) continue;
+        ids.add(child.id);
+        stack.push(child.id);
+      }
+    }
+    return ids;
+  }
+
+  // ── Dashboard right-click actions (operate on per-asset localStorage widgets) ──
+  const bumpReload = () => setDashReloadNonce((n) => n + 1);
+
+  function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    const target = importTargetRef.current;
+    e.target.value = "";
+    if (!file || !target) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const parsed = JSON.parse(String(reader.result));
+        const widgets = Array.isArray(parsed) ? parsed : parsed?.widgets;
+        if (!Array.isArray(widgets)) throw new Error("invalid");
+        writeWidgets(target, withFreshIds(widgets));
+        if (assetSelId === target) bumpReload();
+        toast({ title: "Dashboard imported", description: `${widgets.length} widget(s) loaded from file.` });
+      } catch {
+        toast({ title: "Import failed", description: "That file isn't a valid dashboard JSON.", variant: "destructive" });
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  const dashboardActions: DashboardActions = {
+    edit: (a) => setAssetSelId(a.id),
+    clone: (a) => {
+      const widgets = readWidgets(a.id);
+      if (!widgets.length) { toast({ title: "Nothing to clone", description: `"${a.name}" has no dashboard widgets yet.` }); return; }
+      try { localStorage.setItem(DASH_CLIP, JSON.stringify({ kind: "single", name: a.name, widgets })); } catch { /* quota */ }
+      toast({ title: "Dashboard copied", description: "Select a target asset, then right-click → Import Dashboard to paste it." });
+    },
+    cloneWithChildren: (a) => {
+      const items = [...subtreeIdsOf(a.id)].map((id) => ({ assetId: id, widgets: readWidgets(id) })).filter((x) => x.widgets.length);
+      if (!items.length) { toast({ title: "Nothing to clone", description: `"${a.name}" and its children have no dashboards yet.` }); return; }
+      try { localStorage.setItem(DASH_CLIP, JSON.stringify({ kind: "subtree", name: a.name, items })); } catch { /* quota */ }
+      toast({ title: "Dashboards copied", description: `${items.length} dashboard(s) copied. Right-click any asset → Import Dashboard to restore them.` });
+    },
+    createTemplate: (a) => {
+      const widgets = readWidgets(a.id);
+      if (!widgets.length) { toast({ title: "Nothing to save", description: `"${a.name}" has no dashboard widgets yet.` }); return; }
+      const name = window.prompt("Template name", `${a.name} template`);
+      if (!name || !name.trim()) return;
+      try {
+        const raw = localStorage.getItem("viz_templates"); const tpls = raw ? JSON.parse(raw) : [];
+        tpls.push({ id: newId("tpl"), name: name.trim(), widgets });
+        localStorage.setItem("viz_templates", JSON.stringify(tpls));
+        toast({ title: "Template created", description: `"${name.trim()}" saved with ${widgets.length} widget(s).` });
+      } catch { toast({ title: "Could not save template", variant: "destructive" }); }
+    },
+    remove: (a) => {
+      if (!confirm(`Delete the dashboard for "${a.name}"? All of its widgets will be removed.`)) return;
+      try { localStorage.removeItem(WKEY(a.id)); } catch { /* ignore */ }
+      if (assetSelId === a.id) bumpReload();
+      toast({ title: "Dashboard deleted", description: `"${a.name}" dashboard cleared.` });
+    },
+    toggleBookmark: (a) => {
+      const wasBookmarked = bookmarks.has(a.id);
+      setBookmarks((prev) => {
+        const next = new Set(prev);
+        if (wasBookmarked) next.delete(a.id); else next.add(a.id);
+        try { localStorage.setItem(BOOKMARKS_KEY, JSON.stringify([...next])); } catch { /* quota */ }
+        return next;
+      });
+      toast({ title: wasBookmarked ? "Bookmark removed" : "Bookmarked", description: a.name });
+    },
+    isBookmarked: (id) => bookmarks.has(id),
+    importDashboard: (a) => {
+      let clip: any = null;
+      try { const r = localStorage.getItem(DASH_CLIP); clip = r ? JSON.parse(r) : null; } catch { clip = null; }
+      if (clip?.kind === "single" && Array.isArray(clip.widgets)) {
+        writeWidgets(a.id, withFreshIds(clip.widgets));
+        if (assetSelId === a.id) bumpReload();
+        toast({ title: "Dashboard pasted", description: `Cloned dashboard applied to "${a.name}".` });
+        return;
+      }
+      if (clip?.kind === "subtree" && Array.isArray(clip.items)) {
+        for (const item of clip.items) writeWidgets(item.assetId, withFreshIds(item.widgets));
+        bumpReload();
+        toast({ title: "Dashboards restored", description: `${clip.items.length} dashboard(s) applied to their original assets.` });
+        return;
+      }
+      importTargetRef.current = a.id;
+      importInputRef.current?.click();
+    },
+    exportDashboard: (a) => {
+      const widgets = readWidgets(a.id);
+      downloadJson({ version: 1, asset: a.name, widgets }, `${a.name.replace(/[^\w.-]+/g, "_")}-dashboard.json`);
+      toast({ title: "Dashboard exported", description: `${widgets.length} widget(s) downloaded as JSON.` });
+    },
+    futuristic: (a) => {
+      setAssetSelId(a.id);
+      const wasOn = futuristicIds.has(a.id);
+      setFuturisticIds((prev) => { const next = new Set(prev); if (wasOn) next.delete(a.id); else next.add(a.id); return next; });
+      toast({ title: wasOn ? "Futuristic mode off" : "Futuristic mode on", description: a.name });
+    },
+  };
+
   const treeControls = (
-    <div className="flex items-center gap-3 px-3 py-1.5 border-b border-border text-xs">
-      <button onClick={expandAllAssets} className="text-muted-foreground hover:text-foreground">Expand all</button>
-      <button onClick={collapseAllAssets} className="text-muted-foreground hover:text-foreground">Collapse all</button>
+    <div className="border-b border-border">
+      <div className="flex items-center justify-between gap-2 px-3 py-2">
+        <span className="text-xs font-semibold text-primary">Asset Hierarchy</span>
+        <button
+          onClick={() => navigate("/assets")}
+          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground whitespace-nowrap"
+          title="Assets are created and organized in the Asset section — Visualization only reads them"
+        >
+          <Blocks className="w-3.5 h-3.5" /> Manage assets
+        </button>
+      </div>
+      <div className="flex items-center gap-3 px-3 pb-2 text-xs">
+        <button onClick={expandAllAssets} className="text-muted-foreground hover:text-foreground">Expand all</button>
+        <button onClick={collapseAllAssets} className="text-muted-foreground hover:text-foreground">Collapse all</button>
+      </div>
     </div>
   );
 
+  // Read-only tree: canManage:false hides all asset create/rename/delete controls
+  // and the mutation handlers are intentionally omitted. Only dashboard actions
+  // (per-asset, localStorage) are wired up.
   const assetTreeCtx = {
     childrenByParent: assetChildren,
     selectedId: assetSelId,
@@ -59,166 +196,10 @@ export default function Visualization() {
     toggle: (id: string) => setAssetExpanded((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; }),
     visibleIds: null,
     canManage: false,
-    onAddChild: () => {}, onRename: () => {}, onDelete: () => {}, onAssignTemplate: () => {},
-    onOpenBuilder: undefined,
+    onAssignTemplate: (a: Asset) => navigate(`/assets/${a.id}`),
+    dashboard: dashboardActions,
   };
   const selectedAsset = assetSelId ? allAssets.find((a) => a.id === assetSelId) ?? null : null;
-
-  const [currentId, setCurrentId] = useState<string | null>(null);
-  const [name, setName] = useState("");
-  const [widgets, setWidgetsState] = useState<Widget[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [preview, setPreview] = useState(false);
-  const [fullscreen, setFullscreen] = useState(false);
-  const [autoRefresh, setAutoRefresh] = useState(false);
-  const [dirty, setDirty] = useState(false);
-
-  const past = useRef<Widget[][]>([]);
-  const future = useRef<Widget[][]>([]);
-  const clipboard = useRef<Widget | null>(null);
-  const skipAutosave = useRef(true);
-  const fileRef = useRef<HTMLInputElement>(null);
-
-  const [accessOpen, setAccessOpen] = useState(false);
-  const [tplOpen, setTplOpen] = useState(false);
-  const [roles, setRoles] = useState<string[]>([]);
-  const ALL_ROLES = ["admin", "engineer", "operator", "viewer"];
-
-  // setWidgets wrapper: snapshot history only on add/remove (length change).
-  const setWidgets = useCallback((updater: (prev: Widget[]) => Widget[]) => {
-    setWidgetsState((prev) => {
-      const next = updater(prev);
-      if (next.length !== prev.length) { past.current.push(prev); future.current = []; }
-      return next;
-    });
-    setDirty(true);
-  }, []);
-
-  const openDashboard = useCallback((id: string) => {
-    const d = api.dashboards.find((x) => x.id === id);
-    if (!d) return;
-    skipAutosave.current = true;
-    setCurrentId(id); setName(d.name); setWidgetsState(d.widgets ?? []);
-    setSelectedId(null); past.current = []; future.current = []; setDirty(false);
-    api.markRecent(id);
-  }, [api]);
-
-  // When the dashboards list first loads and nothing is open, open the first one.
-  useEffect(() => {
-    if (!currentId && api.dashboards.length) openDashboard(api.dashboards[0].id);
-  }, [api.dashboards, currentId, openDashboard]);
-
-  // New widgets auto-bind to the opened asset's device + first matching tag.
-  const [builderBinding, setBuilderBinding] = useState<{ assetId: string; tag: string } | undefined>(undefined);
-
-  // Right-click asset → open builder in place; create a dashboard for it if none open.
-  function openBuilderFor(a: Asset) {
-    setMode("build");
-    resolveTags(a.id, allAssets).then(({ ownerId, tags }) => {
-      if (ownerId) setBuilderBinding({ assetId: ownerId, tag: tags[0] ?? "" });
-    });
-    if (!currentId) api.createDashboard(`${a.name} Dashboard`, null, []).then((id) => { if (id) openDashboard(id); });
-  }
-
-  const save = useCallback(async () => {
-    if (!currentId) return;
-    await api.saveDashboard({ id: currentId, name: name.trim() || "Untitled", widgets });
-    setDirty(false);
-    toast({ title: "Dashboard saved" });
-  }, [api, currentId, name, widgets, toast]);
-
-  // Auto-save (debounced) while a dashboard is open and dirty.
-  useEffect(() => {
-    if (skipAutosave.current) { skipAutosave.current = false; return; }
-    if (!currentId || !dirty) return;
-    const t = setTimeout(() => {
-      api.saveDashboard({ id: currentId, name: name.trim() || "Untitled", widgets }).then(() => setDirty(false));
-    }, 1500);
-    return () => clearTimeout(t);
-  }, [widgets, name, currentId, dirty]); // eslint-disable-line
-
-  const updateConfig = useCallback((id: string, patch: Record<string, any>) => {
-    setWidgetsState((prev) => prev.map((w) => (w.id === id ? { ...w, config: { ...w.config, ...patch } } : w)));
-    setDirty(true);
-  }, []);
-  const deleteWidget = useCallback((id: string) => { setWidgets((prev) => prev.filter((w) => w.id !== id)); setSelectedId(null); }, [setWidgets]);
-
-  const undo = useCallback(() => {
-    if (!past.current.length) return;
-    future.current.push(widgets); setWidgetsState(past.current.pop()!); setDirty(true); setSelectedId(null);
-  }, [widgets]);
-  const redo = useCallback(() => {
-    if (!future.current.length) return;
-    past.current.push(widgets); setWidgetsState(future.current.pop()!); setDirty(true); setSelectedId(null);
-  }, [widgets]);
-
-  // Keyboard shortcuts
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      const el = e.target as HTMLElement;
-      if (el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable)) return;
-      const ctrl = e.ctrlKey || e.metaKey;
-      if (ctrl && e.key.toLowerCase() === "z") { e.preventDefault(); undo(); }
-      else if (ctrl && e.key.toLowerCase() === "y") { e.preventDefault(); redo(); }
-      else if (ctrl && e.key.toLowerCase() === "c" && selectedId) { clipboard.current = widgets.find((w) => w.id === selectedId) ?? null; }
-      else if (ctrl && e.key.toLowerCase() === "v" && clipboard.current) {
-        e.preventDefault();
-        const src = clipboard.current;
-        setWidgets((prev) => [...prev, { ...src, id: `w${Date.now()}`, x: Math.min(10, src.x + 1), y: src.y + 1 }]);
-      }
-      else if (ctrl && e.key.toLowerCase() === "d" && selectedId) {
-        e.preventDefault();
-        const src = widgets.find((w) => w.id === selectedId); if (src) setWidgets((prev) => [...prev, { ...src, id: `w${Date.now()}`, x: Math.min(10, src.x + 1), y: src.y + 1 }]);
-      }
-      else if ((e.key === "Delete" || e.key === "Backspace") && selectedId) { e.preventDefault(); deleteWidget(selectedId); }
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [selectedId, widgets, undo, redo, setWidgets, deleteWidget]);
-
-  const selectedWidget = useMemo(() => widgets.find((w) => w.id === selectedId) ?? null, [widgets, selectedId]);
-  const current = currentId ? api.dashboards.find((d) => d.id === currentId) : null;
-
-  // Builder tree ctx: selecting a machine rebinds every bound widget to it, so one
-  // dashboard renders whichever machine you click (parameterized dashboard).
-  const buildAssetCtx = {
-    ...assetTreeCtx,
-    setSelectedId: (id: string) => {
-      setAssetSelId(id);
-      setWidgets((prev) => prev.map((w) => (w.config?.assetId ? { ...w, config: { ...w.config, assetId: id } } : w)));
-    },
-    onOpenBuilder: undefined,
-  };
-
-  function exportJson() {
-    const blob = new Blob([JSON.stringify({ name, widgets }, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob); const a = document.createElement("a");
-    a.href = url; a.download = `${(name || "dashboard").replace(/\s+/g, "_")}.json`; a.click(); URL.revokeObjectURL(url);
-  }
-  async function share() {
-    try { await navigator.clipboard.writeText(JSON.stringify({ name, widgets })); toast({ title: "Dashboard copied", description: "JSON copied to clipboard — paste via Import to share." }); }
-    catch { toast({ title: "Copy failed", variant: "destructive" }); }
-  }
-  async function onImportFile(e: React.ChangeEvent<HTMLInputElement>) {
-    const f = e.target.files?.[0]; e.target.value = "";
-    if (!f) return;
-    try {
-      const obj = JSON.parse(await f.text());
-      const w = Array.isArray(obj.widgets) ? obj.widgets : [];
-      const id = await api.createDashboard(obj.name || f.name.replace(/\.json$/, ""), null, w);
-      if (id) { openDashboard(id); toast({ title: "Dashboard imported" }); }
-    } catch { toast({ title: "Import failed", description: "Not a valid dashboard JSON.", variant: "destructive" }); }
-  }
-  function saveAsTemplate() {
-    const n = prompt("Template name", name || "Template"); if (!n?.trim()) return;
-    api.saveAsTemplate(n.trim(), widgets); toast({ title: "Template saved" });
-  }
-  function openAccess() { setRoles(current?.roleAccess ?? ALL_ROLES); setAccessOpen(true); }
-  async function applyAccess() {
-    if (!currentId) return;
-    await api.saveDashboard({ id: currentId, name: name.trim() || "Untitled", widgets, roleAccess: roles.length ? roles : ALL_ROLES });
-    setAccessOpen(false); toast({ title: "Access updated" });
-  }
 
   return (
     <div className="p-4 h-full flex flex-col gap-3">
@@ -230,156 +211,32 @@ export default function Visualization() {
           <LayoutDashboard className="w-5 h-5 text-primary" />
           <h1 className="text-lg font-bold">Visualization</h1>
         </div>
-        {/* View toggle — pick By Asset or the Dashboard Builder */}
-        <div className="ml-2 inline-flex rounded-md border border-border p-0.5 bg-muted/40">
-          <button
-            onClick={() => setMode("explore")}
-            className={cn("px-3 py-1 text-xs rounded font-medium transition-colors", mode === "explore" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground")}
-          >By Asset</button>
-          <button
-            onClick={() => setMode("build")}
-            className={cn("px-3 py-1 text-xs rounded font-medium transition-colors", mode === "build" ? "bg-background shadow-sm text-foreground" : "text-muted-foreground hover:text-foreground")}
-          >Dashboard Builder</button>
-        </div>
       </div>
 
-      {mode === "explore" ? (
-        <Card className="flex-1 min-h-0 overflow-hidden shadow-sm">
-          <ResizablePanelGroup direction="horizontal" className="h-full">
-            <ResizablePanel defaultSize={26} minSize={18} maxSize={40}>
-              <div className="h-full border-r border-border overflow-auto">
-                {treeControls}
-                <AssetTreeProvider value={assetTreeCtx}>
-                  <AssetTree loading={!assetsData} />
-                </AssetTreeProvider>
-              </div>
-            </ResizablePanel>
-            <ResizableHandle withHandle />
-            <ResizablePanel defaultSize={74}>
-              <AssetVizPanel assetId={assetSelId} assetName={selectedAsset?.name} assets={allAssets} />
-            </ResizablePanel>
-          </ResizablePanelGroup>
-        </Card>
-      ) : (
-      <Card className={cn("flex-1 min-h-0 overflow-hidden shadow-sm", fullscreen && "fixed inset-0 z-50 rounded-none")}>
-        <div className="flex flex-col h-full">
-          {/* Dashboard toolbar */}
-          <div className="flex items-center gap-2 px-3 h-12 border-b border-border shrink-0 flex-wrap">
-            <Button variant="ghost" size="sm" onClick={() => setMode("explore")} title="Back to asset explorer"><ArrowLeft className="w-4 h-4 mr-1" /> Assets</Button>
-            <div className="w-px h-5 bg-border" />
-            <select
-              value={currentId ?? ""}
-              onChange={(e) => {
-                if (e.target.value === "__new") { const n = prompt("Dashboard name", "New Dashboard"); if (n?.trim()) api.createDashboard(n.trim(), null, []).then((id) => id && openDashboard(id)); }
-                else if (e.target.value) openDashboard(e.target.value);
-              }}
-              className="h-8 rounded-md border border-border text-sm px-2 max-w-[12rem]"
-              title="Switch dashboard"
-            >
-              {!currentId && <option value="">— select dashboard —</option>}
-              {api.dashboards.map((d) => <option key={d.id} value={d.id}>{d.name}</option>)}
-              <option value="__new">+ New dashboard…</option>
-            </select>
-            <Input value={name} onChange={(e) => { setName(e.target.value); setDirty(true); }} placeholder="Dashboard name" className="h-8 w-44 text-sm font-medium" disabled={!currentId} />
-            {dirty && <span className="text-[11px] text-amber-600">● unsaved</span>}
-            <div className="flex-1" />
-            <IconBtn title="Undo (Ctrl+Z)" onClick={undo}><Undo2 className="w-4 h-4" /></IconBtn>
-            <IconBtn title="Redo (Ctrl+Y)" onClick={redo}><Redo2 className="w-4 h-4" /></IconBtn>
-            <label className="flex items-center gap-1.5 text-xs text-muted-foreground px-1"><Switch checked={autoRefresh} onCheckedChange={setAutoRefresh} className="scale-90" /> Auto-refresh</label>
-            <Button variant="outline" size="sm" onClick={() => setPreview((p) => !p)} disabled={!currentId}>{preview ? <><EyeOff className="w-4 h-4 mr-1.5" /> Edit</> : <><Eye className="w-4 h-4 mr-1.5" /> Preview</>}</Button>
-            <Button variant="outline" size="sm" onClick={() => current && api.cloneDashboard(current)} disabled={!current}><Copy className="w-4 h-4 mr-1.5" /> Clone</Button>
-            <IconBtn title="Templates" onClick={() => setTplOpen(true)}><LayoutTemplate className="w-4 h-4" /></IconBtn>
-            <IconBtn title="Access control" onClick={openAccess} ><ShieldCheck className="w-4 h-4" /></IconBtn>
-            <IconBtn title="Share (copy JSON)" onClick={share}><Share2 className="w-4 h-4" /></IconBtn>
-            <IconBtn title="Import dashboard" onClick={() => fileRef.current?.click()}><Upload className="w-4 h-4" /></IconBtn>
-            <input ref={fileRef} type="file" accept="application/json,.json" className="hidden" onChange={onImportFile} />
-            <Button variant="outline" size="sm" onClick={exportJson} disabled={!currentId}><Download className="w-4 h-4 mr-1.5" /> Export</Button>
-            <Button variant="outline" size="sm" onClick={() => setFullscreen((f) => !f)}>{fullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}</Button>
-            <Button size="sm" onClick={save} disabled={!currentId}><Save className="w-4 h-4 mr-1.5" /> Save</Button>
-          </div>
-
-          <div className="flex-1 min-h-0">
-            <ResizablePanelGroup direction="horizontal" className="h-full">
-              {!fullscreen && (
-                <>
-                  <ResizablePanel defaultSize={22} minSize={15} maxSize={32}>
-                    <div className="h-full border-r border-border overflow-auto">
-                      {treeControls}
-                      <AssetTreeProvider value={buildAssetCtx}><AssetTree loading={!assetsData} /></AssetTreeProvider>
-                    </div>
-                  </ResizablePanel>
-                  <ResizableHandle withHandle />
-                </>
-              )}
-              <ResizablePanel defaultSize={fullscreen ? 100 : 58}>
-                {currentId ? (
-                  <DashboardCanvas widgets={widgets} setWidgets={setWidgets} selectedId={selectedId} onSelect={setSelectedId} preview={preview} defaultConfig={builderBinding} />
-                ) : (
-                  <div className="h-full flex items-center justify-center text-muted-foreground text-sm">Select or create a dashboard on the left.</div>
-                )}
-              </ResizablePanel>
-              {!fullscreen && !preview && (
-                <>
-                  <ResizableHandle withHandle />
-                  <ResizablePanel defaultSize={20} minSize={15} maxSize={32}>
-                    <div className="h-full border-l border-border"><WidgetPanel selected={selectedWidget} updateConfig={updateConfig} onDelete={deleteWidget} /></div>
-                  </ResizablePanel>
-                </>
-              )}
-            </ResizablePanelGroup>
-          </div>
-        </div>
+      <Card className="flex-1 min-h-0 overflow-hidden shadow-sm">
+        <ResizablePanelGroup direction="horizontal" className="h-full">
+          <ResizablePanel defaultSize={26} minSize={18} maxSize={40}>
+            <div className="h-full border-r border-border overflow-auto">
+              {treeControls}
+              <AssetTreeProvider value={assetTreeCtx}>
+                <AssetTree loading={!assetsData} />
+              </AssetTreeProvider>
+            </div>
+          </ResizablePanel>
+          <ResizableHandle withHandle />
+          <ResizablePanel defaultSize={74}>
+            <AssetVizPanel
+              assetId={assetSelId}
+              assetName={selectedAsset?.name}
+              assets={allAssets}
+              reloadKey={dashReloadNonce}
+              futuristic={assetSelId ? futuristicIds.has(assetSelId) : false}
+            />
+          </ResizablePanel>
+        </ResizablePanelGroup>
       </Card>
-      )}
 
-      {/* Access Control */}
-      <Dialog open={accessOpen} onOpenChange={setAccessOpen}>
-        <DialogContent className="sm:max-w-sm">
-          <DialogHeader><DialogTitle className="flex items-center gap-2"><ShieldCheck className="w-4 h-4" /> Access Control</DialogTitle></DialogHeader>
-          <p className="text-sm text-muted-foreground">Which roles can see this dashboard.</p>
-          <div className="space-y-2">
-            {ALL_ROLES.map((r) => (
-              <label key={r} className="flex items-center gap-2 text-sm capitalize cursor-pointer">
-                <input type="checkbox" checked={roles.includes(r)} onChange={(e) => setRoles((prev) => e.target.checked ? [...prev, r] : prev.filter((x) => x !== r))} />
-                {r}
-              </label>
-            ))}
-          </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setAccessOpen(false)}>Cancel</Button>
-            <Button onClick={applyAccess}>Save</Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Templates */}
-      <Dialog open={tplOpen} onOpenChange={setTplOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader><DialogTitle className="flex items-center gap-2"><LayoutTemplate className="w-4 h-4" /> Dashboard Templates</DialogTitle></DialogHeader>
-          <Button variant="outline" size="sm" className="w-full" onClick={saveAsTemplate} disabled={!currentId}>
-            <Save className="w-4 h-4 mr-1.5" /> Save current dashboard as template
-          </Button>
-          <div className="mt-2 max-h-72 overflow-auto divide-y divide-border border border-border rounded-md">
-            {api.templates.length === 0 ? (
-              <p className="text-sm text-muted-foreground text-center py-6">No templates yet.</p>
-            ) : api.templates.map((tpl) => (
-              <div key={tpl.id} className="flex items-center gap-2 px-3 py-2">
-                <LayoutTemplate className="w-4 h-4 text-primary shrink-0" />
-                <span className="text-sm flex-1 truncate">{tpl.name} <span className="text-xs text-muted-foreground">({tpl.widgets.length} widgets)</span></span>
-                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={async () => {
-                  const n = prompt("New dashboard name", tpl.name); if (!n?.trim()) return;
-                  const id = await api.createFromTemplate(tpl.id, n.trim(), null); if (id) { openDashboard(id); setTplOpen(false); }
-                }}>Create</Button>
-                <button title="Delete template" onClick={() => api.deleteTemplate(tpl.id)} className="p-1 text-muted-foreground hover:text-destructive"><Trash2 className="w-3.5 h-3.5" /></button>
-              </div>
-            ))}
-          </div>
-        </DialogContent>
-      </Dialog>
+      <input ref={importInputRef} type="file" accept="application/json,.json" className="hidden" onChange={handleImportFile} />
     </div>
   );
-}
-
-function IconBtn({ title, onClick, children }: { title: string; onClick: () => void; children: React.ReactNode }) {
-  return <button title={title} onClick={onClick} className="p-1.5 rounded hover:bg-muted text-muted-foreground">{children}</button>;
 }

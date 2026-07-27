@@ -20,6 +20,49 @@ let _authTokenGetter: AuthTokenGetter | null = null;
 let _actorName: string | null = null;
 let _actorRole: string | null = null;
 let _actorUsername: string | null = null;
+let _csrfToken: string | null = null;
+let _onUnauthorized: ((status: number, code: string | null) => void) | null = null;
+
+const CSRF_HEADER = "x-csrf-token";
+const CSRF_COOKIE = "is_csrf";
+const UNSAFE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+/**
+ * Set the CSRF token for this session (returned by /auth/login and
+ * /auth/session). It is echoed back in the X-CSRF-Token header on every
+ * mutating request — the double-submit half the server compares against the
+ * `is_csrf` cookie.
+ *
+ * Optional: when unset, the token is read from the cookie instead. Setting it
+ * explicitly is more robust, because it keeps working if the cookie is ever
+ * scoped to a path the reader cannot see.
+ */
+export function setCsrfToken(token: string | null): void {
+  _csrfToken = token;
+}
+
+/**
+ * Register a callback invoked whenever the API answers 401. The app uses it to
+ * drop its cached identity and bounce to the login screen the moment a session
+ * expires or is revoked server-side, rather than showing a half-broken page.
+ */
+export function setUnauthorizedHandler(
+  handler: ((status: number, code: string | null) => void) | null,
+): void {
+  _onUnauthorized = handler;
+}
+
+function readCsrfCookie(): string | null {
+  if (typeof document === "undefined") return null;
+  for (const part of document.cookie.split(";")) {
+    const idx = part.indexOf("=");
+    if (idx === -1) continue;
+    if (part.slice(0, idx).trim() === CSRF_COOKIE) {
+      return decodeURIComponent(part.slice(idx + 1).trim());
+    }
+  }
+  return null;
+}
 
 /**
  * Set the current actor identity to be included on every mutating request
@@ -367,9 +410,19 @@ export async function customFetch<T = unknown>(
   }
 
   // Attach actor identity headers so the server can log who made the change.
+  //
+  // NOTE: since the auth upgrade these are advisory only — the server derives
+  // the actor from the session cookie and overwrites them. They are still sent
+  // so unauthenticated internal tooling keeps attributing its own writes.
   if (_actorName) headers.set("x-actor-name", _actorName);
   if (_actorRole) headers.set("x-actor-role", _actorRole);
   if (_actorUsername) headers.set("x-actor-username", _actorUsername);
+
+  // CSRF double-submit: echo the session's CSRF token on mutating requests.
+  if (UNSAFE_METHODS.has(method) && !headers.has(CSRF_HEADER)) {
+    const token = _csrfToken ?? readCsrfCookie();
+    if (token) headers.set(CSRF_HEADER, token);
+  }
 
   // Attach bearer token when an auth getter is configured and no
   // Authorization header has been explicitly provided.
@@ -382,10 +435,24 @@ export async function customFetch<T = unknown>(
 
   const requestInfo = { method, url: resolveUrl(input) };
 
-  const response = await fetch(input, { ...init, method, headers });
+  // `include` rather than the default `same-origin` so the session cookie also
+  // travels when the SPA is served from a different origin than the API (the
+  // setBaseUrl case). The server pairs this with an explicit CORS allowlist.
+  const response = await fetch(input, {
+    credentials: "include",
+    ...init,
+    method,
+    headers,
+  });
 
   if (!response.ok) {
     const errorData = await parseErrorBody(response, method);
+
+    if (response.status === 401 && _onUnauthorized) {
+      const code = getStringField(errorData, "code") ?? null;
+      _onUnauthorized(response.status, code);
+    }
+
     throw new ApiError(response, errorData, requestInfo);
   }
 

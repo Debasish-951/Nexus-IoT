@@ -18,10 +18,12 @@ import systemRouter from "./system";
 import vizDashboardsRouter from "./viz_dashboards";
 import aiRouter from "./ai";
 import authRouter from "./auth";
+import securityRouter from "./security";
 
 const router: IRouter = Router();
 
 router.use(authRouter);
+router.use(securityRouter);
 router.use(healthRouter);
 router.use(assetsRouter);
 router.use(attributesRouter);

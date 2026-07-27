@@ -6,7 +6,7 @@ import {
   useDeleteApiClient,
   getListApiClientsQueryKey,
 } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
@@ -19,13 +19,14 @@ import { useToast } from "@/hooks/use-toast";
 import {
   KeyRound, Plus, Trash2, Copy, Eye, EyeOff, ChevronDown,
   CheckCircle2, XCircle, BookOpen, Shield, Zap, Bell, Clock,
-  Terminal, AlertTriangle, RefreshCw, Ban, RotateCcw, Calendar,
+  Terminal, AlertTriangle, RefreshCw, Ban, RotateCcw, Calendar, FolderOpen,
   Globe, Activity, FileDown, Heart, Info,
 } from "lucide-react";
 import { format, formatDistanceToNow, differenceInDays, isPast } from "date-fns";
 import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { ReadOnlyBanner } from "@/components/RoleGuard";
+import { apiGet, apiFetch } from "@/lib/auth-api";
 
 // ── Scope definitions ─────────────────────────────────────────────────────────
 const SCOPES = [
@@ -251,7 +252,7 @@ function RotateDialog({
   function handleRotate() {
     if (!client) return;
     setLoading(true);
-    fetch(`/api/api-clients/${client.id}/rotate-secret`, { method: "POST" })
+    apiFetch(`/api/api-clients/${client.id}/rotate-secret`, { method: "POST" })
       .then((r) => r.json())
       .then((data: Record<string, unknown>) => {
         setNewSecret(data.clientSecret as string);
@@ -326,6 +327,8 @@ function RotateDialog({
 interface CreateForm {
   name: string;
   description: string;
+  /** Root-level asset this client belongs to. "" = platform-wide. */
+  projectId: string;
   scopes: string[];
   allScopes: boolean;
   expiresAt: string;
@@ -338,9 +341,20 @@ function CreateDialog({
   const { toast } = useToast();
   const createClient = useCreateApiClient();
   const form = useForm<CreateForm>({
-    defaultValues: { name: "", description: "", scopes: [], allScopes: false, expiresAt: "", allowedIps: "" },
+    defaultValues: { name: "", description: "", projectId: "", scopes: [], allScopes: false, expiresAt: "", allowedIps: "" },
   });
   const watchAllScopes = form.watch("allScopes");
+
+  // Projects the caller may attach a client to. The API applies the same scope
+  // check on write, so this select is convenience, not the control.
+  const { data: projects = [] } = useQuery<{ id: string; name: string }[]>({
+    queryKey: ["api-client-projects"],
+    queryFn: async () => {
+      const res = await apiGet("/api/api-clients/projects");
+      return res.ok ? res.json() : [];
+    },
+    staleTime: 60_000,
+  });
 
   function onSubmit(data: CreateForm) {
     const finalScopes = data.allScopes ? [ALL_SCOPES_ID] : data.scopes;
@@ -354,6 +368,8 @@ function CreateDialog({
           name: data.name,
           scopes: finalScopes,
           description: data.description || undefined,
+          // "" means unassigned — send null so the server clears it explicitly.
+          projectId: data.projectId || null,
           expiresAt: data.expiresAt || undefined,
           allowedIps,
         } as Parameters<typeof createClient.mutate>[0]["data"],
@@ -387,6 +403,31 @@ function CreateDialog({
                 <FormControl>
                   <Input placeholder="e.g. Grafana Export, Python ETL, SCADA Gateway" {...field} data-testid="client-name-input" />
                 </FormControl>
+              </FormItem>
+            )} />
+
+            {/* Project — the unit a team shares. Assigning a client to a project
+                means everyone mapped to that project sees and uses this one
+                credential, instead of each person holding a personal key. */}
+            <FormField control={form.control} name="projectId" render={({ field }) => (
+              <FormItem>
+                <FormLabel>Project</FormLabel>
+                <FormControl>
+                  <select
+                    {...field}
+                    className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
+                  >
+                    <option value="">No project — platform-wide (admins only)</option>
+                    {projects.map((p) => (
+                      <option key={p.id} value={p.id}>{p.name}</option>
+                    ))}
+                  </select>
+                </FormControl>
+                <FormDescription>
+                  {projects.length === 0
+                    ? "No projects yet. A project is a top-level asset — create one under Asset Management."
+                    : "Everyone assigned to this project shares this client's ingest endpoint."}
+                </FormDescription>
               </FormItem>
             )} />
 
@@ -506,13 +547,13 @@ export default function ApiClients() {
   function invalidate() { qc.invalidateQueries({ queryKey: getListApiClientsQueryKey() }); }
 
   function handleRevoke(client: Record<string, unknown>) {
-    fetch(`/api/api-clients/${client.id}/revoke`, { method: "POST" })
+    apiFetch(`/api/api-clients/${client.id}/revoke`, { method: "POST" })
       .then(() => { toast({ title: `"${client.name}" revoked` }); invalidate(); })
       .catch(() => toast({ title: "Failed", variant: "destructive" }));
   }
 
   function handleRestore(client: Record<string, unknown>) {
-    fetch(`/api/api-clients/${client.id}/restore`, { method: "POST" })
+    apiFetch(`/api/api-clients/${client.id}/restore`, { method: "POST" })
       .then(() => { toast({ title: `"${client.name}" restored` }); invalidate(); })
       .catch(() => toast({ title: "Failed", variant: "destructive" }));
   }
@@ -588,6 +629,7 @@ export default function ApiClients() {
           <thead>
             <tr className="border-b border-border bg-muted/50">
               <th className="text-left px-4 py-2.5 font-medium text-muted-foreground">Name</th>
+              <th className="text-left px-4 py-2.5 font-medium text-muted-foreground">Project</th>
               <th className="text-left px-4 py-2.5 font-medium text-muted-foreground">Bearer Token</th>
               <th className="text-left px-4 py-2.5 font-medium text-muted-foreground">Scopes</th>
               <th className="text-left px-4 py-2.5 font-medium text-muted-foreground">Requests</th>
@@ -607,7 +649,7 @@ export default function ApiClients() {
               ))
             ) : clientList.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-16 text-center text-muted-foreground">
+                <td colSpan={8} className="px-4 py-16 text-center text-muted-foreground">
                   <KeyRound className="w-10 h-10 mx-auto mb-3 opacity-20" />
                   <p className="text-sm font-medium">No API clients yet</p>
                   <p className="text-xs mt-1 opacity-60">Create one to start exporting data securely</p>
@@ -651,6 +693,18 @@ export default function ApiClients() {
                           )}
                         </div>
                       </div>
+                    </td>
+
+                    {/* Owning project — the team that shares this credential */}
+                    <td className="px-4 py-3">
+                      {client.projectName ? (
+                        <span className="inline-flex items-center gap-1 text-xs">
+                          <FolderOpen className="w-3 h-3 text-muted-foreground shrink-0" />
+                          <span className="truncate max-w-[140px]">{client.projectName as string}</span>
+                        </span>
+                      ) : (
+                        <span className="text-[11px] text-muted-foreground italic">platform-wide</span>
+                      )}
                     </td>
 
                     {/* Bearer token */}
@@ -763,7 +817,7 @@ export default function ApiClients() {
 
                   isExpanded && (
                     <tr key={`${client.id as string}-guide`} className="border-b border-border/50 bg-muted/5">
-                      <td colSpan={7} className="px-6 py-5">
+                      <td colSpan={8} className="px-6 py-5">
                         <div className="flex items-center gap-2 mb-4">
                           <BookOpen className="w-4 h-4 text-primary" />
                           <h3 className="text-sm font-semibold">Integration Guide — {client.name as string}</h3>

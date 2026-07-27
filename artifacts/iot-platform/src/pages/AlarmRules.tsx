@@ -41,6 +41,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { ReadOnlyBanner } from "@/components/RoleGuard";
+import { apiFetch } from "@/lib/auth-api";
 
 const SEVERITY_STYLES: Record<string, string> = {
   critical: "bg-red-100 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-400",
@@ -148,7 +149,7 @@ export default function AlarmRules() {
   const [telemetryMetricKeys, setTelemetryMetricKeys] = useState<string[]>([]);
   useEffect(() => {
     if (!watchAssetId) { setTelemetryMetricKeys([]); return; }
-    fetch(`/api/telemetry/${watchAssetId}/metrics`, { credentials: "include" })
+    apiFetch(`/api/telemetry/${watchAssetId}/metrics`, { credentials: "include" })
       .then(r => r.ok ? r.json() : []).then(setTelemetryMetricKeys).catch(() => setTelemetryMetricKeys([]));
   }, [watchAssetId]);
   const attrList = (assetAttributes as any[] | undefined) ?? [];
@@ -218,7 +219,7 @@ export default function AlarmRules() {
   async function testWebhook(ruleId: string) {
     setTestingWebhook(ruleId);
     try {
-      const res = await fetch(`/api/alarm-rules/${ruleId}/test-webhook`, { method: "POST" });
+      const res = await apiFetch(`/api/alarm-rules/${ruleId}/test-webhook`, { method: "POST" });
       const data = await res.json();
       if (data.success) toast({ title: "Webhook test succeeded", description: `HTTP ${data.statusCode}` });
       else toast({ title: "Webhook test failed", description: data.error ?? `HTTP ${data.statusCode}`, variant: "destructive" });

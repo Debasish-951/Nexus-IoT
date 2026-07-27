@@ -1416,6 +1416,24 @@ components:
           type: boolean
 
     # ─── User ──────────────────────────────────────────────────────────────────
+    #
+    # `password` is deliberately absent from every user schema. Accounts are
+    # provisioned by invitation: the server issues an activation token, emails
+    # it, and the user sets their own password. An administrator never sees or
+    # chooses another user's credential.
+    # See docs/security/auth-upgrade.md §2.2.
+    UserRole:
+      type: string
+      enum: [super_admin, admin, customer_admin, engineer, operator, viewer]
+
+    UserStatus:
+      type: string
+      description: |
+        `invited` — created, activation link outstanding, cannot sign in.
+        `active` — activated and able to sign in.
+        `suspended` / `inactive` — administratively blocked; all sessions revoked.
+      enum: [invited, active, suspended, inactive]
+
     User:
       type: object
       properties:
@@ -1428,15 +1446,58 @@ components:
         fullName:
           type: string
         role:
-          type: string
-          enum: [admin, operator, viewer, engineer]
+          $ref: "#/components/schemas/UserRole"
         status:
-          type: string
-          enum: [active, inactive, suspended]
+          $ref: "#/components/schemas/UserStatus"
         lastLogin:
           type: string
           format: date-time
           nullable: true
+        lastLoginIp:
+          type: string
+          nullable: true
+        invitedAt:
+          type: string
+          format: date-time
+          nullable: true
+        activatedAt:
+          type: string
+          format: date-time
+          nullable: true
+        passwordUpdatedAt:
+          type: string
+          format: date-time
+          nullable: true
+        mustChangePassword:
+          type: boolean
+        failedLoginAttempts:
+          type: integer
+        lockedUntil:
+          type: string
+          format: date-time
+          nullable: true
+        isLocked:
+          type: boolean
+          description: Derived — lockedUntil is in the future.
+        hasPassword:
+          type: boolean
+          description: False until the user completes activation.
+        mfaEnabled:
+          type: boolean
+        authProvider:
+          type: string
+          description: local | oidc | azuread | saml — SSO seam.
+        invitationExpiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        invitationExpired:
+          type: boolean
+          description: Invited, but no live activation token remains — resend required.
+        accessOverrides:
+          type: object
+          additionalProperties: true
+          description: Per-user grants layered over the role defaults.
         createdAt:
           type: string
           format: date-time
@@ -1444,33 +1505,43 @@ components:
 
     CreateUserBody:
       type: object
+      description: |
+        Provisions an account in `invited` status and emails a single-use
+        activation link. There is no password field by design.
       properties:
         username:
           type: string
+          minLength: 3
+          maxLength: 64
         email:
           type: string
+          format: email
+          description: An address the user already owns. The platform does not create mailboxes.
         fullName:
           type: string
         role:
-          type: string
-          enum: [admin, operator, viewer, engineer]
-        password:
-          type: string
-      required: [username, email, fullName, role, password]
+          $ref: "#/components/schemas/UserRole"
+        accessOverrides:
+          type: object
+          additionalProperties: true
+          description: Optional per-user grants applied at creation time.
+      required: [username, email, fullName, role]
 
     UpdateUserBody:
       type: object
       properties:
         email:
           type: string
+          format: email
         fullName:
           type: string
         role:
-          type: string
-          enum: [admin, operator, viewer, engineer]
+          $ref: "#/components/schemas/UserRole"
         status:
-          type: string
-          enum: [active, inactive, suspended]
+          $ref: "#/components/schemas/UserStatus"
+        accessOverrides:
+          type: object
+          additionalProperties: true
 
     # ─── Broker ────────────────────────────────────────────────────────────────
     Broker:
@@ -1543,8 +1614,28 @@ components:
           type: string
         name:
           type: string
+        description:
+          type: string
+          nullable: true
         clientId:
           type: string
+        projectId:
+          type: string
+          nullable: true
+          description: Owning project (root-level asset), or null for a platform-wide client.
+        projectName:
+          type: string
+          nullable: true
+          description: Resolved project name, for display. Null if unassigned or deleted.
+        ingestUrl:
+          type: string
+          description: This client's dedicated ingest endpoint path.
+        totalRequests:
+          type: integer
+        lastUsedAt:
+          type: string
+          format: date-time
+          nullable: true
         tags:
           type: array
           items:
@@ -1555,7 +1646,7 @@ components:
             type: string
         status:
           type: string
-          enum: [active, inactive]
+          enum: [active, inactive, revoked]
         createdAt:
           type: string
           format: date-time
@@ -1569,6 +1660,15 @@ components:
       properties:
         name:
           type: string
+        description:
+          type: string
+        projectId:
+          type: string
+          nullable: true
+          description: |
+            Root-level asset this client belongs to. Users assigned to that
+            project share the client's ingest endpoint. Omit for a
+            platform-wide client visible only to administrators.
         tags:
           type: array
           items:
@@ -1584,6 +1684,11 @@ components:
       properties:
         name:
           type: string
+        description:
+          type: string
+        projectId:
+          type: string
+          nullable: true
         tags:
           type: array
           items:

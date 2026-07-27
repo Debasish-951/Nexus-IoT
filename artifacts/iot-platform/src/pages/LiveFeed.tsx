@@ -9,17 +9,16 @@ import {
   Radio, Cpu, BrainCircuit, TrendingUp, ChevronLeft, ChevronRight, Bell,
 } from "lucide-react";
 import { AreaChart, Area, BarChart, Bar, ResponsiveContainer } from "recharts";
+import { useThemePalette, type ThemePalette } from "@/hooks/useTheme";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const STALE_MS = 30_000;
 const MAX_EVENTS = 1000;
 
-// ── light palette ──
-const C = {
-  bg: "#f7f8fa", card: "#ffffff", border: "#e2e8f0", soft: "#f1f5f9",
-  text: "#0f172a", muted: "#475569", dim: "#64748b", faint: "#94a3b8",
-  cyan: "#0891b2", green: "#059669", amber: "#d97706", red: "#dc2626", violet: "#7c3aed", blue: "#2563eb",
-};
+// Palette now comes from useThemePalette() so this page follows the app theme.
+// It was a fixed light-only object, which is why Live Feed stayed white while
+// everything else went dark: the colours are applied as inline styles, and
+// inline styles cannot carry a Tailwind `dark:` variant.
 
 interface SensorRow { id: string; ts: number; assetId: string; assetName: string; sensor: string; value: number; }
 interface AssetLatest { assetId: string; assetName: string; metrics: Record<string, number>; lastSeen: number; }
@@ -27,9 +26,12 @@ interface AlarmRow { id: string; name: string; assetName: string; severity: stri
 interface ActivityRow { id: string; action: string; category: string; detail: string | null; targetName: string | null; timestamp: string; }
 interface Health { health: "ok" | "alarm" | "stale"; freshnessPct: number | null; activeAlarms: number; }
 
-const sevColor = (s: string) => s === "critical" ? C.red : s === "high" ? C.amber : s === "medium" ? C.amber : C.blue;
+// Takes the palette explicitly — it is module-scope, so it cannot call the hook.
+const sevColor = (C: ThemePalette, s: string) =>
+  s === "critical" ? C.red : s === "high" ? C.amber : s === "medium" ? C.amber : C.blue;
 
 export default function LiveFeed() {
+  const C = useThemePalette();
   const [, navigate] = useLocation();
   const { data: assetsData } = useListAssets();
   const { data: summaryData } = useGetDashboardSummary();
@@ -208,7 +210,7 @@ export default function LiveFeed() {
         <div className="flex items-center gap-3">
           <h1 className="text-2xl font-bold" style={{ color: C.text }}>Live Operations Center</h1>
           <span className="flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[11px] font-medium"
-            style={{ background: live ? "#05966922" : "#94a3b822", color: live ? C.green : C.dim }}>
+            style={{ background: live ? `${C.green}22` : `${C.dim}22`, color: live ? C.green : C.dim }}>
             {live ? <Wifi className="w-3 h-3" /> : <WifiOff className="w-3 h-3" />}
             {live && <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ background: C.green }} />}
             {live ? "Live" : "No live data"}
@@ -361,6 +363,7 @@ export default function LiveFeed() {
 function Kpi({ icon: Icon, label, value, sub, color, series, chart }: {
   icon: React.ElementType; label: string; value: number; sub: string; color: string; series?: { v: number }[]; chart?: "area" | "bar";
 }) {
+  const C = useThemePalette();
   return (
     <div className="rounded-xl p-4 relative overflow-hidden" style={{ background: C.card, border: `1px solid ${C.border}`, borderLeft: `4px solid ${color}` }}>
       <div className="flex items-center justify-between">
@@ -385,12 +388,13 @@ function Kpi({ icon: Icon, label, value, sub, color, series, chart }: {
 }
 
 function Panel({ title, right, demo, children }: { title: string; right?: React.ReactNode; demo?: boolean; children: React.ReactNode }) {
+  const C = useThemePalette();
   return (
     <div className="rounded-xl overflow-hidden" style={{ background: C.card, border: `1px solid ${C.border}` }}>
       <div className="flex items-center justify-between px-3 py-2.5" style={{ borderBottom: `1px solid ${C.border}` }}>
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold" style={{ color: C.text }}>{title}</span>
-          {demo && <span className="text-[9px] px-1.5 py-px rounded uppercase tracking-wide" style={{ background: "#a855f722", color: C.violet }}>demo</span>}
+          {demo && <span className="text-[9px] px-1.5 py-px rounded uppercase tracking-wide" style={{ background: `${C.violet}22`, color: C.violet }}>demo</span>}
         </div>
         {right}
       </div>
@@ -400,6 +404,7 @@ function Panel({ title, right, demo, children }: { title: string; right?: React.
 }
 
 function ViewAll({ onClick }: { onClick: () => void }) {
+  const C = useThemePalette();
   return (
     <button onClick={onClick} className="text-xs hover:underline" style={{ color: C.cyan }}>
       View all
@@ -408,10 +413,12 @@ function ViewAll({ onClick }: { onClick: () => void }) {
 }
 
 function Empty({ text }: { text: string }) {
+  const C = useThemePalette();
   return <div className="flex flex-col items-center justify-center py-10 text-center"><Activity className="w-8 h-8 mb-2 opacity-20" style={{ color: C.dim }} /><p className="text-xs" style={{ color: C.faint }}>{text}</p></div>;
 }
 
 function Rank({ i, name, pct, color }: { i: number; name: string; pct: number; color: string }) {
+  const C = useThemePalette();
   return (
     <div className="flex items-center gap-2 mb-2">
       <span className="text-[10px] w-3" style={{ color: C.faint }}>{i}</span>

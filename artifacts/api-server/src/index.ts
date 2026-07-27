@@ -6,6 +6,12 @@ import { startMqttSubscribers } from "./services/mqtt.js";
 import { initWebSocketServer } from "./lib/ws-broadcast";
 import { runPruning } from "./routes/system";
 import { loadSeenDevices } from "./lib/seen-devices";
+import { assertAuthConfigSane } from "./lib/auth-config";
+import { pruneExpiredSessions } from "./lib/sessions";
+
+// Fail fast, before the port is bound, on a configuration that would be unsafe
+// in this environment (e.g. activation links printed to the log in production).
+assertAuthConfigSane();
 
 // On Replit, PORT is injected by the platform.
 // For local development, default to 8080 so the frontend proxy works out of the box.
@@ -37,6 +43,12 @@ server.listen(port, () => {
     runPruning()
       .then((r) => { if (r.totalRowsDeleted > 0) logger.info(r, "Retention pruning completed"); })
       .catch((e) => logger.warn({ err: e }, "Retention pruning error"));
+
+    // Sessions that can never authenticate again are kept for 7 days (so recent
+    // activity stays reviewable in the Security Center) and then dropped.
+    pruneExpiredSessions()
+      .then((n) => { if (n > 0) logger.info({ sessions: n }, "Pruned expired sessions"); })
+      .catch((e) => logger.warn({ err: e }, "Session pruning error"));
   }, PRUNE_INTERVAL_MS);
 });
 

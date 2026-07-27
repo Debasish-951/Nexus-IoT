@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
+import { apiFetch } from "@/lib/auth-api";
 
 // ── Severity ──────────────────────────────────────────────────────────────────
 const SEVERITY_PRIORITY: Record<string, number> = {
@@ -123,7 +124,7 @@ export default function AlarmHistory() {
   async function handleAcknowledge(historyId: string, name: string) {
     setAcknowledging((p) => ({ ...p, [historyId]: true }));
     try {
-      const res = await fetch(`/api/alarms/history/${historyId}/acknowledge`, { method: "POST" });
+      const res = await apiFetch(`/api/alarms/history/${historyId}/acknowledge`, { method: "POST" });
       if (!res.ok) {
         const err = await res.json().catch(() => ({ error: "Unknown error" }));
         toast({ title: "Error", description: err.error ?? "Could not acknowledge", variant: "destructive" });

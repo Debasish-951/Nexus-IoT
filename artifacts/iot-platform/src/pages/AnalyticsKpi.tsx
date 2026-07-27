@@ -912,7 +912,8 @@ function ChartWidget({ widget, data }: { widget: Widget; data: Record<string, an
   const allYValues: number[] = [];
   for (const row of chartData) {
     for (const s of allSeries) {
-      const v = row[s.metric];
+      // Rows are widened to `{ t: string }` by inference; metric keys are dynamic.
+      const v = (row as Record<string, unknown>)[s.metric];
       if (typeof v === "number" && isFinite(v)) allYValues.push(v);
     }
   }
@@ -935,22 +936,25 @@ function ChartWidget({ widget, data }: { widget: Widget; data: Record<string, an
   const uclDashProps = (widget.uclStyle ?? "dashed") === "dashed" ? { strokeDasharray: "8 4" } : {};
   const lclDashProps = (widget.lclStyle ?? "dashed") === "dashed" ? { strokeDasharray: "8 4" } : {};
   const clDashProps  = (widget.clStyle  ?? "solid")  === "dashed" ? { strokeDasharray: "8 4" } : {};
+  // recharts dropped `isAnimationActive` from ReferenceLine's public prop types
+  // but still honours it at runtime. Spread it so behaviour is unchanged.
+  const noAnim = { isAnimationActive: false } as Record<string, unknown>;
 
   // Inline each ReferenceLine directly — recharts does NOT flatten Fragments so wrapping
   // in <> silently swallows all children. Each conditional must be a direct chart child.
   const uclLine = typeof widget.ucl === "number"
     ? <ReferenceLine key="ucl" y={widget.ucl} stroke={uclColor} strokeWidth={2}
-        {...uclDashProps} isAnimationActive={false}
+        {...uclDashProps} {...noAnim}
         label={{ position: "insideTopRight", value: `UCL ${widget.ucl}`, fontSize: 9, fill: uclColor }} />
     : null;
   const lclLine = typeof widget.lcl === "number"
     ? <ReferenceLine key="lcl" y={widget.lcl} stroke={lclColor} strokeWidth={2}
-        {...lclDashProps} isAnimationActive={false}
+        {...lclDashProps} {...noAnim}
         label={{ position: "insideBottomRight", value: `LCL ${widget.lcl}`, fontSize: 9, fill: lclColor }} />
     : null;
   const clLine = typeof widget.centerLine === "number"
     ? <ReferenceLine key="cl" y={widget.centerLine} stroke={clColor} strokeWidth={1.5}
-        {...clDashProps} isAnimationActive={false}
+        {...clDashProps} {...noAnim}
         label={{ position: "insideTopRight", value: `CL ${widget.centerLine}`, fontSize: 9, fill: clColor }} />
     : null;
 
@@ -1124,7 +1128,7 @@ function WidgetTimePopover({ widget, onUpdate }: { widget: Widget; onUpdate: (u:
             </div>
             <div className="space-y-1">
               <p className="text-[10px] font-medium" style={{ color: D.muted }}>Aggregation Type</p>
-              <select value={aggType} onChange={e => setAggType(e.target.value)}
+              <select value={aggType} onChange={e => setAggType(e.target.value as typeof aggType)}
                 className="w-full h-8 rounded px-2 text-xs" style={sel}>
                 {AGG_TYPE_OPTS.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
               </select>

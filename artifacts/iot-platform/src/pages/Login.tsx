@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { cn } from "@/lib/utils";
@@ -7,93 +7,174 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
 import {
-  Eye, EyeOff, Lock, Globe, ShieldCheck, ArrowRight, Check, ChevronDown,
+  Eye, EyeOff, Lock, ShieldCheck, ArrowRight, ArrowLeft, User, Mail, Check, Loader2, AlertTriangle,
 } from "lucide-react";
+import { apiPost } from "@/lib/auth-api";
 
-const BLUE = "#2563EB";
-const FEATURES = ["Asset Management", "Predictive Maintenance", "Live Sensor Analytics", "AI Anomaly Detection"];
+// ── Concept B "Split Signal": animated sensor-mesh hero (left) + sign-in (right).
+// Deliberately dark, digital-twin themed. Lives outside the app Layout (no sidebar).
+const VIOLET = "#8b7bff";
+const VIOLET_HI = "#b06bff";
+const CYAN = "#2dd4ff";
 
-// Web Synergies wordmark recreated in markup (renders with no image file / CSP-safe).
-function WsLogo({ variant = "dark", size = "md" }: { variant?: "dark" | "light"; size?: "md" | "lg" }) {
-  const web = variant === "light" ? "text-white" : "text-slate-900";
-  const tag = variant === "light" ? "text-white/70" : "text-slate-500";
-  const reg = variant === "light" ? "text-white/60" : "text-slate-400";
-  const webSize = size === "lg" ? "text-4xl" : "text-2xl";
-  const synSize = size === "lg" ? "text-2xl px-3 py-1.5" : "text-lg px-2 py-0.5";
+const INPUT_CLASS =
+  "h-11 bg-[#0a1024]/70 border-white/10 text-slate-100 placeholder:text-slate-500 " +
+  "focus-visible:ring-[#8b7bff] focus-visible:ring-offset-0 focus-visible:border-[#8b7bff]";
+
+// ── Animated node mesh (canvas). Respects prefers-reduced-motion. ────────────────
+function NodeMesh() {
+  const ref = useRef<HTMLCanvasElement | null>(null);
+  useEffect(() => {
+    const cv = ref.current;
+    if (!cv) return;
+    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
+    const ctx = cv.getContext("2d");
+    if (!ctx) return;
+
+    let w = 0, h = 0, dpr = 1;
+    type P = { x: number; y: number; vx: number; vy: number };
+    let nodes: P[] = [];
+    let raf = 0;
+
+    const seed = () => {
+      const rect = cv.getBoundingClientRect();
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      w = rect.width; h = rect.height;
+      cv.width = Math.max(1, w * dpr);
+      cv.height = Math.max(1, h * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      const count = Math.max(16, Math.min(46, Math.round((w * h) / 9000)));
+      nodes = Array.from({ length: count }, () => ({
+        x: Math.random() * w, y: Math.random() * h,
+        vx: (Math.random() - 0.5) * 0.14, vy: (Math.random() - 0.5) * 0.14,
+      }));
+    };
+
+    const draw = () => {
+      ctx.clearRect(0, 0, w, h);
+      const linkDist = w * 0.16;
+      for (const p of nodes) {
+        p.x += p.vx; p.y += p.vy;
+        if (p.x < 0 || p.x > w) p.vx *= -1;
+        if (p.y < 0 || p.y > h) p.vy *= -1;
+      }
+      for (let i = 0; i < nodes.length; i++) {
+        for (let j = i + 1; j < nodes.length; j++) {
+          const dx = nodes[i].x - nodes[j].x, dy = nodes[i].y - nodes[j].y;
+          const d = Math.hypot(dx, dy);
+          if (d < linkDist) {
+            ctx.beginPath();
+            ctx.strokeStyle = `rgba(139,123,255,${0.5 * (1 - d / linkDist)})`;
+            ctx.lineWidth = 0.7;
+            ctx.moveTo(nodes[i].x, nodes[i].y);
+            ctx.lineTo(nodes[j].x, nodes[j].y);
+            ctx.stroke();
+          }
+        }
+      }
+      for (const p of nodes) {
+        ctx.beginPath();
+        ctx.fillStyle = "rgba(127,227,255,0.9)";
+        ctx.arc(p.x, p.y, 1.6, 0, Math.PI * 2);
+        ctx.fill();
+      }
+      if (!reduce) raf = requestAnimationFrame(draw);
+    };
+
+    seed();
+    draw();
+    const onResize = () => { seed(); if (reduce) draw(); };
+    window.addEventListener("resize", onResize);
+    return () => { cancelAnimationFrame(raf); window.removeEventListener("resize", onResize); };
+  }, []);
+
+  return <canvas ref={ref} className="absolute inset-0 h-full w-full" aria-hidden />;
+}
+
+// Hexagon brand mark (CSP-safe, no image needed).
+function LogoMark({ className }: { className?: string }) {
   return (
-    <div className="inline-flex flex-col leading-none select-none">
-      <div className="flex items-center">
-        <span className={cn("font-extrabold tracking-tighter", webSize, web)}>Web</span>
-        <span className={cn("ml-1 inline-block bg-[#f47b20] text-white font-bold -skew-x-6 shadow-sm", synSize)}>
-          <span className="inline-block skew-x-6">Synergies</span>
+    <svg className={className} viewBox="0 0 48 48" fill="none" aria-hidden>
+      <path d="M24 3 42 13.5v21L24 45 6 34.5v-21L24 3Z" stroke={VIOLET} strokeWidth="1.6" />
+      <path d="M24 12 34 18v12l-10 6-10-6V18l10-6Z" stroke={CYAN} strokeWidth="1.2" opacity="0.6" />
+      <circle cx="24" cy="24" r="3.4" fill={VIOLET} />
+    </svg>
+  );
+}
+
+// Real Web Synergies logo on a white chip (the wordmark is dark, so it needs a
+// light ground to read on this dark theme). Falls back to the mark + wordmark
+// if the image file is missing.
+function Brand() {
+  const [imgOk, setImgOk] = useState(true);
+  if (imgOk) {
+    return (
+      <div className="flex flex-col gap-3">
+        <span className="inline-flex w-fit items-center rounded-xl bg-white px-8 py-6 shadow-lg shadow-black/30">
+          <img src="/web-synergies-logo.png" alt="Web Synergies" draggable={false}
+            className="h-24 w-auto select-none object-contain" onError={() => setImgOk(false)} />
         </span>
-        <span className={cn("text-[10px] ml-0.5 self-start", reg)}>®</span>
+        <span className="font-mono text-base font-bold uppercase tracking-[0.22em] text-slate-300">
+          Integrated Suite (IS)
+        </span>
       </div>
-      <span className={cn("text-[11px] mt-1.5 font-medium tracking-wide", tag)}>Bettering your Expectations</span>
+    );
+  }
+  return (
+    <div className="flex items-center gap-3">
+      <LogoMark className="h-12 w-12 shrink-0" />
+      <div className="leading-none">
+        <div className="text-2xl font-extrabold tracking-tight text-white">
+          Integrated<span style={{ color: VIOLET }}> Suite</span>
+        </div>
+        <div className="mt-1.5 font-mono text-[10px] uppercase tracking-[0.28em] text-slate-500">
+          IS · Web Synergies
+        </div>
+      </div>
     </div>
-  );
-}
-
-// Uses the real logo file if present (drop web-synergies-logo.png in /public),
-// otherwise falls back to the recreated wordmark so a logo always shows.
-function BrandMark() {
-  const [imgOk, setImgOk] = useState(true);
-  if (!imgOk) return <WsLogo variant="dark" size="lg" />;
-  return (
-    <img
-      src="/web-synergies-logo.png"
-      alt="Web Synergies"
-      className="h-56 w-auto object-contain select-none -ml-4"
-      draggable={false}
-      onError={() => setImgOk(false)}
-    />
-  );
-}
-
-// Logo for the dark hero: the black wordmark needs a white chip to be visible.
-function HeroLogo() {
-  const [imgOk, setImgOk] = useState(true);
-  if (!imgOk) return <WsLogo variant="light" size="lg" />;
-  return (
-    <span className="inline-block bg-white rounded-lg px-4 py-3 shadow-lg">
-      <img
-        src="/web-synergies-logo.png"
-        alt="Web Synergies"
-        className="h-12 w-auto object-contain select-none"
-        draggable={false}
-        onError={() => setImgOk(false)}
-      />
-    </span>
   );
 }
 
 export default function Login() {
   const [, navigate] = useLocation();
-  const { setCurrentUser } = useCurrentUser();
+  const { applySession } = useCurrentUser();
+
+  const [view, setView] = useState<"signin" | "forgot">("signin");
   const [showPw, setShowPw] = useState(false);
   const [loading, setLoading] = useState(false);
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [rememberMe, setRememberMe] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Distinguishes recoverable states (locked, not yet activated) from a plain
+  // bad password, so the message can offer the right next step.
+  const [errorCode, setErrorCode] = useState<string | null>(null);
+
+  // Forgot-password — now a real server round trip.
+  const [fpValue, setFpValue] = useState("");
+  const [fpSent, setFpSent] = useState(false);
+  const [fpLoading, setFpLoading] = useState(false);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    setErrorCode(null);
     setLoading(true);
     try {
-      const res = await fetch("/api/auth/login", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ username: email.trim(), password }),
+      const res = await apiPost("/api/auth/login", {
+        username: email.trim(),
+        password,
+        rememberMe,
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         setError(body.error ?? "Login failed. Please try again.");
+        setErrorCode(body.code ?? null);
         return;
       }
-      const user = await res.json();
-      setCurrentUser(user);
-      localStorage.setItem("ws_authed", "1");
+      // The response carries identity AND the effective permission set, so the
+      // app renders correctly on the very first paint with no extra round trip.
+      applySession(await res.json());
       navigate("/");
     } catch {
       setError("Network error — is the API server running?");
@@ -102,154 +183,249 @@ export default function Login() {
     }
   }
 
-  return (
-    <div className="min-h-screen w-full flex flex-col md:flex-row bg-white">
-      {/* ── Left: industrial hero ── */}
-      <div className="relative md:w-1/2 lg:w-3/5 h-56 md:h-auto overflow-hidden bg-[#0a1b38]">
-        {/* Optional real photo: drop /public/hero.jpg and uncomment
-        <div className="absolute inset-0 bg-cover bg-center" style={{ backgroundImage: "url('/hero.jpg')" }} /> */}
-        {/* subtle tech grid (no blur) */}
-        <div className="absolute inset-0" style={{
-          backgroundImage: "linear-gradient(rgba(56,189,248,0.10) 1px, transparent 1px), linear-gradient(90deg, rgba(56,189,248,0.10) 1px, transparent 1px)",
-          backgroundSize: "40px 40px",
-        }} />
-        {/* transparent blue digital-twin overlay */}
-        <div className="absolute inset-0 bg-[#0a2a5c]/40" />
-        {/* faint binary accents (top-right) */}
-        <div className="absolute top-6 right-6 font-mono text-[10px] leading-5 text-cyan-300/20 select-none hidden md:block text-right">
-          1100101 0110011<br />1011001 1100110<br />0110100 1010011
-        </div>
-        {/* brand + headline (fills the upper-left space) */}
-        <div className="absolute top-8 left-8 right-8 md:max-w-md text-white hidden md:block z-10">
-          <HeroLogo />
-          <h2 className="mt-10 text-3xl font-bold leading-tight">Monitor. Predict. Optimize.</h2>
-          <p className="mt-3 text-sm text-white/70 leading-relaxed max-w-sm">
-            Real-time industrial intelligence — track asset health, catch anomalies early, and act before failures happen.
-          </p>
-        </div>
-        {/* stylized digital-twin (motor) */}
-        <svg className="absolute inset-0 w-full h-full" viewBox="0 0 600 500" preserveAspectRatio="xMidYMid meet" aria-hidden>
-          <g fill="none" stroke="#38bdf8" strokeWidth="1.4" opacity="0.7" style={{ filter: "drop-shadow(0 0 6px rgba(56,189,248,0.6))" }}>
-            <ellipse cx="230" cy="270" rx="150" ry="90" />
-            <ellipse cx="230" cy="270" rx="110" ry="66" />
-            <ellipse cx="230" cy="270" rx="60" ry="36" />
-            <line x1="80" y1="270" x2="380" y2="270" />
-            <line x1="230" y1="180" x2="230" y2="360" />
-            <rect x="380" y="235" width="150" height="70" rx="6" />
-            <line x1="380" y1="255" x2="530" y2="255" />
-            <line x1="380" y1="285" x2="530" y2="285" />
-            <circle cx="230" cy="270" r="6" fill="#38bdf8" />
-          </g>
-        </svg>
+  /**
+   * Always reports success, whatever the server says.
+   *
+   * The endpoint answers 204 for unknown addresses too — echoing anything
+   * else here would reintroduce the account-enumeration oracle the server
+   * deliberately avoids.
+   */
+  async function onForgotSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!fpValue.trim()) return;
+    setFpLoading(true);
+    try {
+      await apiPost("/api/auth/forgot-password", { identifier: fpValue.trim() });
+    } catch {
+      /* deliberately ignored — see above */
+    } finally {
+      setFpLoading(false);
+      setFpSent(true);
+    }
+  }
 
-        {/* glass card bottom-left */}
-        <div className="absolute bottom-5 left-5 right-5 md:right-auto md:max-w-xs rounded-xl border border-white/20 bg-white/10 backdrop-blur-md p-5 text-white shadow-lg">
-          <p className="text-sm font-semibold mb-3 flex items-center gap-2">
-            <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" /> Real-Time Monitoring
-          </p>
-          <ul className="space-y-2">
-            {FEATURES.map((f) => (
-              <li key={f} className="flex items-center gap-2 text-sm text-white/90">
-                <Check className="w-4 h-4 text-cyan-300 shrink-0" /> {f}
-              </li>
-            ))}
-          </ul>
+  function openForgot() {
+    setError(null);
+    setErrorCode(null);
+    setFpValue(email);
+    setFpSent(false);
+    setView("forgot");
+  }
+  function backToSignIn() {
+    setFpSent(false);
+    setView("signin");
+  }
+
+  return (
+    <div className="min-h-screen w-full bg-[#060914] text-slate-100 flex flex-col md:flex-row">
+      {/* ── Left: sensor-mesh hero ── */}
+      <div className="relative hidden md:block md:w-[54%] lg:w-[56%] overflow-hidden border-r border-white/5"
+        style={{ background: "radial-gradient(90% 90% at 20% 8%, rgba(139,123,255,0.20), transparent 60%), #060914" }}>
+        <NodeMesh />
+        {/* faint grid */}
+        <div className="pointer-events-none absolute inset-0" style={{
+          backgroundImage:
+            "linear-gradient(rgba(120,180,255,0.05) 1px, transparent 1px), linear-gradient(90deg, rgba(120,180,255,0.05) 1px, transparent 1px)",
+          backgroundSize: "44px 44px",
+          maskImage: "radial-gradient(80% 80% at 40% 40%, #000, transparent 85%)",
+          WebkitMaskImage: "radial-gradient(80% 80% at 40% 40%, #000, transparent 85%)",
+        }} />
+
+        <div className="relative z-10 flex h-full flex-col justify-center p-10 lg:p-14">
+          <div>
+            <div className="inline-flex items-center gap-2.5 font-mono text-xs uppercase tracking-[0.24em]"
+              style={{ color: VIOLET }}>
+              <span className="relative flex h-2 w-2">
+                <span className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-60"
+                  style={{ backgroundColor: "#3ee08a" }} />
+                <span className="relative inline-flex h-2 w-2 rounded-full" style={{ backgroundColor: "#3ee08a" }} />
+              </span>
+              Sensor Network · Live
+            </div>
+            <h1 className="mt-6 max-w-md text-4xl lg:text-5xl font-extrabold leading-[1.03] tracking-tight text-balance">
+              Monitor. Predict.<br />Optimize.
+            </h1>
+            <p className="mt-4 max-w-sm text-sm leading-relaxed text-slate-400">
+              Real-time industrial intelligence — track asset health, catch anomalies early,
+              and act before failures happen.
+            </p>
+          </div>
         </div>
       </div>
 
-      {/* ── Right: login form ── */}
-      <div className="relative md:w-1/2 lg:w-2/5 flex flex-col">
-        {/* language selector top-right */}
-        <div className="absolute top-4 right-4">
-          <button type="button" className="inline-flex items-center gap-1.5 text-sm text-slate-500 hover:text-slate-800 rounded-md px-2 py-1 hover:bg-slate-100 transition-colors" aria-label="Select language">
-            <Globe className="w-4 h-4" /> English <ChevronDown className="w-3.5 h-3.5" />
-          </button>
-        </div>
-
-        <div className="flex-1 flex items-center justify-center px-6 py-12">
+      {/* ── Right: form ── */}
+      <div className="relative flex flex-1 flex-col">
+        <div className="flex flex-1 items-center justify-center px-6 py-12">
           <div className="w-full max-w-sm">
-            {/* Brand */}
-            <BrandMark />
-            <h2 className="mt-4 text-base font-semibold text-slate-900">Industrial IoT Platform</h2>
-            <p className="text-sm text-slate-500">Asset Management &amp; Predictive Maintenance</p>
+            <Brand />
 
-            <h1 className="mt-8 text-3xl font-bold text-slate-900">Login</h1>
+            {view === "signin" ? (
+              <>
+                <h2 className="mt-10 text-3xl font-bold tracking-tight text-white">Welcome Back!</h2>
+                <p className="mt-1.5 text-sm text-slate-400">Enter your email and password to access your account.</p>
 
-            <form onSubmit={onSubmit} className="mt-6 space-y-4" aria-label="Login form">
-              <div className="space-y-1.5">
-                <Label htmlFor="email" className="text-slate-700">Username or email</Label>
-                <Input id="email" type="text" autoComplete="username" required value={email} onChange={(e) => setEmail(e.target.value)}
-                  placeholder="admin" className="h-11" />
-              </div>
+                <form onSubmit={onSubmit} className="mt-8 space-y-4" aria-label="Sign in form">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="email" className="font-mono text-[11px] uppercase tracking-[0.14em] text-slate-400">
+                      Username or email
+                    </Label>
+                    <div className="relative">
+                      <User className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                      <Input id="email" type="text" autoComplete="username" required value={email}
+                        onChange={(e) => setEmail(e.target.value)} placeholder="you@company.com"
+                        className={cn(INPUT_CLASS, "pl-10")} />
+                    </div>
+                  </div>
 
-              <div className="space-y-1.5">
-                <Label htmlFor="password" className="text-slate-700">Password</Label>
-                <div className="relative">
-                  <Input id="password" type={showPw ? "text" : "password"} autoComplete="current-password" required
-                    value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••" className="h-11 pr-10" />
-                  <button type="button" onClick={() => setShowPw((s) => !s)} tabIndex={0}
-                    aria-label={showPw ? "Hide password" : "Show password"}
-                    className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600">
-                    {showPw ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
-                  </button>
-                </div>
-              </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="password" className="font-mono text-[11px] uppercase tracking-[0.14em] text-slate-400">
+                      Password
+                    </Label>
+                    <div className="relative">
+                      <Lock className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                      <Input id="password" type={showPw ? "text" : "password"} autoComplete="current-password" required
+                        value={password} onChange={(e) => setPassword(e.target.value)} placeholder="••••••••"
+                        className={cn(INPUT_CLASS, "pl-10 pr-10")} />
+                      <button type="button" onClick={() => setShowPw((s) => !s)} tabIndex={0}
+                        aria-label={showPw ? "Hide password" : "Show password"}
+                        className="absolute right-2.5 top-1/2 -translate-y-1/2 text-slate-500 hover:text-slate-300">
+                        {showPw ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+                      </button>
+                    </div>
+                  </div>
 
-              <div className="flex items-center justify-between">
-                <label className="flex items-center gap-2 text-sm text-slate-600 cursor-pointer select-none">
-                  <Checkbox id="remember" /> Remember me
-                </label>
-                <a href="#" className="text-sm font-medium hover:underline" style={{ color: BLUE }}>Forgot password?</a>
-              </div>
+                  <div className="flex items-center justify-between">
+                    <label className="flex cursor-pointer select-none items-center gap-2 text-sm text-slate-400">
+                      <Checkbox id="remember" checked={rememberMe}
+                        onCheckedChange={(v) => setRememberMe(v === true)}
+                        className="border-white/20 data-[state=checked]:border-[#8b7bff] data-[state=checked]:bg-[#8b7bff]" />
+                      Remember me
+                    </label>
+                    <button type="button" onClick={openForgot}
+                      className="text-sm font-medium hover:underline" style={{ color: "#b9adff" }}>
+                      Forgot password?
+                    </button>
+                  </div>
 
-              {error && (
-                <p className="text-sm text-red-600 bg-red-50 border border-red-200 rounded-md px-3 py-2" role="alert">{error}</p>
-              )}
+                  {error && (
+                    <div
+                      className={cn(
+                        "rounded-md border px-3 py-2.5 text-sm",
+                        errorCode === "account_locked" || errorCode === "rate_limited"
+                          ? "border-amber-500/30 bg-amber-500/10 text-amber-200"
+                          : "border-red-500/30 bg-red-500/10 text-red-300",
+                      )}
+                      role="alert"
+                    >
+                      <p className="flex items-start gap-2">
+                        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                        <span>{error}</span>
+                      </p>
+                      {/* Point recoverable states at the action that fixes them,
+                          rather than leaving the user to guess. */}
+                      {(errorCode === "activation_pending" || errorCode === "credential_upgrade_required") && (
+                        <button type="button" onClick={openForgot}
+                          className="mt-1.5 ml-5.5 text-xs font-medium underline hover:no-underline">
+                          Resend my activation link
+                        </button>
+                      )}
+                      {errorCode === "account_locked" && (
+                        <button type="button" onClick={openForgot}
+                          className="mt-1.5 ml-5.5 text-xs font-medium underline hover:no-underline">
+                          Reset my password instead
+                        </button>
+                      )}
+                    </div>
+                  )}
 
-              <Button type="submit" disabled={loading}
-                className="w-full h-11 rounded-lg text-white font-medium transition-transform active:scale-[0.99] hover:brightness-110"
-                style={{ backgroundColor: BLUE }}>
-                {loading ? (
-                  <span className="inline-flex items-center gap-2"><Spinner /> Authenticating…</span>
+                  <Button type="submit" disabled={loading}
+                    className="h-11 w-full rounded-lg font-semibold text-[#0d0820] transition-transform hover:brightness-110 active:scale-[0.99]"
+                    style={{ backgroundImage: `linear-gradient(135deg, ${VIOLET}, ${VIOLET_HI})` }}>
+                    {loading ? (
+                      <span className="inline-flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /> Authenticating…</span>
+                    ) : (
+                      <span className="inline-flex items-center gap-2"><Lock className="h-4 w-4" /> Sign in <ArrowRight className="h-4 w-4" /></span>
+                    )}
+                  </Button>
+
+                  <div className="flex items-center justify-center gap-1.5 font-mono text-[11px] tracking-wide text-slate-500">
+                    <ShieldCheck className="h-3.5 w-3.5 text-emerald-400" /> SECURE · SSL ENCRYPTED
+                  </div>
+                </form>
+              </>
+            ) : (
+              /* ── Forgot password ── */
+              <div className="mt-10">
+                {!fpSent ? (
+                  <>
+                    <h2 className="text-3xl font-bold tracking-tight text-white">Reset your password</h2>
+                    <p className="mt-1.5 text-sm text-slate-400">
+                      Enter your username or email and we will send you a secure reset link.
+                    </p>
+                    <form
+                      onSubmit={onForgotSubmit}
+                      className="mt-8 space-y-4" aria-label="Reset password form">
+                      <div className="space-y-1.5">
+                        <Label htmlFor="fp" className="font-mono text-[11px] uppercase tracking-[0.14em] text-slate-400">
+                          Username or email
+                        </Label>
+                        <div className="relative">
+                          <Mail className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-500" />
+                          <Input id="fp" type="text" autoFocus required value={fpValue}
+                            onChange={(e) => setFpValue(e.target.value)} placeholder="you@plant.io"
+                            className={cn(INPUT_CLASS, "pl-10")} />
+                        </div>
+                      </div>
+                      <Button type="submit" disabled={!fpValue.trim() || fpLoading}
+                        className="h-11 w-full rounded-lg font-semibold text-[#0d0820] transition-transform hover:brightness-110 active:scale-[0.99]"
+                        style={{ backgroundImage: `linear-gradient(135deg, ${VIOLET}, ${VIOLET_HI})` }}>
+                        {fpLoading
+                          ? <span className="inline-flex items-center gap-2"><Loader2 className="h-4 w-4 animate-spin" /> Sending…</span>
+                          : <>Send reset link <ArrowRight className="ml-1.5 h-4 w-4" /></>}
+                      </Button>
+                      <button type="button" onClick={backToSignIn}
+                        className="flex w-full items-center justify-center gap-1.5 text-sm text-slate-400 hover:text-slate-200">
+                        <ArrowLeft className="h-4 w-4" /> Back to sign in
+                      </button>
+                    </form>
+                  </>
                 ) : (
-                  <span className="inline-flex items-center gap-2"><Lock className="w-4 h-4" /> Login <ArrowRight className="w-4 h-4" /></span>
+                  <>
+                    <div className="flex h-12 w-12 items-center justify-center rounded-full border border-emerald-400/30 bg-emerald-400/10">
+                      <Check className="h-6 w-6 text-emerald-400" />
+                    </div>
+                    <h2 className="mt-5 text-2xl font-bold tracking-tight text-white">Check your email</h2>
+                    {/* Intentionally does not confirm whether the account exists —
+                        the server responds identically either way. */}
+                    <p className="mt-2 text-sm leading-relaxed text-slate-400">
+                      If an account matches <span className="font-mono text-slate-200">{fpValue.trim()}</span>, a
+                      reset link is on its way. The link is single-use and expires shortly, so use it soon.
+                    </p>
+                    <p className="mt-3 text-xs leading-relaxed text-slate-500">
+                      Nothing arrived? Check your spam folder, or ask your administrator to confirm the
+                      email address on your account.
+                    </p>
+                    <Button onClick={backToSignIn}
+                      className="mt-6 h-11 w-full rounded-lg font-semibold text-[#0d0820] transition-transform hover:brightness-110 active:scale-[0.99]"
+                      style={{ backgroundImage: `linear-gradient(135deg, ${VIOLET}, ${VIOLET_HI})` }}>
+                      <ArrowLeft className="mr-1.5 h-4 w-4" /> Back to sign in
+                    </Button>
+                  </>
                 )}
-              </Button>
-
-              <div className="flex items-center justify-center gap-1.5 text-xs text-slate-400">
-                <ShieldCheck className="w-3.5 h-3.5 text-emerald-500" /> Secure login · SSL encrypted
               </div>
-
-              <div className="rounded-md bg-slate-50 border border-slate-200 px-3 py-2 text-[11px] leading-relaxed text-slate-500">
-                <span className="font-medium text-slate-600">Demo accounts</span><br />
-                admin / admin123 · jsmith / engineer123 · mwilson / operator123
-              </div>
-            </form>
-
-            <div className="mt-6 text-center text-sm text-slate-500">
-              Need help? <a href="#" className="font-medium hover:underline" style={{ color: BLUE }}>Contact Administrator</a>
-            </div>
+            )}
           </div>
         </div>
 
         {/* Footer */}
-        <div className="px-6 py-4 border-t border-slate-100 flex flex-col sm:flex-row items-center justify-between gap-2 text-xs text-slate-400">
+        <div className="flex flex-col items-center justify-between gap-2 border-t border-white/5 px-6 py-4 text-xs text-slate-500 sm:flex-row">
           <span>Version 1.0.0 · © 2026 Web Synergies Pvt Ltd</span>
           <span className="flex items-center gap-3">
-            <a href="#" className="hover:text-slate-600">Privacy Policy</a>
-            <a href="#" className="hover:text-slate-600">Terms</a>
+            <a href="#" className="hover:text-slate-300">Privacy Policy</a>
+            <a href="#" className="hover:text-slate-300">Terms</a>
           </span>
         </div>
       </div>
     </div>
-  );
-}
-
-function Spinner() {
-  return (
-    <svg className="animate-spin w-4 h-4" viewBox="0 0 24 24" fill="none" aria-hidden>
-      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-      <path className="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
-    </svg>
   );
 }

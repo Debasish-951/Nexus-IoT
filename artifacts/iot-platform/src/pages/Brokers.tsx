@@ -2,7 +2,7 @@ import { useState, useCallback } from "react";
 import {
   useListBrokers, useCreateBroker, useDeleteBroker, getListBrokersQueryKey,
 } from "@workspace/api-client-react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -12,13 +12,15 @@ import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { useForm } from "react-hook-form";
 import { Form, FormField, FormItem, FormLabel, FormControl, FormDescription } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
-import { Plus, Trash2, CheckCircle2, XCircle, AlertCircle, Wifi, Copy, Info, History, ChevronDown } from "lucide-react";
+import { Plus, Trash2, CheckCircle2, XCircle, AlertCircle, Wifi, Copy, Info, History, ChevronDown, KeyRound, FolderOpen } from "lucide-react";
 import { format, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { ReadOnlyBanner } from "@/components/RoleGuard";
 import { useWsEvents } from "@/hooks/useWsEvents";
 import BrokerHistoryTimeline from "@/components/BrokerHistoryTimeline";
+import { Link } from "wouter";
+import { apiGet } from "@/lib/auth-api";
 
 const TYPE_LABELS: Record<string, string> = {
   mqtt:             "MQTT",
@@ -36,38 +38,169 @@ function StatusIcon({ status }: { status: string }) {
 
 const BASE_URL = window.location.origin;
 
+/**
+ * Per-client HTTP ingest endpoints.
+ *
+ * Was a single hard-coded, unauthenticated URL shared by everything, which made
+ * it impossible to tell which integration was generating load. Every API Client
+ * now has its own endpoint carrying its `clientId`, and ingest requires a key —
+ * so the request counts below are real attribution, not a guess.
+ *
+ * The clientId in the path is an identifier, not a secret. The API key sent in
+ * the header is what authenticates; posting to another client's URL with your
+ * own key is rejected.
+ */
 function IngestEndpointPanel() {
   const { toast } = useToast();
-  function copy(text: string) {
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  const { data: clients, isLoading } = useQuery<any[]>({
+    queryKey: ["api-clients-endpoints"],
+    queryFn: async () => {
+      const res = await apiGet("/api/api-clients");
+      return res.ok ? res.json() : [];
+    },
+    staleTime: 15_000,
+  });
+
+  function copy(text: string, what = "Copied") {
     navigator.clipboard.writeText(text);
-    toast({ title: "Copied" });
+    toast({ title: what });
   }
-  const singleUrl  = `${BASE_URL}/api/ingest/payload`;
-  const batchUrl   = `${BASE_URL}/api/ingest/batch`;
-  const exPayload  = JSON.stringify({ deviceId: "sensor-01", data: { temperature: 72.4 } });
+
+  // Only clients that can actually post telemetry. An empty scope list means
+  // "all scopes" in apiKeyAuth, so those qualify too.
+  const ingestClients = (clients ?? []).filter(
+    (c) => c.status === "active" &&
+      (c.scopes.length === 0 || c.scopes.includes("*") || c.scopes.includes("ingest:write")),
+  );
+
+  /**
+   * Group by owning project.
+   *
+   * A project-scoped client is the shared team credential: the project head
+   * assigns people to the project, and everyone on it sees this one endpoint
+   * rather than each person carrying their own key. Unassigned (platform-wide)
+   * clients fall into a trailing bucket.
+   */
+  const groupedByProject = (() => {
+    const byProject = new Map<string | null, any[]>();
+    for (const c of ingestClients) {
+      const key = c.projectName ?? null;
+      if (!byProject.has(key)) byProject.set(key, []);
+      byProject.get(key)!.push(c);
+    }
+    return [...byProject.entries()]
+      .map(([project, clients]) => ({ project, clients }))
+      .sort((a, b) => {
+        if (a.project === null) return 1;   // unassigned last
+        if (b.project === null) return -1;
+        return a.project.localeCompare(b.project);
+      });
+  })();
+
+  // Headings only earn their space once projects are actually in use.
+  const showProjectHeadings = groupedByProject.some((g) => g.project !== null);
+
+  const exPayload = JSON.stringify({ deviceId: "sensor-01", data: { temperature: 72.4 } });
 
   return (
     <div className="rounded-lg border border-blue-200 dark:border-blue-800/40 bg-blue-50/50 dark:bg-blue-950/20 p-4 space-y-3">
-      <p className="text-sm font-semibold flex items-center gap-2 text-blue-800 dark:text-blue-300">
-        <Info className="w-4 h-4" /> HTTP API Ingest Endpoints
-      </p>
-      <p className="text-xs text-blue-700 dark:text-blue-400">
-        External systems (gateways, custom scripts, SCADA) can push data directly to these endpoints using HTTP POST.
-      </p>
-      <div className="space-y-2">
-        {[
-          { label: "Single payload", url: singleUrl },
-          { label: "Batch payloads", url: batchUrl  },
-        ].map(({ label, url }) => (
-          <div key={url} className="flex items-center gap-2 bg-white dark:bg-slate-900 rounded border border-blue-200 dark:border-blue-800/30 px-2.5 py-1.5">
-            <span className="text-xs text-muted-foreground w-28 shrink-0">{label}</span>
-            <code className="text-xs font-mono text-primary flex-1 truncate">{url}</code>
-            <button onClick={() => copy(url)} className="text-muted-foreground hover:text-foreground shrink-0">
-              <Copy className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        ))}
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold flex items-center gap-2 text-blue-800 dark:text-blue-300">
+            <Info className="w-4 h-4" /> HTTP API Ingest Endpoints
+          </p>
+          <p className="text-xs text-blue-700 dark:text-blue-400 mt-0.5">
+            Each API Client has its own endpoint, so traffic and load are attributed per integration.
+          </p>
+        </div>
+        <Link href="/api-clients">
+          <Button size="sm" variant="outline" className="shrink-0">
+            <KeyRound className="w-3.5 h-3.5 mr-1.5" /> Manage clients
+          </Button>
+        </Link>
       </div>
+
+      {isLoading ? (
+        <div className="space-y-2">
+          {[0, 1].map((i) => <Skeleton key={i} className="h-16 rounded" />)}
+        </div>
+      ) : ingestClients.length === 0 ? (
+        <div className="rounded border border-dashed border-blue-300 dark:border-blue-800/50 bg-white/60 dark:bg-slate-900/50 px-4 py-6 text-center">
+          <KeyRound className="w-6 h-6 mx-auto mb-2 text-muted-foreground opacity-40" />
+          <p className="text-sm font-medium">No ingest-capable API clients yet</p>
+          <p className="text-xs text-muted-foreground mt-1 max-w-md mx-auto">
+            Ingest now requires an API key. Create a client with the{" "}
+            <code className="bg-muted px-1 rounded">ingest:write</code> scope to get a dedicated
+            endpoint for a gateway, SCADA bridge, or project.
+          </p>
+          <Link href="/api-clients">
+            <Button size="sm" className="mt-3">Create an API Client</Button>
+          </Link>
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {groupedByProject.map(({ project, clients: group }) => (
+            <div key={project ?? "__unassigned"} className="space-y-2">
+              {/* Group header only when projects are actually in use — a single
+                  unassigned bucket would just be noise. */}
+              {showProjectHeadings && (
+                <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-blue-700/70 dark:text-blue-400/70">
+                  <FolderOpen className="w-3 h-3" />
+                  {project ?? "Not assigned to a project"}
+                </p>
+              )}
+              {group.map((c) => {
+            const single = `${BASE_URL}/api/ingest/k/${c.clientId}/payload`;
+            const batch  = `${BASE_URL}/api/ingest/k/${c.clientId}/batch`;
+            const open   = expanded === c.id;
+            return (
+              <div key={c.id} className="rounded border border-blue-200 dark:border-blue-800/30 bg-white dark:bg-slate-900 overflow-hidden">
+                <div className="flex flex-wrap items-center gap-2 px-3 py-2">
+                  <span className="text-xs font-medium truncate max-w-[180px]">{c.name}</span>
+                  <code className="text-[10px] font-mono text-muted-foreground">{c.clientId}</code>
+                  <span className="ml-auto flex items-center gap-3 text-[11px] text-muted-foreground shrink-0">
+                    <span title="Total requests through this client">
+                      <strong className="tabular-nums text-foreground">{(c.totalRequests ?? 0).toLocaleString()}</strong> req
+                    </span>
+                    <span title="Last request seen">
+                      {c.lastUsedAt ? formatDistanceToNow(new Date(c.lastUsedAt), { addSuffix: true }) : "never used"}
+                    </span>
+                    <button onClick={() => setExpanded(open ? null : c.id)}
+                      className="text-muted-foreground hover:text-foreground">
+                      {open ? "Hide" : "Show"} endpoints
+                    </button>
+                  </span>
+                </div>
+
+                {open && (
+                  <div className="border-t border-blue-200 dark:border-blue-800/30 px-3 py-2 space-y-1.5 bg-blue-50/40 dark:bg-blue-950/10">
+                    {[{ label: "Single payload", url: single }, { label: "Batch payloads", url: batch }].map(({ label, url }) => (
+                      <div key={url} className="flex items-center gap-2">
+                        <span className="text-[11px] text-muted-foreground w-24 shrink-0">{label}</span>
+                        <code className="text-[11px] font-mono text-primary flex-1 truncate">{url}</code>
+                        <button onClick={() => copy(url)} className="text-muted-foreground hover:text-foreground shrink-0">
+                          <Copy className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    ))}
+                    <div className="flex items-center gap-2 pt-1">
+                      <span className="text-[11px] text-muted-foreground w-24 shrink-0">Auth header</span>
+                      <code className="text-[11px] font-mono text-foreground/70 flex-1 truncate">
+                        X-API-Key: &lt;this client&apos;s secret&gt;
+                      </code>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+              })}
+            </div>
+          ))}
+        </div>
+      )}
+
       <div>
         <p className="text-xs text-blue-700 dark:text-blue-400 mb-1">Example payload:</p>
         <div className="flex items-center gap-2 bg-white dark:bg-slate-900 rounded border border-blue-200 dark:border-blue-800/30 px-2.5 py-1.5">
@@ -77,6 +210,12 @@ function IngestEndpointPanel() {
           </button>
         </div>
       </div>
+
+      <p className="flex items-start gap-1.5 text-[11px] text-blue-700/80 dark:text-blue-400/80">
+        <Info className="w-3 h-3 mt-0.5 shrink-0" />
+        Ingest requires a valid API key with the <code className="bg-white/60 dark:bg-slate-900 px-1 rounded">ingest:write</code> scope.
+        Anonymous posting is no longer accepted.
+      </p>
     </div>
   );
 }

@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from "express";
 import { eq, sql } from "drizzle-orm";
 import { db, apiClientsTable } from "@workspace/db";
+import { logger } from "../lib/logger";
 
 declare global {
   namespace Express {
@@ -27,18 +28,51 @@ function isRateLimited(clientId: string): boolean {
   return entry.count > MAX_RPM;
 }
 
+function readSecret(req: Request): string | null {
+  const authHeader = req.headers["authorization"] as string | undefined;
+  const xApiKey    = req.headers["x-api-key"]    as string | undefined;
+
+  if (authHeader?.startsWith("Bearer ")) return authHeader.slice(7).trim() || null;
+  if (xApiKey) return xApiKey.trim() || null;
+  return null;
+}
+
+/**
+ * Resolve an API key onto the request WITHOUT enforcing anything.
+ *
+ * Mounted globally in app.ts ahead of `authorize`, because route authorisation
+ * needs to know a machine caller is present before the route-level
+ * `apiKeyAuth(scope)` runs — otherwise every existing /export integration would
+ * be rejected with 401 before reaching its own guard.
+ *
+ * Deliberately does not touch the usage counters: `apiKeyAuth` does that, and
+ * counting here as well would double every request.
+ */
+export async function attachApiClient(req: Request, _res: Response, next: NextFunction): Promise<void> {
+  const secret = readSecret(req);
+  if (!secret) { next(); return; }
+
+  try {
+    const [client] = await db
+      .select()
+      .from(apiClientsTable)
+      .where(eq(apiClientsTable.clientSecret, secret));
+
+    // Only a usable credential counts. An expired or revoked key must fall
+    // through to `authorize`'s 401 rather than being treated as authenticated.
+    if (client && client.status === "active" && !(client.expiresAt && new Date() > client.expiresAt)) {
+      req.apiClient = client;
+    }
+  } catch {
+    /* a lookup failure is simply "no client" — authorize will reject */
+  }
+  next();
+}
+
 // ── Auth middleware factory ────────────────────────────────────────────────────
 export function apiKeyAuth(requiredScope?: string) {
   return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
-    const authHeader = req.headers["authorization"] as string | undefined;
-    const xApiKey    = req.headers["x-api-key"]    as string | undefined;
-
-    let secret: string | null = null;
-    if (authHeader?.startsWith("Bearer ")) {
-      secret = authHeader.slice(7).trim();
-    } else if (xApiKey) {
-      secret = xApiKey.trim();
-    }
+    const secret = readSecret(req);
 
     if (!secret) {
       res.status(401).json({
@@ -48,10 +82,11 @@ export function apiKeyAuth(requiredScope?: string) {
       return;
     }
 
-    const [client] = await db
+    // Reuse the row attachApiClient already fetched where possible.
+    const client = req.apiClient ?? (await db
       .select()
       .from(apiClientsTable)
-      .where(eq(apiClientsTable.clientSecret, secret));
+      .where(eq(apiClientsTable.clientSecret, secret)))[0];
 
     if (!client) {
       res.status(401).json({ error: "Invalid API credentials" });
@@ -114,14 +149,20 @@ export function apiKeyAuth(requiredScope?: string) {
       return;
     }
 
-    // Track usage (fire-and-forget)
-    void db
-      .update(apiClientsTable)
+    // Track usage (fire-and-forget).
+    //
+    // `.execute()` is required: a Drizzle query builder is a lazy thenable, so
+    // `void db.update(...)` builds the statement and never sends it. That is why
+    // totalRequests/lastUsedAt sat at zero — the counters looked implemented but
+    // no UPDATE was ever issued.
+    db.update(apiClientsTable)
       .set({
         lastUsedAt: new Date(),
         totalRequests: sql`${apiClientsTable.totalRequests} + 1`,
       })
-      .where(eq(apiClientsTable.id, client.id));
+      .where(eq(apiClientsTable.id, client.id))
+      .execute()
+      .catch((err) => logger.warn({ err, clientId: client.clientId }, "api client usage update failed"));
 
     req.apiClient = client;
     next();
@@ -131,22 +172,13 @@ export function apiKeyAuth(requiredScope?: string) {
 // ── Optional auth — validates token if present, allows unauthenticated requests ─
 export function optionalApiKeyAuth(requiredScope?: string) {
   return async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
-    const authHeader = req.headers["authorization"] as string | undefined;
-    const xApiKey    = req.headers["x-api-key"]    as string | undefined;
-
-    let secret: string | null = null;
-    if (authHeader?.startsWith("Bearer ")) {
-      secret = authHeader.slice(7).trim();
-    } else if (xApiKey) {
-      secret = xApiKey.trim();
-    }
-
+    const secret = readSecret(req);
     if (!secret) { next(); return; }
 
-    const [client] = await db
+    const client = req.apiClient ?? (await db
       .select()
       .from(apiClientsTable)
-      .where(eq(apiClientsTable.clientSecret, secret));
+      .where(eq(apiClientsTable.clientSecret, secret)))[0];
 
     if (!client || client.status !== "active") { next(); return; }
     if (client.expiresAt && new Date() > client.expiresAt) { next(); return; }
@@ -156,10 +188,11 @@ export function optionalApiKeyAuth(requiredScope?: string) {
       if (!hasScope) { next(); return; }
     }
 
-    void db
-      .update(apiClientsTable)
+    db.update(apiClientsTable)
       .set({ lastUsedAt: new Date(), totalRequests: sql`${apiClientsTable.totalRequests} + 1` })
-      .where(eq(apiClientsTable.id, client.id));
+      .where(eq(apiClientsTable.id, client.id))
+      .execute()
+      .catch((err) => logger.warn({ err, clientId: client.clientId }, "api client usage update failed"));
 
     req.apiClient = client;
     next();

@@ -11,16 +11,11 @@ import { Label } from "@/components/ui/label";
 import {
   Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter,
 } from "@/components/ui/dialog";
-
-const ROLE_COLORS: Record<string, string> = {
-  admin:    "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
-  engineer: "bg-blue-100  text-blue-700  dark:bg-blue-900/40  dark:text-blue-300",
-  operator: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
-  viewer:   "bg-slate-100 text-slate-600 dark:bg-slate-800    dark:text-slate-300",
-};
+import { apiPost, usePasswordPolicy, validatePasswordAgainst } from "@/lib/auth-api";
+import { PasswordChecklist, PasswordStrengthMeter } from "@/components/PasswordFields";
 
 export default function UserProfileTopMenu() {
-  const { currentUser, setCurrentUser } = useCurrentUser();
+  const { currentUser, logout } = useCurrentUser();
   const [, navigate] = useLocation();
 
   const [open, setOpen] = useState(false);
@@ -43,10 +38,11 @@ export default function UserProfileTopMenu() {
   const initials = displayName
     .split(" ").map((w: string) => w[0] ?? "").join("").toUpperCase().slice(0, 2) || "U";
 
-  function handleSignOut() {
-    localStorage.removeItem("ws_authed");
-    setCurrentUser(null);
+  // Signing out now revokes the session server-side, so the cookie cannot be
+  // replayed. Navigation happens regardless of whether the call succeeds.
+  async function handleSignOut() {
     setOpen(false);
+    await logout();
     navigate("/login");
   }
 
@@ -63,9 +59,12 @@ export default function UserProfileTopMenu() {
           <div className="w-7 h-7 rounded-full bg-primary flex items-center justify-center text-white text-xs font-bold shrink-0">
             {initials}
           </div>
+          {/* Name only. Role is not surfaced to the user anywhere in the
+              product — access is assigned by an administrator, and putting a
+              privilege level on permanent display tells anyone glancing at the
+              screen how valuable the session is. */}
           <div className="hidden sm:block text-left">
-            <p className="text-xs font-medium leading-tight max-w-[120px] truncate">{displayName}</p>
-            <p className="text-[10px] text-muted-foreground leading-tight capitalize">{currentUser.role}</p>
+            <p className="text-sm font-medium leading-tight max-w-[140px] truncate">{displayName}</p>
           </div>
           <ChevronDown className={cn("w-3.5 h-3.5 text-muted-foreground transition-transform hidden sm:block", open && "rotate-180")} />
         </button>
@@ -78,15 +77,12 @@ export default function UserProfileTopMenu() {
                 <div className="w-10 h-10 rounded-full bg-primary flex items-center justify-center text-white text-sm font-bold shrink-0">
                   {initials}
                 </div>
+                {/* Name and email only — the role badge is intentionally gone.
+                    Users are not told their own role anywhere in the product;
+                    access is assigned by an administrator. */}
                 <div className="min-w-0">
                   <p className="text-sm font-semibold truncate">{displayName}</p>
                   <p className="text-xs text-muted-foreground truncate">{currentUser.email}</p>
-                  <span className={cn(
-                    "inline-block mt-1 text-[10px] px-2 py-0.5 rounded-full font-medium capitalize",
-                    ROLE_COLORS[currentUser.role]
-                  )}>
-                    {currentUser.role}
-                  </span>
                 </div>
               </div>
             </div>
@@ -128,10 +124,11 @@ export default function UserProfileTopMenu() {
 }
 
 function ChangePasswordModal({
-  open, onClose, userId, userName,
+  open, onClose, userName,
 }: {
   open: boolean; onClose: () => void; userId: string; userName: string;
 }) {
+  const policy = usePasswordPolicy();
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -156,23 +153,26 @@ function ChangePasswordModal({
     e.preventDefault();
     setError(null);
 
-    if (next.length < 6) {
-      setError("New password must be at least 6 characters."); return;
-    }
     if (next !== confirm) {
       setError("New passwords do not match."); return;
     }
+    // Client-side policy check is UX only — the server re-validates and is the
+    // authority. Keeping the check here just avoids a round trip.
+    const violations = validatePasswordAgainst(next, policy);
+    if (violations.length > 0) { setError(violations[0]); return; }
 
     setLoading(true);
     try {
-      const res = await fetch(`/api/users/${userId}/change-password`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ currentPassword: current, newPassword: next }),
+      // Was PATCH /users/:id/change-password, which took the target from the URL
+      // and authorised nothing — any caller could change any user's password.
+      // This endpoint has no :id: it only ever changes your own.
+      const res = await apiPost("/api/auth/change-password", {
+        currentPassword: current,
+        newPassword: next,
       });
-      const body = await res.json();
+      const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(body.error ?? "Password change failed.");
+        setError(body.violations?.[0] ?? body.error ?? "Password change failed.");
       } else {
         setSuccess(true);
         setTimeout(() => { handleClose(); }, 1800);
@@ -199,6 +199,7 @@ function ChangePasswordModal({
               <Check className="w-6 h-6 text-green-600" />
             </div>
             <p className="text-sm font-medium text-green-700">Password changed successfully</p>
+            <p className="text-xs text-muted-foreground">You have been signed out on all other devices.</p>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4 pt-2">
@@ -229,7 +230,8 @@ function ChangePasswordModal({
                   type={showNext ? "text" : "password"}
                   value={next}
                   onChange={(e) => setNext(e.target.value)}
-                  placeholder="Min. 6 characters"
+                  placeholder={`Min. ${policy.minLength} characters`}
+                  autoComplete="new-password"
                   required
                   className="pr-9 h-9 text-sm"
                 />
@@ -238,6 +240,10 @@ function ChangePasswordModal({
                   {showNext ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
                 </button>
               </div>
+              {/* Same checklist the activation and reset pages show, driven by
+                  the policy the server actually enforces. */}
+              <PasswordStrengthMeter password={next} policy={policy} />
+              {next && <PasswordChecklist password={next} policy={policy} className="pt-1" />}
             </div>
 
             <div className="space-y-1.5">

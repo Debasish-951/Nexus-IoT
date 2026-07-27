@@ -14,11 +14,19 @@ interface RoleGuardProps {
   children: React.ReactNode;
   mode?: "hide" | "disable";
   className?: string;
+  /**
+   * Optional module grant that must ALSO be held. Use it where the role verb is
+   * too coarse — e.g. an engineer has `manage_assets` by role, but an admin can
+   * still switch off their `assets.d` circle, and the delete button should
+   * disappear. The API applies the same pair of checks.
+   */
+  module?: string;
+  level?: "read" | "write" | "delete";
 }
 
-export function RoleGuard({ permission, children, mode = "hide", className }: RoleGuardProps) {
-  const { can, currentUser } = useCurrentUser();
-  if (can(permission)) return <>{children}</>;
+export function RoleGuard({ permission, children, mode = "hide", className, module, level }: RoleGuardProps) {
+  const { canAction } = useCurrentUser();
+  if (canAction(permission, module, level ?? "read")) return <>{children}</>;
   if (mode === "hide") return null;
 
   return (
@@ -28,11 +36,12 @@ export function RoleGuard({ permission, children, mode = "hide", className }: Ro
           {children}
         </div>
       </TooltipTrigger>
+      {/* Deliberately does not name the user's role — see the note in
+          UserProfileTopMenu. The user is told what they cannot do and who to
+          ask, which is the actionable part; the role name is not. */}
       <TooltipContent side="top" className="flex items-center gap-1.5 text-xs">
         <Lock className="w-3 h-3 shrink-0" />
-        <span>
-          Your role <strong>({currentUser?.role})</strong> cannot perform this action
-        </span>
+        <span>You do not have permission for this action</span>
       </TooltipContent>
     </Tooltip>
   );
@@ -42,15 +51,17 @@ export function RoleGuard({ permission, children, mode = "hide", className }: Ro
  * Shows an amber read-only banner when the user lacks a permission.
  * Renders nothing when they have access.
  */
-export function ReadOnlyBanner({ permission, message }: { permission: string; message?: string }) {
-  const { can, currentUser } = useCurrentUser();
-  if (can(permission)) return null;
+export function ReadOnlyBanner({
+  permission, message, module, level,
+}: { permission: string; message?: string; module?: string; level?: "read" | "write" | "delete" }) {
+  const { canAction } = useCurrentUser();
+  if (canAction(permission, module, level ?? "write")) return null;
   return (
     <div className="flex items-center gap-2.5 rounded-md border border-amber-200 dark:border-amber-800/40 bg-amber-50 dark:bg-amber-950/20 px-3 py-2.5 text-xs text-amber-800 dark:text-amber-300">
       <Lock className="w-3.5 h-3.5 shrink-0" />
       <span>
-        <strong>Read-only access</strong> — your role (<code className="bg-amber-100 dark:bg-amber-900 px-1 rounded">{currentUser?.role}</code>){" "}
-        {message ?? "cannot make changes to this section. Contact an Administrator to request elevated access."}
+        <strong>Read-only access</strong> —{" "}
+        {message ?? "you cannot make changes to this section. Contact an Administrator to request access."}
       </span>
     </div>
   );

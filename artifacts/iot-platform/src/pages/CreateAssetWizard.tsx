@@ -12,16 +12,19 @@ import { cn } from "@/lib/utils";
 import {
   FileText, Cpu, CheckCircle2, ArrowRight, ArrowLeft, AlertTriangle, Boxes, Search, Trash2,
 } from "lucide-react";
+import { apiFetch } from "@/lib/auth-api";
 
 interface SeenDevice { deviceId: string; matched: boolean }
 
 export default function CreateAssetWizard({
-  open, onOpenChange, onCreated, initialParentId,
+  open, onOpenChange, onCreated, initialParentId, groupingOnly = false,
 }: {
   open: boolean;
   onOpenChange: (v: boolean) => void;
   onCreated?: (assetId: string) => void;
   initialParentId?: string;
+  /** New Project mode: a single name-only step. No template, no device id. */
+  groupingOnly?: boolean;
 }) {
   const { toast } = useToast();
   const qc = useQueryClient();
@@ -49,18 +52,18 @@ export default function CreateAssetWizard({
   const assetList = (assets as any[] | undefined) ?? [];
 
   function reloadDevices() {
-    fetch("/api/ingest/seen-devices")
+    apiFetch("/api/ingest/seen-devices")
       .then((r) => (r.ok ? r.json() : []))
       .then((d) => setDevices(Array.isArray(d) ? d : []))
       .catch(() => setDevices([]));
   }
   async function removeDevice(did: string) {
-    await fetch(`/api/ingest/seen-devices/${encodeURIComponent(did)}`, { method: "DELETE" }).catch(() => {});
+    await apiFetch(`/api/ingest/seen-devices/${encodeURIComponent(did)}`, { method: "DELETE" }).catch(() => {});
     if (deviceId === did) setDeviceId("");
     reloadDevices();
   }
   async function pruneDevices() {
-    const res = await fetch("/api/ingest/seen-devices/prune", { method: "POST" }).catch(() => null);
+    const res = await apiFetch("/api/ingest/seen-devices/prune", { method: "POST" }).catch(() => null);
     const data = res && res.ok ? await res.json() : { removed: 0 };
     toast({ title: `Removed ${data.removed ?? 0} unused device id(s)` });
     setDeviceId("");
@@ -87,52 +90,41 @@ export default function CreateAssetWizard({
   // Device id is OPTIONAL. Children never own one (they inherit the parent/root
   // device). A root-level asset only owns one if the user opts in via `hasDevice`.
   // Otherwise identifier = null (grouping asset) and any number can be created.
-  const wantsDevice = !isChild && hasDevice;
+  // groupingOnly (New Project) never has a device — it's a pure site/project container.
+  const wantsDevice = !isChild && hasDevice && !groupingOnly;
   const finalIdentifier = wantsDevice ? deviceId.trim() : "";
 
-  // Steps: child via "+" = Details→Review; child via dropdown = skip Device; root =
-  // full only when the user opts into a device id.
+  // Steps: New Project = a single Details step (name only). Child via "+" =
+  // Details→Review; child via dropdown = skip Device; root = full only when the
+  // user opts into a device id.
   const steps = useMemo(() => (
-    childMode ? ["Details", "Review"]
-      : isChild ? ["Template", "Details", "Review"]
-        : wantsDevice ? ["Template", "Details", "Device", "Review"]
-          : ["Template", "Details", "Review"]
-  ), [childMode, isChild, wantsDevice]);
+    groupingOnly ? ["Details"]
+      : childMode ? ["Details"]
+        : isChild ? ["Template", "Details", "Review"]
+          : wantsDevice ? ["Template", "Details", "Device", "Review"]
+            : ["Template", "Details", "Review"]
+  ), [groupingOnly, childMode, isChild, wantsDevice]);
   const current = steps[Math.min(step, steps.length - 1)];
   useEffect(() => { if (step > steps.length - 1) setStep(steps.length - 1); }, [steps.length, step]);
-
-  // Hierarchical, indented options for the Parent dropdown.
-  const treeOptions = useMemo(() => {
-    const out: { id: string; name: string; depth: number }[] = [];
-    const walk = (pid: string | null, depth: number) => {
-      assetList
-        .filter((a) => (a.parentId ?? null) === pid)
-        .sort((x, y) => x.name.localeCompare(y.name))
-        .forEach((a) => { out.push({ id: a.id, name: a.name, depth }); walk(a.id, depth + 1); });
-    };
-    walk(null, 0);
-    return out;
-  }, [assets]); // eslint-disable-line
 
   const filteredDevices = useMemo(() => {
     const q = deviceSearch.trim().toLowerCase();
     return q ? devices.filter((d) => d.deviceId.toLowerCase().includes(q)) : devices;
   }, [devices, deviceSearch]);
   const canNext =
-    current === "Template" ? !!templateId :
+    current === "Template" ? true :   // template is OPTIONAL — grouping projects/sites need none; click Next to skip
     current === "Details" ? name.trim().length > 0 :
     current === "Device" ? deviceId.trim().length > 0 && !linkedIds.has(deviceId.trim()) :
     true;
 
   async function handleCreate() {
     if (!name.trim()) return;
-    if (!childMode && !templateId) return;
     // Only require a device when the user opted into one.
     if (wantsDevice && (!deviceId.trim() || linkedIds.has(deviceId.trim()))) return;
     const tid = effectiveTemplateId;
     setSubmitting(true);
     try {
-      const res = await fetch("/api/assets", {
+      const res = await apiFetch("/api/assets", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: name.trim(), identifier: finalIdentifier, templateId: tid || null, templateName: template?.name ?? null, parentId: parentId || null }),
@@ -145,7 +137,7 @@ export default function CreateAssetWizard({
       // Bind the template (if any): materialize its attributes onto the new asset.
       if (tid) {
         try {
-          await fetch(`/api/assets/${data.id}/apply-template`, {
+          await apiFetch(`/api/assets/${data.id}/apply-template`, {
             method: "POST", headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ templateId: tid }),
           });
@@ -166,31 +158,39 @@ export default function CreateAssetWizard({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><Boxes className="w-4 h-4 text-primary" /> Create Asset</DialogTitle>
-          <DialogDescription>Bind a transmitting device to a new asset using a template.</DialogDescription>
+          <DialogTitle className="flex items-center gap-2"><Boxes className="w-4 h-4 text-primary" /> {groupingOnly ? "New Project" : "Create Asset"}</DialogTitle>
+          <DialogDescription>
+            {groupingOnly
+              ? "Create a top-level project or site (e.g. Plant 2, Site B). Add child assets and dashboards beneath it after creation."
+              : childMode
+                ? "Name the new asset — it's nested under the asset you added it from. Use a new top-level asset for a separate branch."
+                : "Bind a transmitting device to a new asset using a template."}
+          </DialogDescription>
         </DialogHeader>
 
-        {/* Stepper */}
-        <div className="flex items-center gap-1.5 mb-1">
-          {steps.map((s, i) => (
-            <div key={s} className="flex items-center gap-1.5 flex-1">
-              <div className={cn("w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold shrink-0",
-                i < step ? "bg-primary text-primary-foreground" : i === step ? "bg-primary/15 text-primary border border-primary" : "bg-muted text-muted-foreground")}>
-                {i < step ? <CheckCircle2 className="w-3.5 h-3.5" /> : i + 1}
+        {/* Stepper — hidden for the single-step New Project flow */}
+        {steps.length > 1 && (
+          <div className="flex items-center gap-1.5 mb-1">
+            {steps.map((s, i) => (
+              <div key={s} className="flex items-center gap-1.5 flex-1">
+                <div className={cn("w-6 h-6 rounded-full flex items-center justify-center text-xs font-semibold shrink-0",
+                  i < step ? "bg-primary text-primary-foreground" : i === step ? "bg-primary/15 text-primary border border-primary" : "bg-muted text-muted-foreground")}>
+                  {i < step ? <CheckCircle2 className="w-3.5 h-3.5" /> : i + 1}
+                </div>
+                <span className={cn("text-xs", i === step ? "font-medium text-foreground" : "text-muted-foreground")}>{s}</span>
+                {i < steps.length - 1 && <div className="flex-1 h-px bg-border" />}
               </div>
-              <span className={cn("text-xs", i === step ? "font-medium text-foreground" : "text-muted-foreground")}>{s}</span>
-              {i < steps.length - 1 && <div className="flex-1 h-px bg-border" />}
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
 
         <div className="min-h-[220px] py-2">
           {/* Step 1: Template */}
           {current === "Template" && (
             <div className="space-y-2">
-              <Label className="text-sm">Select an asset template <span className="text-destructive">*</span></Label>
+              <Label className="text-sm">Select an asset template <span className="text-muted-foreground font-normal">(optional)</span></Label>
               {templateList.length === 0 ? (
-                <p className="text-sm text-muted-foreground py-6 text-center">No templates yet. Create one in Asset Templates first.</p>
+                <p className="text-sm text-muted-foreground py-6 text-center">No templates yet — click <strong>Next</strong> to skip (recommended for a top-level project or site). You can add attributes or assign a template later.</p>
               ) : templateId ? (
                 <div className="flex items-center justify-between rounded-lg border border-primary bg-primary/5 p-3">
                   <div className="flex items-center gap-3 min-w-0">
@@ -228,7 +228,7 @@ export default function CreateAssetWizard({
                       })()}
                     </div>
                   ) : (
-                    <p className="text-xs text-muted-foreground py-3 text-center">Start typing to find a template.</p>
+                    <p className="text-xs text-muted-foreground py-3 text-center">Start typing to find a template, or click <strong>Next</strong> to skip (optional).</p>
                   )}
                 </>
               )}
@@ -238,28 +238,18 @@ export default function CreateAssetWizard({
           {/* Step 2: Details */}
           {current === "Details" && (
             <div className="space-y-4">
-              {childMode && (
-                <div className="rounded-lg border border-border bg-muted/30 p-3 text-sm">
-                  Adding a child under <strong>{parent?.name}</strong>
-                  {parent?.templateName && <span className="text-muted-foreground"> · template {parent.templateName}</span>}
-                </div>
-              )}
               <div className="space-y-1.5">
-                <Label className="text-sm">{childMode ? "Child Asset Name" : "Asset Name"} <span className="text-destructive">*</span></Label>
-                <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Motor-101, Chiller A" autoFocus />
+                <Label className="text-sm">{childMode ? (parentId ? "Child Asset Name" : "Asset Name") : groupingOnly ? "Project Name" : "Asset Name"} <span className="text-destructive">*</span></Label>
+                <Input value={name} onChange={(e) => setName(e.target.value)} placeholder={groupingOnly ? "e.g. Plant 2, Site B" : "e.g. Motor-101, Chiller A"} autoFocus
+                  onKeyDown={(e) => { if ((groupingOnly || childMode) && e.key === "Enter" && name.trim()) handleCreate(); }} />
               </div>
-              {!childMode && (<div className="space-y-1.5">
-                <Label className="text-sm">Parent Asset <span className="text-muted-foreground font-normal">(optional)</span></Label>
-                <select value={parentId} onChange={(e) => setParentId(e.target.value)}
-                  className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring">
-                  <option value="">None (root level)</option>
-                  {treeOptions.map((o) => (
-                    <option key={o.id} value={o.id}>{"  ".repeat(o.depth)}{o.depth > 0 ? "└ " : ""}{o.name}</option>
-                  ))}
-                </select>
-                <p className="text-xs text-muted-foreground">Place this asset under a parent to build a hierarchy, or leave as a root-level asset.</p>
-              </div>)}
-              {isChild ? (
+              {groupingOnly ? null : childMode ? (
+                <p className="text-xs text-muted-foreground">
+                  {parentId
+                    ? <>Child of <strong>{parent?.name}</strong> — it shares the parent's device and has <strong>no Device ID</strong> of its own. Telemetry is attributed to the device owner.</>
+                    : <>Top-level asset — a device-less project/site root. Add child assets and dashboards beneath it afterwards.</>}
+                </p>
+              ) : isChild ? (
                 <p className="text-xs text-muted-foreground">
                   Child of <strong>{parent?.name}</strong> — it shares the parent's device and has <strong>no Device ID</strong> of its own. Telemetry is attributed to the device owner.
                 </p>
@@ -369,7 +359,7 @@ export default function CreateAssetWizard({
             onClick={() => setStep((s) => Math.max(0, s - 1))}>
             <ArrowLeft className="w-4 h-4 mr-1" /> Back
           </Button>
-          {current !== "Review" ? (
+          {step < steps.length - 1 ? (
             <Button type="button" disabled={!canNext} onClick={() => setStep((s) => s + 1)}>
               Next <ArrowRight className="w-4 h-4 ml-1" />
             </Button>

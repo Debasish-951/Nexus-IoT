@@ -140,6 +140,9 @@
   --destructive-border: hsl(from hsl(var(--destructive)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
 }
 
+/* ── Dark theme: "Ember Grid" — Web Synergies orange on a deep, cool navy
+   ground with a cyan glow. Brand-safe but futuristic (replaces the old warm
+   brown-grey). Hues are cool (~222°) for surfaces; primary stays orange (~29°). */
 .dark {
   --button-outline: rgba(255,255,255,.10);
   --badge-outline: rgba(255,255,255,.05);
@@ -147,49 +150,58 @@
   --elevate-1: rgba(255,255,255,.04);
   --elevate-2: rgba(255,255,255,.09);
 
-  --background: 30 18% 9%;
-  --foreground: 36 12% 90%;
-  --border: 30 18% 20%;
-  --input: 30 18% 22%;
-  --ring: 32 95% 55%;
+  --background: 223 47% 7%;
+  --foreground: 214 40% 94%;
+  --border: 222 39% 18%;
+  --input: 222 35% 24%;
+  --ring: 29 100% 56%;
 
-  --card: 30 18% 11%;
-  --card-foreground: 36 12% 90%;
-  --card-border: 30 18% 18%;
+  --card: 222 43% 10%;
+  --card-foreground: 214 40% 94%;
+  --card-border: 222 39% 16%;
 
-  --popover: 30 18% 11%;
-  --popover-foreground: 36 12% 90%;
-  --popover-border: 30 18% 20%;
+  --popover: 222 43% 10%;
+  --popover-foreground: 214 40% 94%;
+  --popover-border: 222 39% 18%;
 
-  --primary: 32 95% 55%;
-  --primary-foreground: 30 45% 12%;
+  --primary: 29 100% 56%;
+  --primary-foreground: 28 60% 10%;
 
-  --secondary: 30 22% 18%;
-  --secondary-foreground: 36 12% 80%;
+  --secondary: 222 30% 16%;
+  --secondary-foreground: 215 30% 82%;
 
-  --muted: 30 22% 15%;
-  --muted-foreground: 32 15% 58%;
+  --muted: 222 30% 14%;
+  --muted-foreground: 216 20% 62%;
 
-  --accent: 30 25% 20%;
-  --accent-foreground: 36 12% 85%;
+  --accent: 222 32% 18%;
+  --accent-foreground: 215 35% 88%;
 
-  --destructive: 0 65% 50%;
+  --destructive: 354 82% 58%;
   --destructive-foreground: 0 0% 100%;
 
-  --chart-1: 32 95% 58%;
-  --chart-2: 175 60% 50%;
-  --chart-3: 262 60% 68%;
-  --chart-4: 0 72% 58%;
-  --chart-5: 205 80% 58%;
+  --chart-1: 29 100% 58%;
+  --chart-2: 188 86% 53%;
+  --chart-3: 262 70% 68%;
+  --chart-4: 354 85% 62%;
+  --chart-5: 210 90% 60%;
 
-  --sidebar: 30 25% 7%;
-  --sidebar-foreground: 36 13% 75%;
-  --sidebar-border: 30 20% 14%;
-  --sidebar-primary: 32 95% 58%;
-  --sidebar-primary-foreground: 30 45% 12%;
-  --sidebar-accent: 30 25% 14%;
-  --sidebar-accent-foreground: 36 13% 85%;
-  --sidebar-ring: 32 95% 58%;
+  --sidebar: 223 50% 5%;
+  --sidebar-foreground: 215 25% 76%;
+  --sidebar-border: 222 40% 12%;
+  --sidebar-primary: 29 100% 56%;
+  --sidebar-primary-foreground: 28 60% 10%;
+  --sidebar-accent: 222 34% 13%;
+  --sidebar-accent-foreground: 215 30% 88%;
+  --sidebar-ring: 29 100% 56%;
+}
+
+/* Ambient glow behind the app in dark mode (the cool ground + cyan/orange
+   auras are what make Ember Grid read as futuristic rather than flat). */
+.dark .app-shell {
+  background-image:
+    radial-gradient(1000px 520px at 90% -10%, hsl(188 86% 53% / 0.08), transparent 60%),
+    radial-gradient(760px 420px at 0% 112%, hsl(29 100% 56% / 0.05), transparent 60%);
+  background-attachment: fixed;
 }
 
 @layer base {
@@ -249,7 +261,7 @@
   .border.active-elevate-2:not(.no-active-interaction-elevate)::after { inset: -1px; }
 }
 
-/* Brown scrollbar for the left sidebar */
-.sidebar-scroll .scroll-thumb { background-color: #8b5e34 !important; }
-.sidebar-scroll .scroll-thumb:hover { background-color: #6f4a29 !important; }
+/* Cool slate scrollbar for the left sidebar (Ember Grid) */
+.sidebar-scroll .scroll-thumb { background-color: #24304d !important; }
+.sidebar-scroll .scroll-thumb:hover { background-color: #33436b !important; }
 .sidebar-scroll [data-orientation="vertical"] { width: 10px; }

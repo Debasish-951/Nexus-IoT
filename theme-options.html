@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Theme Options — Integrated Suite</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0}
+  :root{
+    --pg:#05070d; --pg-ink:#e7eefb; --pg-dim:#8ba; --pg-line:rgba(130,170,220,.14);
+    --mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+    --sans:system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;
+  }
+  body{background:
+      radial-gradient(1100px 640px at 84% -10%, rgba(34,211,238,.08), transparent 60%),
+      radial-gradient(900px 560px at 10% 108%, rgba(139,92,246,.08), transparent 60%),
+      var(--pg);
+    color:var(--pg-ink);font-family:var(--sans);line-height:1.5;-webkit-font-smoothing:antialiased;overflow-x:hidden}
+  .wrap{max-width:1240px;margin:0 auto;padding:clamp(24px,4vw,52px) clamp(14px,3vw,34px) 80px}
+  .eyebrow{font-family:var(--mono);font-size:11px;letter-spacing:.32em;text-transform:uppercase;color:#7fe3ff;margin:0 0 14px;display:inline-flex;align-items:center;gap:10px}
+  .eyebrow::before{content:"";width:26px;height:1px;background:linear-gradient(90deg,#22d3ee,transparent)}
+  h1{font-size:clamp(26px,4.4vw,44px);line-height:1.04;margin:0 0 12px;font-weight:800;letter-spacing:-.03em;
+     background:linear-gradient(180deg,#fff,#9fb6d6);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .lead{max-width:70ch;color:#93a4c0;font-size:clamp(14px,1.6vw,17px);margin:0 0 26px}
+  .lead b{color:#dbe6f5;font-weight:600}
+
+  /* palette chooser */
+  .chips{display:flex;flex-wrap:wrap;gap:12px;margin:0 0 26px}
+  .chip{cursor:pointer;border:1px solid var(--pg-line);background:rgba(255,255,255,.03);border-radius:12px;
+    padding:12px 14px;display:flex;flex-direction:column;gap:9px;min-width:150px;transition:.18s;text-align:left}
+  .chip:hover{border-color:rgba(130,190,255,.4);transform:translateY(-1px)}
+  .chip.active{border-color:#22d3ee;box-shadow:0 0 0 1px #22d3ee, 0 12px 30px -14px rgba(34,211,238,.6)}
+  .chip .nm{font-weight:700;font-size:13.5px;letter-spacing:-.01em}
+  .chip .rec{font-family:var(--mono);font-size:9px;letter-spacing:.12em;text-transform:uppercase;color:#3ee08a}
+  .sw{display:flex;gap:5px}
+  .sw i{width:20px;height:20px;border-radius:6px;display:block;border:1px solid rgba(255,255,255,.08)}
+  .chip .desc{font-size:11px;color:#8195b0;line-height:1.4;max-width:22ch}
+
+  /* ============ mini dashboard preview (consumes palette vars) ============ */
+  .frame{border:1px solid var(--pg-line);border-radius:16px;overflow:hidden;box-shadow:0 40px 90px -40px rgba(0,0,0,.8)}
+  .dash{
+    --bg:#0a0f1c;--bgGrad:none;--sidebar:#070b15;--card:#0f1626;--cardGrad:none;--line:#1c2740;
+    --ink:#e6edf7;--muted:#8595ad;--primary:#ff8a1f;--primarySoft:rgba(255,138,31,.14);--glow:rgba(34,211,238,.16);
+    --hi:#ff4d5e;--med:#ffa723;--low:#35d07f;--miss:#6ea8ff;--tot:#9db2d6;
+    display:grid;grid-template-columns:210px 1fr;min-height:600px;background:var(--bg);color:var(--ink);
+    font-size:13px;position:relative}
+  .dash::before{content:"";position:absolute;inset:0;background:var(--bgGrad);pointer-events:none}
+  .side{position:relative;z-index:2;background:var(--sidebar);border-right:1px solid var(--line);padding:14px 10px;display:flex;flex-direction:column;gap:4px}
+  .logo{height:44px;border-radius:9px;background:rgba(255,255,255,.9);display:flex;align-items:center;justify-content:center;margin:2px 4px 14px;font-weight:800;color:#111;font-size:11px;letter-spacing:.02em}
+  .nav{display:flex;align-items:center;gap:10px;padding:8px 10px;border-radius:8px;color:var(--muted);font-weight:500}
+  .nav .ico{width:15px;height:15px;border-radius:4px;border:1.6px solid currentColor;opacity:.8}
+  .nav.on{background:var(--primarySoft);color:var(--primary);font-weight:700;box-shadow:inset 3px 0 0 var(--primary)}
+  .side .spacer{flex:1}
+  .me{display:flex;align-items:center;gap:9px;padding:8px;border-top:1px solid var(--line);margin-top:6px}
+  .av{width:26px;height:26px;border-radius:50%;background:linear-gradient(135deg,var(--primary),var(--primary));display:grid;place-items:center;color:#fff;font-weight:700;font-size:11px}
+
+  .main{position:relative;z-index:2;padding:20px 22px}
+  .topbar{display:flex;align-items:center;justify-content:flex-end;gap:12px;margin-bottom:16px}
+  .icobtn{width:30px;height:30px;border-radius:8px;border:1px solid var(--line);display:grid;place-items:center;color:var(--muted)}
+  .pill{display:flex;align-items:center;gap:8px;border:1px solid var(--line);border-radius:9px;padding:4px 8px 4px 4px}
+  .title{font-size:24px;font-weight:800;letter-spacing:-.02em;margin:0}
+  .sub{color:var(--muted);font-size:13px;margin:2px 0 18px}
+
+  .stats{display:grid;grid-template-columns:repeat(5,1fr);gap:12px;margin-bottom:16px}
+  .stat{background:var(--card);background-image:var(--cardGrad);border:1px solid var(--line);border-radius:12px;padding:14px;position:relative;overflow:hidden}
+  .stat .k{font-weight:700;font-size:13px}
+  .stat .kk{color:var(--muted);font-size:10.5px;margin-top:1px}
+  .stat .big{display:flex;align-items:center;gap:8px;margin-top:14px}
+  .stat .num{font-size:26px;font-weight:800;font-variant-numeric:tabular-nums;line-height:1}
+  .stat .u{font-size:11px;color:var(--muted)}
+  .stat .dot{width:9px;height:9px;border-radius:50%}
+  .stat .edge{position:absolute;left:0;top:0;bottom:0;width:3px}
+
+  .panels{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+  .panel{background:var(--card);background-image:var(--cardGrad);border:1px solid var(--line);border-radius:12px;min-height:230px;display:flex;flex-direction:column}
+  .ph{display:flex;align-items:center;justify-content:space-between;padding:13px 14px;border-bottom:1px solid var(--line);font-weight:700;font-size:13px}
+  .ph .chev{color:var(--muted)}
+  .empty{flex:1;display:grid;place-items:center;color:var(--muted);font-size:12.5px}
+  .row{display:flex;align-items:center;gap:9px;padding:10px 13px;border-bottom:1px solid var(--line)}
+  .row:last-child{border-bottom:none}
+  .row .ra{width:22px;height:22px;border-radius:6px;background:var(--primarySoft);color:var(--primary);display:grid;place-items:center;font-size:10px;flex:none}
+  .row .rt{flex:1;min-width:0}
+  .row .rt .a{font-weight:600;font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .row .rt .b{color:var(--muted);font-size:10.5px}
+  .row .rd{color:var(--muted);font-size:10px;white-space:nowrap}
+
+  .note{margin-top:26px;border:1px solid var(--pg-line);background:rgba(255,255,255,.03);border-radius:14px;padding:20px 22px;display:grid;grid-template-columns:auto 1fr;gap:16px;align-items:start}
+  .note .m{font-family:var(--mono);color:#22d3ee;font-size:20px}
+  .note h3{margin:0 0 5px;font-size:15px}
+  .note p{margin:0;color:#93a4c0;font-size:13.5px;max-width:74ch}
+  @media(max-width:820px){.dash{grid-template-columns:1fr}.side{display:none}.stats{grid-template-columns:repeat(2,1fr)}.panels{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <p class="eyebrow">Integrated Suite · Dashboard Theme</p>
+  <h1>Pick a punchier look.</h1>
+  <p class="lead">
+    Your current dark theme is a flat warm brown-grey with one orange accent — that's what reads as <b>dull</b>.
+    Each option below recolors the <b>same dashboard</b> live: cooler, deeper grounds, a vivid accent, subtle glow and gradient cards.
+    Click a palette to preview it, then tell me the one you want and I'll apply it to the real app's theme tokens.
+  </p>
+
+  <div class="chips" id="chips"></div>
+
+  <div class="frame">
+    <div class="dash" id="dash">
+      <!-- sidebar -->
+      <aside class="side">
+        <div class="logo">WEB SYNERGIES</div>
+        <div class="nav on"><span class="ico"></span> Home</div>
+        <div class="nav"><span class="ico"></span> Asset Management</div>
+        <div class="nav"><span class="ico"></span> Data Explorer</div>
+        <div class="nav"><span class="ico"></span> AI Assistant</div>
+        <div class="nav"><span class="ico"></span> Alarm Management</div>
+        <div class="nav"><span class="ico"></span> Broker Management</div>
+        <div class="nav"><span class="ico"></span> Security</div>
+        <div class="nav"><span class="ico"></span> System</div>
+        <div class="spacer"></div>
+        <div class="me"><span class="av">A</span><div><div style="font-weight:700;font-size:12px">Administrator</div><div style="color:var(--muted);font-size:10px">Admin</div></div></div>
+      </aside>
+      <!-- main -->
+      <div class="main">
+        <div class="topbar">
+          <div class="icobtn">☀</div><div class="icobtn">◔</div>
+          <div class="pill"><span class="av">A</span><div><div style="font-weight:700;font-size:12px">Administrator</div><div style="color:var(--muted);font-size:10px">Admin</div></div></div>
+        </div>
+        <h2 class="title">Dashboard</h2>
+        <div class="sub">Overview of Plant Health</div>
+
+        <div class="stats">
+          <div class="stat"><span class="edge" style="background:var(--hi)"></span><div class="k">High</div><div class="kk">Need for action</div><div class="big"><span class="dot" style="background:var(--hi)"></span><span class="num" style="color:var(--hi)">0</span><span class="u">Assets</span></div></div>
+          <div class="stat"><span class="edge" style="background:var(--med)"></span><div class="k">Medium</div><div class="kk">Need for action</div><div class="big"><span class="dot" style="background:var(--med)"></span><span class="num" style="color:var(--med)">0</span><span class="u">Assets</span></div></div>
+          <div class="stat"><span class="edge" style="background:var(--low)"></span><div class="k">Low</div><div class="kk">Good condition</div><div class="big"><span class="dot" style="background:var(--low)"></span><span class="num" style="color:var(--low)">0</span><span class="u">Assets</span></div></div>
+          <div class="stat"><span class="edge" style="background:var(--miss)"></span><div class="k">Missing data</div><div class="kk">No recent data</div><div class="big"><span class="dot" style="background:var(--miss)"></span><span class="num" style="color:var(--miss)">1</span><span class="u">Assets</span></div></div>
+          <div class="stat"><span class="edge" style="background:var(--primary)"></span><div class="k">Total</div><div class="kk">All assets</div><div class="big"><span class="dot" style="background:var(--primary)"></span><span class="num" style="color:var(--primary)">1</span><span class="u">Assets</span></div></div>
+        </div>
+
+        <div class="panels">
+          <div class="panel"><div class="ph">Recent Critical Alarms <span class="chev">›</span></div><div class="empty">No active alarms</div></div>
+          <div class="panel"><div class="ph">Assets Requiring Action <span class="chev">›</span></div><div class="empty">No assets need attention</div></div>
+          <div class="panel">
+            <div class="ph">Recent Activities <span class="chev">›</span></div>
+            <div class="row"><span class="ra">◆</span><div class="rt"><div class="a">role=admin</div><div class="b">by system</div></div><span class="rd">just now</span></div>
+            <div class="row"><span class="ra">◆</span><div class="rt"><div class="a">role=admin</div><div class="b">by system</div></div><span class="rd">1 min</span></div>
+            <div class="row"><span class="ra">◫</span><div class="rt"><div class="a">asset.created · Fan-01</div><div class="b">by system</div></div><span class="rd">17 min</span></div>
+            <div class="row"><span class="ra">◫</span><div class="rt"><div class="a">asset.updated · Plant 1</div><div class="b">by system</div></div><span class="rd">1 day</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="note">
+    <span class="m">▹</span>
+    <div>
+      <h3>How this maps to the real app</h3>
+      <p>Each palette is a set of <b>CSS variable</b> values (background, sidebar, card, border, primary + a glow accent). When you pick one, I edit the <b>dark-theme block in <code style="font-family:var(--mono);color:#7fe3ff">src/index.css</code></b> — no component changes, the whole app recolors at once. Say the palette name (or mix: "Ember Grid but with the Cyan Reactor accent").</p>
+    </div>
+  </div>
+</div>
+
+<script>
+  const PALETTES = [
+    { id:"ember", name:"Ember Grid", rec:true,
+      desc:"Keeps WS orange, but on cool deep-navy with a cyan glow. Brand-safe + modern.",
+      sw:["#0a0f1c","#ff8a1f","#22d3ee","#0f1626"],
+      vars:{ "--bg":"#0a0f1c","--sidebar":"#070b15","--card":"#0f1626","--line":"#1c2740",
+        "--ink":"#e6edf7","--muted":"#8595ad","--primary":"#ff8a1f","--primarySoft":"rgba(255,138,31,.15)",
+        "--miss":"#6ea8ff","--tot":"#7fe3ff",
+        "--bgGrad":"radial-gradient(900px 460px at 90% -8%, rgba(34,211,238,.10), transparent 60%), radial-gradient(700px 380px at 0% 110%, rgba(255,138,31,.07), transparent 60%)",
+        "--cardGrad":"linear-gradient(180deg, rgba(34,211,238,.05), transparent 42%)" } },
+
+    { id:"cyan", name:"Cyan Reactor",
+      desc:"Electric cyan primary on near-black. Maximum futuristic; orange stays for warnings.",
+      sw:["#05080f","#22d3ee","#38bdf8","#0b1220"],
+      vars:{ "--bg":"#05080f","--sidebar":"#04070d","--card":"#0a1220","--line":"#123048",
+        "--ink":"#dbeafe","--muted":"#7c93b0","--primary":"#22d3ee","--primarySoft":"rgba(34,211,238,.14)",
+        "--miss":"#38bdf8","--tot":"#22d3ee",
+        "--bgGrad":"radial-gradient(880px 460px at 88% -10%, rgba(34,211,238,.16), transparent 58%), radial-gradient(700px 400px at 4% 112%, rgba(56,189,248,.10), transparent 60%)",
+        "--cardGrad":"linear-gradient(180deg, rgba(34,211,238,.06), transparent 45%)" } },
+
+    { id:"violet", name:"Violet Pulse",
+      desc:"Deep indigo ground, violet→pink accent. Bold and premium.",
+      sw:["#0a0713","#a855f7","#ec4899","#130d24"],
+      vars:{ "--bg":"#0a0713","--sidebar":"#080511","--card":"#130d24","--line":"#2a2050",
+        "--ink":"#ece7fb","--muted":"#9a8fc0","--primary":"#a855f7","--primarySoft":"rgba(168,85,247,.16)",
+        "--miss":"#8b7bff","--tot":"#d8b4fe",
+        "--bgGrad":"radial-gradient(900px 480px at 88% -8%, rgba(168,85,247,.18), transparent 58%), radial-gradient(700px 400px at 2% 112%, rgba(236,72,153,.12), transparent 60%)",
+        "--cardGrad":"linear-gradient(180deg, rgba(168,85,247,.07), transparent 45%)" } },
+
+    { id:"aurora", name:"Aurora Teal",
+      desc:"Dark slate with mint-teal accent. Fresh, calm, high-tech.",
+      sw:["#06110f","#2dd4bf","#34d399","#0b1a17"],
+      vars:{ "--bg":"#06110f","--sidebar":"#050f0d","--card":"#0b1a17","--line":"#123a32",
+        "--ink":"#dcfce9","--muted":"#7fa99b","--primary":"#2dd4bf","--primarySoft":"rgba(45,212,191,.15)",
+        "--miss":"#38bdf8","--tot":"#5eead4",
+        "--bgGrad":"radial-gradient(880px 460px at 88% -8%, rgba(45,212,191,.15), transparent 58%), radial-gradient(700px 400px at 2% 112%, rgba(52,211,153,.10), transparent 60%)",
+        "--cardGrad":"linear-gradient(180deg, rgba(45,212,191,.06), transparent 45%)" } },
+
+    { id:"sunset", name:"Sunset Fusion",
+      desc:"Orange + magenta duotone on plum-navy. Warm brand energy, cranked up.",
+      sw:["#0e0a16","#ff7a1a","#ff2fb0","#7c5cff"],
+      vars:{ "--bg":"#0e0a16","--sidebar":"#0a0712","--card":"#150f22","--line":"#341f4a",
+        "--ink":"#f2e9f5","--muted":"#a893b0","--primary":"#ff7a1a","--primarySoft":"rgba(255,122,26,.16)",
+        "--miss":"#7c5cff","--tot":"#ff2fb0",
+        "--bgGrad":"radial-gradient(900px 480px at 90% -8%, rgba(255,47,176,.16), transparent 58%), radial-gradient(720px 400px at 0% 112%, rgba(124,92,255,.14), transparent 60%)",
+        "--cardGrad":"linear-gradient(180deg, rgba(255,122,26,.06), transparent 45%)" } },
+
+    { id:"current", name:"Current (dull)",
+      desc:"Your existing theme — shown for before/after comparison.",
+      sw:["#17130f","#f7931e","#1b1611","#2b2318"],
+      vars:{ "--bg":"#17130f","--sidebar":"#120e0a","--card":"#1b1611","--line":"#2b2318",
+        "--ink":"#e8e2d8","--muted":"#9a8f80","--primary":"#f7931e","--primarySoft":"rgba(247,147,30,.14)",
+        "--miss":"#7d8aa0","--tot":"#b8a892","--bgGrad":"none","--cardGrad":"none" } },
+  ];
+
+  const dash = document.getElementById("dash");
+  const chips = document.getElementById("chips");
+
+  function apply(p){
+    for(const k in p.vars) dash.style.setProperty(k, p.vars[k]);
+    [...chips.children].forEach(c=>c.classList.toggle("active", c.dataset.id===p.id));
+  }
+
+  PALETTES.forEach((p,i)=>{
+    const el = document.createElement("button");
+    el.className = "chip" + (i===0 ? " active":"");
+    el.dataset.id = p.id;
+    el.innerHTML =
+      '<div style="display:flex;justify-content:space-between;align-items:center;gap:8px">'+
+        '<span class="nm">'+p.name+'</span>'+ (p.rec?'<span class="rec">★ Rec</span>':'') +
+      '</div>'+
+      '<div class="sw">'+ p.sw.map(c=>'<i style="background:'+c+'"></i>').join('') +'</div>'+
+      '<div class="desc">'+p.desc+'</div>';
+    el.addEventListener("click", ()=>apply(p));
+    chips.appendChild(el);
+  });
+
+  apply(PALETTES[0]);
+</script>
+</body>
+</html>

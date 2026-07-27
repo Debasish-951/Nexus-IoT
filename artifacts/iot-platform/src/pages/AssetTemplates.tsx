@@ -18,8 +18,6 @@ import { format } from "date-fns";
 import { useCurrentUser } from "@/contexts/UserContext";
 import type { Asset } from "./assetShared";
 
-const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
-
 export default function AssetTemplates() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
@@ -28,7 +26,6 @@ export default function AssetTemplates() {
 
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
-  const [creating, setCreating] = useState(false);
   const [deletingAll, setDeletingAll] = useState(false);
 
   const { data: templates } = useListAssetTemplates();
@@ -48,6 +45,7 @@ export default function AssetTemplates() {
     return m;
   }, [allAssets]);
 
+  const createTemplate = useCreateAssetTemplate();
   const deleteTemplate = useDeleteAssetTemplate();
   function handleDeleteTemplate(e: React.MouseEvent, t: any) {
     e.stopPropagation();
@@ -64,8 +62,7 @@ export default function AssetTemplates() {
     setDeletingAll(true);
     let ok = 0, fail = 0;
     await Promise.all(allTemplates.map(async (t) => {
-      const r = await fetch(`${BASE}/api/asset-templates/${t.id}`, { method: "DELETE" }).catch(() => null);
-      if (r && r.ok) ok++; else fail++;
+      try { await deleteTemplate.mutateAsync({ id: t.id }); ok++; } catch { fail++; }
     }));
     qc.invalidateQueries({ queryKey: getListAssetTemplatesQueryKey() });
     toast({
@@ -78,18 +75,15 @@ export default function AssetTemplates() {
 
   const form = useForm({ defaultValues: { name: "" } });
   async function onSubmit(data: { name: string }) {
-    setCreating(true);
-    try {
-      const res = await fetch(`${BASE}/api/asset-templates`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: data.name }),
-      });
-      const created = await res.json().catch(() => ({}));
-      if (!res.ok) { toast({ title: "Create failed", description: created.error ?? "Try again", variant: "destructive" }); return; }
-      toast({ title: "Template created" });
-      qc.invalidateQueries({ queryKey: getListAssetTemplatesQueryKey() });
-      setCreateOpen(false); form.reset();
-      if (created.id) navigate(`/asset-templates/${created.id}`);
-    } finally { setCreating(false); }
+    createTemplate.mutate({ data: { name: data.name } }, {
+      onSuccess: (created) => {
+        toast({ title: "Template created" });
+        qc.invalidateQueries({ queryKey: getListAssetTemplatesQueryKey() });
+        setCreateOpen(false); form.reset();
+        if (created.id) navigate(`/asset-templates/${created.id}`);
+      },
+      onError: (err: any) => toast({ title: "Create failed", description: err?.data?.error ?? "Try again", variant: "destructive" }),
+    });
   }
 
   return (
@@ -187,7 +181,7 @@ export default function AssetTemplates() {
               )} />
               <DialogFooter>
                 <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>Cancel</Button>
-                <Button type="submit" disabled={creating}>{creating ? "Creating…" : "Create"}</Button>
+                <Button type="submit" disabled={createTemplate.isPending}>{createTemplate.isPending ? "Creating…" : "Create"}</Button>
               </DialogFooter>
             </form>
           </Form>

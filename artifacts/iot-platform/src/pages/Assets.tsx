@@ -18,6 +18,7 @@ import { AssetTree } from "@/components/asset-tree/AssetTree";
 import { TreeToolbar } from "@/components/asset-tree/TreeToolbar";
 import AssetDetails from "./AssetDetails";
 import { MousePointerClick } from "lucide-react";
+import { apiFetch } from "@/lib/auth-api";
 
 export default function Assets() {
   const [, navigate] = useLocation();
@@ -97,7 +98,7 @@ export default function Assets() {
     if (!editAsset || !editName.trim()) return;
     setSavingEdit(true);
     try {
-      const res = await fetch(`/api/assets/${editAsset.id}`, {
+      const res = await apiFetch(`/api/assets/${editAsset.id}`, {
         method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: editName.trim() }),
       });
       if (!res.ok) { const er = await res.json().catch(() => ({})); toast({ title: "Update failed", description: er.error, variant: "destructive" }); return; }

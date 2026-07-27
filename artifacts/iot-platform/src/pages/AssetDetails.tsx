@@ -33,6 +33,7 @@ import {
   parseCsv, flattenPayload, CSV_EXAMPLE, JSON_EXAMPLE,
   deriveStatus, STATUS_STYLES, siteOf, HealthBar, STALE_AFTER_MS,
 } from "./assetShared";
+import { apiFetch } from "@/lib/auth-api";
 
 // Suggested Device ID per machine name (auto-prefill; user can edit).
 const MACHINE_DEVICE_MAP: Record<string, string> = {
@@ -82,7 +83,7 @@ export default function AssetDetails({ assetId: assetIdProp, embedded }: { asset
   useEffect(() => {
     if (!assetId) return;
     let cancelled = false;
-    const load = () => fetch(`/api/assets/${assetId}/health`, { credentials: "include" })
+    const load = () => apiFetch(`/api/assets/${assetId}/health`, { credentials: "include" })
       .then((r) => (r.ok ? r.json() : null)).then((h) => { if (!cancelled) setHealth(h); }).catch(() => {});
     load();
     const iv = setInterval(load, 30_000);
@@ -146,7 +147,7 @@ export default function AssetDetails({ assetId: assetIdProp, embedded }: { asset
     if (!asset || previewRows.length === 0) return;
     setImporting(true);
     try {
-      const res = await fetch(`/api/assets/${asset.id}/attributes/bulk`, {
+      const res = await apiFetch(`/api/assets/${asset.id}/attributes/bulk`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ attributes: previewRows }),
       });
@@ -168,7 +169,7 @@ export default function AssetDetails({ assetId: assetIdProp, embedded }: { asset
     if (!tid) { toast({ title: "Please select a template", variant: "destructive" }); return; }
     setApplyingTemplate(true);
     try {
-      const res = await fetch(`/api/assets/${asset.id}/apply-template`, {
+      const res = await apiFetch(`/api/assets/${asset.id}/apply-template`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ templateId: tid }),
       });
@@ -195,7 +196,7 @@ export default function AssetDetails({ assetId: assetIdProp, embedded }: { asset
     };
     if (editAttrUseExpr) body.type = "runtime";
     try {
-      const res = await fetch(`/api/attributes/${editAttr.id}`, {
+      const res = await apiFetch(`/api/attributes/${editAttr.id}`, {
         method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
       });
       if (!res.ok) { const d = await res.json(); toast({ title: "Update failed", description: d.error, variant: "destructive" }); return; }

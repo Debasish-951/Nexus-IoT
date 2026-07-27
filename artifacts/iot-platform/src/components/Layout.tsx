@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import { Link, useLocation } from "wouter";
 import {
   ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Home, LayoutDashboard,
@@ -6,7 +6,7 @@ import {
   AlarmClock, BookOpen, Settings2, Router, Plug,
   Shield, Users, KeyRound, Activity, Menu, X,
   Wifi, Zap, Send, Database, PieChart, ClipboardList, BrainCircuit,
-  MessageSquare, AlertTriangle, Lightbulb,
+  MessageSquare, AlertTriangle, Lightbulb, Radio,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -18,53 +18,81 @@ import ThemeToggle from "@/components/ThemeToggle";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
+interface NavChild {
+  label: string;
+  href: string;
+  icon: React.ElementType;
+  /** Module key from the Access Control matrix. Omit for always-visible items. */
+  module?: string;
+}
+
 interface NavItem {
   label: string;
   href?: string;
   icon: React.ElementType;
-  children?: { label: string; href: string; icon: React.ElementType }[];
+  module?: string;
+  children?: NavChild[];
 }
 
 const navItems: NavItem[] = [
-  { label: "Home", href: "/", icon: Home },
+  { label: "Home", href: "/", icon: Home, module: "dashboard" },
   {
     label: "Asset Management",
     href: "/asset-management",
     icon: LayoutDashboard,
+    module: "assets",
     children: [
-      { label: "Asset Templates",     href: "/asset-templates",     icon: FileText },
-      { label: "Assets",              href: "/assets",              icon: Blocks },
-      { label: "Media Library",       href: "/media-library",       icon: Image },
-      { label: "Hierarchy Generator", href: "/hierarchy-generator", icon: Cpu },
+      { label: "Asset Templates",     href: "/asset-templates",     icon: FileText, module: "assets" },
+      { label: "Assets",              href: "/assets",              icon: Blocks,   module: "assets" },
+      { label: "Media Library",       href: "/media-library",       icon: Image,    module: "assets" },
+      { label: "Hierarchy Generator", href: "/hierarchy-generator", icon: Cpu,      module: "assets" },
     ],
   },
-  { label: "Data Explorer", href: "/data-explorer", icon: BarChart2 },
+  {
+    // No `href`: the /data-explorer landing page duplicates what Visualization
+    // and Live Feed already show, so the group header only toggles — matching
+    // every other pure grouping in this nav. The route still exists and is
+    // still reachable directly; it is simply not advertised.
+    label: "Data Explorer",
+    icon: BarChart2,
+    children: [
+      { label: "Visualization", href: "/visualization", icon: LayoutDashboard, module: "visualization" },
+      { label: "Live Feed",     href: "/live",          icon: Radio,           module: "live" },
+    ],
+  },
   {
     label: "AI Assistant",
     icon: BrainCircuit,
+    module: "explorer",
     children: [
-      { label: "Ask Your Assets",       href: "/ai-copilot",                   icon: MessageSquare },
-      { label: "Health Insights",       href: "/ai-copilot?action=health",     icon: Activity },
-      { label: "Failure Explanations",  href: "/ai-copilot?action=failure",    icon: AlertTriangle },
-      { label: "Smart Recommendations", href: "/ai-copilot?action=recommend",  icon: Lightbulb },
+      { label: "Ask Your Assets",       href: "/ai-copilot",                   icon: MessageSquare,  module: "explorer" },
+      { label: "Health Insights",       href: "/ai-copilot?action=health",     icon: Activity,       module: "explorer" },
+      { label: "Failure Explanations",  href: "/ai-copilot?action=failure",    icon: AlertTriangle,  module: "explorer" },
+      { label: "Smart Recommendations", href: "/ai-copilot?action=recommend",  icon: Lightbulb,      module: "explorer" },
     ],
   },
   {
     label: "Alarm Management",
     icon: Bell,
+    module: "alarms",
     children: [
-      { label: "Alarm List",    href: "/alarms",        icon: AlarmClock },
-      { label: "Alarm History", href: "/alarm-history", icon: BookOpen },
-      { label: "Alarm Rule",    href: "/alarm-rules",   icon: Settings2 },
+      { label: "Alarm List",    href: "/alarms",        icon: AlarmClock, module: "alarms" },
+      { label: "Alarm History", href: "/alarm-history", icon: BookOpen,   module: "alarms" },
+      { label: "Alarm Rule",    href: "/alarm-rules",   icon: Settings2,  module: "alarms" },
     ],
   },
   {
     label: "Broker Management",
     icon: Router,
+    module: "brokers",
     children: [
-      { label: "Broker",       href: "/brokers",               icon: Wifi },
-      { label: "Destinations",      href: "/destinations",      icon: Send },
-      { label: "Integration Hub",   href: "/integrations",      icon: Plug },
+      { label: "Broker",            href: "/brokers",           icon: Wifi,     module: "brokers" },
+      // API Client sits with the brokers rather than under Security: it is an
+      // ingest-integration concern (endpoints, scopes, traffic), not an
+      // account-security one. Still gated by the `api_clients` module grant.
+      { label: "API Client",        href: "/api-clients",       icon: KeyRound, module: "api_clients" },
+      { label: "Destinations",      href: "/destinations",      icon: Send,     module: "brokers" },
+      { label: "Integration Hub",   href: "/integrations",      icon: Plug,     module: "brokers" },
       { label: "Integration Guide", href: "/integration-guide", icon: Zap },
     ],
   },
@@ -72,29 +100,46 @@ const navItems: NavItem[] = [
     label: "Security",
     icon: Shield,
     children: [
-      { label: "User",                 href: "/users",                icon: Users },
-      { label: "API Client",           href: "/api-clients",          icon: KeyRound },
-      { label: "Notification Groups",  href: "/notification-groups",  icon: Users },
+      { label: "User",                href: "/users",               icon: Users,  module: "users" },
+      { label: "Security Center",     href: "/security",            icon: Shield, module: "security" },
+      { label: "Notification Groups", href: "/notification-groups", icon: Users,  module: "alarms" },
     ],
   },
   {
     label: "System",
     icon: Database,
+    module: "reports",
     children: [
-      { label: "Data Management", href: "/data-management", icon: Database },
-      { label: "Reports",         href: "/reports",         icon: ClipboardList },
+      { label: "Data Management", href: "/data-management", icon: Database,      module: "reports" },
+      { label: "Reports",         href: "/reports",         icon: ClipboardList, module: "reports" },
     ],
   },
-  { label: "Activity Log",      href: "/activity-log", icon: Activity },
-  { label: "Payload Simulator", href: "/simulator",    icon: Zap },
+  { label: "Activity Log",      href: "/activity-log", icon: Activity, module: "activity_log" },
+  { label: "Payload Simulator", href: "/simulator",    icon: Zap,      module: "brokers" },
 ];
 
-const ROLE_COLORS: Record<string, string> = {
-  admin:    "bg-amber-100 text-amber-800 dark:bg-amber-900/40 dark:text-amber-300",
-  engineer: "bg-blue-100  text-blue-700  dark:bg-blue-900/40  dark:text-blue-300",
-  operator: "bg-green-100 text-green-700 dark:bg-green-900/40 dark:text-green-300",
-  viewer:   "bg-slate-100 text-slate-600 dark:bg-slate-800    dark:text-slate-300",
-};
+/**
+ * Hide nav entries the user cannot open.
+ *
+ * Module-level visibility control, driven by the same grants the API enforces —
+ * a hidden item is not merely cosmetic, the route and the API both refuse it.
+ * A group whose children are all hidden disappears entirely rather than
+ * expanding into an empty list.
+ */
+function visibleNav(
+  items: NavItem[],
+  canModule: (key: string, level?: "read" | "write" | "delete") => boolean,
+): NavItem[] {
+  return items.reduce<NavItem[]>((acc, item) => {
+    if (item.children) {
+      const children = item.children.filter((c) => !c.module || canModule(c.module));
+      if (children.length > 0) acc.push({ ...item, children });
+      return acc;
+    }
+    if (!item.module || canModule(item.module)) acc.push(item);
+    return acc;
+  }, []);
+}
 
 function NavGroup({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
   const [location] = useLocation();
@@ -137,9 +182,22 @@ function NavGroup({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
   return (
     <div>
       {item.href ? (
-        // Group with a landing page: label navigates, chevron toggles the children.
+        // Group with a landing page: the label navigates AND expands.
+        //
+        // It used to only navigate, with the children reachable solely via the
+        // small chevron. Asset Management is the only group in this shape, so it
+        // was the only one that appeared to "lag": the click kicked off a route
+        // change and page fetch while the submenu stayed shut, which reads as
+        // slowness rather than as "that click did something else". Expanding on
+        // mousedown makes the children appear immediately, before navigation
+        // has even started.
         <div className={cn(headerClasses, "w-full")}>
-          <Link href={item.href} className="flex items-center gap-2.5 flex-1 min-w-0" data-testid={testId}>
+          <Link
+            href={item.href}
+            className="flex items-center gap-2.5 flex-1 min-w-0"
+            data-testid={testId}
+            onMouseDown={() => setOpen(true)}
+          >
             <item.icon className="w-[18px] h-[18px] shrink-0" />
             {!collapsed && <span className="flex-1 text-left truncate">{item.label}</span>}
           </Link>
@@ -187,42 +245,20 @@ function NavGroup({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
   );
 }
 
-function SidebarUserChip({ collapsed }: { collapsed: boolean }) {
-  const { currentUser } = useCurrentUser();
-  if (!currentUser) return null;
-
-  const displayName = currentUser.fullName ?? currentUser.email ?? "User";
-  const initials = displayName
-    .split(" ").map((w: string) => w[0] ?? "").join("").toUpperCase().slice(0, 2) || "U";
-
-  return (
-    <div className={cn(
-      "border-t border-sidebar-border px-3 py-2.5 flex items-center gap-2.5",
-      collapsed && "justify-center px-0"
-    )}>
-      <div className="w-7 h-7 rounded-full bg-sidebar-primary flex items-center justify-center shrink-0 text-white text-xs font-bold">
-        {initials}
-      </div>
-      {!collapsed && (
-        <div className="flex-1 min-w-0">
-          <p className="text-xs font-medium text-sidebar-foreground truncate">{displayName}</p>
-          <span className={cn(
-            "inline-block text-[10px] px-1.5 py-px rounded-full font-medium capitalize mt-0.5",
-            ROLE_COLORS[currentUser.role]
-          )}>
-            {currentUser.role}
-          </span>
-        </div>
-      )}
-    </div>
-  );
-}
+// The sidebar user chip was removed: identity already lives in the top-right
+// profile menu, and repeating it here duplicated the name and put the account's
+// role on permanent display. Role is not shown to the user anywhere — access is
+// assigned by an administrator, not something the user needs to reason about.
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
+  const { canModule } = useCurrentUser();
+
+  // Recomputed when the session's grants change (login, admin edit + refresh).
+  const nav = useMemo(() => visibleNav(navItems, canModule), [canModule]);
 
   return (
-    <div className="flex h-screen bg-background overflow-hidden">
+    <div className="app-shell flex h-screen bg-background overflow-hidden">
       {/* Sidebar */}
       <aside
         className={cn(
@@ -258,14 +294,13 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         {/* Nav */}
         <ScrollArea type="always" className="sidebar-scroll flex-1 px-2 py-2">
           <div className="space-y-0.5">
-            {navItems.map((item) => (
+            {nav.map((item) => (
               <NavGroup key={item.label} item={item} collapsed={collapsed} />
             ))}
           </div>
         </ScrollArea>
 
         {/* Compact user chip */}
-        <SidebarUserChip collapsed={collapsed} />
       </aside>
 
       {/* Main content column */}

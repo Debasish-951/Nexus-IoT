@@ -4,7 +4,6 @@ export interface Widget {
   type: string;                 // registry key, e.g. "kpi", "line", "gauge"
   x: number; y: number;         // grid units
   w: number; h: number;         // grid units
-  locked?: boolean;
   config: Record<string, any>;  // title, assetId, tag, color, text, …
 }
 
@@ -30,3 +29,5 @@ export interface ExplorerState {
 
 export const GRID_COLS = 12;
 export const ROW_H = 36; // px per grid row
+export const MIN_W = 2;  // grid columns — floor so a widget stays legible
+export const MIN_H = 3;  // grid rows — header + enough room for content

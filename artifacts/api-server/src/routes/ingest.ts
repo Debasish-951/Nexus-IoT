@@ -1,4 +1,4 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Request, type Response, type NextFunction } from "express";
 import { eq, desc, and, gte, lte, count, sql } from "drizzle-orm";
 import {
   db, telemetryTable, assetsTable, attributesTable,
@@ -7,7 +7,7 @@ import {
 import { GetTelemetryParams, GetTelemetryQueryParams } from "@workspace/api-zod";
 import { Parser } from "expr-eval";
 import { broadcast } from "../lib/ws-broadcast";
-import { optionalApiKeyAuth } from "../middleware/apiKeyAuth";
+import { apiKeyAuth } from "../middleware/apiKeyAuth";
 import { recordDevice, listSeenDevices, removeSeenDevice, pruneUnusedDevices } from "../lib/seen-devices";
 
 const router: IRouter = Router();
@@ -557,7 +557,8 @@ router.post("/ingest/seen-devices/prune", async (_req, res): Promise<void> => {
 });
 
 // ── Validate (dry-run) endpoint ───────────────────────────────────────────────
-router.post("/ingest/validate", optionalApiKeyAuth("ingest:write"), async (req, res): Promise<void> => {
+router.post(["/ingest/validate", "/ingest/k/:clientId/validate"],
+  ingestAuth, requireMatchingClient, async (req, res): Promise<void> => {
   const body = req.body as Record<string, unknown>;
   const warnings: string[] = [];
 
@@ -597,8 +598,64 @@ router.post("/ingest/validate", optionalApiKeyAuth("ingest:write"), async (req, 
   });
 });
 
+// ── Per-client ingest endpoints ───────────────────────────────────────────────
+//
+// Every API client gets its own ingest URL carrying its public `clientId`:
+//
+//     POST /api/ingest/k/<clientId>/payload
+//     POST /api/ingest/k/<clientId>/batch
+//
+// Why the id is in the path at all, given the key already identifies the caller:
+// it makes each integration's endpoint visibly distinct, so a gateway can be
+// pointed at "its own" URL, traffic is attributable at a glance in the access
+// log, and a misconfigured device is obvious rather than blending into shared
+// counters. The clientId is an identifier, NOT a secret — the API key in the
+// header is still what authenticates the request.
+//
+// `requireMatchingClient` then rejects a request whose key belongs to a
+// different client than the URL names, so one integration's credential cannot
+// be used to post through another's endpoint and skew its figures.
+function requireMatchingClient(req: Request, res: Response, next: NextFunction): void {
+  // A signed-in operator (Payload Simulator) has already been authorised by
+  // `authorize` against the `brokers` module; they may post to any endpoint.
+  if (req.principal) { next(); return; }
+
+  const { clientId } = req.params as { clientId?: string };
+  if (!req.apiClient) {
+    res.status(401).json({ error: "Authentication required", code: "authentication_required" });
+    return;
+  }
+  if (clientId && req.apiClient.clientId !== clientId) {
+    res.status(403).json({
+      error: "This API key does not belong to the client in the URL.",
+      code: "client_mismatch",
+      hint: "Post to your own ingest endpoint, shown on the Broker Management page.",
+    });
+    return;
+  }
+  next();
+}
+
+/**
+ * Ingest accepts EITHER credential:
+ *   - an API key carrying `ingest:write` (devices, gateways, SCADA), or
+ *   - an authenticated browser session holding the `brokers` module, which is
+ *     how the built-in Payload Simulator posts test data.
+ *
+ * Anonymous posting is no longer possible either way.
+ */
+function ingestAuth(req: Request, res: Response, next: NextFunction): void {
+  if (req.principal) { next(); return; }
+  void apiKeyAuth("ingest:write")(req, res, next);
+}
+
 // ── Routes ────────────────────────────────────────────────────────────────────
-router.post("/ingest/payload", optionalApiKeyAuth("ingest:write"), async (req, res): Promise<void> => {
+//
+// Ingest now REQUIRES a valid `ingest:write` API key (it was previously open to
+// anonymous callers). That is what makes the per-client load figures meaningful:
+// traffic can no longer be posted without attribution.
+router.post(["/ingest/payload", "/ingest/k/:clientId/payload"],
+  ingestAuth, requireMatchingClient, async (req, res): Promise<void> => {
   const body = req.body as Record<string, unknown>;
 
   // Single-device model: the whole tree is attributed to the top-level deviceId
@@ -667,7 +724,8 @@ router.post("/ingest/payload", optionalApiKeyAuth("ingest:write"), async (req, r
     alarmsTriggered: triggered.length, alarmsCleared: cleared.length, alarmEvents: result.alarmEvents });
 });
 
-router.post("/ingest/batch", optionalApiKeyAuth("ingest:write"), async (req, res): Promise<void> => {
+router.post(["/ingest/batch", "/ingest/k/:clientId/batch"],
+  ingestAuth, requireMatchingClient, async (req, res): Promise<void> => {
   const items = req.body;
   if (!Array.isArray(items)) { res.status(400).json({ error: "Body must be an array" }); return; }
   let successCount = 0, failureCount = 0, totalTriggered = 0, totalCleared = 0;

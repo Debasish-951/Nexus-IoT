@@ -368,8 +368,8 @@ export const getTelemetryQueryLimitDefault = 100;
 
 export const GetTelemetryQueryParams = zod.object({
   metric: zod.coerce.string().optional(),
-  from: zod.coerce.date().optional(),
-  to: zod.coerce.date().optional(),
+  from: zod.date().optional(),
+  to: zod.date().optional(),
   limit: zod.coerce.number().default(getTelemetryQueryLimitDefault),
 });
 
@@ -571,9 +571,51 @@ export const ListUsersResponseItem = zod.object({
   username: zod.string(),
   email: zod.string(),
   fullName: zod.string(),
-  role: zod.enum(["admin", "operator", "viewer", "engineer"]),
-  status: zod.enum(["active", "inactive", "suspended"]),
+  role: zod.enum([
+    "super_admin",
+    "admin",
+    "customer_admin",
+    "engineer",
+    "operator",
+    "viewer",
+  ]),
+  status: zod
+    .enum(["invited", "active", "suspended", "inactive"])
+    .describe(
+      "`invited` — created, activation link outstanding, cannot sign in.\n`active` — activated and able to sign in.\n`suspended` \/ `inactive` — administratively blocked; all sessions revoked.\n",
+    ),
   lastLogin: zod.coerce.date().nullish(),
+  lastLoginIp: zod.string().nullish(),
+  invitedAt: zod.coerce.date().nullish(),
+  activatedAt: zod.coerce.date().nullish(),
+  passwordUpdatedAt: zod.coerce.date().nullish(),
+  mustChangePassword: zod.boolean().optional(),
+  failedLoginAttempts: zod.number().optional(),
+  lockedUntil: zod.coerce.date().nullish(),
+  isLocked: zod
+    .boolean()
+    .optional()
+    .describe("Derived — lockedUntil is in the future."),
+  hasPassword: zod
+    .boolean()
+    .optional()
+    .describe("False until the user completes activation."),
+  mfaEnabled: zod.boolean().optional(),
+  authProvider: zod
+    .string()
+    .optional()
+    .describe("local | oidc | azuread | saml — SSO seam."),
+  invitationExpiresAt: zod.coerce.date().nullish(),
+  invitationExpired: zod
+    .boolean()
+    .optional()
+    .describe(
+      "Invited, but no live activation token remains — resend required.",
+    ),
+  accessOverrides: zod
+    .record(zod.string(), zod.unknown())
+    .optional()
+    .describe("Per-user grants layered over the role defaults."),
   createdAt: zod.coerce.date(),
 });
 export const ListUsersResponse = zod.array(ListUsersResponseItem);
@@ -581,13 +623,38 @@ export const ListUsersResponse = zod.array(ListUsersResponseItem);
 /**
  * @summary Create user
  */
-export const CreateUserBody = zod.object({
-  username: zod.string(),
-  email: zod.string(),
-  fullName: zod.string(),
-  role: zod.enum(["admin", "operator", "viewer", "engineer"]),
-  password: zod.string(),
-});
+export const createUserBodyUsernameMin = 3;
+export const createUserBodyUsernameMax = 64;
+
+export const CreateUserBody = zod
+  .object({
+    username: zod
+      .string()
+      .min(createUserBodyUsernameMin)
+      .max(createUserBodyUsernameMax),
+    email: zod
+      .string()
+      .email()
+      .describe(
+        "An address the user already owns. The platform does not create mailboxes.",
+      ),
+    fullName: zod.string(),
+    role: zod.enum([
+      "super_admin",
+      "admin",
+      "customer_admin",
+      "engineer",
+      "operator",
+      "viewer",
+    ]),
+    accessOverrides: zod
+      .record(zod.string(), zod.unknown())
+      .optional()
+      .describe("Optional per-user grants applied at creation time."),
+  })
+  .describe(
+    "Provisions an account in `invited` status and emails a single-use\nactivation link. There is no password field by design.\n",
+  );
 
 /**
  * @summary Get user by ID
@@ -601,9 +668,51 @@ export const GetUserResponse = zod.object({
   username: zod.string(),
   email: zod.string(),
   fullName: zod.string(),
-  role: zod.enum(["admin", "operator", "viewer", "engineer"]),
-  status: zod.enum(["active", "inactive", "suspended"]),
+  role: zod.enum([
+    "super_admin",
+    "admin",
+    "customer_admin",
+    "engineer",
+    "operator",
+    "viewer",
+  ]),
+  status: zod
+    .enum(["invited", "active", "suspended", "inactive"])
+    .describe(
+      "`invited` — created, activation link outstanding, cannot sign in.\n`active` — activated and able to sign in.\n`suspended` \/ `inactive` — administratively blocked; all sessions revoked.\n",
+    ),
   lastLogin: zod.coerce.date().nullish(),
+  lastLoginIp: zod.string().nullish(),
+  invitedAt: zod.coerce.date().nullish(),
+  activatedAt: zod.coerce.date().nullish(),
+  passwordUpdatedAt: zod.coerce.date().nullish(),
+  mustChangePassword: zod.boolean().optional(),
+  failedLoginAttempts: zod.number().optional(),
+  lockedUntil: zod.coerce.date().nullish(),
+  isLocked: zod
+    .boolean()
+    .optional()
+    .describe("Derived — lockedUntil is in the future."),
+  hasPassword: zod
+    .boolean()
+    .optional()
+    .describe("False until the user completes activation."),
+  mfaEnabled: zod.boolean().optional(),
+  authProvider: zod
+    .string()
+    .optional()
+    .describe("local | oidc | azuread | saml — SSO seam."),
+  invitationExpiresAt: zod.coerce.date().nullish(),
+  invitationExpired: zod
+    .boolean()
+    .optional()
+    .describe(
+      "Invited, but no live activation token remains — resend required.",
+    ),
+  accessOverrides: zod
+    .record(zod.string(), zod.unknown())
+    .optional()
+    .describe("Per-user grants layered over the role defaults."),
   createdAt: zod.coerce.date(),
 });
 
@@ -615,10 +724,25 @@ export const UpdateUserParams = zod.object({
 });
 
 export const UpdateUserBody = zod.object({
-  email: zod.string().optional(),
+  email: zod.string().email().optional(),
   fullName: zod.string().optional(),
-  role: zod.enum(["admin", "operator", "viewer", "engineer"]).optional(),
-  status: zod.enum(["active", "inactive", "suspended"]).optional(),
+  role: zod
+    .enum([
+      "super_admin",
+      "admin",
+      "customer_admin",
+      "engineer",
+      "operator",
+      "viewer",
+    ])
+    .optional(),
+  status: zod
+    .enum(["invited", "active", "suspended", "inactive"])
+    .optional()
+    .describe(
+      "`invited` — created, activation link outstanding, cannot sign in.\n`active` — activated and able to sign in.\n`suspended` \/ `inactive` — administratively blocked; all sessions revoked.\n",
+    ),
+  accessOverrides: zod.record(zod.string(), zod.unknown()).optional(),
 });
 
 export const UpdateUserResponse = zod.object({
@@ -626,9 +750,51 @@ export const UpdateUserResponse = zod.object({
   username: zod.string(),
   email: zod.string(),
   fullName: zod.string(),
-  role: zod.enum(["admin", "operator", "viewer", "engineer"]),
-  status: zod.enum(["active", "inactive", "suspended"]),
+  role: zod.enum([
+    "super_admin",
+    "admin",
+    "customer_admin",
+    "engineer",
+    "operator",
+    "viewer",
+  ]),
+  status: zod
+    .enum(["invited", "active", "suspended", "inactive"])
+    .describe(
+      "`invited` — created, activation link outstanding, cannot sign in.\n`active` — activated and able to sign in.\n`suspended` \/ `inactive` — administratively blocked; all sessions revoked.\n",
+    ),
   lastLogin: zod.coerce.date().nullish(),
+  lastLoginIp: zod.string().nullish(),
+  invitedAt: zod.coerce.date().nullish(),
+  activatedAt: zod.coerce.date().nullish(),
+  passwordUpdatedAt: zod.coerce.date().nullish(),
+  mustChangePassword: zod.boolean().optional(),
+  failedLoginAttempts: zod.number().optional(),
+  lockedUntil: zod.coerce.date().nullish(),
+  isLocked: zod
+    .boolean()
+    .optional()
+    .describe("Derived — lockedUntil is in the future."),
+  hasPassword: zod
+    .boolean()
+    .optional()
+    .describe("False until the user completes activation."),
+  mfaEnabled: zod.boolean().optional(),
+  authProvider: zod
+    .string()
+    .optional()
+    .describe("local | oidc | azuread | saml — SSO seam."),
+  invitationExpiresAt: zod.coerce.date().nullish(),
+  invitationExpired: zod
+    .boolean()
+    .optional()
+    .describe(
+      "Invited, but no live activation token remains — resend required.",
+    ),
+  accessOverrides: zod
+    .record(zod.string(), zod.unknown())
+    .optional()
+    .describe("Per-user grants layered over the role defaults."),
   createdAt: zod.coerce.date(),
 });
 
@@ -728,10 +894,29 @@ export const DeleteBrokerParams = zod.object({
 export const ListApiClientsResponseItem = zod.object({
   id: zod.string(),
   name: zod.string(),
+  description: zod.string().nullish(),
   clientId: zod.string(),
+  projectId: zod
+    .string()
+    .nullish()
+    .describe(
+      "Owning project (root-level asset), or null for a platform-wide client.",
+    ),
+  projectName: zod
+    .string()
+    .nullish()
+    .describe(
+      "Resolved project name, for display. Null if unassigned or deleted.",
+    ),
+  ingestUrl: zod
+    .string()
+    .optional()
+    .describe("This client's dedicated ingest endpoint path."),
+  totalRequests: zod.number().optional(),
+  lastUsedAt: zod.coerce.date().nullish(),
   tags: zod.array(zod.string()),
   scopes: zod.array(zod.string()),
-  status: zod.enum(["active", "inactive"]),
+  status: zod.enum(["active", "inactive", "revoked"]),
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date(),
 });
@@ -742,6 +927,13 @@ export const ListApiClientsResponse = zod.array(ListApiClientsResponseItem);
  */
 export const CreateApiClientBody = zod.object({
   name: zod.string(),
+  description: zod.string().optional(),
+  projectId: zod
+    .string()
+    .nullish()
+    .describe(
+      "Root-level asset this client belongs to. Users assigned to that\nproject share the client's ingest endpoint. Omit for a\nplatform-wide client visible only to administrators.\n",
+    ),
   tags: zod.array(zod.string()).optional(),
   scopes: zod.array(zod.string()).optional(),
 });
@@ -755,6 +947,8 @@ export const UpdateApiClientParams = zod.object({
 
 export const UpdateApiClientBody = zod.object({
   name: zod.string().optional(),
+  description: zod.string().optional(),
+  projectId: zod.string().nullish(),
   tags: zod.array(zod.string()).optional(),
   scopes: zod.array(zod.string()).optional(),
   status: zod.enum(["active", "inactive"]).optional(),
@@ -763,10 +957,29 @@ export const UpdateApiClientBody = zod.object({
 export const UpdateApiClientResponse = zod.object({
   id: zod.string(),
   name: zod.string(),
+  description: zod.string().nullish(),
   clientId: zod.string(),
+  projectId: zod
+    .string()
+    .nullish()
+    .describe(
+      "Owning project (root-level asset), or null for a platform-wide client.",
+    ),
+  projectName: zod
+    .string()
+    .nullish()
+    .describe(
+      "Resolved project name, for display. Null if unassigned or deleted.",
+    ),
+  ingestUrl: zod
+    .string()
+    .optional()
+    .describe("This client's dedicated ingest endpoint path."),
+  totalRequests: zod.number().optional(),
+  lastUsedAt: zod.coerce.date().nullish(),
   tags: zod.array(zod.string()),
   scopes: zod.array(zod.string()),
-  status: zod.enum(["active", "inactive"]),
+  status: zod.enum(["active", "inactive", "revoked"]),
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date(),
 });

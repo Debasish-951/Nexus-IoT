@@ -20,11 +20,12 @@ import { format, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { ReadOnlyBanner } from "@/components/RoleGuard";
+import { apiFetch } from "@/lib/auth-api";
 
 const DEST_QUERY_KEY = ["destinations"];
 
 async function fetchDestinations() {
-  const res = await fetch("/api/destinations");
+  const res = await apiFetch("/api/destinations");
   if (!res.ok) throw new Error("Failed to fetch");
   return res.json();
 }
@@ -50,7 +51,7 @@ export default function Destinations() {
 
   const createDest = useMutation({
     mutationFn: async (data: any) => {
-      const res = await fetch("/api/destinations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
+      const res = await apiFetch("/api/destinations", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(data) });
       if (!res.ok) throw new Error(await res.text());
       return res.json();
     },
@@ -59,13 +60,13 @@ export default function Destinations() {
   });
 
   const deleteDest = useMutation({
-    mutationFn: async (id: string) => { const res = await fetch(`/api/destinations/${id}`, { method: "DELETE" }); if (!res.ok) throw new Error(); },
+    mutationFn: async (id: string) => { const res = await apiFetch(`/api/destinations/${id}`, { method: "DELETE" }); if (!res.ok) throw new Error(); },
     onSuccess: () => { toast({ title: "Destination deleted" }); qc.invalidateQueries({ queryKey: DEST_QUERY_KEY }); },
   });
 
   const toggleDest = useMutation({
     mutationFn: async ({ id, enabled }: { id: string; enabled: boolean }) => {
-      const res = await fetch(`/api/destinations/${id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled }) });
+      const res = await apiFetch(`/api/destinations/${id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ enabled }) });
       if (!res.ok) throw new Error();
       return res.json();
     },
@@ -84,7 +85,7 @@ export default function Destinations() {
   async function testDestination(id: string) {
     setTesting(id);
     try {
-      const res = await fetch(`/api/destinations/${id}/test`, { method: "POST" });
+      const res = await apiFetch(`/api/destinations/${id}/test`, { method: "POST" });
       const data = await res.json();
       if (data.success) toast({ title: "Test succeeded", description: `HTTP ${data.statusCode}` });
       else toast({ title: "Test failed", description: data.error ?? `HTTP ${data.statusCode}`, variant: "destructive" });

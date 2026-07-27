@@ -393,19 +393,33 @@ export interface UpdateAlarmRuleBody {
 export type UserRole = (typeof UserRole)[keyof typeof UserRole];
 
 export const UserRole = {
+  super_admin: "super_admin",
   admin: "admin",
+  customer_admin: "customer_admin",
+  engineer: "engineer",
   operator: "operator",
   viewer: "viewer",
-  engineer: "engineer",
 } as const;
 
+/**
+ * `invited` — created, activation link outstanding, cannot sign in.
+`active` — activated and able to sign in.
+`suspended` / `inactive` — administratively blocked; all sessions revoked.
+
+ */
 export type UserStatus = (typeof UserStatus)[keyof typeof UserStatus];
 
 export const UserStatus = {
+  invited: "invited",
   active: "active",
-  inactive: "inactive",
   suspended: "suspended",
+  inactive: "inactive",
 } as const;
+
+/**
+ * Per-user grants layered over the role defaults.
+ */
+export type UserAccessOverrides = { [key: string]: unknown };
 
 export interface User {
   id: string;
@@ -415,51 +429,60 @@ export interface User {
   role: UserRole;
   status: UserStatus;
   lastLogin?: string | null;
+  lastLoginIp?: string | null;
+  invitedAt?: string | null;
+  activatedAt?: string | null;
+  passwordUpdatedAt?: string | null;
+  mustChangePassword?: boolean;
+  failedLoginAttempts?: number;
+  lockedUntil?: string | null;
+  /** Derived — lockedUntil is in the future. */
+  isLocked?: boolean;
+  /** False until the user completes activation. */
+  hasPassword?: boolean;
+  mfaEnabled?: boolean;
+  /** local | oidc | azuread | saml — SSO seam. */
+  authProvider?: string;
+  invitationExpiresAt?: string | null;
+  /** Invited, but no live activation token remains — resend required. */
+  invitationExpired?: boolean;
+  /** Per-user grants layered over the role defaults. */
+  accessOverrides?: UserAccessOverrides;
   createdAt: string;
 }
 
-export type CreateUserBodyRole =
-  (typeof CreateUserBodyRole)[keyof typeof CreateUserBodyRole];
+/**
+ * Optional per-user grants applied at creation time.
+ */
+export type CreateUserBodyAccessOverrides = { [key: string]: unknown };
 
-export const CreateUserBodyRole = {
-  admin: "admin",
-  operator: "operator",
-  viewer: "viewer",
-  engineer: "engineer",
-} as const;
+/**
+ * Provisions an account in `invited` status and emails a single-use
+activation link. There is no password field by design.
 
+ */
 export interface CreateUserBody {
+  /**
+   * @minLength 3
+   * @maxLength 64
+   */
   username: string;
+  /** An address the user already owns. The platform does not create mailboxes. */
   email: string;
   fullName: string;
-  role: CreateUserBodyRole;
-  password: string;
+  role: UserRole;
+  /** Optional per-user grants applied at creation time. */
+  accessOverrides?: CreateUserBodyAccessOverrides;
 }
 
-export type UpdateUserBodyRole =
-  (typeof UpdateUserBodyRole)[keyof typeof UpdateUserBodyRole];
-
-export const UpdateUserBodyRole = {
-  admin: "admin",
-  operator: "operator",
-  viewer: "viewer",
-  engineer: "engineer",
-} as const;
-
-export type UpdateUserBodyStatus =
-  (typeof UpdateUserBodyStatus)[keyof typeof UpdateUserBodyStatus];
-
-export const UpdateUserBodyStatus = {
-  active: "active",
-  inactive: "inactive",
-  suspended: "suspended",
-} as const;
+export type UpdateUserBodyAccessOverrides = { [key: string]: unknown };
 
 export interface UpdateUserBody {
   email?: string;
   fullName?: string;
-  role?: UpdateUserBodyRole;
-  status?: UpdateUserBodyStatus;
+  role?: UserRole;
+  status?: UserStatus;
+  accessOverrides?: UpdateUserBodyAccessOverrides;
 }
 
 export type BrokerType = (typeof BrokerType)[keyof typeof BrokerType];
@@ -521,12 +544,22 @@ export type ApiClientStatus =
 export const ApiClientStatus = {
   active: "active",
   inactive: "inactive",
+  revoked: "revoked",
 } as const;
 
 export interface ApiClient {
   id: string;
   name: string;
+  description?: string | null;
   clientId: string;
+  /** Owning project (root-level asset), or null for a platform-wide client. */
+  projectId?: string | null;
+  /** Resolved project name, for display. Null if unassigned or deleted. */
+  projectName?: string | null;
+  /** This client's dedicated ingest endpoint path. */
+  ingestUrl?: string;
+  totalRequests?: number;
+  lastUsedAt?: string | null;
   tags: string[];
   scopes: string[];
   status: ApiClientStatus;
@@ -536,6 +569,12 @@ export interface ApiClient {
 
 export interface CreateApiClientBody {
   name: string;
+  description?: string;
+  /** Root-level asset this client belongs to. Users assigned to that
+project share the client's ingest endpoint. Omit for a
+platform-wide client visible only to administrators.
+ */
+  projectId?: string | null;
   tags?: string[];
   scopes?: string[];
 }
@@ -550,6 +589,8 @@ export const UpdateApiClientBodyStatus = {
 
 export interface UpdateApiClientBody {
   name?: string;
+  description?: string;
+  projectId?: string | null;
   tags?: string[];
   scopes?: string[];
   status?: UpdateApiClientBodyStatus;

@@ -1,14 +1,16 @@
-import { useEffect } from "react";
-import { Switch, Route, Router as WouterRouter, useLocation } from "wouter";
+import { Switch, Route, Router as WouterRouter } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as SonnerToaster } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import Layout from "@/components/Layout";
 import { UserProvider } from "@/contexts/UserContext";
+import { Protected } from "@/components/RouteGuard";
 import AlarmToastListener from "@/components/AlarmToastListener";
 import NotFound from "@/pages/not-found";
 import Login from "@/pages/Login";
+import Activate from "@/pages/Activate";
+import ResetPassword from "@/pages/ResetPassword";
 import Dashboard from "@/pages/Dashboard";
 import Assets from "@/pages/Assets";
 import AssetDetails from "@/pages/AssetDetails";
@@ -20,6 +22,7 @@ import Alarms from "@/pages/Alarms";
 import AlarmHistory from "@/pages/AlarmHistory";
 import AlarmRules from "@/pages/AlarmRules";
 import Users from "@/pages/Users";
+import SecurityCenter from "@/pages/SecurityCenter";
 import Brokers from "@/pages/Brokers";
 import ApiClients from "@/pages/ApiClients";
 import Settings from "@/pages/Settings";
@@ -40,58 +43,82 @@ import AICopilot from "@/pages/AICopilot";
 const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
-      retry: 1,
+      // 401/403 are terminal — retrying a permission failure just delays the
+      // redirect and doubles the noise in the security event log.
+      retry: (failureCount, error) => {
+        const status = (error as { status?: number } | null)?.status;
+        if (status === 401 || status === 403) return false;
+        return failureCount < 1;
+      },
       staleTime: 10_000,
     },
   },
 });
 
+/**
+ * Route table.
+ *
+ * Every authenticated route is wrapped in <Protected>, and routes that belong
+ * to a controlled module declare it, so a user who types the URL directly gets
+ * the same answer as one who uses the nav. The API enforces the same rules —
+ * this layer exists so the UI is coherent, not so it is secure.
+ */
+const ROUTES: { path: string; component: React.ComponentType; module?: string }[] = [
+  { path: "/",                     component: Dashboard,            module: "dashboard" },
+  { path: "/asset-management",     component: AssetManagement,      module: "assets" },
+  { path: "/hierarchy-generator",  component: HierarchyGenerator,   module: "assets" },
+  { path: "/assets",               component: Assets,               module: "assets" },
+  { path: "/assets/:id",           component: AssetDetails,         module: "assets" },
+  { path: "/asset-templates",      component: AssetTemplates,       module: "assets" },
+  { path: "/asset-templates/:id",  component: AssetTemplateDetails, module: "assets" },
+  { path: "/media-library",        component: MediaLibrary,         module: "assets" },
+  { path: "/alarms",               component: Alarms,               module: "alarms" },
+  { path: "/alarm-history",        component: AlarmHistory,         module: "alarms" },
+  { path: "/alarm-rules",          component: AlarmRules,           module: "alarms" },
+  { path: "/notification-groups",  component: NotificationGroups,   module: "alarms" },
+  { path: "/users",                component: Users,                module: "users" },
+  { path: "/security",             component: SecurityCenter,       module: "security" },
+  { path: "/brokers",              component: Brokers,              module: "brokers" },
+  { path: "/destinations",         component: Destinations,         module: "brokers" },
+  { path: "/integrations",         component: IntegrationHub,       module: "brokers" },
+  { path: "/integration-guide",    component: IntegrationGuide },
+  { path: "/simulator",            component: IngestSimulator,      module: "brokers" },
+  { path: "/api-clients",          component: ApiClients,           module: "api_clients" },
+  { path: "/data-explorer",        component: DataExplorerHome,     module: "explorer" },
+  { path: "/ai-copilot",           component: AICopilot,            module: "explorer" },
+  { path: "/activity-log",         component: ActivityLog,          module: "activity_log" },
+  { path: "/data-management",      component: DataManagement,       module: "reports" },
+  { path: "/reports",              component: Reports,              module: "reports" },
+  { path: "/visualization",        component: Visualization,        module: "visualization" },
+  { path: "/live",                 component: LiveFeed,             module: "live" },
+  // Personal preferences — available to anyone signed in.
+  { path: "/settings",             component: Settings },
+];
+
 function AppRouter() {
-  const [location, navigate] = useLocation();
-  const authed = typeof window !== "undefined" && localStorage.getItem("ws_authed") === "1";
-
-  // Gate: send unauthenticated users to the login screen.
-  useEffect(() => {
-    if (!authed && location !== "/login") navigate("/login", { replace: true });
-  }, [authed, location, navigate]);
-
   return (
     <Switch>
-      {/* Login lives outside the app Layout (no sidebar). */}
+      {/* Public routes — outside the app Layout (no sidebar) and outside
+          <Protected>, since by definition the user has no session yet. */}
       <Route path="/login" component={Login} />
+      <Route path="/activate" component={Activate} />
+      <Route path="/reset-password" component={ResetPassword} />
+
       <Route>
-        <Layout>
-          <Switch>
-            <Route path="/" component={Dashboard} />
-        <Route path="/asset-management" component={AssetManagement} />
-        <Route path="/hierarchy-generator" component={HierarchyGenerator} />
-        <Route path="/assets" component={Assets} />
-        <Route path="/assets/:id" component={AssetDetails} />
-        <Route path="/asset-templates" component={AssetTemplates} />
-        <Route path="/asset-templates/:id" component={AssetTemplateDetails} />
-        <Route path="/alarms" component={Alarms} />
-        <Route path="/alarm-history" component={AlarmHistory} />
-        <Route path="/alarm-rules" component={AlarmRules} />
-        <Route path="/users" component={Users} />
-        <Route path="/brokers" component={Brokers} />
-        <Route path="/api-clients" component={ApiClients} />
-        <Route path="/destinations" component={Destinations} />
-        <Route path="/data-explorer" component={DataExplorerHome} />
-        <Route path="/integrations" component={IntegrationHub} />
-        <Route path="/integration-guide" component={IntegrationGuide} />
-        <Route path="/activity-log" component={ActivityLog} />
-        <Route path="/data-management" component={DataManagement} />
-        <Route path="/reports" component={Reports} />
-        <Route path="/visualization" component={Visualization} />
-        <Route path="/live" component={LiveFeed} />
-        <Route path="/ai-copilot" component={AICopilot} />
-        <Route path="/settings" component={Settings} />
-        <Route path="/media-library" component={MediaLibrary} />
-        <Route path="/notification-groups" component={NotificationGroups} />
-            <Route path="/simulator" component={IngestSimulator} />
-            <Route component={NotFound} />
-          </Switch>
-        </Layout>
+        <Protected>
+          <Layout>
+            <Switch>
+              {ROUTES.map(({ path, component: Component, module }) => (
+                <Route key={path} path={path}>
+                  <Protected module={module}>
+                    <Component />
+                  </Protected>
+                </Route>
+              ))}
+              <Route component={NotFound} />
+            </Switch>
+          </Layout>
+        </Protected>
       </Route>
     </Switch>
   );
