@@ -5,7 +5,9 @@ import { z } from "zod/v4";
 
 export interface AttributeDefinition {
   name: string;
-  type: "static" | "dynamic" | "metric" | "runtime";
+  // "timestamp" attributes hold the payload's own clock rather than a metric value —
+  // ingest binds them by type, not by tagName (the timestamp never travels as a metric).
+  type: "static" | "dynamic" | "metric" | "runtime" | "timestamp";
   dataType: "text" | "number" | "double" | "boolean" | "timestamp";
   tagName?: string;
   uom?: string;
@@ -13,6 +15,8 @@ export interface AttributeDefinition {
   // Optional metadata (stored in the jsonb column — no DB migration needed).
   required?: boolean;
   description?: string;
+  /** Display rounding, 0–10. Copied onto the attribute when the template is applied. */
+  decimalPlaces?: number;
 }
 
 export const assetTemplatesTable = pgTable("asset_templates", {

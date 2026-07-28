@@ -314,7 +314,7 @@ or defaulted, so push is non-destructive. See §5.6 for rollback.
 | `POST` | `/api/auth/forgot-password` | none (rate-limited) | Always 204 |
 | `GET` | `/api/auth/reset/:token` | none | Validate a reset token |
 | `POST` | `/api/auth/reset-password` | none | `{token, password}` → set password, revoke all sessions |
-| `POST` | `/api/auth/change-password` | session | `{currentPassword, newPassword}` — self only |
+| `POST` | `/api/auth/change-password` | session | `{currentPassword, newPassword}` — self only. `currentPassword` is omitted while `mustChangePassword` is set: signing in with the temporary password created that session, and it can reach nothing else, so it is not demanded twice. Reuse is still rejected, compared against the stored hash |
 | `GET` | `/api/auth/password-policy` | none | Policy for live client-side validation |
 | `POST` | `/api/users` | `manage_users` | **Creates an invited user + sends activation email** (no `password` field) |
 | `POST` | `/api/users/:id/resend-invitation` | `manage_users` | Revoke old token, issue + email a new one |
@@ -329,7 +329,8 @@ or defaulted, so push is non-destructive. See §5.6 for rollback.
 | `GET` | `/api/security/rbac-catalog` | session | Roles, verbs, modules — drives the Access Control editor |
 
 **Removed:** `PATCH /api/users/:id/change-password` (unauthenticated horizontal-escalation hole).
-Superseded by `POST /api/auth/change-password` (self, re-auth required) and
+Superseded by `POST /api/auth/change-password` (self, re-auth required except in the
+forced-change flow, where the session itself is the proof) and
 `POST /api/users/:id/send-password-reset` (admin, email-mediated).
 
 **Changed:** `POST /api/users` no longer accepts `password`. Passing one is ignored, not an error,

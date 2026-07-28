@@ -6,7 +6,7 @@ export const attributesTable = pgTable("attributes", {
   id: uuid("id").primaryKey().defaultRandom(),
   assetId: uuid("asset_id").notNull(),
   name: text("name").notNull(),
-  type: text("type").notNull().default("static"), // static | dynamic | metric | runtime
+  type: text("type").notNull().default("static"), // static | dynamic | metric | runtime | timestamp
   dataType: text("data_type").notNull().default("text"), // text | number | boolean | timestamp | double
   value: jsonb("value"),
   tagName: text("tag_name"),

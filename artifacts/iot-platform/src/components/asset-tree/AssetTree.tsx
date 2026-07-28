@@ -4,7 +4,7 @@ import { useAssetTree } from "./AssetTreeContext";
 
 // Renders the top-level roots; each recurses via TreeNode. The panel scrolls
 // independently (parent gives it a fixed height).
-export function AssetTree({ loading }: { loading?: boolean }) {
+export function AssetTree({ loading, emptyMessage }: { loading?: boolean; emptyMessage?: string }) {
   const t = useAssetTree();
   const roots = t.childrenByParent["root"] ?? [];
 
@@ -22,7 +22,7 @@ export function AssetTree({ loading }: { loading?: boolean }) {
     return (
       <div className="flex flex-col items-center justify-center h-full text-muted-foreground p-6 text-center">
         <Blocks className="w-8 h-8 mb-2 opacity-20" />
-        <p className="text-sm">No assets match.</p>
+        <p className="text-sm">{emptyMessage ?? "No assets match."}</p>
       </div>
     );
   }

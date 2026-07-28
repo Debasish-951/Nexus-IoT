@@ -68,12 +68,13 @@ function IngestEndpointPanel() {
     toast({ title: what });
   }
 
-  // Only clients that can actually post telemetry. An empty scope list means
-  // "all scopes" in apiKeyAuth, so those qualify too.
-  const ingestClients = (clients ?? []).filter(
-    (c) => c.status === "active" &&
-      (c.scopes.length === 0 || c.scopes.includes("*") || c.scopes.includes("ingest:write")),
-  );
+  // Only clients that can actually post telemetry. An empty (or absent) scope list
+  // means "all scopes" in apiKeyAuth, so those qualify too.
+  const ingestClients = (clients ?? []).filter((c) => {
+    if ((c.status ?? "active") !== "active") return false;
+    const scopes: string[] = Array.isArray(c.scopes) ? c.scopes : [];
+    return scopes.length === 0 || scopes.includes("*") || scopes.includes("ingest:write");
+  });
 
   /**
    * Group by owning project.
@@ -112,7 +113,8 @@ function IngestEndpointPanel() {
             <Info className="w-4 h-4" /> HTTP API Ingest Endpoints
           </p>
           <p className="text-xs text-blue-700 dark:text-blue-400 mt-0.5">
-            Each API Client has its own endpoint, so traffic and load are attributed per integration.
+            External systems (gateways, custom scripts, SCADA) push data to these endpoints with
+            HTTP POST and an <code className="bg-white/60 dark:bg-slate-900 px-1 rounded">ingest:write</code> API key.
           </p>
         </div>
         <Link href="/api-clients">
@@ -122,18 +124,46 @@ function IngestEndpointPanel() {
         </Link>
       </div>
 
+      {/* Platform-wide endpoints — always shown.
+          These accept any key carrying `ingest:write`, so this is the address to hand
+          to a gateway or integrator. The per-client endpoints below are the same
+          pipeline with the clientId in the path, which is what buys per-integration
+          attribution; they are an addition, not a replacement. */}
+      <div className="space-y-1.5">
+        {[
+          { label: "Single payload", url: `${BASE_URL}/api/ingest/payload` },
+          { label: "Batch payloads", url: `${BASE_URL}/api/ingest/batch` },
+        ].map(({ label, url }) => (
+          <div key={url} className="flex items-center gap-2 bg-white dark:bg-slate-900 rounded border border-blue-200 dark:border-blue-800/30 px-2.5 py-1.5">
+            <span className="text-[11px] text-muted-foreground w-24 shrink-0">{label}</span>
+            <code className="text-xs font-mono text-primary flex-1 truncate">{url}</code>
+            <button onClick={() => copy(url)} title="Copy endpoint" className="text-muted-foreground hover:text-foreground shrink-0">
+              <Copy className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        ))}
+        <div className="flex items-center gap-2 px-2.5">
+          <span className="text-[11px] text-muted-foreground w-24 shrink-0">Auth header</span>
+          <code className="text-[11px] font-mono text-foreground/70 flex-1 truncate">X-API-Key: &lt;client secret&gt;</code>
+        </div>
+      </div>
+
+      <p className="text-[11px] font-semibold uppercase tracking-wide text-blue-700/70 dark:text-blue-400/70">
+        Per-client endpoints
+      </p>
+
       {isLoading ? (
         <div className="space-y-2">
           {[0, 1].map((i) => <Skeleton key={i} className="h-16 rounded" />)}
         </div>
       ) : ingestClients.length === 0 ? (
-        <div className="rounded border border-dashed border-blue-300 dark:border-blue-800/50 bg-white/60 dark:bg-slate-900/50 px-4 py-6 text-center">
+        <div className="rounded border border-dashed border-blue-300 dark:border-blue-800/50 bg-white/60 dark:bg-slate-900/50 px-4 py-5 text-center">
           <KeyRound className="w-6 h-6 mx-auto mb-2 text-muted-foreground opacity-40" />
           <p className="text-sm font-medium">No ingest-capable API clients yet</p>
           <p className="text-xs text-muted-foreground mt-1 max-w-md mx-auto">
-            Ingest now requires an API key. Create a client with the{" "}
-            <code className="bg-muted px-1 rounded">ingest:write</code> scope to get a dedicated
-            endpoint for a gateway, SCADA bridge, or project.
+            The endpoints above are live — they just need a key. Create a client with the{" "}
+            <code className="bg-muted px-1 rounded">ingest:write</code> scope to get its secret, plus
+            a dedicated endpoint whose traffic is attributed to that gateway, SCADA bridge, or project.
           </p>
           <Link href="/api-clients">
             <Button size="sm" className="mt-3">Create an API Client</Button>

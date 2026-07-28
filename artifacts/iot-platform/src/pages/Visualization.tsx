@@ -2,19 +2,28 @@ import { useState, useMemo, useRef } from "react";
 import { useLocation } from "wouter";
 import { Card } from "@/components/ui/card";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, LayoutDashboard, Blocks } from "lucide-react";
-import { useListAssets } from "@workspace/api-client-react";
+import { ArrowLeft, LayoutDashboard, FolderPlus } from "lucide-react";
 import { AssetVizPanel } from "@/features/dashboards/AssetVizPanel";
 import { AssetTreeProvider, type DashboardActions } from "@/components/asset-tree/AssetTreeContext";
 import { AssetTree } from "@/components/asset-tree/AssetTree";
 import { newId } from "@/features/dashboards/useDashboards";
+import { useVizHierarchy, type VizNode } from "@/features/dashboards/vizHierarchy";
 import type { Asset } from "@/pages/assetShared";
 
-// ── Per-asset dashboard storage helpers (localStorage; same key AssetVizPanel uses) ──
+// ── Per-node dashboard storage helpers (localStorage) ──
 const WKEY = (id: string) => `wsviz:widgets:${id}`;
 const DASH_CLIP = "wsviz:dashboard-clipboard";
 const BOOKMARKS_KEY = "wsviz:bookmarks";
+const TEMPLATES_KEY = "viz_templates";
+interface DashTemplate { id: string; name: string; widgets: any[]; }
+function readTemplates(): DashTemplate[] {
+  try { const r = localStorage.getItem(TEMPLATES_KEY); return r ? JSON.parse(r) : []; } catch { return []; }
+}
 function readWidgets(id: string): any[] { try { const r = localStorage.getItem(WKEY(id)); return r ? JSON.parse(r) : []; } catch { return []; } }
 function writeWidgets(id: string, widgets: any[]) { try { localStorage.setItem(WKEY(id), JSON.stringify(widgets)); } catch { /* quota */ } }
 function withFreshIds(widgets: any[]): any[] { return widgets.map((w) => ({ ...w, id: newId("w") })); }
@@ -24,19 +33,18 @@ function downloadJson(data: unknown, filename: string) {
   URL.revokeObjectURL(a.href);
 }
 
-// Visualization is a READ-ONLY consumer of the asset hierarchy. The hierarchy
-// itself is owned by the Asset section (Asset Template → Asset → Visualization);
-// this page never creates, renames, or deletes assets — it only selects an
-// existing asset and builds its dashboard. Dashboards/widgets are stored per
-// asset in localStorage (wsviz:widgets:*) and are the only thing this page writes.
+// Visualization owns its OWN hierarchy — it is NOT a mirror of the asset tree in
+// Asset Management. The user builds whatever structure suits their reporting, and
+// each node holds one dashboard (stored per node in localStorage). Widgets inside
+// a dashboard bind to real assets + metrics individually, which is where asset
+// attributes come into play (see WidgetConfigPanel).
 export default function Visualization() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
 
-  const { data: assetsData } = useListAssets();
-  const allAssets = (assetsData as Asset[] | undefined) ?? [];
-  const [assetSelId, setAssetSelId] = useState<string | null>(null);
-  const [assetExpanded, setAssetExpanded] = useState<Set<string>>(new Set()); // empty = all collapsed (default)
+  const viz = useVizHierarchy();
+  const [selId, setSelId] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set()); // empty = all collapsed
   const [bookmarks, setBookmarks] = useState<Set<string>>(() => {
     try { const r = localStorage.getItem(BOOKMARKS_KEY); return new Set(r ? JSON.parse(r) : []); } catch { return new Set(); }
   });
@@ -44,32 +52,64 @@ export default function Visualization() {
   const [dashReloadNonce, setDashReloadNonce] = useState(0);
   const importInputRef = useRef<HTMLInputElement>(null);
   const importTargetRef = useRef<string | null>(null);
-  const assetChildren = useMemo(() => {
-    const m: Record<string, Asset[]> = {};
-    for (const a of allAssets) { const k = a.parentId ?? "root"; (m[k] ||= []).push(a); }
-    for (const k in m) m[k].sort((x, y) => x.name.localeCompare(y.name));
-    return m;
-  }, [allAssets]);
-  const allParentIds = useMemo(() => Object.keys(assetChildren).filter((k) => k !== "root"), [assetChildren]);
-  const expandAllAssets = () => setAssetExpanded(new Set(allParentIds));
-  const collapseAllAssets = () => setAssetExpanded(new Set());
 
-  function subtreeIdsOf(rootId: string) {
-    const ids = new Set<string>([rootId]);
-    const stack = [rootId];
-    while (stack.length) {
-      const id = stack.pop()!;
-      for (const child of assetChildren[id] ?? []) {
-        if (ids.has(child.id)) continue;
-        ids.add(child.id);
-        stack.push(child.id);
-      }
-    }
-    return ids;
-  }
+  // Create / rename node dialogs
+  const [createOpen, setCreateOpen] = useState(false);
+  const [createParent, setCreateParent] = useState<string | null>(null);
+  const [createName, setCreateName] = useState("");
+  const [renameNode, setRenameNode] = useState<VizNode | null>(null);
+  const [renameValue, setRenameValue] = useState("");
 
-  // ── Dashboard right-click actions (operate on per-asset localStorage widgets) ──
+  const allParentIds = useMemo(
+    () => Object.keys(viz.childrenByParent).filter((k) => k !== "root"),
+    [viz.childrenByParent],
+  );
+  const expandAll = () => setExpanded(new Set(allParentIds));
+  const collapseAll = () => setExpanded(new Set());
+
   const bumpReload = () => setDashReloadNonce((n) => n + 1);
+
+  // The shared tree components are typed against Asset; viz nodes only ever use
+  // id/name/parentId, so present them in that shape.
+  const childrenByParent = useMemo(() => {
+    const out: Record<string, Asset[]> = {};
+    for (const [k, list] of Object.entries(viz.childrenByParent)) {
+      out[k] = list.map((n) => ({
+        id: n.id, name: n.name, identifier: "", parentId: n.parentId,
+        childCount: 0, attributeCount: 0, updatedAt: "",
+      })) as Asset[];
+    }
+    return out;
+  }, [viz.childrenByParent]);
+
+  // ── Node CRUD ──
+  function openCreate(parentId: string | null) { setCreateParent(parentId); setCreateName(""); setCreateOpen(true); }
+  function submitCreate() {
+    const name = createName.trim();
+    if (!name) return;
+    const id = viz.addNode(name, createParent);
+    if (createParent) setExpanded((p) => new Set(p).add(createParent));
+    setSelId(id);
+    setCreateOpen(false);
+    toast({ title: "Created", description: `"${name}" added to the Visualization hierarchy.` });
+  }
+  function openRename(a: Asset) {
+    const node = viz.nodes.find((n) => n.id === a.id);
+    if (!node) return;
+    setRenameNode(node); setRenameValue(node.name);
+  }
+  function submitRename() {
+    if (!renameNode || !renameValue.trim()) return;
+    viz.renameNode(renameNode.id, renameValue);
+    setRenameNode(null);
+    toast({ title: "Renamed" });
+  }
+  function handleDeleteNode(a: Asset) {
+    if (!confirm(`Delete "${a.name}" and its child nodes? Their dashboards will be removed too.`)) return;
+    const removed = viz.deleteNode(a.id);
+    if (selId && removed.has(selId)) setSelId(null);
+    toast({ title: "Deleted", description: `"${a.name}" removed.` });
+  }
 
   function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -83,7 +123,7 @@ export default function Visualization() {
         const widgets = Array.isArray(parsed) ? parsed : parsed?.widgets;
         if (!Array.isArray(widgets)) throw new Error("invalid");
         writeWidgets(target, withFreshIds(widgets));
-        if (assetSelId === target) bumpReload();
+        if (selId === target) bumpReload();
         toast({ title: "Dashboard imported", description: `${widgets.length} widget(s) loaded from file.` });
       } catch {
         toast({ title: "Import failed", description: "That file isn't a valid dashboard JSON.", variant: "destructive" });
@@ -93,18 +133,18 @@ export default function Visualization() {
   }
 
   const dashboardActions: DashboardActions = {
-    edit: (a) => setAssetSelId(a.id),
+    edit: (a) => setSelId(a.id),
     clone: (a) => {
       const widgets = readWidgets(a.id);
       if (!widgets.length) { toast({ title: "Nothing to clone", description: `"${a.name}" has no dashboard widgets yet.` }); return; }
       try { localStorage.setItem(DASH_CLIP, JSON.stringify({ kind: "single", name: a.name, widgets })); } catch { /* quota */ }
-      toast({ title: "Dashboard copied", description: "Select a target asset, then right-click → Import Dashboard to paste it." });
+      toast({ title: "Dashboard copied", description: "Select a target node, then right-click → Import Dashboard to paste it." });
     },
     cloneWithChildren: (a) => {
-      const items = [...subtreeIdsOf(a.id)].map((id) => ({ assetId: id, widgets: readWidgets(id) })).filter((x) => x.widgets.length);
+      const items = [...viz.subtreeIds(a.id)].map((id) => ({ assetId: id, widgets: readWidgets(id) })).filter((x) => x.widgets.length);
       if (!items.length) { toast({ title: "Nothing to clone", description: `"${a.name}" and its children have no dashboards yet.` }); return; }
       try { localStorage.setItem(DASH_CLIP, JSON.stringify({ kind: "subtree", name: a.name, items })); } catch { /* quota */ }
-      toast({ title: "Dashboards copied", description: `${items.length} dashboard(s) copied. Right-click any asset → Import Dashboard to restore them.` });
+      toast({ title: "Dashboards copied", description: `${items.length} dashboard(s) copied. Right-click any node → Import Dashboard to restore them.` });
     },
     createTemplate: (a) => {
       const widgets = readWidgets(a.id);
@@ -112,16 +152,16 @@ export default function Visualization() {
       const name = window.prompt("Template name", `${a.name} template`);
       if (!name || !name.trim()) return;
       try {
-        const raw = localStorage.getItem("viz_templates"); const tpls = raw ? JSON.parse(raw) : [];
+        const tpls = readTemplates();
         tpls.push({ id: newId("tpl"), name: name.trim(), widgets });
-        localStorage.setItem("viz_templates", JSON.stringify(tpls));
+        localStorage.setItem(TEMPLATES_KEY, JSON.stringify(tpls));
         toast({ title: "Template created", description: `"${name.trim()}" saved with ${widgets.length} widget(s).` });
       } catch { toast({ title: "Could not save template", variant: "destructive" }); }
     },
     remove: (a) => {
       if (!confirm(`Delete the dashboard for "${a.name}"? All of its widgets will be removed.`)) return;
       try { localStorage.removeItem(WKEY(a.id)); } catch { /* ignore */ }
-      if (assetSelId === a.id) bumpReload();
+      if (selId === a.id) bumpReload();
       toast({ title: "Dashboard deleted", description: `"${a.name}" dashboard cleared.` });
     },
     toggleBookmark: (a) => {
@@ -140,14 +180,14 @@ export default function Visualization() {
       try { const r = localStorage.getItem(DASH_CLIP); clip = r ? JSON.parse(r) : null; } catch { clip = null; }
       if (clip?.kind === "single" && Array.isArray(clip.widgets)) {
         writeWidgets(a.id, withFreshIds(clip.widgets));
-        if (assetSelId === a.id) bumpReload();
+        if (selId === a.id) bumpReload();
         toast({ title: "Dashboard pasted", description: `Cloned dashboard applied to "${a.name}".` });
         return;
       }
       if (clip?.kind === "subtree" && Array.isArray(clip.items)) {
         for (const item of clip.items) writeWidgets(item.assetId, withFreshIds(item.widgets));
         bumpReload();
-        toast({ title: "Dashboards restored", description: `${clip.items.length} dashboard(s) applied to their original assets.` });
+        toast({ title: "Dashboards restored", description: `${clip.items.length} dashboard(s) applied to their original nodes.` });
         return;
       }
       importTargetRef.current = a.id;
@@ -155,11 +195,11 @@ export default function Visualization() {
     },
     exportDashboard: (a) => {
       const widgets = readWidgets(a.id);
-      downloadJson({ version: 1, asset: a.name, widgets }, `${a.name.replace(/[^\w.-]+/g, "_")}-dashboard.json`);
+      downloadJson({ version: 1, node: a.name, widgets }, `${a.name.replace(/[^\w.-]+/g, "_")}-dashboard.json`);
       toast({ title: "Dashboard exported", description: `${widgets.length} widget(s) downloaded as JSON.` });
     },
     futuristic: (a) => {
-      setAssetSelId(a.id);
+      setSelId(a.id);
       const wasOn = futuristicIds.has(a.id);
       setFuturisticIds((prev) => { const next = new Set(prev); if (wasOn) next.delete(a.id); else next.add(a.id); return next; });
       toast({ title: wasOn ? "Futuristic mode off" : "Futuristic mode on", description: a.name });
@@ -169,42 +209,42 @@ export default function Visualization() {
   const treeControls = (
     <div className="border-b border-border">
       <div className="flex items-center justify-between gap-2 px-3 py-2">
-        <span className="text-xs font-semibold text-primary">Asset Hierarchy</span>
-        <button
-          onClick={() => navigate("/assets")}
-          className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground whitespace-nowrap"
-          title="Assets are created and organized in the Asset section — Visualization only reads them"
-        >
-          <Blocks className="w-3.5 h-3.5" /> Manage assets
-        </button>
+        <span className="text-xs font-semibold text-primary">Dashboard Hierarchy</span>
+        <Button size="sm" className="h-7 px-2 text-xs whitespace-nowrap" onClick={() => openCreate(null)} title="Create a top-level dashboard">
+          <FolderPlus className="w-3.5 h-3.5 mr-1" /> Create Dashboard
+        </Button>
       </div>
       <div className="flex items-center gap-3 px-3 pb-2 text-xs">
-        <button onClick={expandAllAssets} className="text-muted-foreground hover:text-foreground">Expand all</button>
-        <button onClick={collapseAllAssets} className="text-muted-foreground hover:text-foreground">Collapse all</button>
+        <button onClick={expandAll} className="text-muted-foreground hover:text-foreground">Expand all</button>
+        <button onClick={collapseAll} className="text-muted-foreground hover:text-foreground">Collapse all</button>
       </div>
     </div>
   );
 
-  // Read-only tree: canManage:false hides all asset create/rename/delete controls
-  // and the mutation handlers are intentionally omitted. Only dashboard actions
-  // (per-asset, localStorage) are wired up.
+  // This hierarchy is fully user-owned: create/rename/delete are all wired to the
+  // local viz store. `onAssignTemplate` is omitted — these are not assets.
   const assetTreeCtx = {
-    childrenByParent: assetChildren,
-    selectedId: assetSelId,
-    setSelectedId: setAssetSelId,
-    isExpanded: (id: string) => assetExpanded.has(id),
-    toggle: (id: string) => setAssetExpanded((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; }),
+    childrenByParent,
+    selectedId: selId,
+    setSelectedId: setSelId,
+    isExpanded: (id: string) => expanded.has(id),
+    toggle: (id: string) => setExpanded((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; }),
     visibleIds: null,
-    canManage: false,
-    onAssignTemplate: (a: Asset) => navigate(`/assets/${a.id}`),
+    canManage: true,
+    onAddChild: (parentId: string) => openCreate(parentId),
+    onAddRoot: () => openCreate(null),
+    onRename: openRename,
+    onDelete: handleDeleteNode,
     dashboard: dashboardActions,
   };
-  const selectedAsset = assetSelId ? allAssets.find((a) => a.id === assetSelId) ?? null : null;
+  const selectedNode = selId ? viz.nodes.find((n) => n.id === selId) ?? null : null;
 
   return (
     <div className="p-4 h-full flex flex-col gap-3">
       <div className="flex items-center gap-3 shrink-0">
-        <button onClick={() => (window.history.length > 1 ? window.history.back() : navigate("/data-explorer"))} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+        {/* Back = one level up within THIS section, not browser history (which
+            could be any page the user happened to arrive from). */}
+        <button onClick={() => navigate("/data-explorer")} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
         <div className="flex items-center gap-1.5">
@@ -219,24 +259,64 @@ export default function Visualization() {
             <div className="h-full border-r border-border overflow-auto">
               {treeControls}
               <AssetTreeProvider value={assetTreeCtx}>
-                <AssetTree loading={!assetsData} />
+                <AssetTree emptyMessage='No nodes yet — click "New" to start building your hierarchy.' />
               </AssetTreeProvider>
             </div>
           </ResizablePanel>
           <ResizableHandle withHandle />
           <ResizablePanel defaultSize={74}>
             <AssetVizPanel
-              assetId={assetSelId}
-              assetName={selectedAsset?.name}
-              assets={allAssets}
+              nodeId={selId}
+              nodeName={selectedNode?.name}
               reloadKey={dashReloadNonce}
-              futuristic={assetSelId ? futuristicIds.has(assetSelId) : false}
+              futuristic={selId ? futuristicIds.has(selId) : false}
             />
           </ResizablePanel>
         </ResizablePanelGroup>
       </Card>
 
       <input ref={importInputRef} type="file" accept="application/json,.json" className="hidden" onChange={handleImportFile} />
+
+      {/* Create node */}
+      <Dialog open={createOpen} onOpenChange={setCreateOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2"><FolderPlus className="w-4 h-4 text-primary" /> Create Dashboard</DialogTitle>
+            <DialogDescription>
+              {createParent
+                ? <>Nested under <strong>{viz.nodes.find((n) => n.id === createParent)?.name ?? "the selected node"}</strong>. Each entry in the hierarchy holds its own dashboard.</>
+                : "Adds a top-level entry to your Visualization hierarchy. Each entry holds its own dashboard."}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5 py-1">
+            <Label className="text-sm">Name <span className="text-destructive">*</span></Label>
+            <Input value={createName} onChange={(e) => setCreateName(e.target.value)} autoFocus
+              placeholder="e.g. Plant 1, Line A, Compressor Room"
+              onKeyDown={(e) => { if (e.key === "Enter") submitCreate(); }} />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreateOpen(false)}>Cancel</Button>
+            <Button onClick={submitCreate} disabled={!createName.trim()}>Create</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Rename node */}
+      <Dialog open={!!renameNode} onOpenChange={(v) => { if (!v) setRenameNode(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader><DialogTitle>Rename Node</DialogTitle></DialogHeader>
+          <div className="space-y-1.5 py-1">
+            <Label className="text-sm">Name</Label>
+            <Input value={renameValue} onChange={(e) => setRenameValue(e.target.value)} autoFocus
+              onKeyDown={(e) => { if (e.key === "Enter") submitRename(); }} />
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setRenameNode(null)}>Cancel</Button>
+            <Button onClick={submitRename} disabled={!renameValue.trim()}>Save</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
     </div>
   );
 }

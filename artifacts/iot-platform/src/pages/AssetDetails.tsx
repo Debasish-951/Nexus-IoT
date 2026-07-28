@@ -14,7 +14,6 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { useForm } from "react-hook-form";
@@ -22,15 +21,13 @@ import { Form, FormField, FormItem, FormLabel, FormControl, FormDescription } fr
 import { useToast } from "@/hooks/use-toast";
 import {
   ChevronRight, Blocks, Plus, Trash2, Edit2, ArrowLeft, Download,
-  FileSpreadsheet, Braces, LayoutTemplate, Calculator, AlertTriangle, Info,
-  TrendingUp, Wrench,
+  LayoutTemplate, Calculator, TrendingUp, Wrench,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { useCurrentUser } from "@/contexts/UserContext";
 import {
-  Asset, AttrDef, AssetHealth, AttributeType, TrendsPanel, ExpressionEditor, ImportPreviewTable,
-  parseCsv, flattenPayload, CSV_EXAMPLE, JSON_EXAMPLE,
+  Asset, AssetHealth, TrendsPanel, ExpressionEditor,
   deriveStatus, STATUS_STYLES, siteOf, HealthBar, STALE_AFTER_MS,
 } from "./assetShared";
 import { apiFetch } from "@/lib/auth-api";
@@ -94,12 +91,6 @@ export default function AssetDetails({ assetId: assetIdProp, embedded }: { asset
   const [addAttrOpen, setAddAttrOpen] = useState(false);
   const [editAttr, setEditAttr] = useState<any | null>(null);
   const [importOpen, setImportOpen] = useState(false);
-  const [importTab, setImportTab] = useState<"template" | "csv" | "json">("template");
-  const [csvText, setCsvText] = useState("");
-  const [jsonText, setJsonText] = useState("");
-  const [previewRows, setPreviewRows] = useState<AttrDef[]>([]);
-  const [parseError, setParseError] = useState<string | null>(null);
-  const [importing, setImporting] = useState(false);
   const [applyingTemplate, setApplyingTemplate] = useState(false);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [attrUseExpr, setAttrUseExpr] = useState(false);
@@ -110,58 +101,6 @@ export default function AssetDetails({ assetId: assetIdProp, embedded }: { asset
 
   const attrNames = attrList.filter((a: any) => a.type !== "runtime").map((a: any) => a.name as string);
 
-
-  function handleParse() {
-    setParseError(null); setPreviewRows([]);
-    try {
-      if (importTab === "csv") {
-        const rows = parseCsv(csvText);
-        if (rows.length === 0) { setParseError("No data rows found."); return; }
-        setPreviewRows(rows);
-      } else if (importTab === "json") {
-        const parsed = JSON.parse(jsonText);
-        const payloads = Array.isArray(parsed) ? parsed : [parsed];
-        const flattened: AttrDef[] = [];
-        for (const item of payloads) {
-          const obj = item && typeof item === "object" ? item as Record<string, any> : {};
-          const source = obj.data && typeof obj.data === "object" && !Array.isArray(obj.data) ? obj.data
-            : obj.metrics && typeof obj.metrics === "object" && !Array.isArray(obj.metrics) ? obj.metrics
-              : flattenPayload(obj);
-          for (const [key, value] of Object.entries(source)) {
-            if (value === undefined) continue;
-            const isNumber = typeof value === "number";
-            flattened.push({
-              name: key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase()),
-              type: isNumber ? "dynamic" : "static",
-              dataType: isNumber ? (Number.isInteger(value) ? "number" : "double") : "text",
-              tagName: key,
-            });
-          }
-        }
-        setPreviewRows(flattened);
-      }
-    } catch (e: any) { setParseError(e.message); }
-  }
-
-  async function handleBulkImport() {
-    if (!asset || previewRows.length === 0) return;
-    setImporting(true);
-    try {
-      const res = await apiFetch(`/api/assets/${asset.id}/attributes/bulk`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ attributes: previewRows }),
-      });
-      const data = await res.json();
-      if (!res.ok) { toast({ title: "Import failed", description: data.error, variant: "destructive" }); return; }
-      const desc = data.skipped > 0
-        ? `${data.created} created · ${data.skipped} skipped: ${(data.skippedItems ?? []).join(", ")}`
-        : `${data.created} attribute(s) created`;
-      toast({ title: "Import complete", description: desc });
-      qc.invalidateQueries({ queryKey: getListAssetAttributesQueryKey(asset.id) });
-      qc.invalidateQueries({ queryKey: getListAssetsQueryKey() });
-      closeImport();
-    } finally { setImporting(false); }
-  }
 
   async function handleApplyTemplate() {
     if (!asset) return;
@@ -255,7 +194,7 @@ export default function AssetDetails({ assetId: assetIdProp, embedded }: { asset
     });
   }
   function closeImport() {
-    setImportOpen(false); setPreviewRows([]); setParseError(null); setCsvText(""); setJsonText(""); setSelectedTemplateId("");
+    setImportOpen(false); setSelectedTemplateId("");
   }
 
   if (!assets) {
@@ -283,7 +222,7 @@ export default function AssetDetails({ assetId: assetIdProp, embedded }: { asset
   return (
     <div className={cn("space-y-4", embedded ? "p-5" : "p-6 max-w-6xl mx-auto")}>
       {!embedded && (
-        <button onClick={() => (window.history.length > 1 ? window.history.back() : navigate("/assets"))} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+        <button onClick={() => navigate("/assets")} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
       )}
@@ -349,23 +288,13 @@ export default function AssetDetails({ assetId: assetIdProp, embedded }: { asset
             <div className="p-3 flex items-center gap-2 border-b border-border bg-muted/30 flex-wrap">
               {can("manage_assets") && (
                 <Button size="sm" className="h-7 text-xs" onClick={() => { attrForm.reset(); setAttrUseExpr(false); setAddAttrOpen(true); }}>
-                  <Plus className="w-3.5 h-3.5 mr-1" /> Add
+                  <Plus className="w-3.5 h-3.5 mr-1" /> Add Attribute
                 </Button>
               )}
               {can("manage_assets") && <div className="h-5 w-px bg-border" />}
               {can("manage_assets") && (
-                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => { setImportTab("template"); setImportOpen(true); setPreviewRows([]); }}>
+                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setImportOpen(true)}>
                   <LayoutTemplate className="w-3.5 h-3.5 mr-1" /> Apply Template
-                </Button>
-              )}
-              {can("manage_assets") && (
-                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => { setImportTab("csv"); setImportOpen(true); setPreviewRows([]); setCsvText(""); }}>
-                  <FileSpreadsheet className="w-3.5 h-3.5 mr-1" /> Import CSV
-                </Button>
-              )}
-              {can("manage_assets") && (
-                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => { setImportTab("json"); setImportOpen(true); setPreviewRows([]); setJsonText(""); }}>
-                  <Braces className="w-3.5 h-3.5 mr-1" /> Import JSON
                 </Button>
               )}
               <div className="flex-1" />
@@ -379,7 +308,6 @@ export default function AssetDetails({ assetId: assetIdProp, embedded }: { asset
                 <thead>
                   <tr className="border-b border-border bg-muted/50">
                     <th className="px-3 py-2 w-8" />
-                    <th className="text-left px-3 py-2 font-medium text-muted-foreground w-24">Type</th>
                     <th className="text-left px-3 py-2 font-medium text-muted-foreground">Name</th>
                     <th className="text-left px-3 py-2 font-medium text-muted-foreground">Value / UoM</th>
                     <th className="text-left px-3 py-2 font-medium text-muted-foreground">Tag / Source</th>
@@ -391,14 +319,14 @@ export default function AssetDetails({ assetId: assetIdProp, embedded }: { asset
                 <tbody>
                   {!attributes ? (
                     Array.from({ length: 4 }).map((_, i) => (
-                      <tr key={i} className="border-b border-border/50"><td colSpan={8} className="px-3 py-2"><Skeleton className="h-3 w-full" /></td></tr>
+                      <tr key={i} className="border-b border-border/50"><td colSpan={7} className="px-3 py-2"><Skeleton className="h-3 w-full" /></td></tr>
                     ))
                   ) : attrList.length === 0 ? (
-                    <tr><td colSpan={8} className="px-3 py-12 text-center">
+                    <tr><td colSpan={7} className="px-3 py-12 text-center">
                       <div className="flex flex-col items-center gap-3 text-muted-foreground">
                         <Blocks className="w-8 h-8 opacity-20" /><p className="text-sm">No attributes yet</p>
                         {can("manage_assets") && (
-                          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => { setImportTab("template"); setImportOpen(true); }}>
+                          <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setImportOpen(true)}>
                             <LayoutTemplate className="w-3.5 h-3.5 mr-1" /> Apply Template
                           </Button>
                         )}
@@ -412,7 +340,6 @@ export default function AssetDetails({ assetId: assetIdProp, embedded }: { asset
                             <button className="text-muted-foreground hover:text-primary opacity-0 group-hover:opacity-100" onClick={() => openEditAttr(attr)}><Edit2 className="w-3 h-3" /></button>
                           )}
                         </td>
-                        <td className="px-3 py-2"><AttributeType type={attr.type} /></td>
                         <td className="px-3 py-2 font-medium">{attr.name}</td>
                         <td className="px-3 py-2 font-mono">
                           {attr.value != null ? (
@@ -488,7 +415,7 @@ export default function AssetDetails({ assetId: assetIdProp, embedded }: { asset
                     <FormItem><FormLabel>Type</FormLabel>
                       <Select value={field.value} onValueChange={field.onChange}>
                         <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-                        <SelectContent><SelectItem value="static">Static</SelectItem><SelectItem value="dynamic">Dynamic</SelectItem><SelectItem value="metric">Metric</SelectItem></SelectContent>
+                        <SelectContent><SelectItem value="static">Static</SelectItem><SelectItem value="dynamic">Dynamic</SelectItem><SelectItem value="metric">Metric</SelectItem><SelectItem value="timestamp">Timestamp</SelectItem></SelectContent>
                       </Select>
                     </FormItem>
                   )} />
@@ -569,7 +496,7 @@ export default function AssetDetails({ assetId: assetIdProp, embedded }: { asset
                       <FormItem><FormLabel>Type</FormLabel>
                         <Select value={field.value} onValueChange={field.onChange}>
                           <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
-                          <SelectContent><SelectItem value="static">Static</SelectItem><SelectItem value="dynamic">Dynamic</SelectItem><SelectItem value="metric">Metric</SelectItem></SelectContent>
+                          <SelectContent><SelectItem value="static">Static</SelectItem><SelectItem value="dynamic">Dynamic</SelectItem><SelectItem value="metric">Metric</SelectItem><SelectItem value="timestamp">Timestamp</SelectItem></SelectContent>
                         </Select>
                       </FormItem>
                     )} />
@@ -606,25 +533,11 @@ export default function AssetDetails({ assetId: assetIdProp, embedded }: { asset
         </DialogContent>
       </Dialog>
 
-      {/* ── Apply Template / Import Dialog ── */}
+      {/* ── Apply Template Dialog ── */}
       <Dialog open={importOpen} onOpenChange={(v) => { if (!v) closeImport(); }}>
         <DialogContent className="max-w-2xl">
-          <DialogHeader><DialogTitle>Add Attributes to "{asset.name}"</DialogTitle><DialogDescription>Duplicates (same name or tag) are automatically skipped.</DialogDescription></DialogHeader>
-          <Tabs value={importTab} onValueChange={(v) => { setImportTab(v as any); setPreviewRows([]); setParseError(null); }}>
-            <TabsList className="grid grid-cols-3 w-full">
-              <TabsTrigger value="template" className="text-xs gap-1.5"><LayoutTemplate className="w-3 h-3" /> Apply Template</TabsTrigger>
-              <TabsTrigger value="csv" className="text-xs gap-1.5"><FileSpreadsheet className="w-3 h-3" /> CSV</TabsTrigger>
-              <TabsTrigger value="json" className="text-xs gap-1.5"><Braces className="w-3 h-3" /> JSON Array</TabsTrigger>
-            </TabsList>
-            <TabsContent value="template" className="space-y-3 mt-3">
-              <div className="rounded-md bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/40 p-3 text-xs">
-                <p className="font-semibold text-blue-800 dark:text-blue-300 flex items-center gap-1.5 mb-1.5"><Info className="w-3.5 h-3.5" /> How Apply Template works</p>
-                <ul className="text-blue-700 dark:text-blue-400 space-y-1">
-                  <li>• Schema defined in Asset Templates → stamped onto this asset</li>
-                  <li>• Tag names resolved: <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">temperature</code> → <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">{asset.identifier ? `${asset.identifier}.` : ""}temperature</code></li>
-                  <li>• Existing attributes are skipped, not duplicated</li>
-                </ul>
-              </div>
+          <DialogHeader><DialogTitle>Apply Template to "{asset.name}"</DialogTitle><DialogDescription>Duplicates (same name or tag) are automatically skipped.</DialogDescription></DialogHeader>
+          <div className="space-y-3">
               <div className="space-y-1.5">
                 <label className="text-xs font-medium">Select Template</label>
                 <Select value={selectedTemplateId || asset.templateId || ""} onValueChange={setSelectedTemplateId}>
@@ -651,36 +564,7 @@ export default function AssetDetails({ assetId: assetIdProp, embedded }: { asset
                 <Button variant="outline" onClick={closeImport}>Cancel</Button>
                 <Button onClick={handleApplyTemplate} disabled={applyingTemplate || (!selectedTemplateId && !asset.templateId)}>{applyingTemplate ? "Applying…" : "Apply Template"}</Button>
               </DialogFooter>
-            </TabsContent>
-            <TabsContent value="csv" className="space-y-3 mt-3">
-              <div className="flex items-center justify-between">
-                <p className="text-xs text-muted-foreground">Columns: name, type, dataType, tagName, sourceMetric, uom</p>
-                <button className="text-xs text-primary hover:underline" onClick={() => setCsvText(CSV_EXAMPLE)}>Load example</button>
-              </div>
-              <Textarea value={csvText} onChange={(e) => { setCsvText(e.target.value); setPreviewRows([]); setParseError(null); }} placeholder={"name,type,dataType,tagName,uom\nEnergy kWh,dynamic,double,device-01.energy_kwh,kWh"} className="font-mono text-xs h-36 resize-none" />
-              {parseError && <p className="text-xs text-destructive flex items-center gap-1"><AlertTriangle className="w-3 h-3" />{parseError}</p>}
-              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleParse} disabled={!csvText.trim()}>Preview</Button>
-              {previewRows.length > 0 && <ImportPreviewTable rows={previewRows} />}
-              <DialogFooter>
-                <Button variant="outline" onClick={closeImport}>Cancel</Button>
-                <Button onClick={handleBulkImport} disabled={importing || previewRows.length === 0}>{importing ? "Importing…" : `Import ${previewRows.length} attribute${previewRows.length !== 1 ? "s" : ""}`}</Button>
-              </DialogFooter>
-            </TabsContent>
-            <TabsContent value="json" className="space-y-3 mt-3">
-              <div className="flex items-center justify-between">
-                <p className="text-xs text-muted-foreground">JSON array of attribute objects</p>
-                <button className="text-xs text-primary hover:underline" onClick={() => setJsonText(JSON_EXAMPLE)}>Load example</button>
-              </div>
-              <Textarea value={jsonText} onChange={(e) => { setJsonText(e.target.value); setPreviewRows([]); setParseError(null); }} placeholder={'[\n  {"name":"Temperature","type":"dynamic","dataType":"double","tagName":"device-01.temperature","uom":"°C"}\n]'} className="font-mono text-xs h-36 resize-none" />
-              {parseError && <p className="text-xs text-destructive flex items-center gap-1"><AlertTriangle className="w-3 h-3" />{parseError}</p>}
-              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleParse} disabled={!jsonText.trim()}>Preview</Button>
-              {previewRows.length > 0 && <ImportPreviewTable rows={previewRows} />}
-              <DialogFooter>
-                <Button variant="outline" onClick={closeImport}>Cancel</Button>
-                <Button onClick={handleBulkImport} disabled={importing || previewRows.length === 0}>{importing ? "Importing…" : `Import ${previewRows.length} attribute${previewRows.length !== 1 ? "s" : ""}`}</Button>
-              </DialogFooter>
-            </TabsContent>
-          </Tabs>
+          </div>
         </DialogContent>
       </Dialog>
 

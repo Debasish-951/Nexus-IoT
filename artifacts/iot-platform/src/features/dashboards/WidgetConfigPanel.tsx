@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Clock, Move, Image as ImageIcon, Plus, Trash2, X, Settings2 } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useListAssets } from "@workspace/api-client-react";
 import { WIDGET_CATEGORIES, PALETTE, widgetDef } from "./registry";
-import { useMetricOptions } from "./useWidgetData";
+import { useMetricChoices } from "./useWidgetData";
 import { ColorField } from "./ColorField";
 
 const BINDABLE = new Set(["kpi", "health", "availability", "oee", "downtime", "runtime", "energy", "gauge", "thermometer", "tank", "battery", "progress", "line", "area", "bar", "stackbar", "table", "alarms", "events"]);
@@ -72,7 +72,7 @@ function OverlaySeriesRow({ overlay, index, assets, defaultAssetId, onChange, on
   onChange: (patch: Partial<Overlay>) => void; onRemove: () => void;
 }) {
   const assetId = overlay.assetId ?? defaultAssetId ?? "";
-  const metrics = useMetricOptions(assetId);
+  const metrics = useMetricChoices(assetId);
   const color = overlay.color ?? SPC_COLORS[(index + 1) % SPC_COLORS.length];
   const selCls = "h-7 text-xs rounded-md border border-border bg-background px-1.5 min-w-0";
   return (
@@ -85,7 +85,7 @@ function OverlaySeriesRow({ overlay, index, assets, defaultAssetId, onChange, on
         </select>
         <select value={overlay.tag ?? ""} onChange={(e) => onChange({ tag: e.target.value })} className={cn(selCls, "flex-1")} disabled={!assetId}>
           <option value="">Metric…</option>
-          {metrics.map((m) => <option key={m} value={m}>{m}</option>)}
+          {metrics.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
         </select>
         <button onClick={onRemove} title="Remove series" className="text-muted-foreground hover:text-destructive shrink-0"><Trash2 className="w-3.5 h-3.5" /></button>
       </div>
@@ -107,18 +107,26 @@ function OverlaySeriesRow({ overlay, index, assets, defaultAssetId, onChange, on
 // the Widget Library. Nothing is committed to the dashboard until Save; the
 // parent owns whether that means appending a new widget or patching an existing one.
 export function WidgetConfigPanel({
-  mode, type: initialType, initialConfig, onSave, onCancel,
+  mode, type: initialType, initialConfig, onSave, onCancel, onChange,
 }: {
   mode: "create" | "edit";
   type: string;
   initialConfig: Record<string, any>;
   onSave: (type: string, config: Record<string, any>) => void;
   onCancel: () => void;
+  /** Fires on every edit so the widget on the canvas can preview live. */
+  onChange?: (type: string, config: Record<string, any>) => void;
 }) {
   const [type, setType] = useState(initialType);
   const [draft, setDraft] = useState<Record<string, any>>(initialConfig);
 
   const set = (patch: Record<string, any>) => setDraft((d) => ({ ...d, ...patch }));
+
+  // Push each change up for the live canvas preview. Kept in a ref so callers can
+  // pass an inline closure without the identity change re-firing the effect.
+  const onChangeRef = useRef(onChange);
+  onChangeRef.current = onChange;
+  useEffect(() => { onChangeRef.current?.(type, draft); }, [type, draft]);
 
   function handleTypeChange(newType: string) {
     const def = widgetDef(newType);
@@ -139,7 +147,7 @@ export function WidgetConfigPanel({
 
   const { data: assetsData } = useListAssets();
   const assets = (assetsData as any[] | undefined) ?? [];
-  const metrics = useMetricOptions(draft.assetId);
+  const metrics = useMetricChoices(draft.assetId);
   const overlays: Overlay[] = Array.isArray(draft.overlays) ? draft.overlays : [];
   const selCls = "w-full h-8 rounded-md border border-border text-sm px-2 bg-background";
 
@@ -166,7 +174,9 @@ export function WidgetConfigPanel({
           </select>
         </Field>
 
-        <Field label="Title (optional)"><Input value={draft.title ?? ""} onChange={(e) => set({ title: e.target.value })} className="h-8 text-sm" placeholder="Auto-generated if blank" /></Field>
+        {/* Left empty on purpose — widget types carry no default title, so this is the
+            user's to fill. Blank falls back to the widget type's name on the canvas. */}
+        <Field label="Title (optional)"><Input value={draft.title ?? ""} onChange={(e) => set({ title: e.target.value })} className="h-8 text-sm" placeholder="Defaults to the widget type" /></Field>
 
         {type === "text" && (
           <Field label="Text"><textarea value={draft.text ?? ""} onChange={(e) => set({ text: e.target.value })} className="w-full rounded-md border border-border p-2 text-sm h-24 resize-y" /></Field>
@@ -196,12 +206,12 @@ export function WidgetConfigPanel({
               <>
                 <Field label="X Tag">
                   <select value={draft.xTag ?? ""} onChange={(e) => set({ xTag: e.target.value })} className={selCls} disabled={!draft.assetId}>
-                    <option value="">— select —</option>{metrics.map((m) => <option key={m} value={m}>{m}</option>)}
+                    <option value="">— select —</option>{metrics.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
                   </select>
                 </Field>
                 <Field label="Y Tag">
                   <select value={draft.yTag ?? ""} onChange={(e) => set({ yTag: e.target.value })} className={selCls} disabled={!draft.assetId}>
-                    <option value="">— select —</option>{metrics.map((m) => <option key={m} value={m}>{m}</option>)}
+                    <option value="">— select —</option>{metrics.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
                   </select>
                 </Field>
               </>
@@ -210,10 +220,10 @@ export function WidgetConfigPanel({
                 <div className="space-y-1">
                   <Label className="text-xs">Primary Metric</Label>
                   <select value={draft.tag ?? ""} onChange={(e) => set({ tag: e.target.value })} className={selCls} disabled={!draft.assetId}>
-                    <option value="">{draft.assetId ? "— select tag —" : "pick an asset first"}</option>
-                    {metrics.map((m) => <option key={m} value={m}>{m}</option>)}
+                    <option value="">{draft.assetId ? "— select attribute / metric —" : "pick an asset first"}</option>
+                    {metrics.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
                   </select>
-                  <p className="text-[11px] text-muted-foreground">Metrics from live telemetry — attribute names shown where matched.</p>
+                  <p className="text-[11px] text-muted-foreground">The asset's attributes (name · unit) plus any live telemetry tags.</p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">

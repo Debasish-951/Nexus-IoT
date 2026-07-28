@@ -24,45 +24,45 @@ export interface WidgetDef {
 // ── Catalog (Phase 1 core set + full list of names) ──
 export const WIDGET_CATEGORIES: { name: string; items: WidgetDef[] }[] = [
   { name: "KPI", items: [
-    { type: "kpi",        label: "Custom KPI",        icon: Activity,    category: "KPI", w: 3, h: 3, defaults: { title: "KPI", unit: "", color: PALETTE.primary } },
-    { type: "health",     label: "Health Score",      icon: ShieldCheck, category: "KPI", w: 3, h: 3, defaults: { title: "Health Score", unit: "%", color: PALETTE.success, value: 92 } },
-    { type: "availability", label: "Availability",    icon: BadgeCheck,  category: "KPI", w: 3, h: 3, defaults: { title: "Availability", unit: "%", color: PALETTE.success, value: 98 } },
-    { type: "oee",        label: "OEE",               icon: Percent,     category: "KPI", w: 3, h: 3, defaults: { title: "OEE", unit: "%", color: PALETTE.primary, value: 84 } },
-    { type: "downtime",   label: "Downtime",          icon: Clock,       category: "KPI", w: 3, h: 3, defaults: { title: "Downtime", unit: "h", color: PALETTE.warning, value: 3.2 } },
-    { type: "runtime",    label: "Runtime",           icon: Timer,       category: "KPI", w: 3, h: 3, defaults: { title: "Runtime", unit: "h", color: PALETTE.primary, value: 128 } },
-    { type: "energy",     label: "Energy",            icon: Zap,         category: "KPI", w: 3, h: 3, defaults: { title: "Energy", unit: "kWh", color: PALETTE.primary, value: 245 } },
-    { type: "alarmcount", label: "Alarm Count",       icon: Bell,        category: "KPI", w: 3, h: 3, defaults: { title: "Active Alarms", color: PALETTE.critical, value: 0 } },
-    { type: "assetcount", label: "Asset Count",       icon: Boxes,       category: "KPI", w: 3, h: 3, defaults: { title: "Assets", color: PALETTE.neutral, value: 0 } },
+    { type: "kpi",        label: "Custom KPI",        icon: Activity,    category: "KPI", w: 3, h: 3, defaults: { unit: "", color: PALETTE.primary } },
+    { type: "health",     label: "Health Score",      icon: ShieldCheck, category: "KPI", w: 3, h: 3, defaults: { unit: "%", color: PALETTE.success, value: 92 } },
+    { type: "availability", label: "Availability",    icon: BadgeCheck,  category: "KPI", w: 3, h: 3, defaults: { unit: "%", color: PALETTE.success, value: 98 } },
+    { type: "oee",        label: "OEE",               icon: Percent,     category: "KPI", w: 3, h: 3, defaults: { unit: "%", color: PALETTE.primary, value: 84 } },
+    { type: "downtime",   label: "Downtime",          icon: Clock,       category: "KPI", w: 3, h: 3, defaults: { unit: "h", color: PALETTE.warning, value: 3.2 } },
+    { type: "runtime",    label: "Runtime",           icon: Timer,       category: "KPI", w: 3, h: 3, defaults: { unit: "h", color: PALETTE.primary, value: 128 } },
+    { type: "energy",     label: "Energy",            icon: Zap,         category: "KPI", w: 3, h: 3, defaults: { unit: "kWh", color: PALETTE.primary, value: 245 } },
+    { type: "alarmcount", label: "Alarm Count",       icon: Bell,        category: "KPI", w: 3, h: 3, defaults: { color: PALETTE.critical, value: 0 } },
+    { type: "assetcount", label: "Asset Count",       icon: Boxes,       category: "KPI", w: 3, h: 3, defaults: { color: PALETTE.neutral, value: 0 } },
   ]},
   { name: "Charts", items: [
-    { type: "line",  label: "Line Chart",  icon: LineIcon,  category: "Charts", w: 6, h: 5, defaults: { title: "Line Chart", color: PALETTE.primary } },
-    { type: "area",  label: "Area Chart",  icon: AreaIcon,  category: "Charts", w: 6, h: 5, defaults: { title: "Area Chart", color: PALETTE.primary } },
-    { type: "bar",   label: "Bar Chart",   icon: BarChart3, category: "Charts", w: 6, h: 5, defaults: { title: "Bar Chart", color: PALETTE.primary } },
-    { type: "stackbar", label: "Stacked Bar", icon: BarChart3, category: "Charts", w: 6, h: 5, defaults: { title: "Stacked Bar", color: PALETTE.primary } },
-    { type: "sparkline", label: "Sparkline", icon: LineIcon,  category: "Charts", w: 3, h: 2, defaults: { title: "Sparkline", color: PALETTE.primary } },
-    { type: "pie",   label: "Pie Chart",   icon: PieIcon,   category: "Charts", w: 4, h: 5, defaults: { title: "Pie Chart" } },
-    { type: "donut", label: "Donut Chart", icon: PieIcon,   category: "Charts", w: 4, h: 5, defaults: { title: "Donut Chart" } },
-    { type: "scatter", label: "Scatter",   icon: ScatterChart, category: "Charts", w: 6, h: 5, defaults: { title: "Scatter" } },
-    { type: "heatmap", label: "Heatmap",   icon: Grid3x3,   category: "Charts", w: 6, h: 5, defaults: { title: "Heatmap" } },
+    { type: "line",  label: "Line Chart",  icon: LineIcon,  category: "Charts", w: 6, h: 5, defaults: { color: PALETTE.primary } },
+    { type: "area",  label: "Area Chart",  icon: AreaIcon,  category: "Charts", w: 6, h: 5, defaults: { color: PALETTE.primary } },
+    { type: "bar",   label: "Bar Chart",   icon: BarChart3, category: "Charts", w: 6, h: 5, defaults: { color: PALETTE.primary } },
+    { type: "stackbar", label: "Stacked Bar", icon: BarChart3, category: "Charts", w: 6, h: 5, defaults: { color: PALETTE.primary } },
+    { type: "sparkline", label: "Sparkline", icon: LineIcon,  category: "Charts", w: 3, h: 2, defaults: { color: PALETTE.primary } },
+    { type: "pie",   label: "Pie Chart",   icon: PieIcon,   category: "Charts", w: 4, h: 5 },
+    { type: "donut", label: "Donut Chart", icon: PieIcon,   category: "Charts", w: 4, h: 5 },
+    { type: "scatter", label: "Scatter",   icon: ScatterChart, category: "Charts", w: 6, h: 5 },
+    { type: "heatmap", label: "Heatmap",   icon: Grid3x3,   category: "Charts", w: 6, h: 5 },
   ]},
   { name: "Industrial", items: [
-    { type: "gauge",     label: "Gauge",           icon: GaugeIcon,   category: "Industrial", w: 3, h: 4, defaults: { title: "Gauge", value: 62, max: 100, color: PALETTE.primary } },
-    { type: "thermometer", label: "Thermometer",   icon: Thermometer, category: "Industrial", w: 2, h: 5, defaults: { title: "Temp", value: 48, max: 120, color: PALETTE.critical } },
-    { type: "tank",      label: "Tank Level",      icon: Droplet,     category: "Industrial", w: 2, h: 5, defaults: { title: "Tank", value: 70, color: PALETTE.primary } },
-    { type: "progress",  label: "Progress Bar",    icon: CircleDot,   category: "Industrial", w: 4, h: 2, defaults: { title: "Progress", value: 65, color: PALETTE.success } },
-    { type: "status",    label: "Status Indicator",icon: CircleDot,   category: "Industrial", w: 3, h: 2, defaults: { title: "Status", state: "ok" } },
-    { type: "traffic",   label: "Traffic Light",   icon: TrafficCone, category: "Industrial", w: 2, h: 4, defaults: { title: "Traffic", state: "ok" } },
-    { type: "battery",   label: "Battery",         icon: Battery,     category: "Industrial", w: 3, h: 2, defaults: { title: "Battery", value: 80, color: PALETTE.success } },
+    { type: "gauge",     label: "Gauge",           icon: GaugeIcon,   category: "Industrial", w: 3, h: 4, defaults: { value: 62, max: 100, color: PALETTE.primary } },
+    { type: "thermometer", label: "Thermometer",   icon: Thermometer, category: "Industrial", w: 2, h: 5, defaults: { value: 48, max: 120, color: PALETTE.critical } },
+    { type: "tank",      label: "Tank Level",      icon: Droplet,     category: "Industrial", w: 2, h: 5, defaults: { value: 70, color: PALETTE.primary } },
+    { type: "progress",  label: "Progress Bar",    icon: CircleDot,   category: "Industrial", w: 4, h: 2, defaults: { value: 65, color: PALETTE.success } },
+    { type: "status",    label: "Status Indicator",icon: CircleDot,   category: "Industrial", w: 3, h: 2, defaults: { state: "ok" } },
+    { type: "traffic",   label: "Traffic Light",   icon: TrafficCone, category: "Industrial", w: 2, h: 4, defaults: { state: "ok" } },
+    { type: "battery",   label: "Battery",         icon: Battery,     category: "Industrial", w: 3, h: 2, defaults: { value: 80, color: PALETTE.success } },
   ]},
   { name: "Tables", items: [
-    { type: "table",   label: "Data Grid",       icon: TableIcon,  category: "Tables", w: 6, h: 5, defaults: { title: "Data Grid" } },
-    { type: "alarms",  label: "Alarm Table",     icon: Bell,       category: "Tables", w: 6, h: 5, defaults: { title: "Alarms" } },
-    { type: "events",  label: "Events",          icon: ListOrdered,category: "Tables", w: 6, h: 5, defaults: { title: "Events" } },
+    { type: "table",   label: "Data Grid",       icon: TableIcon,  category: "Tables", w: 6, h: 5 },
+    { type: "alarms",  label: "Alarm Table",     icon: Bell,       category: "Tables", w: 6, h: 5 },
+    { type: "events",  label: "Events",          icon: ListOrdered,category: "Tables", w: 6, h: 5 },
   ]},
   { name: "Media & Controls", items: [
     { type: "text",    label: "Text",            icon: Type,       category: "Media & Controls", w: 4, h: 2, defaults: { text: "Text widget" } },
-    { type: "image",   label: "Image",           icon: ImageIcon,  category: "Media & Controls", w: 4, h: 4, defaults: { title: "Image", src: "" } },
-    { type: "assetsel",label: "Asset Selector",  icon: Boxes,      category: "Media & Controls", w: 3, h: 2, defaults: { title: "Asset" } },
+    { type: "image",   label: "Image",           icon: ImageIcon,  category: "Media & Controls", w: 4, h: 4, defaults: { src: "" } },
+    { type: "assetsel",label: "Asset Selector",  icon: Boxes,      category: "Media & Controls", w: 3, h: 2 },
     { type: "button",  label: "Button",          icon: ToggleLeft, category: "Media & Controls", w: 2, h: 2, defaults: { label: "Button" } },
   ]},
 ];
@@ -159,7 +159,9 @@ export function WidgetView({ widget, refreshNonce }: { widget: Widget; refreshNo
     const color = statusColor(value, c);
     return (
       <div className="h-full w-full flex flex-col justify-center px-1">
-        <p className="text-xs text-muted-foreground truncate">{c.title ?? "KPI"}{c.tag && !bound ? " (no data)" : ""}</p>
+        {/* Widgets ship with no default title (the user names them), so the caption
+            falls back to the series label, then the widget type's own name. */}
+        <p className="text-xs text-muted-foreground truncate">{c.title || c.label || widgetDef(t)?.label || "KPI"}{c.tag && !bound ? " (no data)" : ""}</p>
         <p className="text-3xl font-bold tabular-nums" style={{ color }}>{typeof value === "number" ? fmt(value, c) : value}<span className="text-sm text-muted-foreground ml-1">{c.unit ?? ""}</span></p>
         {c.subtitle && <p className="text-[11px] text-muted-foreground truncate">{c.subtitle}</p>}
       </div>

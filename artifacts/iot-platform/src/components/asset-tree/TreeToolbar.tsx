@@ -25,9 +25,9 @@ export function TreeToolbar({
           />
         </div>
         {canManage && (
-          <Button size="sm" className="h-8 px-2.5 shrink-0 whitespace-nowrap" onClick={onAdd} title="Create root project">
+          <Button size="sm" className="h-8 px-2.5 shrink-0 whitespace-nowrap" onClick={onAdd} title="Create a top-level asset">
             <Plus className="w-4 h-4 mr-1" />
-            New Project
+            Create Asset
           </Button>
         )}
       </div>

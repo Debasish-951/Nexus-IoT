@@ -33,7 +33,9 @@ export interface AssetTreeCtx {
   onAddRoot?: () => void;               // create a new top-level asset (no parent)
   onRename?: (a: Asset) => void;
   onDelete?: (a: Asset) => void;
-  onAssignTemplate: (a: Asset) => void;
+  // Optional: only meaningful for real assets. The Visualization tree renders
+  // its own hierarchy nodes, which have no asset template, so it omits this.
+  onAssignTemplate?: (a: Asset) => void;
   onOpenBuilder?: (a: Asset) => void;   // optional — right-click → open Dashboard Builder
   dashboard?: DashboardActions;         // optional — right-click → dashboard actions
 }

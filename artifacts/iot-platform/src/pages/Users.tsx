@@ -7,6 +7,7 @@ import {
 } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
@@ -579,6 +580,89 @@ function AccessControlTab({ users, canEdit }: { users: any[]; canEdit: boolean }
 
 // ── Row actions ───────────────────────────────────────────────────────────────
 
+/** Presets offered before issuing; the server caps anything above 24h. */
+const TEMP_EXPIRY_PRESETS = [
+  { minutes: 15, label: "15 minutes", hint: "Hand it over on a call" },
+  { minutes: 60, label: "1 hour", hint: "Same working session" },
+  { minutes: 240, label: "4 hours", hint: "Different shift" },
+  { minutes: 1440, label: "24 hours", hint: "Longest allowed" },
+];
+
+/**
+ * Asks how long the temporary password should live before issuing it.
+ *
+ * The window is the administrator's call: a credential read out over a phone call
+ * wants minutes, one handed to a technician joining a later shift wants hours. The
+ * server still caps it at 24 hours and enforces a 1-minute floor.
+ */
+function TemporaryPasswordExpiryDialog({ user, onCancel, onIssue }: {
+  user: any; onCancel: () => void; onIssue: (minutes: number) => void;
+}) {
+  const [minutes, setMinutes] = useState(15);
+  const [custom, setCustom] = useState("");
+
+  const chosen = custom.trim() !== "" ? Number(custom) : minutes;
+  const valid = Number.isInteger(chosen) && chosen >= 1 && chosen <= 1440;
+
+  return (
+    <Dialog open onOpenChange={(v) => { if (!v) onCancel(); }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Timer className="w-4 h-4" /> Temporary password for {user.fullName}
+          </DialogTitle>
+          <DialogDescription>
+            How long should it stay usable? Their current password stops working immediately
+            and every session of theirs is signed out.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-3">
+          <div className="grid grid-cols-2 gap-2">
+            {TEMP_EXPIRY_PRESETS.map((p) => {
+              const active = custom.trim() === "" && minutes === p.minutes;
+              return (
+                <button key={p.minutes} type="button"
+                  onClick={() => { setMinutes(p.minutes); setCustom(""); }}
+                  className={cn(
+                    "rounded-lg border px-3 py-2 text-left transition-colors",
+                    active ? "border-primary bg-primary/10" : "border-border hover:bg-muted/50",
+                  )}>
+                  <p className="text-sm font-medium">{p.label}</p>
+                  <p className="text-[11px] text-muted-foreground">{p.hint}</p>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs">Or a custom window (minutes)</Label>
+            <Input type="number" min={1} max={1440} value={custom} placeholder="e.g. 45"
+              onChange={(e) => setCustom(e.target.value)} className="h-9" />
+            {custom.trim() !== "" && !valid && (
+              <p className="text-[11px] text-destructive">Enter a whole number of minutes between 1 and 1440 (24 hours).</p>
+            )}
+          </div>
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onCancel}>Cancel</Button>
+          <Button disabled={!valid} onClick={() => onIssue(chosen)}>
+            Issue for {valid ? formatWindow(chosen) : "—"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function formatWindow(minutes: number): string {
+  if (minutes < 60) return `${minutes}m`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m === 0 ? `${h}h` : `${h}h ${m}m`;
+}
+
 /**
  * Shows a freshly-issued temporary password exactly once.
  *
@@ -598,6 +682,9 @@ function TemporaryPasswordDialog({ result, onClose }: { result: any; onClose: ()
   const expired = remaining <= 0;
   const mins = Math.max(0, Math.floor(remaining / 60_000));
   const secs = Math.max(0, Math.floor((remaining % 60_000) / 1000));
+  // Long windows are now possible (up to 24h), so seconds only earn their place
+  // in the last hour.
+  const left = mins >= 60 ? formatWindow(mins) : `${mins}m ${secs}s`;
 
   return (
     <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
@@ -634,7 +721,7 @@ function TemporaryPasswordDialog({ result, onClose }: { result: any; onClose: ()
             <Clock className="w-3.5 h-3.5 shrink-0" />
             {expired
               ? "Expired — issue a new one."
-              : <span>Expires in <strong className="tabular-nums">{mins}m {secs}s</strong> ({format(new Date(result.expiresAt), "HH:mm:ss")})</span>}
+              : <span>Expires in <strong className="tabular-nums">{left}</strong> ({format(new Date(result.expiresAt), "MMM d, HH:mm:ss")})</span>}
           </div>
 
           <p className="flex items-start gap-2 rounded-md border border-border bg-muted/30 px-3 py-2.5 text-[11px] text-muted-foreground">
@@ -659,15 +746,13 @@ function UserRowActions({ user, onDone }: { user: any; onDone: () => void }) {
   const { toast } = useToast();
   const [busy, setBusy] = useState<string | null>(null);
   const [tempResult, setTempResult] = useState<any>(null);
+  const [tempAskOpen, setTempAskOpen] = useState(false);
 
-  async function issueTemporary() {
-    if (!window.confirm(
-      `Issue a 15-minute temporary password for ${user.fullName}?\n\n` +
-      `Their current password (if any) stops working immediately and all their sessions are signed out.`
-    )) return;
+  async function issueTemporary(minutes: number) {
+    setTempAskOpen(false);
     setBusy("temporary-password");
     try {
-      const res = await apiPost(`/api/users/${user.id}/temporary-password`, { expiresInMinutes: 15 });
+      const res = await apiPost(`/api/users/${user.id}/temporary-password`, { expiresInMinutes: minutes });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
         toast({ title: body.error ?? "Could not issue a temporary password", variant: "destructive" });
@@ -738,8 +823,11 @@ function UserRowActions({ user, onDone }: { user: any; onDone: () => void }) {
           className="hover:text-emerald-600"
           onClick={() => call("unlock", "Account unlocked")} />
       )}
-      <Btn action="temporary-password" title="Issue a 15-minute temporary password" icon={Timer}
-        className="hover:text-amber-600" onClick={issueTemporary} />
+      <Btn action="temporary-password" title="Issue a temporary password" icon={Timer}
+        className="hover:text-amber-600" onClick={() => setTempAskOpen(true)} />
+      {tempAskOpen && (
+        <TemporaryPasswordExpiryDialog user={user} onCancel={() => setTempAskOpen(false)} onIssue={issueTemporary} />
+      )}
       {tempResult && <TemporaryPasswordDialog result={tempResult} onClose={() => setTempResult(null)} />}
     </>
   );

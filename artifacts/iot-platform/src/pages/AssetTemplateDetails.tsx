@@ -1,7 +1,7 @@
-import { useState, useEffect, useRef, useMemo } from "react";
-import { useRoute, useLocation } from "wouter";
+import { useState, useEffect, useRef } from "react";
+import { useRoute, useLocation, useSearch } from "wouter";
 import {
-  useListAssetTemplates, useDeleteAssetTemplate, useCreateAssetTemplate, useListAssets,
+  useListAssetTemplates, useDeleteAssetTemplate,
   getListAssetTemplatesQueryKey,
 } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -10,36 +10,41 @@ import { Input } from "@/components/ui/input";
 import { Card, CardContent } from "@/components/ui/card";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import {
   Plus, Trash2, Save, Braces, FileSpreadsheet, ChevronRight, AlertTriangle,
-  CheckCircle2, LayoutTemplate, Zap, Info, Download, Copy, Upload, Boxes, Hash, User, Calendar, ArrowLeft,
+  CheckCircle2, LayoutTemplate, Zap, Upload, Hash, User, Calendar, ArrowLeft, X, Pencil,
 } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/contexts/UserContext";
-import {
-  Asset, deriveStatus, STATUS_STYLES, siteOf, useAssetHealthMap, HealthBar,
-} from "./assetShared";
 import { apiFetch } from "@/lib/auth-api";
+import { ATTR_TYPES, ATTR_DATATYPES, TEMPLATE_CSV_HEADERS, parseTemplateCsv, type AttrDef } from "./templateCsv";
 
-interface Def {
-  name: string; type: string; dataType: string;
-  tagName?: string; uom?: string; value?: string;
-  required?: boolean; description?: string;
-}
-const ATTR_TYPES = ["static", "dynamic", "metric"] as const;
-const ATTR_DATATYPES = ["text", "number", "double", "boolean", "timestamp"] as const;
+type Def = AttrDef;
+// Envelope keys that never become attributes. deviceId is deliberately absent from the
+// attribute list because it is surfaced separately (detected + registered on import).
 const PAYLOAD_SKIP_KEYS = new Set([
-  "deviceId","device_id","timestamp","timestampUnix","timestamp_unix","receivedAt","received_at",
-  "capturedAt","captured_at","sensor","asset","measurement_point","id","version","type","source",
+  "deviceId","device_id","sensor","asset","measurement_point","id","version","type","source",
 ]);
+// Timestamp-ish keys ARE extracted (every payload carries one, and the template needs a
+// slot to bind it to) but they are typed as `timestamp` rather than inferred from the JS
+// value — otherwise an epoch reads as a plain number and an ISO string as free text.
+const TIMESTAMP_KEYS = new Set([
+  "ts","time","timestamp","timestampunix","timestamp_unix","capturedat","captured_at",
+  "receivedat","received_at","eventtime","event_time","datetime","date_time",
+]);
+const isTimestampKey = (key: string) => TIMESTAMP_KEYS.has((key.split(".").pop() ?? key).toLowerCase());
 const PAYLOAD_EXAMPLE = JSON.stringify({ deviceId: "my-device-01", timestampUnix: 1766062407826, data: { temperature: 31.7, humidity: 68.4, energy_kwh: 145.7, battery: 3.0 } }, null, 2);
-const CSV_EXAMPLE = `name,type,dataType,tagName,uom\nTemperature,dynamic,double,temperature,°C\nVibration RMS X,dynamic,double,vibration_rms_velocity_x,mm/s\nSensor Serial,static,text,sensor_serial,`;
+const CSV_EXAMPLE = [
+  TEMPLATE_CSV_HEADERS.join(","),
+  "Temperature,dynamic,Chiller Section,temperature,double,°C,2,TRUE",
+  "Vibration RMS X,dynamic,Chiller Section,vibration_rms_velocity_x,double,mm/s,3,FALSE",
+  "Sensor Serial,static,Chiller Section,sensor_serial,text,,,FALSE",
+].join("\n");
 const JSON_SCHEMA_EXAMPLE = JSON.stringify({ deviceId: "my-device-01", attributes: [{ name: "Temperature", type: "dynamic", dataType: "double", tagName: "temperature", uom: "°C" }] }, null, 2);
 
 function extractFromPayload(text: string): { defs: Def[]; deviceId: string | null } {
@@ -83,6 +88,8 @@ function extractFromPayload(text: string): { defs: Def[]; deviceId: string | nul
     else collect(p);
   }
   const defs: Def[] = Object.entries(seen).map(([key, val]) => {
+    const name = key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+    if (isTimestampKey(key)) return { name, type: "timestamp", dataType: "timestamp", tagName: key };
     const jsType = typeof val;
     let dataType = "text"; let attrType = "dynamic";
     if (jsType === "number") { dataType = Number.isInteger(val as number) ? "number" : "double"; }
@@ -92,35 +99,29 @@ function extractFromPayload(text: string): { defs: Def[]; deviceId: string | nul
       const isSerial = ["serial","mac","id","name","point"].some((s) => lk.includes(s));
       attrType = isSerial ? "static" : "dynamic";
     }
-    const name = key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
     return { name, type: attrType, dataType, tagName: key };
   });
   return { defs, deviceId };
 }
-function parseCsvDefs(text: string): Def[] {
-  const lines = text.trim().split(/\r?\n/);
-  if (lines.length < 2) return [];
-  const headers = lines[0].split(",").map((h) => h.trim().toLowerCase());
-  return lines.slice(1).map((line) => {
-    const cells = line.split(",").map((c) => c.trim().replace(/^"|"$/g, ""));
-    const row: Record<string, string> = {};
-    headers.forEach((h, i) => { row[h] = cells[i] ?? ""; });
-    return {
-      name: row.name || "Unnamed",
-      type: (ATTR_TYPES.includes(row.type as any) ? row.type : "static"),
-      dataType: (ATTR_DATATYPES.includes(row.datatype as any) ? row.datatype : ATTR_DATATYPES.includes(row["data_type"] as any) ? row["data_type"] : "text"),
-      tagName: row.tagname || row["tag_name"] || row.tag || undefined,
-      uom: row.uom || row.unit || undefined,
-      description: row.description || undefined,
-      required: row.required === "true" || row.required === "TRUE" || undefined,
-    } as Def;
-  }).filter((r) => r.name && r.name !== "Unnamed");
+/** CSV pasted on THIS page always lands in the template being edited, so a Device
+ *  Template Name column is optional here — but when one is present, rows naming a
+ *  different template are dropped rather than silently absorbed. */
+function parseCsvDefs(text: string, templateName: string): { defs: Def[]; error: string | null; skipped: number } {
+  const { rows, errors } = parseTemplateCsv(text, { defaultTemplateName: templateName });
+  if (errors.length > 0) return { defs: [], error: errors.slice(0, 4).join(" "), skipped: 0 };
+  const mine = rows.filter((r) => r.templateName.toLowerCase() === templateName.toLowerCase());
+  return {
+    defs: mine.map(({ templateName: _t, line: _l, ...d }) => d),
+    error: null,
+    skipped: rows.length - mine.length,
+  };
 }
 
 export default function AssetTemplateDetails() {
   const [, params] = useRoute("/asset-templates/:id");
   const id = params?.id ?? "";
   const [, navigate] = useLocation();
+  const search = useSearch();
   const { toast } = useToast();
   const qc = useQueryClient();
   const { can } = useCurrentUser();
@@ -128,18 +129,14 @@ export default function AssetTemplateDetails() {
   const [template, setTemplate] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
   const [editedDefs, setEditedDefs] = useState<Def[]>([]);
-  const [defsDirty, setDefsDirty] = useState(false);
   const [savingDefs, setSavingDefs] = useState(false);
-  const [cloning, setCloning] = useState(false);
   const [newDef, setNewDef] = useState<Def>({ name: "", type: "dynamic", dataType: "double", tagName: "", uom: "" });
+  const [manualRowOpen, setManualRowOpen] = useState(false);
+  const nameRefs = useRef<(HTMLInputElement | null)[]>([]);
 
   const deleteTemplate = useDeleteAssetTemplate();
-  const createTemplate = useCreateAssetTemplate();
-  const { data: assets } = useListAssets();
-  const allAssets = (assets as Asset[] | undefined) ?? [];
-  const usingAssets = useMemo(() => allAssets.filter((a) => a.templateId === id), [allAssets, id]);
 
-  // Import dialog state
+  // Inline import panel state
   const [importOpen, setImportOpen] = useState(false);
   const [importTab, setImportTab] = useState<"payload" | "csv" | "json">("payload");
   const [importText, setImportText] = useState("");
@@ -157,25 +154,33 @@ export default function AssetTemplateDetails() {
       .then((r) => (r.ok ? r.json() : null))
       .then((t) => {
         if (cancelled) return;
+        const defs = Array.isArray(t?.attributeDefinitions) ? t.attributeDefinitions : [];
         setTemplate(t);
-        setEditedDefs(Array.isArray(t?.attributeDefinitions) ? t.attributeDefinitions : []);
-        setDefsDirty(false);
+        setEditedDefs(defs);
+        // Open the import panel once, up front, for a brand-new template — it must
+        // NOT be re-derived from editedDefs.length on every render, or it would
+        // snap shut the moment the first attribute is added (mid add-another-one flow).
+        // Also honored when the list page's "Import" action links here directly
+        // (?openImport=1), since the top-level Import button no longer lives on this page.
+        if (defs.length === 0 || new URLSearchParams(search).get("openImport") === "1") setImportOpen(true);
       })
       .finally(() => !cancelled && setLoading(false));
     return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
 
+  /** Manually-typed attributes join the same review list as extracted/parsed ones —
+   * they are only committed to the template once "Add N definitions to template" is
+   * clicked, same as anything pulled from a payload/CSV/JSON paste. */
   function addDefRow() {
     if (!newDef.name.trim()) return;
-    setEditedDefs((p) => [...p, { ...newDef, name: newDef.name.trim() }]);
+    setImportPreview((p) => [...p, { ...newDef, name: newDef.name.trim() }]);
     setNewDef({ name: "", type: "dynamic", dataType: "double", tagName: "", uom: "" });
-    setDefsDirty(true);
   }
-  function removeDef(idx: number) { setEditedDefs((p) => p.filter((_, i) => i !== idx)); setDefsDirty(true); }
+  function removeDef(idx: number) { setEditedDefs((p) => p.filter((_, i) => i !== idx)); }
   function updateDef(idx: number, field: keyof Def, val: any) {
-    setEditedDefs((p) => p.map((d, i) => i === idx ? { ...d, [field]: val } : d)); setDefsDirty(true);
+    setEditedDefs((p) => p.map((d, i) => i === idx ? { ...d, [field]: val } : d));
   }
-
   async function saveDefs() {
     if (!template) return;
     setSavingDefs(true);
@@ -188,63 +193,10 @@ export default function AssetTemplateDetails() {
       if (!res.ok) { toast({ title: "Save failed", description: data.error, variant: "destructive" }); return; }
       toast({ title: "Template saved", description: `${editedDefs.length} attribute definition(s)` });
       qc.invalidateQueries({ queryKey: getListAssetTemplatesQueryKey() });
-      setTemplate({ ...template, attributeDefinitions: editedDefs, attributeCount: editedDefs.length });
-      setDefsDirty(false);
+      // Saving ends the editing session — go back to the list, where the refreshed
+      // attribute count confirms the write landed.
+      navigate("/asset-templates");
     } finally { setSavingDefs(false); }
-  }
-
-  function exportDefsExcel() {
-    if (!editedDefs.length) return;
-    const esc = (s: any) => String(s ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    const headers = ["Attribute Name", "Type", "Data Type", "Tag", "UoM", "Required", "Description"];
-    const rows = editedDefs.map((d) => [
-      d.name, d.type, d.dataType, d.tagName ?? "", d.uom ?? "", d.required ? "true" : "", d.description ?? "",
-    ]);
-    // HTML-table workbook — opens natively in Excel with proper columns, no deps/CSP issues.
-    const table =
-      `<table border="1"><thead><tr>${headers.map((h) => `<th>${esc(h)}</th>`).join("")}</tr></thead>` +
-      `<tbody>${rows.map((r) => `<tr>${r.map((c) => `<td>${esc(c)}</td>`).join("")}</tr>`).join("")}</tbody></table>`;
-    const html = `<html xmlns:x="urn:schemas-microsoft-com:office:excel"><head><meta charset="utf-8"></head><body>${table}</body></html>`;
-    const url = URL.createObjectURL(new Blob([html], { type: "application/vnd.ms-excel" }));
-    const a = document.createElement("a");
-    a.href = url; a.download = `${template?.name ?? "template"}_schema.xls`;
-    a.click(); URL.revokeObjectURL(url);
-  }
-
-  function exportDefsCsv() {
-    if (!editedDefs.length) return;
-    const esc = (s: any) => {
-      const v = String(s ?? "");
-      return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
-    };
-    // Header matches the CSV import parser (parseCsvDefs) so it round-trips.
-    const headers = ["name", "type", "dataType", "tagName", "uom", "required", "description"];
-    const rows = editedDefs.map((d) => [
-      d.name, d.type, d.dataType, d.tagName ?? "", d.uom ?? "", d.required ? "true" : "", d.description ?? "",
-    ]);
-    const csv = [headers, ...rows].map((r) => r.map(esc).join(",")).join("\n");
-    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
-    const a = document.createElement("a");
-    a.href = url; a.download = `${template?.name ?? "template"}_schema.csv`;
-    a.click(); URL.revokeObjectURL(url);
-  }
-
-  async function cloneTemplate() {
-    if (!template) return;
-    setCloning(true);
-    try {
-      const res = await createTemplate.mutateAsync({ data: { name: `Copy of ${template.name}` } });
-      const newId = (res as any).id;
-      if (newId && editedDefs.length > 0) {
-        await apiFetch(`/api/asset-templates/${newId}`, {
-          method: "PUT", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ attributeDefinitions: editedDefs }), credentials: "include",
-        });
-      }
-      qc.invalidateQueries({ queryKey: getListAssetTemplatesQueryKey() });
-      toast({ title: "Template cloned", description: `Created "Copy of ${template.name}"` });
-      if (newId) navigate(`/asset-templates/${newId}`);
-    } finally { setCloning(false); }
   }
 
   function handleCsvFile(file: File) {
@@ -261,9 +213,15 @@ export default function AssetTemplateDetails() {
         if (defs.length === 0) throw new Error("No metric keys found in payload.");
         setImportPreview(defs); setDetectedDeviceId(deviceId);
       } else if (importTab === "csv") {
-        const rows = parseCsvDefs(importText);
-        if (rows.length === 0) throw new Error("No rows found. Check the CSV format.");
-        setImportPreview(rows);
+        const { defs, error, skipped } = parseCsvDefs(importText, template?.name ?? "");
+        if (error) throw new Error(error);
+        if (defs.length === 0) {
+          throw new Error(skipped > 0
+            ? `No rows for "${template?.name}" — ${skipped} row(s) name a different template. Import those from the Asset Templates page.`
+            : "No rows found. Check the CSV format.");
+        }
+        if (skipped > 0) toast({ title: `Skipped ${skipped} row(s)`, description: "They belong to a different Device Template Name." });
+        setImportPreview(defs);
       } else {
         const parsed = JSON.parse(importText);
         let arr: Def[]; let did: string | null = null;
@@ -278,7 +236,6 @@ export default function AssetTemplateDetails() {
   function handleImportConfirm() {
     const finalDefs = importPreview.map((d, i) => previewUoms[i] !== undefined ? { ...d, uom: previewUoms[i] } : d);
     setEditedDefs((p) => [...p, ...finalDefs]);
-    setDefsDirty(true);
     const did = detectedDeviceId;
     closeImport();
     if (did) {
@@ -305,7 +262,6 @@ export default function AssetTemplateDetails() {
   );
 
   const summary = [
-    { label: "Assets Using", value: String(usingAssets.length), icon: Boxes },
     { label: "Total Attributes", value: String(editedDefs.length), icon: Hash },
     { label: "Created By", value: "—", icon: User },
     { label: "Created On", value: template.createdAt ? format(new Date(template.createdAt), "yyyy-MM-dd") : "—", icon: Calendar },
@@ -313,7 +269,7 @@ export default function AssetTemplateDetails() {
 
   return (
     <div className="p-6 space-y-4 max-w-6xl mx-auto">
-      <button onClick={() => (window.history.length > 1 ? window.history.back() : navigate("/asset-templates"))} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+      <button onClick={() => navigate("/asset-templates")} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="w-4 h-4" /> Back
       </button>
       {/* Breadcrumb + actions */}
@@ -324,19 +280,8 @@ export default function AssetTemplateDetails() {
           <span className="text-foreground font-medium">{template.name}</span>
         </div>
         <div className="flex items-center gap-2">
-          <Button size="sm" variant="outline" className="h-8 text-xs" onClick={exportDefsExcel} disabled={editedDefs.length === 0}>
-            <Download className="w-3.5 h-3.5 mr-1" /> Export to Excel
-          </Button>
-          <Button size="sm" variant="outline" className="h-8 text-xs" onClick={exportDefsCsv} disabled={editedDefs.length === 0}>
-            <Download className="w-3.5 h-3.5 mr-1" /> Export to CSV
-          </Button>
           {can("manage_templates") && (
-            <Button size="sm" variant="outline" className="h-8 text-xs" onClick={cloneTemplate} disabled={cloning}>
-              <Copy className="w-3.5 h-3.5 mr-1" /> {cloning ? "Cloning…" : "Clone"}
-            </Button>
-          )}
-          {can("manage_templates") && (
-            <Button size="sm" className="h-8 text-xs" onClick={saveDefs} disabled={!defsDirty || savingDefs}>
+            <Button size="sm" className="h-8 text-xs" onClick={saveDefs} disabled={savingDefs}>
               <Save className="w-3.5 h-3.5 mr-1" />{savingDefs ? "Saving…" : "Save"}
             </Button>
           )}
@@ -361,7 +306,7 @@ export default function AssetTemplateDetails() {
       </div>
 
       {/* Summary cards */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         {summary.map((s) => (
           <Card key={s.label} className="shadow-sm">
             <CardContent className="p-4 flex items-center gap-3">
@@ -375,148 +320,35 @@ export default function AssetTemplateDetails() {
         ))}
       </div>
 
-      {/* Tabs */}
-      <Tabs defaultValue="attributes">
-        <TabsList>
-          <TabsTrigger value="assets" className="text-xs">Assets ({usingAssets.length})</TabsTrigger>
-          <TabsTrigger value="attributes" className="text-xs">Attributes ({editedDefs.length})</TabsTrigger>
-        </TabsList>
+      {/* Attributes panel */}
+      <Card className="shadow-sm overflow-hidden">
+        {editedDefs.length > 0 && (
+          <div className="p-3 border-b border-border bg-muted/30 flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">{editedDefs.length} attribute definition{editedDefs.length !== 1 ? "s" : ""}</span>
+          </div>
+        )}
 
-        {/* Assets tab */}
-        <TabsContent value="assets" className="mt-3">
-          <AssetsUsingTable assets={usingAssets} allAssets={allAssets} onOpen={(aid) => navigate(`/assets/${aid}`)} />
-        </TabsContent>
-
-        {/* Attributes tab */}
-        <TabsContent value="attributes" className="mt-3">
-          <Card className="shadow-sm overflow-hidden">
-            <div className="p-3 flex items-center justify-between border-b border-border bg-muted/30">
-              <span className="text-xs text-muted-foreground">{editedDefs.length} attribute definition{editedDefs.length !== 1 ? "s" : ""}</span>
-              {can("manage_templates") && (
-                <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => { setImportOpen(true); setImportTab("payload"); setImportText(""); setImportPreview([]); setImportError(null); }}>
-                  <Zap className="w-3.5 h-3.5 mr-1" /> Import / Parse
-                </Button>
-              )}
-            </div>
-            <div className="overflow-auto">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-border bg-muted/50 text-muted-foreground">
-                    <th className="text-left px-3 py-2.5 font-medium min-w-36">Attribute Name</th>
-                    <th className="text-left px-3 py-2.5 font-medium w-28">Data Type</th>
-                    <th className="text-left px-3 py-2.5 font-medium w-20">Unit</th>
-                    <th className="text-left px-3 py-2.5 font-medium w-20">Required</th>
-                    <th className="text-left px-3 py-2.5 font-medium min-w-48">Description</th>
-                    <th className="text-left px-3 py-2.5 font-medium min-w-32">Tag (relative)</th>
-                    <th className="px-3 py-2.5 w-8" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {editedDefs.length === 0 ? (
-                    <tr><td colSpan={7} className="px-4 py-10 text-center text-muted-foreground">
-                      <LayoutTemplate className="w-7 h-7 mx-auto mb-3 opacity-20" />
-                      <p className="text-sm font-medium mb-1">No attribute definitions yet</p>
-                      <p className="text-xs opacity-60 mb-4">Paste a device payload to extract all fields automatically.</p>
-                      {can("manage_templates") && (
-                        <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => { setImportOpen(true); setImportTab("payload"); }}>
-                          <Zap className="w-3 h-3 mr-1.5" /> Paste Device Payload
-                        </Button>
-                      )}
-                    </td></tr>
-                  ) : editedDefs.map((def, idx) => (
-                    <tr key={idx} className="border-b border-border/50 hover:bg-muted/20 group">
-                      <td className="px-2 py-1">
-                        <Input value={def.name} onChange={(e) => updateDef(idx, "name", e.target.value)} disabled={!can("manage_templates")}
-                          className="h-7 text-xs border-0 bg-transparent focus:bg-background focus:border focus:border-border px-1" />
-                      </td>
-                      <td className="px-2 py-1">
-                        <Select value={def.dataType} onValueChange={(v) => updateDef(idx, "dataType", v)}>
-                          <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
-                          <SelectContent>{ATTR_DATATYPES.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}</SelectContent>
-                        </Select>
-                      </td>
-                      <td className="px-2 py-1">
-                        <Input value={def.uom ?? ""} onChange={(e) => updateDef(idx, "uom", e.target.value)} placeholder="—" disabled={!can("manage_templates")}
-                          className="h-7 text-xs border-0 bg-transparent focus:bg-background focus:border focus:border-border px-1" />
-                      </td>
-                      <td className="px-2 py-1">
-                        <Switch checked={!!def.required} onCheckedChange={(v) => updateDef(idx, "required", v)} disabled={!can("manage_templates")} className="scale-75" />
-                      </td>
-                      <td className="px-2 py-1">
-                        <Input value={def.description ?? ""} onChange={(e) => updateDef(idx, "description", e.target.value)} placeholder="—" disabled={!can("manage_templates")}
-                          className="h-7 text-xs border-0 bg-transparent focus:bg-background focus:border focus:border-border px-1" />
-                      </td>
-                      <td className="px-2 py-1">
-                        <Input value={def.tagName ?? ""} onChange={(e) => updateDef(idx, "tagName", e.target.value)} placeholder="metric_key" disabled={!can("manage_templates")}
-                          className="h-7 text-xs font-mono border-0 bg-transparent focus:bg-background focus:border focus:border-border px-1" />
-                      </td>
-                      <td className="px-2 py-1">
-                        {can("manage_templates") && (
-                          <button onClick={() => removeDef(idx)} className="opacity-0 group-hover:opacity-100 text-muted-foreground hover:text-destructive transition-all">
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                  {/* New row */}
-                  {can("manage_templates") && (
-                    <tr className="bg-muted/10">
-                      <td className="px-2 py-1">
-                        <Input value={newDef.name} onChange={(e) => setNewDef((d) => ({ ...d, name: e.target.value }))} placeholder="+ Add attribute" className="h-7 text-xs" onKeyDown={(e) => { if (e.key === "Enter") addDefRow(); }} />
-                      </td>
-                      <td className="px-2 py-1">
-                        <Select value={newDef.dataType} onValueChange={(v) => setNewDef((d) => ({ ...d, dataType: v }))}>
-                          <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
-                          <SelectContent>{ATTR_DATATYPES.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}</SelectContent>
-                        </Select>
-                      </td>
-                      <td className="px-2 py-1"><Input value={newDef.uom ?? ""} onChange={(e) => setNewDef((d) => ({ ...d, uom: e.target.value }))} placeholder="unit" className="h-7 text-xs" /></td>
-                      <td className="px-2 py-1"><Switch checked={!!newDef.required} onCheckedChange={(v) => setNewDef((d) => ({ ...d, required: v }))} className="scale-75" /></td>
-                      <td className="px-2 py-1"><Input value={newDef.description ?? ""} onChange={(e) => setNewDef((d) => ({ ...d, description: e.target.value }))} placeholder="description" className="h-7 text-xs" /></td>
-                      <td className="px-2 py-1"><Input value={newDef.tagName ?? ""} onChange={(e) => setNewDef((d) => ({ ...d, tagName: e.target.value }))} placeholder="metric_key" className="h-7 text-xs font-mono" onKeyDown={(e) => { if (e.key === "Enter") addDefRow(); }} /></td>
-                      <td className="px-2 py-1"><Button size="sm" variant="outline" className="h-7 w-7 p-0" onClick={addDefRow} disabled={!newDef.name.trim()}><Plus className="w-3 h-3" /></Button></td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-            {defsDirty && (
-              <div className="px-4 py-2 bg-amber-50 dark:bg-amber-950/30 border-t border-amber-200 dark:border-amber-800/40 flex items-center justify-between">
-                <p className="text-xs text-amber-700 dark:text-amber-400 flex items-center gap-1.5"><AlertTriangle className="w-3 h-3" /> Unsaved changes — click Save to persist</p>
-                <Button size="sm" className="h-6 text-xs" onClick={saveDefs} disabled={savingDefs}><Save className="w-3 h-3 mr-1" />{savingDefs ? "Saving…" : "Save now"}</Button>
+        {/* Inline Import / Parse panel — opened by default for a brand-new template (see the fetch effect above) so the fastest path (paste a payload) is visible immediately with no extra click. For an existing template it is reached from the list page's Import action (?openImport=1) — this page has no Import button of its own. Deliberately keyed off `importOpen` alone, NOT editedDefs.length — re-deriving it from the attribute count would snap the panel shut the moment the first attribute is added, cutting off "add one more" mid-flow. */}
+        {importOpen && (
+          <div className="border-b border-border">
+            <div className="px-4 pt-3 pb-2 flex items-start justify-between gap-2">
+              <div>
+                <p className="text-sm font-semibold flex items-center gap-1.5"><Zap className="w-4 h-4 text-primary" /> Import Attribute Definitions</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Three ways to populate a template. The fastest: paste a raw device payload.</p>
               </div>
-            )}
-          </Card>
-        </TabsContent>
-      </Tabs>
-
-      {/* Import / Parse dialog */}
-      <Dialog open={importOpen} onOpenChange={(v) => { if (!v) closeImport(); }}>
-        <DialogContent className="max-w-2xl flex flex-col max-h-[90vh] p-0 gap-0">
-          <DialogHeader className="px-6 pt-6 pb-3 shrink-0">
-            <DialogTitle className="flex items-center gap-2"><Zap className="w-4 h-4 text-primary" /> Import Attribute Definitions</DialogTitle>
-            <DialogDescription>Three ways to populate a template. The fastest: paste a raw device payload.</DialogDescription>
-          </DialogHeader>
-          <Tabs value={importTab} onValueChange={(v) => { setImportTab(v as any); setImportText(""); setImportPreview([]); setImportError(null); setDetectedDeviceId(null); setPreviewUoms({}); }} className="flex flex-col flex-1 min-h-0">
-            <div className="px-6 shrink-0">
-              <TabsList className="grid grid-cols-3 w-full">
+              <button onClick={closeImport} className="text-muted-foreground hover:text-foreground shrink-0"><X className="w-4 h-4" /></button>
+            </div>
+          <Tabs value={importTab} onValueChange={(v) => { setImportTab(v as any); setImportText(""); setImportPreview([]); setImportError(null); setDetectedDeviceId(null); setPreviewUoms({}); }}>
+            <div className="px-4">
+              <TabsList className="grid grid-cols-3 w-full max-w-md">
                 <TabsTrigger value="payload" className="text-xs gap-1.5"><Zap className="w-3 h-3" /> Device Payload</TabsTrigger>
                 <TabsTrigger value="csv" className="text-xs gap-1.5"><FileSpreadsheet className="w-3 h-3" /> CSV</TabsTrigger>
                 <TabsTrigger value="json" className="text-xs gap-1.5"><Braces className="w-3 h-3" /> Schema JSON</TabsTrigger>
               </TabsList>
             </div>
             {/* Device Payload */}
-            <TabsContent value="payload" className="flex flex-col flex-1 min-h-0 mt-0 data-[state=inactive]:hidden">
-              <div className="flex-1 overflow-y-auto px-6 py-3 space-y-3">
-                <div className="rounded-md bg-blue-50 dark:bg-blue-950/30 border border-blue-200 dark:border-blue-800/40 p-3 space-y-1.5 text-xs">
-                  <p className="font-semibold text-blue-800 dark:text-blue-300 flex items-center gap-1.5"><Info className="w-3.5 h-3.5" /> How this works</p>
-                  <ul className="text-blue-700 dark:text-blue-400 space-y-1">
-                    <li>• Paste the raw JSON your device sends to the ingest endpoint</li>
-                    <li>• Every field in <code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">data</code>/<code className="bg-blue-100 dark:bg-blue-900 px-1 rounded">metrics</code> becomes an attribute</li>
-                    <li>• Tag names stay relative; the asset identifier is prepended on apply</li>
-                  </ul>
-                </div>
+            <TabsContent value="payload" className="mt-0">
+              <div className="px-4 py-3 space-y-3">
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">Paste Device Payload</label>
                   <button className="text-xs text-primary hover:underline" onClick={() => setImportText(PAYLOAD_EXAMPLE)}>Load example</button>
@@ -534,18 +366,19 @@ export default function AssetTemplateDetails() {
                     <PreviewTable rows={importPreview} uomOverrides={previewUoms}
                       onUomChange={(i, v) => setPreviewUoms((p) => ({ ...p, [i]: v }))}
                       onTypeChange={(i, v) => setImportPreview((p) => p.map((d, idx) => idx === i ? { ...d, type: v } : d))}
+                      onEdit={(i, patch) => setImportPreview((p) => p.map((d, idx) => idx === i ? { ...d, ...patch } : d))}
                       onRemove={(i) => setImportPreview((p) => p.filter((_, idx) => idx !== i))} />
                   </div>
                 )}
               </div>
-              <ImportFooter onCancel={closeImport} onConfirm={handleImportConfirm} count={importPreview.length} />
             </TabsContent>
             {/* CSV */}
-            <TabsContent value="csv" className="flex flex-col flex-1 min-h-0 mt-0 data-[state=inactive]:hidden">
-              <div className="flex-1 overflow-y-auto px-6 py-3 space-y-3">
-                <div className="rounded-md bg-muted/40 border border-border p-3 text-xs text-muted-foreground">
+            <TabsContent value="csv" className="mt-0">
+              <div className="px-4 py-3 space-y-3">
+                <div className="rounded-md bg-muted/40 border border-border p-3 text-xs text-muted-foreground space-y-1">
                   <p className="font-semibold text-foreground">Columns</p>
-                  <p><code className="bg-muted px-1 rounded">name</code> · <code className="bg-muted px-1 rounded">type</code> · <code className="bg-muted px-1 rounded">dataType</code> · <code className="bg-muted px-1 rounded">tagName</code> · <code className="bg-muted px-1 rounded">uom</code> · <code className="bg-muted px-1 rounded">required</code> · <code className="bg-muted px-1 rounded">description</code></p>
+                  <p>{TEMPLATE_CSV_HEADERS.map((h) => <code key={h} className="bg-muted px-1 rounded mr-1">{h}</code>)}</p>
+                  <p className="opacity-70">Tag Name must match the incoming payload key. Rows naming a different <span className="font-medium">Device Template Name</span> are skipped here — import a multi-template sheet from the Asset Templates page instead.</p>
                 </div>
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">CSV Data</label>
@@ -555,21 +388,21 @@ export default function AssetTemplateDetails() {
                     <button className="text-xs text-primary hover:underline" onClick={() => setImportText(CSV_EXAMPLE)}>Load example</button>
                   </div>
                 </div>
-                <Textarea value={importText} onChange={(e) => { setImportText(e.target.value); setImportPreview([]); setImportError(null); }} placeholder={"name,type,dataType,tagName,uom\nTemperature,dynamic,double,temperature,°C"} className="font-mono text-xs h-40 resize-none" />
+                <Textarea value={importText} onChange={(e) => { setImportText(e.target.value); setImportPreview([]); setImportError(null); }} placeholder={`${TEMPLATE_CSV_HEADERS.join(",")}\nTemperature,dynamic,${template?.name ?? "Section A"},temperature,double,°C,2,TRUE`} className="font-mono text-xs h-40 resize-none" />
                 {importError && <p className="text-xs text-destructive flex items-center gap-1.5"><AlertTriangle className="w-3 h-3" />{importError}</p>}
                 <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleParse} disabled={!importText.trim()}>Preview</Button>
                 {importPreview.length > 0 && (
                   <PreviewTable rows={importPreview} uomOverrides={previewUoms}
                     onUomChange={(i, v) => setPreviewUoms((p) => ({ ...p, [i]: v }))}
                     onTypeChange={(i, v) => setImportPreview((p) => p.map((d, idx) => idx === i ? { ...d, type: v } : d))}
+                    onEdit={(i, patch) => setImportPreview((p) => p.map((d, idx) => idx === i ? { ...d, ...patch } : d))}
                     onRemove={(i) => setImportPreview((p) => p.filter((_, idx) => idx !== i))} />
                 )}
               </div>
-              <ImportFooter onCancel={closeImport} onConfirm={handleImportConfirm} count={importPreview.length} />
             </TabsContent>
             {/* JSON */}
-            <TabsContent value="json" className="flex flex-col flex-1 min-h-0 mt-0 data-[state=inactive]:hidden">
-              <div className="flex-1 overflow-y-auto px-6 py-3 space-y-3">
+            <TabsContent value="json" className="mt-0">
+              <div className="px-4 py-3 space-y-3">
                 <div className="rounded-md bg-muted/40 border border-border p-3 text-xs text-muted-foreground">
                   <p className="font-semibold text-foreground">Schema JSON format</p>
                   <p className="opacity-60">Bare array, or envelope <code className="bg-muted px-1 rounded">{`{ "deviceId": "...", "attributes": [...] }`}</code>.</p>
@@ -585,33 +418,155 @@ export default function AssetTemplateDetails() {
                   <PreviewTable rows={importPreview} uomOverrides={previewUoms}
                     onUomChange={(i, v) => setPreviewUoms((p) => ({ ...p, [i]: v }))}
                     onTypeChange={(i, v) => setImportPreview((p) => p.map((d, idx) => idx === i ? { ...d, type: v } : d))}
+                    onEdit={(i, patch) => setImportPreview((p) => p.map((d, idx) => idx === i ? { ...d, ...patch } : d))}
                     onRemove={(i) => setImportPreview((p) => p.filter((_, idx) => idx !== i))} />
                 )}
               </div>
-              <ImportFooter onCancel={closeImport} onConfirm={handleImportConfirm} count={importPreview.length} />
             </TabsContent>
           </Tabs>
-        </DialogContent>
-      </Dialog>
+
+          {/* Manual entry — collapsed to a single button until the user opts in. Columns match
+              PreviewTable exactly (Name/Type/Data Type/Tag/UoM) so a manually-typed attribute
+              lands as just another row in that same review list, not a separately-structured one. */}
+          {can("manage_templates") && (
+          <div className="px-4 pb-1">
+            {manualRowOpen ? (
+              <div className="rounded border border-border overflow-hidden">
+                <table className="w-full text-xs">
+                  <tbody>
+                    <tr className="bg-muted/10">
+                      <td className="px-3 py-1.5">
+                        <Input value={newDef.name} onChange={(e) => setNewDef((d) => ({ ...d, name: e.target.value }))} placeholder="Attribute name" className="h-7 text-xs" onKeyDown={(e) => { if (e.key === "Enter") addDefRow(); }} autoFocus />
+                      </td>
+                      <td className="px-2 py-1 w-24">
+                        <Select value={newDef.type} onValueChange={(v) => setNewDef((d) => ({ ...d, type: v }))}>
+                          <SelectTrigger className="h-6 text-xs py-0"><SelectValue /></SelectTrigger>
+                          <SelectContent>{ATTR_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
+                        </Select>
+                      </td>
+                      <td className="px-2 py-1 w-20">
+                        <Select value={newDef.dataType} onValueChange={(v) => setNewDef((d) => ({ ...d, dataType: v }))}>
+                          <SelectTrigger className="h-6 text-xs py-0"><SelectValue /></SelectTrigger>
+                          <SelectContent>{ATTR_DATATYPES.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}</SelectContent>
+                        </Select>
+                      </td>
+                      <td className="px-2 py-1"><Input value={newDef.tagName ?? ""} onChange={(e) => setNewDef((d) => ({ ...d, tagName: e.target.value }))} placeholder="tag_name" className="h-7 text-xs font-mono" onKeyDown={(e) => { if (e.key === "Enter") addDefRow(); }} /></td>
+                      <td className="px-2 py-1 w-20"><Input value={newDef.uom ?? ""} onChange={(e) => setNewDef((d) => ({ ...d, uom: e.target.value }))} placeholder="unit" className="h-6 text-xs px-1 py-0" /></td>
+                      <td className="px-2 py-1 w-8"><Button size="sm" variant="outline" className="h-7 w-7 p-0" onClick={addDefRow} disabled={!newDef.name.trim()}><Plus className="w-3 h-3" /></Button></td>
+                      <td className="px-2 py-1 w-8"><button onClick={() => setManualRowOpen(false)} className="text-muted-foreground hover:text-foreground"><X className="w-3.5 h-3.5" /></button></td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setManualRowOpen(true)}>
+                <Plus className="w-3 h-3 mr-1" /> Add Metric
+              </Button>
+            )}
+          </div>
+          )}
+
+          <ImportFooter onCancel={closeImport} onConfirm={handleImportConfirm} count={importPreview.length} />
+          </div>
+        )}
+
+        <div className="overflow-auto">
+          <table className="w-full text-xs">
+                {/* Column order mirrors the export CSV (minus Device Template Name, which
+                    is this template) so the sheet and this table read the same way. */}
+                {editedDefs.length > 0 && (
+                  <thead>
+                    <tr className="border-b border-border bg-muted/50 text-muted-foreground">
+                      <th className="text-left px-3 py-2.5 font-medium min-w-36">Attribute Name</th>
+                      <th className="text-left px-3 py-2.5 font-medium w-28">Type</th>
+                      <th className="text-left px-3 py-2.5 font-medium min-w-32">Tag (relative)</th>
+                      <th className="text-left px-3 py-2.5 font-medium w-28">Data Type</th>
+                      <th className="text-left px-3 py-2.5 font-medium w-20">Unit</th>
+                      <th className="text-left px-3 py-2.5 font-medium w-16">Decimal</th>
+                      <th className="text-left px-3 py-2.5 font-medium w-20">Required</th>
+                      <th className="text-left px-3 py-2.5 font-medium min-w-40">Description</th>
+                      <th className="px-3 py-2.5 w-14" />
+                    </tr>
+                  </thead>
+                )}
+                <tbody>
+                  {editedDefs.map((def, idx) => (
+                    <tr key={idx} className="border-b border-border/50 hover:bg-muted/20 group">
+                      <td className="px-2 py-1">
+                        <Input value={def.name} onChange={(e) => updateDef(idx, "name", e.target.value)} disabled={!can("manage_templates")}
+                          ref={(el) => { nameRefs.current[idx] = el; }}
+                          className="h-7 text-xs border-0 bg-transparent focus:bg-background focus:border focus:border-border px-1" />
+                      </td>
+                      <td className="px-2 py-1">
+                        <Select value={def.type} onValueChange={(v) => updateDef(idx, "type", v)}>
+                          <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
+                          <SelectContent>{ATTR_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
+                        </Select>
+                      </td>
+                      <td className="px-2 py-1">
+                        <Input value={def.tagName ?? ""} onChange={(e) => updateDef(idx, "tagName", e.target.value)} placeholder="metric_key" disabled={!can("manage_templates")}
+                          className="h-7 text-xs font-mono border-0 bg-transparent focus:bg-background focus:border focus:border-border px-1" />
+                      </td>
+                      <td className="px-2 py-1">
+                        <Select value={def.dataType} onValueChange={(v) => updateDef(idx, "dataType", v)}>
+                          <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
+                          <SelectContent>{ATTR_DATATYPES.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}</SelectContent>
+                        </Select>
+                      </td>
+                      <td className="px-2 py-1">
+                        <Input value={def.uom ?? ""} onChange={(e) => updateDef(idx, "uom", e.target.value)} placeholder="—" disabled={!can("manage_templates")}
+                          className="h-7 text-xs border-0 bg-transparent focus:bg-background focus:border focus:border-border px-1" />
+                      </td>
+                      <td className="px-2 py-1">
+                        {/* Blank = show the raw value; 0–10 rounds the displayed number. */}
+                        <Input type="number" min={0} max={10} value={def.decimalPlaces ?? ""} disabled={!can("manage_templates")}
+                          onChange={(e) => updateDef(idx, "decimalPlaces", e.target.value === "" ? undefined : Math.max(0, Math.min(10, Number(e.target.value))))}
+                          placeholder="—" className="h-7 text-xs border-0 bg-transparent focus:bg-background focus:border focus:border-border px-1" />
+                      </td>
+                      <td className="px-2 py-1">
+                        <Switch checked={!!def.required} onCheckedChange={(v) => updateDef(idx, "required", v)} disabled={!can("manage_templates")} className="scale-75" />
+                      </td>
+                      <td className="px-2 py-1">
+                        <Input value={def.description ?? ""} onChange={(e) => updateDef(idx, "description", e.target.value)} placeholder="—" disabled={!can("manage_templates")}
+                          className="h-7 text-xs border-0 bg-transparent focus:bg-background focus:border focus:border-border px-1" />
+                      </td>
+                      <td className="px-2 py-1">
+                        {can("manage_templates") && (
+                          <div className="flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-all">
+                            <button onClick={() => nameRefs.current[idx]?.focus()} className="text-muted-foreground hover:text-primary">
+                              <Pencil className="w-3 h-3" />
+                            </button>
+                            <button onClick={() => removeDef(idx)} className="text-muted-foreground hover:text-destructive">
+                              <Trash2 className="w-3 h-3" />
+                            </button>
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+      </Card>
     </div>
   );
 }
 
 function ImportFooter({ onCancel, onConfirm, count }: { onCancel: () => void; onConfirm: () => void; count: number }) {
   return (
-    <div className="px-6 py-4 border-t border-border shrink-0">
-      <DialogFooter>
-        <Button variant="outline" onClick={onCancel}>Cancel</Button>
-        <Button onClick={onConfirm} disabled={count === 0}>Add {count || ""} definition{count !== 1 ? "s" : ""} to template</Button>
-      </DialogFooter>
+    <div className="px-4 py-3 border-t border-border flex items-center justify-end gap-2">
+      <Button variant="outline" size="sm" onClick={onCancel}>Cancel</Button>
+      <Button size="sm" onClick={onConfirm} disabled={count === 0}>Add {count || ""} definition{count !== 1 ? "s" : ""} to template</Button>
     </div>
   );
 }
 
-function PreviewTable({ rows, uomOverrides, onUomChange, onTypeChange, onRemove }: {
+function PreviewTable({ rows, uomOverrides, onUomChange, onTypeChange, onEdit, onRemove }: {
   rows: Def[]; uomOverrides: Record<number, string>;
-  onUomChange: (i: number, v: string) => void; onTypeChange: (i: number, v: string) => void; onRemove: (i: number) => void;
+  onUomChange: (i: number, v: string) => void; onTypeChange: (i: number, v: string) => void;
+  onEdit: (i: number, patch: Partial<Def>) => void; onRemove: (i: number) => void;
 }) {
+  const [editingIdx, setEditingIdx] = useState<number | null>(null);
   return (
     <div className="rounded border border-border overflow-hidden">
       <div className="bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground flex items-center gap-2">
@@ -622,29 +577,52 @@ function PreviewTable({ rows, uomOverrides, onUomChange, onTypeChange, onRemove 
           <thead>
             <tr className="border-b border-border/50 bg-muted/30 text-muted-foreground">
               <th className="text-left px-3 py-1.5 font-medium">Name</th>
-              <th className="text-left px-3 py-1.5 font-medium w-24">Type</th>
-              <th className="text-left px-3 py-1.5 font-medium w-20">Data Type</th>
+              <th className="text-left px-3 py-1.5 font-medium w-28">Type</th>
+              <th className="text-left px-3 py-1.5 font-medium w-24">Data Type</th>
               <th className="text-left px-3 py-1.5 font-medium">Tag (relative)</th>
               <th className="text-left px-3 py-1.5 font-medium w-20">UoM</th>
-              <th className="px-2 py-1.5 w-6" />
+              <th className="px-2 py-1.5 w-12" />
             </tr>
           </thead>
           <tbody>
-            {rows.map((r, i) => (
-              <tr key={i} className="border-b border-border/50 last:border-0 hover:bg-muted/20">
-                <td className="px-3 py-1.5 font-medium">{r.name}</td>
-                <td className="px-2 py-1">
-                  <Select value={r.type} onValueChange={(v) => onTypeChange(i, v)}>
-                    <SelectTrigger className="h-6 text-xs py-0"><SelectValue /></SelectTrigger>
-                    <SelectContent><SelectItem value="static">static</SelectItem><SelectItem value="dynamic">dynamic</SelectItem><SelectItem value="metric">metric</SelectItem></SelectContent>
-                  </Select>
-                </td>
-                <td className="px-3 py-1.5 text-muted-foreground">{r.dataType}</td>
-                <td className="px-3 py-1.5 font-mono text-muted-foreground">{r.tagName || "—"}</td>
-                <td className="px-2 py-1"><Input value={uomOverrides[i] ?? r.uom ?? ""} onChange={(e) => onUomChange(i, e.target.value)} placeholder="unit" className="h-6 text-xs px-1 py-0" /></td>
-                <td className="px-2 py-1"><button onClick={() => onRemove(i)} className="text-muted-foreground hover:text-destructive"><Trash2 className="w-3 h-3" /></button></td>
-              </tr>
-            ))}
+            {rows.map((r, i) => {
+              const editing = editingIdx === i;
+              return (
+                <tr key={i} className="border-b border-border/50 last:border-0 hover:bg-muted/20">
+                  <td className="px-3 py-1.5 font-medium">
+                    {editing ? (
+                      <Input value={r.name} onChange={(e) => onEdit(i, { name: e.target.value })} className="h-6 text-xs px-1 py-0" />
+                    ) : r.name}
+                  </td>
+                  <td className="px-2 py-1">
+                    <Select value={r.type} onValueChange={(v) => onTypeChange(i, v)}>
+                      <SelectTrigger className="h-6 text-xs py-0"><SelectValue /></SelectTrigger>
+                      <SelectContent>{ATTR_TYPES.map((t) => <SelectItem key={t} value={t}>{t}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </td>
+                  {/* Data type is always editable — the value-sniffed guess is only a
+                      starting point (an int-looking first sample is often a double). */}
+                  <td className="px-2 py-1">
+                    <Select value={r.dataType} onValueChange={(v) => onEdit(i, { dataType: v })}>
+                      <SelectTrigger className="h-6 text-xs py-0"><SelectValue /></SelectTrigger>
+                      <SelectContent>{ATTR_DATATYPES.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}</SelectContent>
+                    </Select>
+                  </td>
+                  <td className="px-3 py-1.5 font-mono text-muted-foreground">
+                    {editing ? (
+                      <Input value={r.tagName ?? ""} onChange={(e) => onEdit(i, { tagName: e.target.value })} placeholder="tag_name" className="h-6 text-xs font-mono px-1 py-0" />
+                    ) : (r.tagName || "—")}
+                  </td>
+                  <td className="px-2 py-1"><Input value={uomOverrides[i] ?? r.uom ?? ""} onChange={(e) => onUomChange(i, e.target.value)} placeholder="unit" className="h-6 text-xs px-1 py-0" /></td>
+                  <td className="px-2 py-1">
+                    <div className="flex items-center gap-1.5">
+                      <button onClick={() => setEditingIdx(editing ? null : i)} className={cn("text-muted-foreground hover:text-primary", editing && "text-primary")}><Pencil className="w-3 h-3" /></button>
+                      <button onClick={() => onRemove(i)} className="text-muted-foreground hover:text-destructive"><Trash2 className="w-3 h-3" /></button>
+                    </div>
+                  </td>
+                </tr>
+              );
+            })}
           </tbody>
         </table>
       </div>
@@ -652,43 +630,3 @@ function PreviewTable({ rows, uomOverrides, onUomChange, onTypeChange, onRemove 
   );
 }
 
-function AssetsUsingTable({ assets, allAssets, onOpen }: { assets: Asset[]; allAssets: Asset[]; onOpen: (id: string) => void }) {
-  const healthMap = useAssetHealthMap(assets.map((a) => a.id));
-  if (assets.length === 0) {
-    return <Card className="shadow-sm"><CardContent className="p-10 text-center text-sm text-muted-foreground">No assets are using this template yet.</CardContent></Card>;
-  }
-  return (
-    <Card className="shadow-sm overflow-hidden">
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b border-border bg-muted/50 text-xs text-muted-foreground">
-              <th className="text-left px-4 py-2.5 font-medium">Asset Identifier</th>
-              <th className="text-left px-4 py-2.5 font-medium">Asset Name</th>
-              <th className="text-left px-4 py-2.5 font-medium">Site</th>
-              <th className="text-left px-4 py-2.5 font-medium">Health</th>
-              <th className="text-left px-4 py-2.5 font-medium">Status</th>
-              <th className="text-left px-4 py-2.5 font-medium">Last Updated</th>
-            </tr>
-          </thead>
-          <tbody>
-            {assets.map((a) => {
-              const h = healthMap[a.id] ?? null;
-              const status = deriveStatus(a, h);
-              return (
-                <tr key={a.id} onClick={() => onOpen(a.id)} className="border-b border-border/50 hover:bg-muted/30 transition-colors cursor-pointer">
-                  <td className="px-4 py-2.5 font-mono text-xs text-primary">{a.identifier}</td>
-                  <td className="px-4 py-2.5 font-medium">{a.name}</td>
-                  <td className="px-4 py-2.5 text-muted-foreground">{siteOf(a, allAssets)}</td>
-                  <td className="px-4 py-2.5"><HealthBar pct={h?.freshnessPct ?? null} /></td>
-                  <td className="px-4 py-2.5"><span className={cn("text-xs px-2 py-0.5 rounded-full font-medium", STATUS_STYLES[status])}>{status}</span></td>
-                  <td className="px-4 py-2.5 text-xs text-muted-foreground">{a.updatedAt ? format(new Date(a.updatedAt), "MM/dd HH:mm") : "—"}</td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
-      </div>
-    </Card>
-  );
-}

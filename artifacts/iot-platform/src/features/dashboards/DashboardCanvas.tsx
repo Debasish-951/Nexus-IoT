@@ -120,7 +120,9 @@ export function DashboardCanvas({
               >
                 <GripVertical className="w-3 h-3 text-muted-foreground shrink-0" />
                 <span className="text-[11px] truncate flex-1">
-                  <span className="text-foreground font-medium">{w.config?.title ?? def?.label ?? w.type}</span>
+                  {/* `||` not `??`: the title starts empty and can be cleared, and an
+                      empty string must fall through to the widget type's name. */}
+                  <span className="text-foreground font-medium">{w.config?.title || def?.label || w.type}</span>
                   {w.config?.subtitle ? <span className="text-muted-foreground"> · {w.config.subtitle}</span> : null}
                 </span>
                 <div onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} className="flex items-center shrink-0 text-muted-foreground">
@@ -161,7 +163,7 @@ export function DashboardCanvas({
       <Dialog open={!!fullscreenWidget} onOpenChange={(v) => { if (!v) setFullscreenId(null); }}>
         <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
-            <DialogTitle>{fullscreenWidget?.config?.title ?? widgetDef(fullscreenWidget?.type ?? "")?.label ?? "Widget"}</DialogTitle>
+            <DialogTitle>{fullscreenWidget?.config?.title || widgetDef(fullscreenWidget?.type ?? "")?.label || "Widget"}</DialogTitle>
           </DialogHeader>
           <div className="h-[60vh] p-1">{fullscreenWidget && <WidgetView widget={fullscreenWidget} refreshNonce={refreshNonces[fullscreenWidget.id] ?? 0} />}</div>
         </DialogContent>

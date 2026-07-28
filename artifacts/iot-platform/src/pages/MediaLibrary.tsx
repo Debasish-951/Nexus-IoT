@@ -131,7 +131,7 @@ export default function MediaLibrary() {
 
   return (
     <div className="p-6 space-y-5">
-      <button onClick={() => (window.history.length > 1 ? window.history.back() : navigate("/asset-management"))} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+      <button onClick={() => navigate("/asset-management")} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="w-4 h-4" /> Back
       </button>
       {/* Header */}

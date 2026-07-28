@@ -227,7 +227,7 @@ router.post("/assets/:id/attributes/bulk", async (req, res): Promise<void> => {
   const existingNames   = new Set(existing.map((e) => e.name.toLowerCase()));
   const existingTagNames = new Set(existing.filter((e) => e.tagName).map((e) => e.tagName!.toLowerCase()));
 
-  const validTypes      = ["static", "dynamic", "metric"];
+  const validTypes      = ["static", "dynamic", "metric", "timestamp"];
   const validDataTypes  = ["text", "number", "double", "boolean", "timestamp"];
 
   let created = 0;
@@ -264,6 +264,7 @@ router.post("/assets/:id/attributes/bulk", async (req, res): Promise<void> => {
         value:    item.value  != null ? item.value  : null,
         tagName:  item.tagName ? item.tagName.trim() : null,
         uom:      item.uom     ? item.uom.trim()     : null,
+        decimalPlaces: Number.isInteger(item.decimalPlaces) ? item.decimalPlaces : null,
       });
       // Update local sets to catch duplicates within the same batch
       existingNames.add(nameKey);
@@ -353,6 +354,7 @@ router.post("/assets/:id/apply-template", async (req, res): Promise<void> => {
         tagName:    resolvedTagName,
         uom:        def.uom        ?? null,
         expression: def.expression ?? null,
+        decimalPlaces: Number.isInteger(def.decimalPlaces) ? def.decimalPlaces : null,
       });
       existingNames.add(nameKey);
       if (tagKey) existingTagNames.add(tagKey);

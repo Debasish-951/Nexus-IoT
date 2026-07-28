@@ -303,6 +303,32 @@ export function buildDocumentContent(): ContentItem[] {
     ]),
     note("Applying a template to an asset that already has attributes will add the template attributes without removing existing ones. If an attribute with the same tag name exists, it will be updated."),
 
+    h3("Master Template → Section Worksheets"),
+    p("A large payload is easier to manage as one master template that is split into section-wise templates in a spreadsheet. Create one template from the raw device payload, export the worksheet, split it, and import the parts back — the header never changes."),
+    ol([
+      "Create a template and paste the raw device payload into the import panel — every key becomes an attribute definition.",
+      "On the Asset Templates page, select the template (or nothing, for all of them) and click Export. An .xlsx worksheet is produced: green header row, frozen, with dropdowns on the columns you fill in.",
+      "Only Attribute Name, Tag Name and any unit already set are pre-filled. Type, Device Template Name, Data Type and Required are left blank on purpose — they are yours to decide per section.",
+      "In Excel, split the rows into section-wise files, fill the blank columns, and set the Device Template Name on each row to the section it belongs to. Keep the header row as-is.",
+      "Click Import and choose a file (.xlsx or .csv). The preview lists each Device Template Name, whether it will be created or merged into, and any row-level problem.",
+      "Confirm. New template names are created; existing ones are merged into, matching on Tag Name — nothing is deleted.",
+      "When creating an asset, pick the section template so the asset gets exactly that section's attributes.",
+    ]),
+    table(
+      ["Column", "Required", "Pre-filled", "Meaning"],
+      [
+        ["Attribute Name", "Yes", "Yes", "Display name — free text, choose whatever reads best."],
+        ["Type", "Yes", "No", "static, dynamic, metric or timestamp."],
+        ["Device Template Name", "Yes", "No", "Which template the row belongs to. A name that does not exist yet is created on import."],
+        ["Tag Name", "Yes", "Yes", "Must match the incoming payload key. This is the binding — a mismatch means the attribute never receives data."],
+        ["Data Type", "Yes", "No", "text, number, double, boolean or timestamp."],
+        ["UoM", "No", "If set", "Unit shown next to the value (kWh, °C, mm/s…)."],
+        ["Decimal Place", "No", "If set", "0–10. Display rounding for numeric values; blank shows the raw value."],
+        ["Required", "No", "No", "TRUE or FALSE. Recorded on the definition; not currently enforced."],
+      ],
+    ),
+    note("Import blocks on structural problems — a blank or unknown Type, Device Template Name or Data Type, a missing name or tag, a Decimal Place outside 0–10, or the same tag used twice in one template. A tag that matches no existing template is only a warning, since a template is often authored before its device has ever reported. Only the first sheet of a workbook is read."),
+
     h2("4.8 Maintenance Mode"),
     p("Any asset can be placed in Maintenance Mode to suppress alarm evaluation while work is being performed. When maintenance mode is enabled:"),
     ul([

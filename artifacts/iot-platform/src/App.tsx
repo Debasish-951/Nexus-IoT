@@ -37,6 +37,8 @@ import ActivityLog from "@/pages/ActivityLog";
 import DataManagement from "@/pages/DataManagement";
 import Reports from "@/pages/Reports";
 import Visualization from "@/pages/Visualization";
+import LiveTwin from "@/pages/LiveTwin";
+import DashboardTemplates from "@/pages/DashboardTemplates";
 import LiveFeed from "@/pages/LiveFeed";
 import AICopilot from "@/pages/AICopilot";
 
@@ -90,6 +92,8 @@ const ROUTES: { path: string; component: React.ComponentType; module?: string }[
   { path: "/data-management",      component: DataManagement,       module: "reports" },
   { path: "/reports",              component: Reports,              module: "reports" },
   { path: "/visualization",        component: Visualization,        module: "visualization" },
+  { path: "/live-twin",            component: LiveTwin,             module: "visualization" },
+  { path: "/dashboard-templates",  component: DashboardTemplates,   module: "visualization" },
   { path: "/live",                 component: LiveFeed,             module: "live" },
   // Personal preferences — available to anyone signed in.
   { path: "/settings",             component: Settings },

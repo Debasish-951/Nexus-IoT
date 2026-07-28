@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback, useEffect } from "react";
 import { useLocation } from "wouter";
 import { useListAssets, useDeleteAsset, getListAssetsQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -92,14 +92,32 @@ export default function Assets() {
 
   const [editAsset, setEditAsset] = useState<Asset | null>(null);
   const [editName, setEditName] = useState("");
+  const [editIdentifier, setEditIdentifier] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
-  function openEdit(a: Asset) { setEditAsset(a); setEditName(a.name); }
+  // Registered device ids, for binding a device to this asset. Assets are created
+  // device-less, so this dialog is where the Device ID link is made or changed.
+  const [seenDevices, setSeenDevices] = useState<{ deviceId: string }[]>([]);
+  useEffect(() => {
+    if (!editAsset) return;
+    apiFetch("/api/ingest/seen-devices")
+      .then((r) => (r.ok ? r.json() : []))
+      .then((d) => setSeenDevices(Array.isArray(d) ? d : []))
+      .catch(() => setSeenDevices([]));
+  }, [editAsset]);
+  // A device is taken if some OTHER asset already uses it as its identifier.
+  const takenByOther = useMemo(
+    () => new Set(allAssets.filter((a) => a.id !== editAsset?.id).map((a) => a.identifier).filter(Boolean)),
+    [allAssets, editAsset],
+  );
+
+  function openEdit(a: Asset) { setEditAsset(a); setEditName(a.name); setEditIdentifier(a.identifier ?? ""); }
   async function saveEdit() {
     if (!editAsset || !editName.trim()) return;
     setSavingEdit(true);
     try {
       const res = await apiFetch(`/api/assets/${editAsset.id}`, {
-        method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: editName.trim() }),
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: editName.trim(), identifier: editIdentifier }),
       });
       if (!res.ok) { const er = await res.json().catch(() => ({})); toast({ title: "Update failed", description: er.error, variant: "destructive" }); return; }
       toast({ title: "Asset updated" });
@@ -120,7 +138,7 @@ export default function Assets() {
 
   return (
     <div className="p-6 space-y-3 h-full flex flex-col">
-      <button onClick={() => (window.history.length > 1 ? window.history.back() : navigate("/asset-management"))} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground shrink-0">
+      <button onClick={() => navigate("/asset-management")} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground shrink-0">
         <ArrowLeft className="w-4 h-4" /> Back
       </button>
       <div className="shrink-0">
@@ -168,12 +186,36 @@ export default function Assets() {
 
       <Dialog open={!!editAsset} onOpenChange={(v) => { if (!v) setEditAsset(null); }}>
         <DialogContent>
-          <DialogHeader><DialogTitle>Rename Asset</DialogTitle></DialogHeader>
-          <div className="space-y-1.5">
-            <Label className="text-sm">Asset Name</Label>
-            <Input value={editName} onChange={(e) => setEditName(e.target.value)} autoFocus
-              onKeyDown={(e) => { if (e.key === "Enter") saveEdit(); }} />
-            {editAsset && <p className="text-xs text-muted-foreground">Identifier <code className="font-mono bg-muted px-1 rounded">{editAsset.identifier ?? "—"}</code> can't be changed (it's the device link).</p>}
+          <DialogHeader><DialogTitle>Edit Asset</DialogTitle></DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <Label className="text-sm">Asset Name</Label>
+              <Input value={editName} onChange={(e) => setEditName(e.target.value)} autoFocus
+                onKeyDown={(e) => { if (e.key === "Enter") saveEdit(); }} />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-sm">Device ID <span className="text-muted-foreground font-normal">(optional)</span></Label>
+              <select
+                value={editIdentifier}
+                onChange={(e) => setEditIdentifier(e.target.value)}
+                className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
+              >
+                <option value="">— none (grouping asset) —</option>
+                {/* Keep the current binding selectable even if it is no longer transmitting. */}
+                {editIdentifier && !seenDevices.some((d) => d.deviceId === editIdentifier) && (
+                  <option value={editIdentifier}>{editIdentifier}</option>
+                )}
+                {seenDevices.map((d) => (
+                  <option key={d.deviceId} value={d.deviceId} disabled={takenByOther.has(d.deviceId)}>
+                    {d.deviceId}{takenByOther.has(d.deviceId) ? " — already linked" : ""}
+                  </option>
+                ))}
+              </select>
+              <p className="text-xs text-muted-foreground">
+                Links telemetry to this asset: incoming <code className="font-mono bg-muted px-1 rounded">deviceId</code> must match exactly.
+                Leave as none for a grouping asset (Site / Unit / Process).
+              </p>
+            </div>
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditAsset(null)}>Cancel</Button>

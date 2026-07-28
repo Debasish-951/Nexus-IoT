@@ -598,7 +598,7 @@ export default function HierarchyGenerator() {
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-4">
-      <button onClick={() => (window.history.length > 1 ? window.history.back() : navigate("/asset-management"))} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+      <button onClick={() => navigate("/asset-management")} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="w-4 h-4" /> Back
       </button>
       <div className="flex items-center gap-2">

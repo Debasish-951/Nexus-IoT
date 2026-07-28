@@ -6,7 +6,7 @@ import {
   AlarmClock, BookOpen, Settings2, Router, Plug,
   Shield, Users, KeyRound, Activity, Menu, X,
   Wifi, Zap, Send, Database, PieChart, ClipboardList, BrainCircuit,
-  MessageSquare, AlertTriangle, Lightbulb, Radio,
+  MessageSquare, AlertTriangle, Lightbulb, Radio, LayoutTemplate,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
@@ -42,8 +42,8 @@ const navItems: NavItem[] = [
     icon: LayoutDashboard,
     module: "assets",
     children: [
-      { label: "Asset Templates",     href: "/asset-templates",     icon: FileText, module: "assets" },
       { label: "Assets",              href: "/assets",              icon: Blocks,   module: "assets" },
+      { label: "Asset Templates",     href: "/asset-templates",     icon: FileText, module: "assets" },
       { label: "Media Library",       href: "/media-library",       icon: Image,    module: "assets" },
       { label: "Hierarchy Generator", href: "/hierarchy-generator", icon: Cpu,      module: "assets" },
     ],
@@ -56,8 +56,10 @@ const navItems: NavItem[] = [
     label: "Data Explorer",
     icon: BarChart2,
     children: [
-      { label: "Visualization", href: "/visualization", icon: LayoutDashboard, module: "visualization" },
-      { label: "Live Feed",     href: "/live",          icon: Radio,           module: "live" },
+      { label: "Visualization",   href: "/visualization",       icon: LayoutDashboard, module: "visualization" },
+      { label: "Live Twin",       href: "/live-twin",           icon: Radio,           module: "visualization" },
+      { label: "Asset Template",  href: "/dashboard-templates", icon: LayoutTemplate,  module: "visualization" },
+      { label: "Live Feed",       href: "/live",                icon: Activity,        module: "live" },
     ],
   },
   {
@@ -87,7 +89,7 @@ const navItems: NavItem[] = [
     module: "brokers",
     children: [
       { label: "Broker",            href: "/brokers",           icon: Wifi,     module: "brokers" },
-      // API Client sits with the brokers rather than under Security: it is an
+      // API Client sits with the brokers rather than under Admin Center: it is an
       // ingest-integration concern (endpoints, scopes, traffic), not an
       // account-security one. Still gated by the `api_clients` module grant.
       { label: "API Client",        href: "/api-clients",       icon: KeyRound, module: "api_clients" },
@@ -97,7 +99,7 @@ const navItems: NavItem[] = [
     ],
   },
   {
-    label: "Security",
+    label: "Admin Center",
     icon: Shield,
     children: [
       { label: "User",                href: "/users",               icon: Users,  module: "users" },

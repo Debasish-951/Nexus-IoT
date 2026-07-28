@@ -529,24 +529,46 @@ router.post("/auth/change-password", async (req, res): Promise<void> => {
   }
 
   const { currentPassword, newPassword } = req.body as Record<string, unknown>;
-  if (typeof currentPassword !== "string" || typeof newPassword !== "string") {
-    res.status(400).json({ error: "currentPassword and newPassword are required", code: "invalid_request" });
+  if (typeof newPassword !== "string") {
+    res.status(400).json({ error: "newPassword is required", code: "invalid_request" });
     return;
   }
 
   const user = req.principal.user;
 
-  if (!(await verifyPassword(currentPassword, user.passwordHash))) {
-    await logSecurityEvent({
-      type: "password.changed", outcome: "failure", userId: user.id, username: user.username,
-      reason: "bad_current_password", req,
-    });
-    res.status(401).json({ error: "Your current password is incorrect", code: "invalid_credentials" });
-    return;
+  // Re-authentication is required for a *voluntary* change — the point is that a
+  // hijacked session cannot silently take over the account.
+  //
+  // A user on an admin-issued temporary password is a different case: signing in
+  // with that password is what created this session, minutes ago, and the session
+  // can reach nothing but this endpoint. Demanding the same password a second time
+  // proves nothing that has not just been proved, so the forced-change flow takes
+  // only the new password.
+  const forcedChange = user.mustChangePassword;
+  if (!forcedChange) {
+    if (typeof currentPassword !== "string") {
+      res.status(400).json({ error: "currentPassword and newPassword are required", code: "invalid_request" });
+      return;
+    }
+    if (!(await verifyPassword(currentPassword, user.passwordHash))) {
+      await logSecurityEvent({
+        type: "password.changed", outcome: "failure", userId: user.id, username: user.username,
+        reason: "bad_current_password", req,
+      });
+      res.status(401).json({ error: "Your current password is incorrect", code: "invalid_credentials" });
+      return;
+    }
   }
 
-  if (currentPassword === newPassword) {
-    res.status(400).json({ error: "The new password must be different from your current one", code: "password_reused" });
+  // Compared against the stored hash rather than the submitted string, so reuse is
+  // caught in the forced-change flow too — where the old password is never sent.
+  if (await verifyPassword(newPassword, user.passwordHash)) {
+    res.status(400).json({
+      error: forcedChange
+        ? "Your new password must be different from the temporary one"
+        : "The new password must be different from your current one",
+      code: "password_reused",
+    });
     return;
   }
 

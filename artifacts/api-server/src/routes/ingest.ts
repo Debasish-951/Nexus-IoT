@@ -492,6 +492,12 @@ export async function processNormalised(n: NormalisedPayload, assetIdHint?: stri
       .where(and(eq(attributesTable.assetId, assetId as string), eq(attributesTable.tagName, `${n.deviceId}.sensor_serial`)));
   }
 
+  // Timestamp attributes carry the payload's own clock. It is stripped from the metric
+  // set by ENVELOPE_FIELDS (it is not telemetry), so it is bound by attribute TYPE here
+  // rather than by tagName like everything else.
+  await db.update(attributesTable).set({ value: ts.toISOString(), timestamp: ts })
+    .where(and(eq(attributesTable.assetId, assetId as string), eq(attributesTable.type, "timestamp")));
+
   // Evaluate runtime (computed) attributes
   await evaluateRuntimeAttributes(assetId as string, ts);
 

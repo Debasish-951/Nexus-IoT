@@ -141,14 +141,54 @@ export function aggregate(pts: Point[], mode: string): number | null {
   }
 }
 
-// Metric (tag) names available for an asset.
-export function useMetricOptions(assetId?: string): string[] {
-  const [metrics, setMetrics] = useState<string[]>([]);
+export interface MetricChoice { key: string; label: string }
+
+// Metric choices for an asset, for widget data-binding: the live telemetry tags
+// UNION the asset's configured attributes, each labelled with the attribute's
+// friendly name and unit where the two match. Attribute tagNames are stored
+// prefixed with the device identifier (e.g. "pump-01.temperature") while
+// telemetry keys arrive unprefixed, so both forms are indexed. Attributes that
+// have not produced telemetry yet are still offered, so a dashboard can be laid
+// out before data starts flowing.
+export function useMetricChoices(assetId?: string): MetricChoice[] {
+  const [choices, setChoices] = useState<MetricChoice[]>([]);
   useEffect(() => {
-    if (!assetId) { setMetrics([]); return; }
+    if (!assetId) { setChoices([]); return; }
     let cancelled = false;
-    fetch(`/api/telemetry/${assetId}/metrics`).then((r) => (r.ok ? r.json() : [])).then((m) => { if (!cancelled) setMetrics(Array.isArray(m) ? m : []); }).catch(() => {});
+    Promise.all([
+      fetch(`/api/telemetry/${assetId}/metrics`).then((r) => (r.ok ? r.json() : [])).catch(() => []),
+      fetch(`/api/assets/${assetId}/attributes`).then((r) => (r.ok ? r.json() : [])).catch(() => []),
+    ]).then(([metricsRaw, attrsRaw]) => {
+      if (cancelled) return;
+      const metrics: string[] = Array.isArray(metricsRaw) ? metricsRaw : [];
+      const attrs: any[] = Array.isArray(attrsRaw) ? attrsRaw : [];
+      const strip = (t: string) => (t.includes(".") ? t.split(".").slice(1).join(".") : t);
+
+      const byKey = new Map<string, any>();
+      for (const a of attrs) {
+        for (const cand of [a.tagName, a.tagName ? strip(a.tagName) : undefined, a.sourceMetric]) {
+          if (cand && !byKey.has(cand)) byKey.set(cand, a);
+        }
+      }
+      const labelFor = (key: string) => {
+        const a = byKey.get(key);
+        if (!a?.name) return key;
+        return a.uom ? `${a.name} · ${a.uom} (${key})` : `${a.name} (${key})`;
+      };
+
+      const out: MetricChoice[] = metrics.map((k) => ({ key: k, label: labelFor(k) }));
+      const seen = new Set(metrics);
+      for (const a of attrs) {
+        if (a.type === "static") continue;          // not a time series
+        const key = a.tagName ? strip(a.tagName) : a.sourceMetric;
+        if (!key || seen.has(key)) continue;
+        seen.add(key);
+        const base = a.uom ? `${a.name} · ${a.uom} (${key})` : `${a.name} (${key})`;
+        out.push({ key, label: `${base} — no data yet` });
+      }
+      setChoices(out);
+    });
     return () => { cancelled = true; };
   }, [assetId]);
-  return metrics;
+  return choices;
 }

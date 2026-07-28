@@ -1,7 +1,7 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { useLocation } from "wouter";
 import { Button } from "@/components/ui/button";
-import { Loader2, ArrowRight, ShieldAlert, Clock } from "lucide-react";
+import { Loader2, ArrowRight } from "lucide-react";
 import AuthShell, { AUTH_INPUT_CLASS, AUTH_BUTTON_STYLE } from "./AuthShell";
 import { PasswordInput, PasswordChecklist, PasswordStrengthMeter } from "@/components/PasswordFields";
 import { apiPost, usePasswordPolicy, validatePasswordAgainst } from "@/lib/auth-api";
@@ -13,47 +13,32 @@ import { useCurrentUser } from "@/contexts/UserContext";
  *
  * This is not a nag — the API refuses every endpoint except /auth/change-password
  * while the flag is set, so without this screen the app would just render a wall
- * of 403s. Rendering it in place of the whole application keeps the UI honest
- * about what the session can actually do.
+ * of 403s. Deliberately bare: the whole step is new password → confirm → done.
  */
 export default function ForcePasswordChange() {
   const [, navigate] = useLocation();
   const policy = usePasswordPolicy();
-  const { currentUser, session, refresh, logout } = useCurrentUser();
+  const { currentUser, refresh, logout } = useCurrentUser();
 
-  const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const [remaining, setRemaining] = useState<number | null>(null);
-
-  // Live countdown on the temporary credential. Once it lapses the session is
-  // still valid, but re-authenticating would fail — so say so plainly.
-  useEffect(() => {
-    const expiry = session?.passwordExpiresAt;
-    if (!expiry) return;
-    const tick = () => setRemaining(new Date(expiry).getTime() - Date.now());
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, [session?.passwordExpiresAt]);
 
   async function onSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
 
     if (next !== confirm) { setError("The two passwords do not match."); return; }
-    if (next === current) { setError("Your new password must be different from the temporary one."); return; }
     const violations = validatePasswordAgainst(next, policy);
     if (violations.length > 0) { setError(violations[0]); return; }
 
     setSubmitting(true);
     try {
-      const res = await apiPost("/api/auth/change-password", {
-        currentPassword: current,
-        newPassword: next,
-      });
+      // No currentPassword: the temporary one was already proved at sign-in, and
+      // this session cannot reach anything else until the change lands. Reuse of
+      // the temporary password is rejected server-side, against the stored hash.
+      const res = await apiPost("/api/auth/change-password", { newPassword: next });
       if (res.ok) {
         // Re-read the session so mustChangePassword clears and the app unlocks.
         await refresh();
@@ -69,47 +54,16 @@ export default function ForcePasswordChange() {
     }
   }
 
-  const expired = remaining !== null && remaining <= 0;
-  const minutes = remaining !== null ? Math.max(0, Math.floor(remaining / 60_000)) : null;
-  const seconds = remaining !== null ? Math.max(0, Math.floor((remaining % 60_000) / 1000)) : null;
-
   return (
     <AuthShell
-      title="Choose your password"
-      subtitle={`You signed in with a temporary password. Set your own to continue, ${currentUser?.fullName ?? ""}.`}
+      title="Generate your password"
+      subtitle={`Set your own password to continue, ${currentUser?.fullName ?? ""}.`}
     >
-      <div className="mt-5 flex items-start gap-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3">
-        <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0 text-amber-400" />
-        <p className="text-sm leading-relaxed text-amber-200">
-          Until you do this, every part of the platform is locked. This is enforced by the
-          API, not just hidden in the interface.
-        </p>
-      </div>
-
-      {remaining !== null && (
-        <div className={`mt-3 flex items-center gap-2 rounded-lg border px-4 py-2.5 text-sm ${
-          expired
-            ? "border-red-500/30 bg-red-500/10 text-red-300"
-            : "border-white/10 bg-white/[0.03] text-slate-300"
-        }`}>
-          <Clock className="h-3.5 w-3.5 shrink-0" />
-          {expired
-            ? <span>The temporary password has expired. Finish now if you can — if it fails, ask for a new one.</span>
-            : <span>Temporary password expires in <strong className="tabular-nums">{minutes}m {seconds}s</strong></span>}
-        </div>
-      )}
-
-      <form onSubmit={onSubmit} className="mt-6 space-y-4" aria-label="Choose your password">
-        <div className="[&_label]:text-slate-400">
-          <PasswordInput
-            id="current-password" label="Temporary password" value={current} onChange={setCurrent}
-            autoComplete="current-password" autoFocus inputClassName={AUTH_INPUT_CLASS}
-          />
-        </div>
+      <form onSubmit={onSubmit} className="mt-6 space-y-4" aria-label="Generate your password">
         <div className="[&_label]:text-slate-400">
           <PasswordInput
             id="new-password" label="New password" value={next} onChange={setNext}
-            inputClassName={AUTH_INPUT_CLASS}
+            autoComplete="new-password" autoFocus inputClassName={AUTH_INPUT_CLASS}
           />
         </div>
         <PasswordStrengthMeter password={next} policy={policy} />
@@ -134,7 +88,7 @@ export default function ForcePasswordChange() {
 
         <Button
           type="submit"
-          disabled={submitting || !current || !next || !confirm}
+          disabled={submitting || !next || !confirm}
           className="h-11 w-full rounded-lg font-semibold text-[#0d0820] transition-transform hover:brightness-110 active:scale-[0.99]"
           style={AUTH_BUTTON_STYLE}
         >

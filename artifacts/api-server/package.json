@@ -19,6 +19,7 @@
     "expr-eval": "^2.0.2",
     "express": "^5",
     "mqtt": "^5.15.1",
+    "nodemailer": "^9.0.3",
     "pino": "^9",
     "pino-http": "^10",
     "ws": "^8.20.0"

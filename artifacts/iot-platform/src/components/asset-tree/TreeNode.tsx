@@ -188,9 +188,9 @@ export const TreeNode = memo(function TreeNode({ asset, depth, verticals = [], i
           <ContextMenuItem onSelect={() => d.exportDashboard(asset)}><Upload className="w-4 h-4 mr-2" /> Export Dashboard</ContextMenuItem>
           <ContextMenuItem onSelect={() => d.futuristic(asset)}><Rocket className="w-4 h-4 mr-2" /> Futuristic Dashboard</ContextMenuItem>
         </>}
-        {(t.onOpenBuilder || d) && t.canManage && <ContextMenuSeparator />}
-        {t.canManage && (
-          <ContextMenuItem onSelect={() => t.onAssignTemplate(asset)}><LayoutTemplate className="w-4 h-4 mr-2" /> Assign Template</ContextMenuItem>
+        {(t.onOpenBuilder || d) && t.canManage && t.onAssignTemplate && <ContextMenuSeparator />}
+        {t.canManage && t.onAssignTemplate && (
+          <ContextMenuItem onSelect={() => t.onAssignTemplate!(asset)}><LayoutTemplate className="w-4 h-4 mr-2" /> Assign Template</ContextMenuItem>
         )}
       </ContextMenuContent>
     </ContextMenu>

@@ -36,7 +36,7 @@ export default function DataExplorerHome() {
       }}
     >
       <div className="p-6 max-w-5xl mx-auto">
-        <button onClick={() => (window.history.length > 1 ? window.history.back() : navigate("/"))} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-3">
+        <button onClick={() => navigate("/")} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground mb-3">
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
         <div className="flex items-center gap-2 mb-1">
