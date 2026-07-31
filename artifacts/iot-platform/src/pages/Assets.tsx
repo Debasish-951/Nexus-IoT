@@ -193,28 +193,28 @@ export default function Assets() {
               <Input value={editName} onChange={(e) => setEditName(e.target.value)} autoFocus
                 onKeyDown={(e) => { if (e.key === "Enter") saveEdit(); }} />
             </div>
+            {/* Read-only: the Device ID is declared on the asset template and stamped on
+                when the template is applied, so there is one place it can be wrong
+                instead of two that can disagree. */}
             <div className="space-y-1.5">
-              <Label className="text-sm">Device ID <span className="text-muted-foreground font-normal">(optional)</span></Label>
-              <select
-                value={editIdentifier}
-                onChange={(e) => setEditIdentifier(e.target.value)}
-                className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm focus:outline-none focus:ring-1 focus:ring-ring"
-              >
-                <option value="">— none (grouping asset) —</option>
-                {/* Keep the current binding selectable even if it is no longer transmitting. */}
-                {editIdentifier && !seenDevices.some((d) => d.deviceId === editIdentifier) && (
-                  <option value={editIdentifier}>{editIdentifier}</option>
-                )}
-                {seenDevices.map((d) => (
-                  <option key={d.deviceId} value={d.deviceId} disabled={takenByOther.has(d.deviceId)}>
-                    {d.deviceId}{takenByOther.has(d.deviceId) ? " — already linked" : ""}
-                  </option>
-                ))}
-              </select>
+              <Label className="text-sm">Device ID</Label>
+              <div className="flex h-9 items-center rounded-md border border-input bg-muted/40 px-3 text-sm">
+                <span className={editIdentifier ? "font-mono" : "text-muted-foreground"}>
+                  {editIdentifier || "— none (grouping asset) —"}
+                </span>
+              </div>
               <p className="text-xs text-muted-foreground">
-                Links telemetry to this asset: incoming <code className="font-mono bg-muted px-1 rounded">deviceId</code> must match exactly.
-                Leave as none for a grouping asset (Site / Unit / Process).
+                Comes from the asset template. Set it on the template (Asset Templates → your
+                template → Device ID); applying the template binds this asset to that payload.
               </p>
+              {/* Applying a template never clears a binding, so unbinding needs an explicit
+                  action — otherwise a mis-bound asset could not be corrected from the UI. */}
+              {editIdentifier && (
+                <button onClick={() => setEditIdentifier("")}
+                  className="text-xs text-muted-foreground underline hover:text-destructive">
+                  Unbind this device
+                </button>
+              )}
             </div>
           </div>
           <DialogFooter>

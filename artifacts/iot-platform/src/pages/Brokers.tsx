@@ -103,8 +103,6 @@ function IngestEndpointPanel() {
   // Headings only earn their space once projects are actually in use.
   const showProjectHeadings = groupedByProject.some((g) => g.project !== null);
 
-  const exPayload = JSON.stringify({ deviceId: "sensor-01", data: { temperature: 72.4 } });
-
   return (
     <div className="rounded-lg border border-blue-200 dark:border-blue-800/40 bg-blue-50/50 dark:bg-blue-950/20 p-4 space-y-3">
       <div className="flex items-start justify-between gap-3">
@@ -221,6 +219,21 @@ function IngestEndpointPanel() {
                         X-API-Key: &lt;this client&apos;s secret&gt;
                       </code>
                     </div>
+                    {/* For gateways that expose a URL field and nothing else (Node-RED
+                        subflows, PLC HTTP blocks): the key rides in the query string, so
+                        no header has to be set. Copy-only — the secret is not rendered. */}
+                    {c.clientSecret && (
+                      <div className="flex items-center gap-2 border-t border-blue-200/60 dark:border-blue-800/20 pt-1.5">
+                        <span className="text-[11px] text-muted-foreground w-24 shrink-0">URL with key</span>
+                        <span className="text-[11px] text-muted-foreground/80 flex-1 truncate">
+                          …/payload?key=&lt;secret&gt; — for clients that cannot send headers
+                        </span>
+                        <button onClick={() => copy(`${single}?key=${c.clientSecret}`, "Endpoint with key copied")}
+                          title="Copy endpoint including the key" className="text-muted-foreground hover:text-foreground shrink-0">
+                          <Copy className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -230,16 +243,6 @@ function IngestEndpointPanel() {
           ))}
         </div>
       )}
-
-      <div>
-        <p className="text-xs text-blue-700 dark:text-blue-400 mb-1">Example payload:</p>
-        <div className="flex items-center gap-2 bg-white dark:bg-slate-900 rounded border border-blue-200 dark:border-blue-800/30 px-2.5 py-1.5">
-          <code className="text-xs font-mono text-foreground/80 flex-1">{exPayload}</code>
-          <button onClick={() => copy(exPayload)} className="text-muted-foreground hover:text-foreground shrink-0">
-            <Copy className="w-3.5 h-3.5" />
-          </button>
-        </div>
-      </div>
 
       <p className="flex items-start gap-1.5 text-[11px] text-blue-700/80 dark:text-blue-400/80">
         <Info className="w-3 h-3 mt-0.5 shrink-0" />

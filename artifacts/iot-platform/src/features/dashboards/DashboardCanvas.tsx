@@ -9,6 +9,15 @@ import { GRID_COLS, ROW_H, MIN_W, MIN_H, type Widget } from "./types";
 import { WidgetView, widgetDef } from "./registry";
 import { WidgetTimePopover } from "./WidgetTimePopover";
 import { newId } from "./useDashboards";
+import type { TimeCfg } from "./timeRange";
+
+// Breathing room around and between widgets. PAD keeps the outermost widgets off
+// the panel edges — they used to sit flush against the hierarchy pane and the
+// header border, with a gutter only ever appearing between neighbours. GAP is that
+// gutter: each widget is inset GAP/2 on every side, so two adjacent widgets end up
+// a full GAP apart while the canvas edge keeps PAD + GAP/2.
+const PAD = 8;
+const GAP = 10;
 
 interface Props {
   widgets: Widget[];
@@ -22,20 +31,35 @@ interface Props {
   onCopyWidget: (w: Widget) => void;
   onEditWidget: (id: string) => void;
   futuristic?: boolean; // neon presentation theme (toggled from the asset tree)
+  // The dashboard-wide range, read live by any widget that hasn't set its own
+  // (see WidgetView) — not copied into any widget's stored config.
+  dashTimeCfg?: TimeCfg | null;
 }
 
 export function DashboardCanvas({
   widgets, setWidgets, selectedId, onSelect, onDropWidget,
-  updateConfig, refreshNonces, onRefreshWidget, onCopyWidget, onEditWidget, futuristic,
+  updateConfig, refreshNonces, onRefreshWidget, onCopyWidget, onEditWidget, futuristic, dashTimeCfg,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
+  // Same node as `ref`, but as state so it can be handed to Radix as a collision
+  // boundary — a ref alone is still null on the render that positions the popovers.
+  const [canvasEl, setCanvasEl] = useState<HTMLDivElement | null>(null);
+  // Stable identity matters: an inline arrow would be a new ref callback every
+  // render, so React would detach (null) and reattach it — and fire setCanvasEl —
+  // on every single render, including each pointermove of a drag.
+  const attachCanvas = useCallback((el: HTMLDivElement | null) => {
+    ref.current = el;
+    setCanvasEl(el);
+  }, []);
   const [cellW, setCellW] = useState(90);
   const [fullscreenId, setFullscreenId] = useState<string | null>(null);
   const drag = useRef<null | { id: string; mode: "move" | "resize"; sx: number; sy: number; orig: Widget }>(null);
 
   useEffect(() => {
     if (!ref.current) return;
-    const ro = new ResizeObserver(() => { if (ref.current) setCellW(ref.current.clientWidth / GRID_COLS); });
+    // Minus the padding on both sides, so 12 columns span the usable width rather
+    // than overflowing it by PAD*2.
+    const ro = new ResizeObserver(() => { if (ref.current) setCellW((ref.current.clientWidth - PAD * 2) / GRID_COLS); });
     ro.observe(ref.current);
     return () => ro.disconnect();
   }, []);
@@ -71,8 +95,8 @@ export function DashboardCanvas({
     if (!type || !ref.current) return;
     const def = widgetDef(type); if (!def) return;
     const rect = ref.current.getBoundingClientRect();
-    const x = Math.max(0, Math.min(GRID_COLS - def.w, Math.floor((e.clientX - rect.left) / cellW)));
-    const y = Math.max(0, Math.floor((e.clientY - rect.top + ref.current.scrollTop) / ROW_H));
+    const x = Math.max(0, Math.min(GRID_COLS - def.w, Math.floor((e.clientX - rect.left - PAD) / cellW)));
+    const y = Math.max(0, Math.floor((e.clientY - rect.top + ref.current.scrollTop - PAD) / ROW_H));
     onDropWidget(type, x, y);
   }
 
@@ -85,7 +109,7 @@ export function DashboardCanvas({
 
   return (
     <div
-      ref={ref}
+      ref={attachCanvas}
       onClick={() => onSelect(null)}
       onDragOver={(e) => e.preventDefault()}
       onDrop={onDrop}
@@ -96,7 +120,7 @@ export function DashboardCanvas({
         backgroundSize: `auto, auto`,
       } : undefined}
     >
-      <div className="relative" style={{ height: canvasRows * ROW_H }}>
+      <div className="relative" style={{ height: canvasRows * ROW_H + PAD * 2 }}>
         {widgets.length === 0 && (
           <div className="absolute inset-0 flex items-center justify-center text-muted-foreground text-sm pointer-events-none">
             Click "Add Widget" above, then drag a widget onto the canvas
@@ -111,7 +135,12 @@ export function DashboardCanvas({
               onClick={(e) => { e.stopPropagation(); onSelect(w.id); }}
               className={cn("absolute rounded-lg bg-card border shadow-sm overflow-hidden flex flex-col",
                 selected ? "border-[#2563EB] ring-2 ring-[#2563EB]/30" : "border-border")}
-              style={{ left: w.x * cellW, top: w.y * ROW_H, width: w.w * cellW - 6, height: w.h * ROW_H - 6 }}
+              style={{
+                left: PAD + w.x * cellW + GAP / 2,
+                top: PAD + w.y * ROW_H + GAP / 2,
+                width: w.w * cellW - GAP,
+                height: w.h * ROW_H - GAP,
+              }}
             >
               {/* header / drag handle */}
               <div
@@ -120,13 +149,16 @@ export function DashboardCanvas({
               >
                 <GripVertical className="w-3 h-3 text-muted-foreground shrink-0" />
                 <span className="text-[11px] truncate flex-1">
-                  {/* `||` not `??`: the title starts empty and can be cleared, and an
-                      empty string must fall through to the widget type's name. */}
-                  <span className="text-foreground font-medium">{w.config?.title || def?.label || w.type}</span>
+                  {/* The header is the Widget Title and nothing else — deliberately
+                      blank when no title is set. It must NOT fall back to Label or to
+                      the widget type: Label already names the series in the legend
+                      under the chart, and showing it up here too printed the same
+                      text twice on one widget. */}
+                  <span className="text-foreground font-medium">{w.config?.title ?? ""}</span>
                   {w.config?.subtitle ? <span className="text-muted-foreground"> · {w.config.subtitle}</span> : null}
                 </span>
                 <div onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} className="flex items-center shrink-0 text-muted-foreground">
-                  <WidgetTimePopover widget={w} updateConfig={updateConfig} />
+                  <WidgetTimePopover widget={w} updateConfig={updateConfig} dashTimeCfg={dashTimeCfg} boundary={canvasEl} />
                   <button onClick={() => onEditWidget(w.id)} title="Edit widget" className="p-0.5 hover:text-foreground"><Pencil className="w-3 h-3" /></button>
                   <button onClick={() => onRefreshWidget(w.id)} title="Refresh" className="p-0.5 hover:text-foreground"><RefreshCw className="w-3 h-3" /></button>
                   <button onClick={() => setFullscreenId(w.id)} title="Fullscreen" className="p-0.5 hover:text-foreground"><Maximize2 className="w-3 h-3" /></button>
@@ -148,7 +180,7 @@ export function DashboardCanvas({
                   <img src={w.config.imageUrl} alt="" className="absolute inset-0 w-full h-full object-cover opacity-[0.08] pointer-events-none select-none"
                     onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
                 )}
-                <div className="relative h-full"><WidgetView widget={w} refreshNonce={refreshNonces[w.id] ?? 0} /></div>
+                <div className="relative h-full"><WidgetView widget={w} refreshNonce={refreshNonces[w.id] ?? 0} dashTimeCfg={dashTimeCfg} /></div>
               </div>
               {/* resize handle */}
               <div onPointerDown={(e) => startDrag(e, w, "resize")}
@@ -163,9 +195,12 @@ export function DashboardCanvas({
       <Dialog open={!!fullscreenWidget} onOpenChange={(v) => { if (!v) setFullscreenId(null); }}>
         <DialogContent className="sm:max-w-3xl">
           <DialogHeader>
+            {/* Unlike the canvas header this keeps a fallback: a dialog with a blank
+                title has no accessible name, and there is no surrounding context
+                here to say what you are looking at. */}
             <DialogTitle>{fullscreenWidget?.config?.title || widgetDef(fullscreenWidget?.type ?? "")?.label || "Widget"}</DialogTitle>
           </DialogHeader>
-          <div className="h-[60vh] p-1">{fullscreenWidget && <WidgetView widget={fullscreenWidget} refreshNonce={refreshNonces[fullscreenWidget.id] ?? 0} />}</div>
+          <div className="h-[60vh] p-1">{fullscreenWidget && <WidgetView widget={fullscreenWidget} refreshNonce={refreshNonces[fullscreenWidget.id] ?? 0} dashTimeCfg={dashTimeCfg} />}</div>
         </DialogContent>
       </Dialog>
     </div>

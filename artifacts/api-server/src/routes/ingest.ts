@@ -36,6 +36,20 @@ const ENVELOPE_FIELDS = new Set([
   "sensor", "asset", "measurement_point", "data", "metrics",
 ]);
 
+/**
+ * Keys that are structure, not readings — never metrics, at any depth.
+ *
+ * Split out from ENVELOPE_FIELDS because the clock fields below are envelope only at the
+ * ROOT: `timestamp` inside a machine object is that machine's own reading, and the
+ * platform's job is to deliver what the payload contains, not to decide it is redundant.
+ */
+const STRUCTURAL_FIELDS = new Set([
+  "deviceId", "assetId", "sensor", "asset", "measurement_point", "data", "metrics",
+]);
+// NOTE: the clock fields are NOT excluded anywhere. normalise() reads them to stamp the
+// record, and they are ALSO passed through as metrics — a payload key the platform keeps
+// to itself is a key the user cannot bind an attribute to.
+
 // ── Payload normaliser ────────────────────────────────────────────────────────
 export interface NormalisedPayload {
   deviceId: string; timestamp?: Date;
@@ -98,7 +112,10 @@ export function normalise(body: Record<string, unknown>): NormalisedPayload | nu
 function deepFlatten(v: unknown, prefix: string, out: Record<string, unknown>): void {
   if (v && typeof v === "object" && !Array.isArray(v)) {
     for (const [k, val] of Object.entries(v as Record<string, unknown>)) {
-      if (ENVELOPE_FIELDS.has(k)) continue; // skip deviceId/timestamp/sensor/… at every level
+      // Only structure is skipped — the wrappers whose CONTENTS are flattened anyway, and
+      // deviceId, which is the binding itself. Every actual reading in the payload comes
+      // through as a metric, including timestamps and `machine`, at any depth.
+      if (STRUCTURAL_FIELDS.has(k)) continue;
       deepFlatten(val, prefix ? `${prefix}.${k}` : k, out);
     }
   } else if (Array.isArray(v)) {
@@ -424,17 +441,34 @@ export async function processNormalised(n: NormalisedPayload, assetIdHint?: stri
   let assetId: string | null = assetIdHint ?? null;
   let assetName = n.externalAssetName ?? n.deviceId;
 
+  /**
+   * A device id may be claimed by MORE THAN ONE asset.
+   *
+   * One gateway payload commonly describes several sections of a plant — chiller,
+   * lighting, grid — and the natural modelling is one asset (and one section
+   * template) per section, all fed by that single `deviceId`. Resolving to a single
+   * asset silently delivered everything to whichever row came back first and dropped
+   * the rest, which is what made splitting a master template look broken.
+   *
+   * With several claimants each asset receives only the metrics it actually defines
+   * an attribute for; a metric no asset claims is reported as unclaimed rather than
+   * duplicated everywhere. A single claimant keeps the original behaviour — it gets
+   * the whole payload, so tags can still be discovered before attributes exist.
+   */
   let isInMaintenance = false;
+  let siblings: { id: string; name: string; maintenanceMode: boolean | null }[] = [];
   if (!assetId) {
-    const [asset] = await db.select({ id: assetsTable.id, name: assetsTable.name, maintenanceMode: assetsTable.maintenanceMode })
+    siblings = await db.select({ id: assetsTable.id, name: assetsTable.name, maintenanceMode: assetsTable.maintenanceMode })
       .from(assetsTable).where(eq(assetsTable.identifier, n.deviceId));
-    assetId = asset?.id ?? null;
-    if (asset?.name) assetName = asset.name;
-    if (asset?.maintenanceMode) isInMaintenance = true;
+    const first = siblings[0];
+    assetId = first?.id ?? null;
+    if (first?.name) assetName = first.name;
+    if (first?.maintenanceMode) isInMaintenance = true;
   } else {
-    const [asset] = await db.select({ name: assetsTable.name, maintenanceMode: assetsTable.maintenanceMode }).from(assetsTable).where(eq(assetsTable.id, assetId));
+    const [asset] = await db.select({ id: assetsTable.id, name: assetsTable.name, maintenanceMode: assetsTable.maintenanceMode }).from(assetsTable).where(eq(assetsTable.id, assetId));
     if (asset?.name) assetName = asset.name;
     if (asset?.maintenanceMode) isInMaintenance = true;
+    if (asset) siblings = [asset];
   }
 
   const ts = n.timestamp ?? new Date();
@@ -444,15 +478,60 @@ export async function processNormalised(n: NormalisedPayload, assetIdHint?: stri
   // Do NOT auto-create assets. Telemetry is only stored when its deviceId matches
   // an existing asset's identifier; unknown deviceIds are ignored (no asset created).
   if (!assetId) {
-    return { recordsWritten: 0, assetId: null, assetName, alarmEvents: [] };
+    return { recordsWritten: 0, assetId: null, assetName, alarmEvents: [], claimantIds: [] as string[] };
   }
   if (Object.keys(n.metrics).length === 0) {
-    return { recordsWritten: 0, assetId, assetName, alarmEvents: [] };
+    return { recordsWritten: 0, assetId, assetName, alarmEvents: [], claimantIds: siblings.map((s) => s.id) };
   }
+
+  // ── Split the payload across every asset claiming this device ────────────────
+  //
+  // Partitioning is by declared tag: an attribute's tagName may be the bare metric
+  // key ("chiller.energy_kWh") or the fully-qualified "<deviceId>.<metric>", and
+  // `sourceMetric` is an explicit remap — all three are accepted, as elsewhere.
+  let shares: { assetId: string; assetName: string; maintenance: boolean; metrics: Record<string, unknown> }[];
+  const unclaimedMetrics: string[] = [];
+
+  if (siblings.length <= 1) {
+    shares = [{ assetId: assetId as string, assetName, maintenance: isInMaintenance, metrics: n.metrics }];
+  } else {
+    const claimed = new Set<string>();
+    shares = [];
+    for (const sib of siblings) {
+      const attrs = await db.select({ tagName: attributesTable.tagName, sourceMetric: attributesTable.sourceMetric })
+        .from(attributesTable).where(eq(attributesTable.assetId, sib.id));
+      const owned = new Set<string>();
+      for (const a of attrs) {
+        if (a.tagName) owned.add(a.tagName.toLowerCase());
+        if (a.sourceMetric) owned.add(a.sourceMetric.toLowerCase());
+      }
+      const mine: Record<string, unknown> = {};
+      for (const [metric, value] of Object.entries(n.metrics)) {
+        const bare = metric.toLowerCase();
+        const full = `${n.deviceId}.${metric}`.toLowerCase();
+        if (owned.has(bare) || owned.has(full)) { mine[metric] = value; claimed.add(metric); }
+      }
+      if (Object.keys(mine).length > 0) {
+        shares.push({ assetId: sib.id, assetName: sib.name, maintenance: !!sib.maintenanceMode, metrics: mine });
+      }
+    }
+    for (const metric of Object.keys(n.metrics)) if (!claimed.has(metric)) unclaimedMetrics.push(metric);
+    if (shares.length === 0) {
+      return { recordsWritten: 0, assetId, assetName, alarmEvents: [], claimantIds: siblings.map((s) => s.id), unclaimedMetrics };
+    }
+  }
+
+  let recordsWritten = 0;
+  const alarmEvents: Awaited<ReturnType<typeof evaluateAlarmRules>> = [];
+
+  for (const share of shares) {
+    const assetId = share.assetId;
+    const assetName = share.assetName;
+    const metrics = share.metrics;
 
   // Snapshot previous values for rate-of-change evaluation
   const prevMetrics: Record<string, { value: number; ts: Date }> = {};
-  const metricKeys = Object.keys(n.metrics);
+  const metricKeys = Object.keys(metrics);
   if (metricKeys.length > 0) {
     for (const metric of metricKeys) {
       const [prev] = await db.select({ value: telemetryTable.value, timestamp: telemetryTable.timestamp })
@@ -466,7 +545,7 @@ export async function processNormalised(n: NormalisedPayload, assetIdHint?: stri
     }
   }
 
-  const records = Object.entries(n.metrics).map(([metric, value]) => ({
+  const records = Object.entries(metrics).map(([metric, value]) => ({
     assetId, deviceId: n.deviceId, metric, value, timestamp: ts, quality: "good",
   }));
   await db.insert(telemetryTable).values(records as any[]);
@@ -475,7 +554,7 @@ export async function processNormalised(n: NormalisedPayload, assetIdHint?: stri
   // bare metric name (case-insensitive; telemetry keys are camelCase, tagNames lower).
   // Safe because the caller (/ingest/payload) only reaches this after the payload's
   // root deviceId matched an asset — wrong device id ⇒ no asset ⇒ no values.
-  for (const [metric, value] of Object.entries(n.metrics)) {
+  for (const [metric, value] of Object.entries(metrics)) {
     const full = `${n.deviceId}.${metric}`.toLowerCase();
     const bare = metric.toLowerCase();
     await db.update(attributesTable).set({ value, timestamp: ts })
@@ -492,19 +571,15 @@ export async function processNormalised(n: NormalisedPayload, assetIdHint?: stri
       .where(and(eq(attributesTable.assetId, assetId as string), eq(attributesTable.tagName, `${n.deviceId}.sensor_serial`)));
   }
 
-  // Timestamp attributes carry the payload's own clock. It is stripped from the metric
-  // set by ENVELOPE_FIELDS (it is not telemetry), so it is bound by attribute TYPE here
-  // rather than by tagName like everything else.
-  await db.update(attributesTable).set({ value: ts.toISOString(), timestamp: ts })
-    .where(and(eq(attributesTable.assetId, assetId as string), eq(attributesTable.type, "timestamp")));
+  // (Timestamp attributes are bound after the loop — see below.)
 
   // Evaluate runtime (computed) attributes
   await evaluateRuntimeAttributes(assetId as string, ts);
 
   // Evaluate alarm rules — skip when asset is in maintenance mode
-  const alarmEvents = isInMaintenance
+  const shareAlarms = share.maintenance
     ? []
-    : await evaluateAlarmRules(assetId as string, assetName, n.metrics, prevMetrics, ts);
+    : await evaluateAlarmRules(assetId as string, assetName, metrics, prevMetrics, ts);
 
   // Skip the WS fan-out for the per-machine distribution — one payload attributes
   // to ~22 machines, and broadcasting each would flood every WS-listening page.
@@ -512,12 +587,12 @@ export async function processNormalised(n: NormalisedPayload, assetIdHint?: stri
     broadcast("telemetry", {
       assetId,
       assetName,
-      metrics: n.metrics,
+      metrics,
       timestamp: ts.toISOString(),
     });
   }
 
-  for (const ev of alarmEvents) {
+  for (const ev of shareAlarms) {
     broadcast("alarm", {
       event:     ev.event,
       alarmId:   ev.alarmId,
@@ -533,7 +608,25 @@ export async function processNormalised(n: NormalisedPayload, assetIdHint?: stri
     });
   }
 
-  return { recordsWritten: records.length, assetId, assetName, alarmEvents };
+  recordsWritten += records.length;
+  alarmEvents.push(...shareAlarms);
+  }
+
+  // Timestamp attributes need no special handling any more: the payload's clock fields
+  // arrive as ordinary metrics, so they fill by tag match like everything else — and the
+  // attribute shows exactly what the device sent rather than a re-formatted copy.
+
+  return {
+    recordsWritten, assetId, assetName, alarmEvents,
+    // Every asset claiming this device id, so callers do not have to guess which one
+    // "the" asset is when a payload is split across sections.
+    claimantIds: siblings.map((s) => s.id),
+    // Present only when several assets share the device id.
+    ...(siblings.length > 1 && {
+      assetsAttributed: shares.map((s) => s.assetName),
+      unclaimedMetrics,
+    }),
+  };
 }
 
 // ── Seen devices (deviceIds received in telemetry, even if unmatched) ─────────
@@ -581,14 +674,39 @@ router.post(["/ingest/validate", "/ingest/k/:clientId/validate"],
     return;
   }
 
-  // Lookup asset
-  const [asset] = await db.select({ id: assetsTable.id, name: assetsTable.name })
+  // Every asset claiming this device id — a payload split across section assets has
+  // more than one, and the dry run should show exactly which metric lands where.
+  const claimants = await db.select({ id: assetsTable.id, name: assetsTable.name })
     .from(assetsTable).where(eq(assetsTable.identifier, n.deviceId));
+  const asset = claimants[0];
 
   const metricCount = Object.keys(n.metrics).length;
-  if (!asset) warnings.push(`No asset found with identifier="${n.deviceId}". Telemetry will be discarded until the asset is created.`);
+  if (!asset) warnings.push(`No asset found with identifier="${n.deviceId}". Telemetry will be discarded until an asset is bound to it (set the Device ID on its asset template).`);
   if (metricCount === 0) warnings.push("No metrics extracted — check payload format and envelope fields.");
   if (n.payloadFormat === "unknown") warnings.push("Payload format unrecognised (no data, metrics, or flat metric fields found).");
+
+  // Per-asset breakdown: which of the payload's metrics each claimant declares.
+  const perAsset: { assetId: string; assetName: string; metrics: string[] }[] = [];
+  if (claimants.length > 1) {
+    const unclaimed = new Set(Object.keys(n.metrics));
+    for (const c of claimants) {
+      const attrs = await db.select({ tagName: attributesTable.tagName, sourceMetric: attributesTable.sourceMetric })
+        .from(attributesTable).where(eq(attributesTable.assetId, c.id));
+      const owned = new Set<string>();
+      for (const a of attrs) {
+        if (a.tagName) owned.add(a.tagName.toLowerCase());
+        if (a.sourceMetric) owned.add(a.sourceMetric.toLowerCase());
+      }
+      const mine = Object.keys(n.metrics).filter((m) =>
+        owned.has(m.toLowerCase()) || owned.has(`${n.deviceId}.${m}`.toLowerCase()));
+      mine.forEach((m) => unclaimed.delete(m));
+      perAsset.push({ assetId: c.id, assetName: c.name, metrics: mine });
+      if (mine.length === 0) warnings.push(`"${c.name}" shares this device id but declares none of these metrics — it will receive nothing.`);
+    }
+    if (unclaimed.size > 0) {
+      warnings.push(`${unclaimed.size} metric(s) are not declared by any asset and will be dropped: ${[...unclaimed].slice(0, 6).join(", ")}${unclaimed.size > 6 ? "…" : ""}`);
+    }
+  }
 
   res.json({
     valid: !!asset && Object.keys(n.metrics).length > 0,
@@ -596,6 +714,8 @@ router.post(["/ingest/validate", "/ingest/k/:clientId/validate"],
     assetId: asset?.id ?? null,
     assetName: asset?.name ?? null,
     assetMatched: !!asset,
+    // Populated when several section assets share the device id.
+    ...(claimants.length > 1 && { assetsSharingDeviceId: perAsset }),
     timestamp: n.timestamp?.toISOString() ?? null,
     payloadFormat: n.payloadFormat,
     extractedMetrics: n.metrics,
@@ -650,9 +770,19 @@ function requireMatchingClient(req: Request, res: Response, next: NextFunction):
  *
  * Anonymous posting is no longer possible either way.
  */
-function ingestAuth(req: Request, res: Response, next: NextFunction): void {
+async function ingestAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
   if (req.principal) { next(); return; }
-  void apiKeyAuth("ingest:write")(req, res, next);
+  // `await` (not `void`) matters here: every OTHER apiKeyAuth() caller registers it
+  // directly as Express middleware, where Express 5 natively awaits it and forwards
+  // any rejection to the error handler in app.ts. `void`-ing the call instead — as
+  // this one did, because it also needs the req.principal bypass above — detached
+  // the promise from Express entirely, so any exception inside apiKeyAuth (a thrown
+  // error, a rejected DB call, anything) became an unhandled rejection at the Node
+  // process level instead of a request-scoped 500. Node's default for an unhandled
+  // rejection is to crash the whole process — killing every client's connection,
+  // not just the one that triggered it. That is what actually took the server down;
+  // the header-after-json bug below was only the trigger that happened to surface it.
+  await apiKeyAuth("ingest:write")(req, res, next);
 }
 
 // ── Routes ────────────────────────────────────────────────────────────────────
@@ -696,7 +826,8 @@ router.post(["/ingest/payload", "/ingest/k/:clientId/payload"],
   //    root device having matched an asset — a wrong root device id ⇒ no root asset ⇒
   //    nothing distributed (no values anywhere), which is the intended behaviour.
   let machinesAttributed = 0;
-  if (result.assetId) {
+  const roots = result.claimantIds?.length ? result.claimantIds : (result.assetId ? [result.assetId] : []);
+  if (roots.length > 0) {
     // Prefer flat-row extraction (array / {…,machines:[…]} with level columns +
     // MachineId leaves); fall back to the nested name-tree walker.
     const flatRecs = extractFlatRowRecords(body);
@@ -710,7 +841,14 @@ router.post(["/ingest/payload", "/ingest/k/:clientId/payload"],
         childrenOf.set(a.parentId, arr);
       }
       for (const rec of recs) {
-        const machineAssetId = resolveAssetByPath(result.assetId, rec.namePath, childrenOf);
+        // Try EVERY asset claiming this device id, not just the first one. When a payload
+        // is split across section assets there is no single "root", and resolving under
+        // an arbitrary claimant made attribution depend on row order.
+        let machineAssetId: string | null = null;
+        for (const root of roots) {
+          machineAssetId = resolveAssetByPath(root, rec.namePath, childrenOf);
+          if (machineAssetId) break;
+        }
         if (!machineAssetId) continue;
         await processNormalised(
           { deviceId: normalised.deviceId, timestamp: normalised.timestamp, metrics: rec.metrics, payloadFormat: "flat" },

@@ -73,6 +73,22 @@ export const authConfig = {
     durationMs: num("AUTH_LOCKOUT_MINUTES", 15) * 60_000,
   },
 
+  apiKey: {
+    /**
+     * Requests per minute allowed per API client (machine callers: gateways,
+     * SCADA bridges, scripts). Counted per client, so one project's gateway can
+     * never consume another's budget.
+     *
+     * Default raised from the original hardcoded 120 (2/second), which a single
+     * real telemetry gateway already ran at 98% of. Exceeding it returns 429, and
+     * a rejected ingest post is lost data unless the gateway retries — so the
+     * ceiling needs headroom for normal operation, not to sit on the boundary.
+     *
+     * 0 disables the limit (deliberate operator choice, e.g. load testing).
+     */
+    rateLimitRpm: num("INGEST_RATE_LIMIT_RPM", 1200),
+  },
+
   rateLimit: {
     login: { max: num("AUTH_RL_LOGIN_MAX", 10), windowMs: num("AUTH_RL_LOGIN_WINDOW_MINUTES", 5) * 60_000 },
     forgot: { max: num("AUTH_RL_FORGOT_MAX", 5), windowMs: num("AUTH_RL_FORGOT_WINDOW_MINUTES", 60) * 60_000 },

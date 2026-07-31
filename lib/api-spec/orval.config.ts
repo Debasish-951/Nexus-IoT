@@ -57,7 +57,10 @@ export default defineConfig({
       override: {
         zod: {
           coerce: {
-            query: ['boolean', 'number', 'string'],
+            // Query params always arrive as strings — a date-time query param (e.g.
+            // /telemetry/:assetId?from=&to=) needs `date` coerced here too, or it comes
+            // out as `zod.date()`, which rejects every string and 400s the endpoint.
+            query: ['boolean', 'number', 'string', 'date'],
             param: ['boolean', 'number', 'string'],
             body: ['bigint', 'date'],
             response: ['bigint', 'date'],

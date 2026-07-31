@@ -2,6 +2,7 @@ import { Request, Response, NextFunction } from "express";
 import { eq, sql } from "drizzle-orm";
 import { db, apiClientsTable } from "@workspace/db";
 import { logger } from "../lib/logger";
+import { authConfig } from "../lib/auth-config";
 
 declare global {
   namespace Express {
@@ -12,12 +13,26 @@ declare global {
 }
 
 // ── Per-client in-memory rate limiter ─────────────────────────────────────────
+//
+// The ceiling was a hardcoded 120 requests/minute — 2 per second. That is below
+// what a single ordinary telemetry gateway produces: the first real Node-RED flow
+// connected to this platform measured 118/min, i.e. 98% of the cap, on ONE
+// project. Every additional project would have sat equally close to its own
+// ceiling, and going over does not throttle — it returns 429 and the reading is
+// gone unless the gateway happens to retry. So the default is now both higher and
+// operator-tunable, per `authConfig.apiKey.rateLimitRpm`
+// (env: INGEST_RATE_LIMIT_RPM).
+//
+// Still counted PER CLIENT, which is what makes one-key-per-project the right
+// pattern: each project gets its own independent budget and cannot starve another.
 interface RateBucket { count: number; windowStart: number }
 const buckets = new Map<string, RateBucket>();
-const WINDOW_MS  = 60_000; // 1 minute sliding window
-const MAX_RPM    = 120;    // requests per minute per client
+const WINDOW_MS = 60_000; // 1 minute fixed window
 
-function isRateLimited(clientId: string): boolean {
+function isRateLimited(clientId: string, maxRpm: number): boolean {
+  // 0 disables the limit entirely — an explicit operator choice, e.g. while
+  // load-testing, rather than something reachable by accident.
+  if (maxRpm <= 0) return false;
   const now   = Date.now();
   const entry = buckets.get(clientId);
   if (!entry || now - entry.windowStart > WINDOW_MS) {
@@ -25,15 +40,35 @@ function isRateLimited(clientId: string): boolean {
     return false;
   }
   entry.count += 1;
-  return entry.count > MAX_RPM;
+  return entry.count > maxRpm;
 }
 
+/**
+ * Where a client secret may travel, in order of preference.
+ *
+ * A header is the right place for a credential. But plenty of field gateways —
+ * Node-RED subflows, PLC HTTP blocks, SCADA bridges — expose a URL field and
+ * nothing else, and their operators cannot edit the posting code. Refusing those
+ * leaves only one alternative: anonymous ingest. A key in the query string is
+ * weaker than a header but far stronger than no key at all, and it keeps every
+ * other control (scope, expiry, revocation, per-client attribution, rate limit).
+ *
+ * The query string is deliberately stripped from the request log in app.ts, so a
+ * key sent this way is not written to disk. It can still appear in a reverse
+ * proxy's access log, so prefer the header where the client allows it.
+ */
 function readSecret(req: Request): string | null {
   const authHeader = req.headers["authorization"] as string | undefined;
   const xApiKey    = req.headers["x-api-key"]    as string | undefined;
 
   if (authHeader?.startsWith("Bearer ")) return authHeader.slice(7).trim() || null;
   if (xApiKey) return xApiKey.trim() || null;
+
+  for (const param of ["key", "apiKey", "api_key"]) {
+    const v = req.query?.[param];
+    const raw = Array.isArray(v) ? v[0] : v;
+    if (typeof raw === "string" && raw.trim()) return raw.trim();
+  }
   return null;
 }
 
@@ -77,7 +112,7 @@ export function apiKeyAuth(requiredScope?: string) {
     if (!secret) {
       res.status(401).json({
         error: "Authentication required",
-        hint: "Provide  Authorization: Bearer <clientSecret>  or  X-API-Key: <clientSecret>",
+        hint: "Provide  Authorization: Bearer <clientSecret>,  X-API-Key: <clientSecret>,  or  ?key=<clientSecret>  on the URL when the client cannot set headers",
       });
       return;
     }
@@ -139,13 +174,26 @@ export function apiKeyAuth(requiredScope?: string) {
     }
 
     // Rate limit
-    if (isRateLimited(client.id)) {
+    const maxRpm = authConfig.apiKey.rateLimitRpm;
+    if (isRateLimited(client.id, maxRpm)) {
+      // Headers must be set BEFORE the response is sent. `.json()` ends the
+      // response, so the old `setHeader` call after it threw
+      // ERR_HTTP_HEADERS_SENT — an uncaught exception that crashed the entire
+      // process, taking down every client's connection, not just the one that
+      // got rate-limited. This is why the server kept dying under load.
+      res.setHeader("Retry-After", "60");
       res.status(429).json({
         error: "Rate limit exceeded",
-        limit: `${MAX_RPM} requests per minute`,
+        limit: `${maxRpm} requests per minute`,
         retryAfter: "60",
       });
-      res.setHeader("Retry-After", "60");
+      // Logged as a warning because a rejected ingest post is silently LOST data
+      // unless the gateway retries — it needs to be findable after the fact, not
+      // just visible to whoever was watching at the time.
+      logger.warn(
+        { clientId: client.clientId, name: client.name, maxRpm },
+        "api client rate limited — ingest data may have been dropped",
+      );
       return;
     }
 

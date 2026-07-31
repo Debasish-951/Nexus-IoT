@@ -64,12 +64,10 @@ router.post("/assets", async (req, res): Promise<void> => {
       })
       .returning();
   } catch (err: any) {
-    const msg = String(err?.message ?? "");
-    // Unique violation on identifier → device already bound to another asset.
-    const friendly = /unique|duplicate key/i.test(msg) && devId
-      ? `Device id "${devId}" is already linked to another asset. Each device id can belong to only one asset — leave the Device ID blank for grouping assets.`
-      : (msg || "Failed to create asset");
-    res.status(400).json({ error: friendly });
+    // Several assets MAY share a device id (section templates off one payload), so a
+    // duplicate is no longer an error here — anything that lands in this catch is a
+    // genuine failure.
+    res.status(400).json({ error: String(err?.message ?? "") || "Failed to create asset" });
     return;
   }
 
@@ -121,7 +119,7 @@ router.put("/assets/:id", async (req, res): Promise<void> => {
   try {
     [asset] = await db.update(assetsTable).set(updateData).where(eq(assetsTable.id, params.data.id)).returning();
   } catch (err: any) {
-    res.status(400).json({ error: err?.message ?? "Update failed (device id may already be in use)" });
+    res.status(400).json({ error: err?.message ?? "Update failed" });
     return;
   }
 
@@ -304,10 +302,47 @@ router.post("/assets/:id/apply-template", async (req, res): Promise<void> => {
 
   if (!template) { res.status(404).json({ error: "Template not found" }); return; }
 
-  const defs: any[] = (template as any).attributeDefinitions ?? [];
-  if (defs.length === 0) {
+  // A `deviceid` definition is the binding, not an attribute — it never becomes a row
+  // on the asset. Older templates carry the id in the column instead; both are honoured.
+  const allDefs: any[] = (template as any).attributeDefinitions ?? [];
+  const defs = allDefs.filter((d) => d?.type !== "deviceid");
+  const declaredDeviceId: string | null =
+    (template as any).deviceId
+    ?? allDefs.find((d) => d?.type === "deviceid")?.value
+    ?? allDefs.find((d) => d?.type === "deviceid")?.tagName
+    ?? null;
+
+  if (defs.length === 0 && !declaredDeviceId) {
     res.json({ created: 0, skipped: 0, skippedItems: [], message: "Template has no attribute definitions" });
     return;
+  }
+
+  /**
+   * Applying a template binds the asset to the template's device stream, so the user
+   * never has to type a Device ID on the asset itself.
+   *
+   * Sharing an id across assets is legitimate and expected: one gateway payload is
+   * split into section templates (chiller, lighting, grid), every one of them carries
+   * the same device id, and each section asset takes the metrics it declares. Ingest
+   * partitions the payload by declared tag, so this is a supported topology, not a
+   * collision. An asset that already has an id keeps it — a re-apply never silently
+   * re-points an asset at a different device.
+   */
+  let deviceIdBound: string | null = null;
+  const sharedWith: string[] = [];
+  if (declaredDeviceId && asset.identifier !== declaredDeviceId) {
+    // Mirrors the template, including re-pointing an asset whose template's device id
+    // was corrected — the template is the single source of truth for the binding. A
+    // template with NO device id never clears an existing one, so adding a second,
+    // device-less template to an asset cannot silently unbind it.
+    const claimants = await db
+      .select({ id: assetsTable.id, name: assetsTable.name })
+      .from(assetsTable)
+      .where(eq(assetsTable.identifier, declaredDeviceId));
+    await db.update(assetsTable).set({ identifier: declaredDeviceId }).where(eq(assetsTable.id, id));
+    asset.identifier = declaredDeviceId;
+    deviceIdBound = declaredDeviceId;
+    for (const c of claimants) if (c.id !== id) sharedWith.push(c.name);
   }
 
   // Fetch existing attributes for duplicate detection
@@ -319,7 +354,9 @@ router.post("/assets/:id/apply-template", async (req, res): Promise<void> => {
   const existingNames    = new Set(existing.map((e) => e.name.toLowerCase()));
   const existingTagNames = new Set(existing.filter((e) => e.tagName).map((e) => e.tagName!.toLowerCase()));
 
-  const prefix = asset.identifier ? `${asset.identifier}.` : "";
+  // Tags are stored bare: ingest matches either the bare metric key or
+  // "<deviceId>.<metric>", and a bare tag keeps a template portable between assets.
+  const prefix = "";
 
   let created = 0;
   let skipped = 0;
@@ -374,7 +411,13 @@ router.post("/assets/:id/apply-template", async (req, res): Promise<void> => {
     })
     .where(eq(assetsTable.id, id));
 
-  res.json({ created, skipped, skippedItems, templateName: template.name });
+  res.json({
+    created, skipped, skippedItems, templateName: template.name,
+    // So the UI can say "bound to energy", and mention any section assets sharing it.
+    deviceIdBound,
+    sharedWith,
+    deviceId: asset.identifier ?? null,
+  });
 });
 
 export default router;

@@ -23,13 +23,35 @@ export interface AttrDef {
   decimalPlaces?: number;
 }
 
-export const ATTR_TYPES = ["static", "dynamic", "metric", "timestamp"] as const;
+/**
+ * `deviceid` is not an attribute — it is the routing key that binds a payload to an
+ * asset. It rides in this list so the whole binding can be declared in one place (the
+ * template), and is peeled off before the definitions are stored: on a `deviceid` row
+ * the Tag Name column holds the device id itself, e.g. `energy`.
+ */
+export const ATTR_TYPES = ["deviceid", "static", "dynamic", "metric", "timestamp"] as const;
+export const DEVICE_ID_TYPE = "deviceid";
+
+/** Split a definition list into the device id it declares and the real attributes. */
+export function splitDeviceId(defs: AttrDef[]): { deviceId: string | null; attributes: AttrDef[] } {
+  let deviceId: string | null = null;
+  const attributes: AttrDef[] = [];
+  for (const d of defs) {
+    if (d.type === DEVICE_ID_TYPE) {
+      const id = (d.value ?? d.tagName ?? "").trim();
+      if (id && !deviceId) deviceId = id;
+      continue;
+    }
+    attributes.push(d);
+  }
+  return { deviceId, attributes };
+}
 export const ATTR_DATATYPES = ["text", "number", "double", "boolean", "timestamp"] as const;
 
 /** Exported header, in order. Import accepts these in any order, and is tolerant of
  *  casing/spacing, so a sheet re-saved by Excel still round-trips. */
 export const TEMPLATE_CSV_HEADERS = [
-  "Attribute Name", "Type", "Device Template Name", "Tag Name",
+  "Attribute Name", "Type", "Device Id", "Tag Name",
   "Data Type", "UoM", "Decimal Place", "Required",
 ] as const;
 
@@ -39,6 +61,9 @@ export const TEMPLATE_CSV_HEADERS = [
 const HEADER_ALIASES: Record<string, keyof CsvRowFields> = {
   attributename: "name", name: "name",
   type: "type", attributetype: "type",
+  // The device id is what every row in a file shares — a section sheet describes one
+  // device. `devicetemplatename` stays mapped for sheets exported before the rename.
+  deviceid: "deviceId", device: "deviceId", identifier: "deviceId",
   devicetemplatename: "templateName", templatename: "templateName", template: "templateName",
   tagname: "tagName", tag: "tagName", tagrelative: "tagName",
   datatype: "dataType",
@@ -49,7 +74,7 @@ const HEADER_ALIASES: Record<string, keyof CsvRowFields> = {
 };
 
 interface CsvRowFields {
-  name: string; type: string; templateName: string; tagName: string;
+  name: string; type: string; templateName: string; deviceId: string; tagName: string;
   dataType: string; uom: string; decimalPlaces: string; required: string; description: string;
 }
 
@@ -62,6 +87,8 @@ export interface CsvRow extends AttrDef {
 
 export interface ParsedTemplateCsv {
   rows: CsvRow[];
+  /** Distinct, non-empty Device Id values seen in the file (normally exactly one). */
+  deviceIds: string[];
   /** Blocking — the import must not proceed while any of these are present. */
   errors: string[];
   /** Non-blocking — shown for review, most often an unrecognised tag. */
@@ -91,16 +118,26 @@ function splitCsvLine(line: string): string[] {
 /**
  * Rows for the onboarding worksheet — one per attribute, in header order.
  *
- * Only the two machine-derived columns are filled: Attribute Name and Tag Name (plus a
- * UoM if one is already set). Type, Device Template Name, Data Type and Required are
- * left blank on purpose — the export is a worksheet for the person onboarding the
- * asset, and those are their calls to make, not a guess of ours to correct.
+ * Type and Data Type carry the master template's values rather than being blanked: by
+ * export time they have already been decided once, and re-entering them per section
+ * (200 cells for a 100-tag payload) is the work this sheet exists to avoid. They stay
+ * editable in Excel — the columns have dropdowns.
+ *
+ * Attribute Name is the raw payload tag, same as Tag Name. That is the only column
+ * meant to be rewritten by hand: rename it to whatever reads best, and leave Tag Name
+ * exactly as the payload sends it.
+ *
+ * Every row repeats the Device Id, so a split file stays self-describing.
  */
-export function templatesToRows(templates: { name: string; defs: AttrDef[] }[]): (string | number)[][] {
+export function templatesToRows(templates: { name: string; defs: AttrDef[]; deviceId?: string | null }[]): (string | number)[][] {
   const rows: (string | number)[][] = [];
   for (const t of templates) {
     for (const d of t.defs) {
-      rows.push([d.name, "", "", d.tagName ?? "", "", d.uom ?? "", d.decimalPlaces ?? "", ""]);
+      if (d.type === DEVICE_ID_TYPE) continue;   // the id is a column now, not a row
+      rows.push([
+        d.name, d.type ?? "", t.deviceId ?? "", d.tagName ?? "",
+        d.dataType ?? "", d.uom ?? "", d.decimalPlaces ?? "", d.required ? "TRUE" : "FALSE",
+      ]);
     }
   }
   return rows;
@@ -126,9 +163,7 @@ function parseDecimals(raw: string, line: number, errors: string[]): number | un
 }
 
 export interface ParseOptions {
-  /** Off for the single-template CSV tab, where the target template is already known. */
-  requireTemplateName?: boolean;
-  /** Fallback template name for rows with no Device Template Name column. */
+  /** Template name for the whole file — supplied by the import dialog. */
   defaultTemplateName?: string;
   /** Tags already known to the platform (lowercased). A row whose tag is absent gets a
    *  warning — never an error, because a template is often authored before its device
@@ -152,7 +187,7 @@ export function parseTemplateRows(cells: string[][], opts: ParseOptions = {}): P
   const lines = cells.filter((r) => r.some((c) => (c ?? "").trim() !== ""));
   if (lines.length < 2) {
     errors.push("The file needs a header row and at least one attribute row.");
-    return { rows, errors, warnings };
+    return { rows, deviceIds: [], errors, warnings };
   }
 
   // Map each column position to a field; unrecognised columns are ignored, which lets
@@ -167,10 +202,10 @@ export function parseTemplateRows(cells: string[][], opts: ParseOptions = {}): P
       errors.push(`Missing required column: "${label}".`);
     }
   }
-  if (opts.requireTemplateName && !has("templateName")) {
-    errors.push('Missing required column: "Device Template Name" — it decides which template each row goes to.');
-  }
-  if (errors.length > 0) return { rows, errors, warnings };
+  if (errors.length > 0) return { rows, deviceIds: [], errors, warnings };
+
+  // A file describes ONE device: its section templates are all fed by the same payload.
+  const deviceIdSet = new Set<string>();
 
   // name/tag collisions are per-template, so they are tracked per template key.
   const seenNames = new Map<string, Set<string>>();
@@ -185,17 +220,29 @@ export function parseTemplateRows(cells: string[][], opts: ParseOptions = {}): P
     };
 
     const name = get("name");
+    // The template name comes from the import dialog now; a legacy sheet that still has
+    // a Device Template Name column keeps routing by it.
     const templateName = get("templateName") || opts.defaultTemplateName || "";
+    const rowDeviceId = get("deviceId");
+    if (rowDeviceId) deviceIdSet.add(rowDeviceId);
     const tagName = get("tagName");
     const type = get("type").toLowerCase();
-    const dataType = get("dataType").toLowerCase();
+    // A device-id row carries no payload value, so Data Type is meaningless on it —
+    // default it rather than making the user fill a cell that changes nothing.
+    const isDeviceId = type === DEVICE_ID_TYPE;
+    const dataType = get("dataType").toLowerCase() || (isDeviceId ? "text" : "");
 
     // The export leaves Type / Device Template Name / Data Type blank for the user to
     // fill, so "you still have to fill this in" is the common case — say that, rather
     // than reporting an empty cell as an invalid value.
     if (!name) { errors.push(`Line ${line}: Attribute Name is required.`); continue; }
-    if (!templateName) { errors.push(`Line ${line}: Device Template Name is empty — name the section this row belongs to.`); continue; }
-    if (!tagName) { errors.push(`Line ${line}: Tag Name is required — it is what binds the attribute to the payload.`); continue; }
+    if (!templateName) { errors.push(`Line ${line}: no template name — give one in the import dialog.`); continue; }
+    if (!tagName) {
+      errors.push(isDeviceId
+        ? `Line ${line}: put the device id in the Tag Name column on a "${DEVICE_ID_TYPE}" row.`
+        : `Line ${line}: Tag Name is required — it is what binds the attribute to the payload.`);
+      continue;
+    }
     if (!type) { errors.push(`Line ${line}: Type is empty — set it to one of ${ATTR_TYPES.join(", ")}.`); continue; }
     if (!ATTR_TYPES.includes(type as any)) {
       errors.push(`Line ${line}: Type "${get("type")}" is not valid (use ${ATTR_TYPES.join(", ")}).`);
@@ -223,7 +270,9 @@ export function parseTemplateRows(cells: string[][], opts: ParseOptions = {}): P
     names.add(name.toLowerCase()); seenNames.set(key, names);
     tags.add(tagName.toLowerCase()); seenTags.set(key, tags);
 
-    if (opts.knownTags && opts.knownTags.size > 0 && !opts.knownTags.has(tagName.toLowerCase())) {
+    // A device-id row's "tag" is the device id, not a payload key — checking it against
+    // known tags would flag every one of them.
+    if (!isDeviceId && opts.knownTags && opts.knownTags.size > 0 && !opts.knownTags.has(tagName.toLowerCase())) {
       warnings.push(`Line ${line}: tag "${tagName}" does not match any tag already known to the platform — check it against the payload, or ignore this if the device is new.`);
     }
 
@@ -234,6 +283,7 @@ export function parseTemplateRows(cells: string[][], opts: ParseOptions = {}): P
 
     rows.push({
       templateName, line, name, type, dataType, tagName,
+      ...(rowDeviceId ? { value: rowDeviceId } : {}),
       ...(uom ? { uom } : {}),
       ...(description ? { description } : {}),
       ...(required !== undefined ? { required } : {}),
@@ -242,7 +292,12 @@ export function parseTemplateRows(cells: string[][], opts: ParseOptions = {}): P
   }
 
   if (rows.length === 0 && errors.length === 0) errors.push("No attribute rows found.");
-  return { rows, errors, warnings };
+
+  const deviceIds = [...deviceIdSet];
+  if (deviceIds.length > 1) {
+    errors.push(`This file lists ${deviceIds.length} different Device Ids (${deviceIds.join(", ")}). One file describes one device — split it, or correct the column.`);
+  }
+  return { rows, deviceIds, errors, warnings };
 }
 
 /** Group parsed rows by template, preserving first-seen casing and file order. */

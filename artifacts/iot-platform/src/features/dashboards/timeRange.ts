@@ -3,6 +3,8 @@
 // Aggregation" popover. Values mirror src/pages/AnalyticsKpi.tsx so both
 // dashboards behave identically.
 
+import { format } from "date-fns";
+
 export const REFRESH_INTERVALS = [
   { label: "1 s",    ms: 1_000 },
   { label: "2 s",    ms: 2_000 },
@@ -112,6 +114,19 @@ export function rangeLabelOf(cfg: TimeCfg): string {
   if (minutes === -3) return "MTD";
   if (minutes === -4) return "YTD";
   return RANGES.find((r) => r.minutes === minutes)?.label ?? `${minutes}m`;
+}
+
+/**
+ * Chart x-axis tick label for one point.
+ *
+ * Within a single day every tick sharing the same date would be redundant, so
+ * time-only ("14:20") is enough. Once the window can span more than a day —
+ * "Last 3 days", "Last 7 days", a custom multi-day range — ticks without a date
+ * are ambiguous (which of the seven 14:20s is this?), so the date rides along.
+ */
+export function tickLabel(timestamp: string | number | Date, rangeMinutes: number): string {
+  const spansMultipleDays = !(rangeMinutes > 0 && rangeMinutes <= 1440);
+  return format(new Date(timestamp), spansMultipleDays ? "MMM d, HH:mm" : "HH:mm");
 }
 
 const GAP_STEP_MS: Record<string, number> = {

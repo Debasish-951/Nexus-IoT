@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Clock, Move, Image as ImageIcon, Plus, Trash2, X, Settings2 } from "lucide-react";
+import { Clock, Move, Image as ImageIcon, Plus, Trash2, X, Settings2, Layers } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
@@ -8,6 +8,8 @@ import { useListAssets } from "@workspace/api-client-react";
 import { WIDGET_CATEGORIES, PALETTE, widgetDef } from "./registry";
 import { useMetricChoices } from "./useWidgetData";
 import { ColorField } from "./ColorField";
+import { AssetPickerDialog } from "./AssetPickerDialog";
+import { AttributeSelect } from "./AttributeSelect";
 
 const BINDABLE = new Set(["kpi", "health", "availability", "oee", "downtime", "runtime", "energy", "gauge", "thermometer", "tank", "battery", "progress", "line", "area", "bar", "stackbar", "table", "alarms", "events"]);
 const MULTI_SERIES = new Set(["line", "area", "bar", "stackbar"]);
@@ -75,18 +77,27 @@ function OverlaySeriesRow({ overlay, index, assets, defaultAssetId, onChange, on
   const metrics = useMetricChoices(assetId);
   const color = overlay.color ?? SPC_COLORS[(index + 1) % SPC_COLORS.length];
   const selCls = "h-7 text-xs rounded-md border border-border bg-background px-1.5 min-w-0";
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const assetName = assets.find((a) => a.id === assetId)?.name;
   return (
     <div className="rounded-md border border-border p-2 space-y-1.5">
       <div className="flex items-center gap-1.5">
         <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: color }} />
-        <select value={assetId} onChange={(e) => onChange({ assetId: e.target.value, tag: "" })} className={cn(selCls, "flex-1")}>
-          <option value="">Asset…</option>
-          {assets.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-        </select>
-        <select value={overlay.tag ?? ""} onChange={(e) => onChange({ tag: e.target.value })} className={cn(selCls, "flex-1")} disabled={!assetId}>
-          <option value="">Metric…</option>
-          {metrics.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
-        </select>
+        {/* Same hierarchy picker as the primary source — an overlay may point at a
+            different asset, so it needs the same disambiguation. */}
+        <button type="button" onClick={() => setPickerOpen(true)}
+          className={cn(selCls, "flex-1 text-left truncate", !assetName && "text-muted-foreground")}>
+          {assetName ?? "Data source…"}
+        </button>
+        <AssetPickerDialog
+          open={pickerOpen} assets={assets} value={assetId}
+          onClose={() => setPickerOpen(false)}
+          onSelect={(id) => onChange({ assetId: id, tag: "" })}
+        />
+        <div className="flex-1 min-w-0">
+          <AttributeSelect size="sm" value={overlay.tag ?? ""} options={metrics} disabled={!assetId}
+            placeholder="Attribute…" onChange={(key) => onChange({ tag: key })} />
+        </div>
         <button onClick={onRemove} title="Remove series" className="text-muted-foreground hover:text-destructive shrink-0"><Trash2 className="w-3.5 h-3.5" /></button>
       </div>
       <div className="flex items-center gap-1.5">
@@ -148,6 +159,23 @@ export function WidgetConfigPanel({
   const { data: assetsData } = useListAssets();
   const assets = (assetsData as any[] | undefined) ?? [];
   const metrics = useMetricChoices(draft.assetId);
+  const [assetPickerOpen, setAssetPickerOpen] = useState(false);
+
+  /** "Textile Industry › energy_analytics › rf_dryer" — the path, so a duplicated
+   *  leaf name (two "All_machine" nodes) still reads unambiguously once chosen. */
+  const selectedAssetPath = (() => {
+    if (!draft.assetId) return "";
+    const byId = new Map(assets.map((a) => [a.id, a]));
+    const parts: string[] = [];
+    let cur = byId.get(draft.assetId);
+    const guard = new Set<string>();
+    while (cur && !guard.has(cur.id)) {
+      guard.add(cur.id);
+      parts.unshift(cur.name);
+      cur = cur.parentId ? byId.get(cur.parentId) : undefined;
+    }
+    return parts.join(" › ");
+  })();
   const overlays: Overlay[] = Array.isArray(draft.overlays) ? draft.overlays : [];
   const selCls = "w-full h-8 rounded-md border border-border text-sm px-2 bg-background";
 
@@ -175,8 +203,9 @@ export function WidgetConfigPanel({
         </Field>
 
         {/* Left empty on purpose — widget types carry no default title, so this is the
-            user's to fill. Blank falls back to the widget type's name on the canvas. */}
-        <Field label="Title (optional)"><Input value={draft.title ?? ""} onChange={(e) => set({ title: e.target.value })} className="h-8 text-sm" placeholder="Defaults to the widget type" /></Field>
+            user's to fill. Blank means a blank widget header; it does NOT fall back to
+            the Label (that names the series in the legend) or to the widget type. */}
+        <Field label="Widget Title"><Input value={draft.title ?? ""} onChange={(e) => set({ title: e.target.value })} className="h-8 text-sm" placeholder="Shown in the widget header — blank for none" /></Field>
 
         {type === "text" && (
           <Field label="Text"><textarea value={draft.text ?? ""} onChange={(e) => set({ text: e.target.value })} className="w-full rounded-md border border-border p-2 text-sm h-24 resize-y" /></Field>
@@ -195,46 +224,63 @@ export function WidgetConfigPanel({
         {bindable && (
           <div className="pt-2 mt-1 border-t border-border space-y-3">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Data</p>
-            <Field label="Asset">
-              <select value={draft.assetId ?? ""} onChange={(e) => set({ assetId: e.target.value, tag: "", tags: [], xTag: "", yTag: "", overlays: [] })} className={selCls}>
-                <option value="">— none (sample data) —</option>
-                {assets.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-              </select>
+            {/* Picked from the hierarchy, not a flat list: two assets can share a
+                name under different parents, and the path is what disambiguates. */}
+            <Field label="Data Source">
+              <button type="button" onClick={() => setAssetPickerOpen(true)}
+                className={cn(selCls, "flex items-center justify-between gap-2 text-left")}>
+                <span className={cn("truncate", !draft.assetId && "text-muted-foreground")}>
+                  {selectedAssetPath || "— none (sample data) —"}
+                </span>
+                <Layers className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+              </button>
             </Field>
+            <AssetPickerDialog
+              open={assetPickerOpen}
+              assets={assets}
+              value={draft.assetId ?? ""}
+              onClose={() => setAssetPickerOpen(false)}
+              onSelect={(assetId) => set({ assetId, tag: "", tags: [], xTag: "", yTag: "", overlays: [] })}
+            />
 
             {isScatter ? (
               <>
-                <Field label="X Tag">
-                  <select value={draft.xTag ?? ""} onChange={(e) => set({ xTag: e.target.value })} className={selCls} disabled={!draft.assetId}>
-                    <option value="">— select —</option>{metrics.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
-                  </select>
+                <Field label="X Attribute">
+                  <AttributeSelect value={draft.xTag ?? ""} options={metrics} disabled={!draft.assetId}
+                    placeholder={draft.assetId ? "— select attribute —" : "pick a data source first"}
+                    onChange={(key) => set({ xTag: key })} />
                 </Field>
-                <Field label="Y Tag">
-                  <select value={draft.yTag ?? ""} onChange={(e) => set({ yTag: e.target.value })} className={selCls} disabled={!draft.assetId}>
-                    <option value="">— select —</option>{metrics.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
-                  </select>
+                <Field label="Y Attribute">
+                  <AttributeSelect value={draft.yTag ?? ""} options={metrics} disabled={!draft.assetId}
+                    placeholder={draft.assetId ? "— select attribute —" : "pick a data source first"}
+                    onChange={(key) => set({ yTag: key })} />
                 </Field>
               </>
             ) : (
               <>
                 <div className="space-y-1">
-                  <Label className="text-xs">Primary Metric</Label>
-                  <select value={draft.tag ?? ""} onChange={(e) => set({ tag: e.target.value })} className={selCls} disabled={!draft.assetId}>
-                    <option value="">{draft.assetId ? "— select attribute / metric —" : "pick an asset first"}</option>
-                    {metrics.map((m) => <option key={m.key} value={m.key}>{m.label}</option>)}
-                  </select>
-                  <p className="text-[11px] text-muted-foreground">The asset's attributes (name · unit) plus any live telemetry tags.</p>
+                  <Label className="text-xs">Attribute</Label>
+                  <AttributeSelect value={draft.tag ?? ""} options={metrics} disabled={!draft.assetId}
+                    placeholder={draft.assetId ? "— select attribute —" : "pick a data source first"}
+                    onChange={(key) => set({ tag: key })} />
+                  <p className="text-[11px] text-muted-foreground">Shown by Attribute Name; falls back to the raw payload tag if it was never renamed.</p>
                 </div>
 
                 <div className="grid grid-cols-2 gap-2">
-                  <Field label="Label"><Input value={draft.label ?? ""} onChange={(e) => set({ label: e.target.value })} className="h-8 text-sm" placeholder="Short display name" /></Field>
-                  <Field label="UoM"><Input value={draft.unit ?? ""} onChange={(e) => set({ unit: e.target.value })} className="h-8 text-sm" placeholder="e.g. kWh, °C" /></Field>
+                  <Field label="Label"><Input value={draft.label ?? ""} onChange={(e) => set({ label: e.target.value })} className="h-8 text-sm" placeholder="Attribute Name" /></Field>
+                  <Field label="UoM"><Input value={draft.unit ?? ""} onChange={(e) => set({ unit: e.target.value })} className="h-8 text-sm" placeholder="From attribute" /></Field>
                 </div>
+                {/* Both are overrides, not requirements — the chart already names the
+                    series from the Attribute Name and takes the unit from the
+                    attribute's UoM. Saying so stops these reading as blanks to fill. */}
+                <p className="text-[11px] text-muted-foreground -mt-1.5">
+                  Optional overrides. Left blank, the series is named after the <strong>Attribute Name</strong> (shown in the legend below the chart) and the <strong>UoM</strong> comes from the attribute itself (shown on the Y-axis).
+                </p>
 
                 {multiSeries && (
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
-                      <Label className="text-xs font-medium">Overlay Metrics (multi-series)</Label>
+                      <Label className="text-xs font-medium">Overlay Attributes (multi-series)</Label>
                       <button
                         onClick={() => set({ overlays: [...overlays, { assetId: draft.assetId, tag: "" }] })}
                         className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded border border-primary/40 text-primary hover:bg-primary/5"
@@ -250,7 +296,7 @@ export function WidgetConfigPanel({
                       />
                     ))}
                     {overlays.length === 0 && (
-                      <p className="text-[11px] text-muted-foreground">Add extra series to overlay on the same chart from any asset.</p>
+                      <p className="text-[11px] text-muted-foreground">Add extra series to overlay on the same chart, from this or any other asset.</p>
                     )}
                   </div>
                 )}

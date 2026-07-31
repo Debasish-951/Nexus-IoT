@@ -57,10 +57,16 @@ router.put("/asset-templates/:id", async (req, res): Promise<void> => {
 
   // attributeDefinitions comes through as raw JSON (not in Zod schema — accept directly from body)
   const attributeDefinitions = (req.body as any)?.attributeDefinitions;
+  const rawDeviceId = (req.body as any)?.deviceId;
 
   const updatePayload: Record<string, unknown> = {};
   if (parsed.data.name !== undefined) updatePayload.name = parsed.data.name;
   if (parsed.data.tags !== undefined) updatePayload.tags = parsed.data.tags;
+  // The template owns the device id: applying it binds the asset to that payload
+  // stream, so it has to be editable here (same raw-read pattern as the definitions).
+  if (rawDeviceId !== undefined) {
+    updatePayload.deviceId = typeof rawDeviceId === "string" && rawDeviceId.trim() ? rawDeviceId.trim() : null;
+  }
   if (attributeDefinitions !== undefined) {
     updatePayload.attributeDefinitions = JSON.stringify(attributeDefinitions);
     updatePayload.attributeCount = Array.isArray(attributeDefinitions) ? attributeDefinitions.length : 0;

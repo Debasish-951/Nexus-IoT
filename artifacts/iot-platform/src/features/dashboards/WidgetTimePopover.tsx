@@ -7,16 +7,39 @@ import { Switch } from "@/components/ui/switch";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { RANGES, GRANULARITY_OPTS, AGG_TYPE_OPTS, REFRESH_INTERVALS, rangeLabelOf } from "./timeRange";
+import { RANGES, GRANULARITY_OPTS, AGG_TYPE_OPTS, REFRESH_INTERVALS, rangeLabelOf, type TimeCfg } from "./timeRange";
 import type { Widget } from "./types";
 
 // Per-widget "Time Range & Aggregation" control — mirrors the popover on the
 // Analytics & KPI page (src/pages/AnalyticsKpi.tsx) so both dashboards behave
 // the same way, restyled with this app's light shadcn components.
-export function WidgetTimePopover({ widget, updateConfig }: { widget: Widget; updateConfig: (id: string, patch: Record<string, any>) => void }) {
+//
+// Scope: every setting in here — range, granularity, aggregation, refresh — is
+// this widget's own. The dashboard-wide "Set all ranges…" control (in the
+// toolbar) only ever touches a widget that has NOT been configured here yet
+// (tracked by `timeIsCustom`); the moment Apply is clicked, this widget stops
+// listening to that control. That is the fix for two symptoms of the same bug:
+// a deliberately-set widget range silently reverting to whatever the dashboard
+// selector last held, and this popover LOOKING tied to the dashboard because,
+// before `timeIsCustom` existed, every widget always was.
+export function WidgetTimePopover({ widget, updateConfig, dashTimeCfg, boundary }: {
+  widget: Widget; updateConfig: (id: string, patch: Record<string, any>) => void;
+  /** The dashboard-wide range, for the header badge to show what this widget is
+   *  ACTUALLY using right now when it isn't customised — otherwise the badge
+   *  showed a meaningless default instead of the truth. */
+  dashTimeCfg?: TimeCfg | null;
+  /** Keeps the panel inside the dashboard canvas instead of sprawling over the
+   *  hierarchy sidebar. Radix's default boundary is the viewport, which the
+   *  sidebar is part of — so it saw nothing to avoid. */
+  boundary?: HTMLElement | null;
+}) {
   const c = widget.config ?? {};
   const [open, setOpen] = useState(false);
-  const [rangeMinutes, setRangeMinutes] = useState<number>(c.rangeMinutes ?? (c.rangeHours != null ? c.rangeHours * 60 : 1440));
+  // Seeded from the dashboard's range when this widget is following it, so opening
+  // the popover shows what the widget is really on rather than a 24h default it
+  // was never using.
+  const fallbackMinutes = dashTimeCfg?.rangeMinutes ?? 1440;
+  const [rangeMinutes, setRangeMinutes] = useState<number>(c.rangeMinutes ?? (c.rangeHours != null ? c.rangeHours * 60 : fallbackMinutes));
   const [customFrom, setCustomFrom] = useState(c.customFrom ?? "");
   const [customTo, setCustomTo] = useState(c.customTo ?? "");
   const [granularity, setGranularity] = useState(c.granularity ?? "auto");
@@ -24,21 +47,26 @@ export function WidgetTimePopover({ widget, updateConfig }: { widget: Widget; up
   const [interpolated, setInterpolated] = useState(!!c.interpolated);
   const [refreshEnabled, setRefreshEnabled] = useState(!!c.refreshEnabled);
   const [refreshInterval, setRefreshInterval] = useState<number>(c.refreshInterval ?? 30_000);
-  const [allowOverride, setAllowOverride] = useState(c.allowOverride !== false);
+
+  // True once this widget has its own explicit time settings (set below, the
+  // instant Apply is clicked). Legacy widgets saved with the old, inverted
+  // `allowOverride: false` field are honoured the same way, so a range someone
+  // already deliberately locked down does not start following the dashboard
+  // again just because this file changed.
+  const isCustomised = !!c.timeIsCustom || c.allowOverride === false;
 
   // Re-sync local state whenever the popover opens, so stale edits from a
   // previous open (closed without Apply) don't linger.
   useEffect(() => {
     if (!open) return;
-    setRangeMinutes(c.rangeMinutes ?? (c.rangeHours != null ? c.rangeHours * 60 : 1440));
-    setCustomFrom(c.customFrom ?? "");
-    setCustomTo(c.customTo ?? "");
+    setRangeMinutes(c.rangeMinutes ?? (c.rangeHours != null ? c.rangeHours * 60 : fallbackMinutes));
+    setCustomFrom(c.customFrom ?? (dashTimeCfg?.customFrom ?? ""));
+    setCustomTo(c.customTo ?? (dashTimeCfg?.customTo ?? ""));
     setGranularity(c.granularity ?? "auto");
     setAggType(c.aggType ?? "avg");
     setInterpolated(!!c.interpolated);
     setRefreshEnabled(!!c.refreshEnabled);
     setRefreshInterval(c.refreshInterval ?? 30_000);
-    setAllowOverride(c.allowOverride !== false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
@@ -55,7 +83,25 @@ export function WidgetTimePopover({ widget, updateConfig }: { widget: Widget; up
       interpolated,
       refreshEnabled,
       refreshInterval,
-      allowOverride,
+      // Setting anything here IS the act of customising this widget — from now
+      // on the dashboard-wide range selector leaves it alone.
+      timeIsCustom: true,
+      allowOverride: undefined,
+    });
+    setOpen(false);
+  }
+
+  // Opts back into the dashboard-wide range. Only the range fields are cleared —
+  // granularity/aggregation/refresh are this widget's own regardless, so they
+  // are left exactly as they are.
+  function handleFollowDashboard() {
+    updateConfig(widget.id, {
+      timeIsCustom: false,
+      allowOverride: undefined,
+      rangeMinutes: undefined,
+      rangeHours: undefined,
+      customFrom: undefined,
+      customTo: undefined,
     });
     setOpen(false);
   }
@@ -63,16 +109,49 @@ export function WidgetTimePopover({ widget, updateConfig }: { widget: Widget; up
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <button className="p-1 rounded hover:bg-muted transition-colors" title="Time Range & Aggregation">
+        <button className="relative p-1 rounded hover:bg-muted transition-colors"
+          title={isCustomised ? "Time Range & Aggregation — set for this widget" : "Time Range & Aggregation — following the dashboard's range"}>
           <Clock className="w-3.5 h-3.5 text-muted-foreground" />
+          {isCustomised && <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-primary" />}
         </button>
       </PopoverTrigger>
-      <PopoverContent side="bottom" align="end" sideOffset={6} className="w-80 p-0">
+      <PopoverContent
+        side="bottom" align="end" sideOffset={6}
+        collisionBoundary={boundary ?? undefined}
+        collisionPadding={10}
+        // Radix reports the room it actually has as a CSS var. Capping to it (and
+        // scrolling past that) means opening Custom range — which makes this panel
+        // taller — can never push content out through the bottom of the canvas.
+        className="w-80 max-w-[calc(100vw-1.25rem)] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto p-0"
+      >
         <div className="px-3 py-2 flex items-center gap-2 border-b border-border bg-muted/40">
           <Clock className="w-3.5 h-3.5 text-primary" />
           <span className="text-xs font-semibold text-primary">Time Range &amp; Aggregation</span>
-          <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono">{rangeLabelOf(c)}</span>
+          <span className="ml-auto text-[10px] px-1.5 py-0.5 rounded bg-muted text-muted-foreground font-mono">
+            {rangeLabelOf(isCustomised ? c : (dashTimeCfg ?? {}))}
+          </span>
         </div>
+
+        {/* A single on/off control for "follow the dashboard vs. set my own" —
+            replaces the old buried text link, which read as an afterthought and
+            was easy to miss. Flipping it ON immediately reverts to the dashboard's
+            live range; flipping it OFF just means "I'm about to customise" — the
+            fields below are edited normally and Apply is still what commits them. */}
+        <div className="px-3 py-2 flex items-center justify-between border-b border-border">
+          <span className={cn("text-[11px] font-medium", !isCustomised ? "text-foreground" : "text-muted-foreground")}>
+            Follow dashboard range
+          </span>
+          <Switch
+            checked={!isCustomised}
+            onCheckedChange={(checked) => { if (checked) handleFollowDashboard(); }}
+            className="scale-90"
+          />
+        </div>
+        <p className="px-3 pt-2 text-[10px] text-muted-foreground">
+          {isCustomised
+            ? "Custom for this widget — the dashboard-wide range selector no longer affects it."
+            : "Following the dashboard's range. Change anything below and hit Apply to set one just for this widget."}
+        </p>
 
         <div className="p-3 space-y-3">
           <div className="grid grid-cols-2 gap-2">
@@ -106,15 +185,25 @@ export function WidgetTimePopover({ widget, updateConfig }: { widget: Widget; up
             </div>
           </div>
 
+          {/* Stacked, not side by side. A `datetime-local` input needs ~150px before
+              its native picker button, so two of them plus an arrow and a decorative
+              calendar icon could never fit this panel's width — they overflowed past
+              its right edge. Each row is now full-width, and the redundant icon is
+              gone since every date input already has its own picker. */}
           {isCustom && (
-            <div className="space-y-1">
-              <Label className="text-[10px] text-muted-foreground">Custom Time Range</Label>
-              <div className="flex items-center gap-1.5">
-                <Input type="datetime-local" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className="h-7 text-[11px] px-1.5" />
-                <span className="text-[10px] text-muted-foreground">→</span>
-                <Input type="datetime-local" value={customTo} onChange={(e) => setCustomTo(e.target.value)} className="h-7 text-[11px] px-1.5" />
-                <CalendarDays className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+            <div className="space-y-1.5">
+              <Label className="text-[10px] text-muted-foreground flex items-center gap-1">
+                <CalendarDays className="w-3 h-3" /> Custom Time Range
+              </Label>
+              <div className="grid grid-cols-[2.25rem_minmax(0,1fr)] items-center gap-1.5">
+                <span className="text-[10px] text-muted-foreground">From</span>
+                <Input type="datetime-local" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className="h-7 w-full min-w-0 text-[11px] px-1.5" />
+                <span className="text-[10px] text-muted-foreground">To</span>
+                <Input type="datetime-local" value={customTo} onChange={(e) => setCustomTo(e.target.value)} className="h-7 w-full min-w-0 text-[11px] px-1.5" />
               </div>
+              {(!customFrom || !customTo) && (
+                <p className="text-[10px] text-amber-600 dark:text-amber-400">Set both dates, then Apply.</p>
+              )}
             </div>
           )}
 
@@ -153,12 +242,11 @@ export function WidgetTimePopover({ widget, updateConfig }: { widget: Widget; up
             </label>
           </div>
 
-          <div className="flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Switch checked={allowOverride} onCheckedChange={setAllowOverride} className="scale-75 origin-left" />
-              <span className={cn("text-[10px]", allowOverride ? "text-foreground" : "text-muted-foreground")}>Allow Override</span>
-            </div>
-            <Button size="sm" className="h-7 text-xs" onClick={handleApply}>Apply</Button>
+          <div className="flex items-center justify-end">
+            {/* Applying "Custom range" with a missing date would commit a config that
+                getFromTo silently reads as the 60-minute default — a range the user
+                never asked for, with nothing on screen to explain it. */}
+            <Button size="sm" className="h-7 text-xs" disabled={isCustom && (!customFrom || !customTo)} onClick={handleApply}>Apply</Button>
           </div>
         </div>
       </PopoverContent>

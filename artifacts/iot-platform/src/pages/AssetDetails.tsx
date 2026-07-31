@@ -116,6 +116,16 @@ export default function AssetDetails({ assetId: assetIdProp, embedded }: { asset
       if (!res.ok) { toast({ title: "Failed", description: data.error, variant: "destructive" }); return; }
       let desc = `${data.created} attribute(s) created`;
       if (data.skipped > 0) desc += ` · ${data.skipped} skipped: ${(data.skippedItems ?? []).join(", ")}`;
+      // The template also carries the Device ID, so say what this asset is now bound to —
+      // that binding is what decides whether telemetry ever lands.
+      if (data.deviceIdBound) {
+        desc += ` · bound to device "${data.deviceIdBound}"`;
+        // Sharing a device id is the section-template pattern, not an error: each asset
+        // takes the metrics it declares.
+        if (data.sharedWith?.length) desc += ` (shared with ${data.sharedWith.join(", ")})`;
+      } else if (!data.deviceId) {
+        desc += " · no Device ID on the template, so this asset will not receive data";
+      }
       toast({ title: `Template "${data.templateName}" applied`, description: desc });
       qc.invalidateQueries({ queryKey: getListAssetAttributesQueryKey(asset.id) });
       qc.invalidateQueries({ queryKey: getListAssetsQueryKey() });
@@ -552,10 +562,10 @@ export default function AssetDetails({ assetId: assetIdProp, embedded }: { asset
                 if (!tmpl || defs.length === 0) return null;
                 return (
                   <div className="rounded border border-border overflow-hidden">
-                    <div className="bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground">{defs.length} attribute{defs.length !== 1 ? "s" : ""} · prefix: <code className="font-mono">{asset.identifier ? `${asset.identifier}.` : "(none — grouping asset)"}</code></div>
+                    <div className="bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground">{defs.length} attribute{defs.length !== 1 ? "s" : ""} · device id: <code className="font-mono">{tmpl.deviceId || asset.identifier || "(none — this asset will not receive data)"}</code></div>
                     <div className="max-h-40 overflow-auto"><table className="w-full text-xs">
-                      <thead><tr className="border-b border-border/50 bg-muted/30"><th className="text-left px-3 py-1.5 font-medium text-muted-foreground">Name</th><th className="text-left px-3 py-1.5 font-medium text-muted-foreground">Resolved Tag</th><th className="text-left px-3 py-1.5 font-medium text-muted-foreground">UoM</th></tr></thead>
-                      <tbody>{defs.map((d: any, i: number) => (<tr key={i} className="border-b border-border/50 last:border-0"><td className="px-3 py-1.5 font-medium">{d.name}</td><td className="px-3 py-1.5 font-mono text-muted-foreground">{d.tagName ? `${asset.identifier ? `${asset.identifier}.` : ""}${d.tagName}` : "—"}</td><td className="px-3 py-1.5">{d.uom || "—"}</td></tr>))}</tbody>
+                      <thead><tr className="border-b border-border/50 bg-muted/30"><th className="text-left px-3 py-1.5 font-medium text-muted-foreground">Name</th><th className="text-left px-3 py-1.5 font-medium text-muted-foreground">Tag</th><th className="text-left px-3 py-1.5 font-medium text-muted-foreground">UoM</th></tr></thead>
+                      <tbody>{defs.map((d: any, i: number) => (<tr key={i} className="border-b border-border/50 last:border-0"><td className="px-3 py-1.5 font-medium">{d.name}</td><td className="px-3 py-1.5 font-mono text-muted-foreground">{d.tagName ?? "—"}</td><td className="px-3 py-1.5">{d.uom || "—"}</td></tr>))}</tbody>
                     </table></div>
                   </div>
                 );

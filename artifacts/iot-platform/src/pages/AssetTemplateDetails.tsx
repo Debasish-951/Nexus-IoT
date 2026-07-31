@@ -16,17 +16,20 @@ import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import {
   Plus, Trash2, Save, Braces, FileSpreadsheet, ChevronRight, AlertTriangle,
-  CheckCircle2, LayoutTemplate, Zap, Upload, Hash, User, Calendar, ArrowLeft, X, Pencil,
+  CheckCircle2, LayoutTemplate, Zap, Upload, Hash, Radio, Calendar, ArrowLeft, X, Pencil,
 } from "lucide-react";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { apiFetch } from "@/lib/auth-api";
-import { ATTR_TYPES, ATTR_DATATYPES, TEMPLATE_CSV_HEADERS, parseTemplateCsv, type AttrDef } from "./templateCsv";
+import { ATTR_TYPES, ATTR_DATATYPES, TEMPLATE_CSV_HEADERS, DEVICE_ID_TYPE, parseTemplateCsv, splitDeviceId, type AttrDef } from "./templateCsv";
 
 type Def = AttrDef;
-// Envelope keys that never become attributes. deviceId is deliberately absent from the
-// attribute list because it is surfaced separately (detected + registered on import).
+// Envelope keys that never become attributes. deviceId is handled separately — it is
+// emitted as a `deviceid` row so the binding is declared in the same list.
+// Only structural/envelope keys are skipped. Everything else the payload contains becomes
+// an attribute, including `machine` and per-machine timestamps: whether a row is worth
+// keeping is the user's call, made in the exported sheet — not a guess made here.
 const PAYLOAD_SKIP_KEYS = new Set([
   "deviceId","device_id","sensor","asset","measurement_point","id","version","type","source",
 ]);
@@ -41,9 +44,9 @@ const isTimestampKey = (key: string) => TIMESTAMP_KEYS.has((key.split(".").pop()
 const PAYLOAD_EXAMPLE = JSON.stringify({ deviceId: "my-device-01", timestampUnix: 1766062407826, data: { temperature: 31.7, humidity: 68.4, energy_kwh: 145.7, battery: 3.0 } }, null, 2);
 const CSV_EXAMPLE = [
   TEMPLATE_CSV_HEADERS.join(","),
-  "Temperature,dynamic,Chiller Section,temperature,double,°C,2,TRUE",
-  "Vibration RMS X,dynamic,Chiller Section,vibration_rms_velocity_x,double,mm/s,3,FALSE",
-  "Sensor Serial,static,Chiller Section,sensor_serial,text,,,FALSE",
+  "temperature,dynamic,chiller-01,temperature,double,°C,2,TRUE",
+  "vibration_rms_velocity_x,dynamic,chiller-01,vibration_rms_velocity_x,double,mm/s,3,FALSE",
+  "sensor_serial,static,chiller-01,sensor_serial,text,,,FALSE",
 ].join("\n");
 const JSON_SCHEMA_EXAMPLE = JSON.stringify({ deviceId: "my-device-01", attributes: [{ name: "Temperature", type: "dynamic", dataType: "double", tagName: "temperature", uom: "°C" }] }, null, 2);
 
@@ -87,9 +90,22 @@ function extractFromPayload(text: string): { defs: Def[]; deviceId: string | nul
     if (dataObj) collect(dataObj);
     else collect(p);
   }
-  const defs: Def[] = Object.entries(seen).map(([key, val]) => {
-    const name = key.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-    if (isTimestampKey(key)) return { name, type: "timestamp", dataType: "timestamp", tagName: key };
+  // The device id leads the review list rather than sitting in a separate banner: it is
+  // part of what the template declares, and burying it is exactly how an asset ends up
+  // receiving nothing. Its Type is `deviceid`, and the id itself lives in the tag cell.
+  const idRow: Def[] = deviceId
+    ? [{ name: "Device ID", type: DEVICE_ID_TYPE, dataType: "text", tagName: deviceId, value: deviceId }]
+    : [];
+
+  // Attribute Name starts as the raw payload tag, identical to Tag Name. Prettifying it
+  // here ("Genset.Efficiency KWh Per L") guessed at naming the user is better placed to
+  // choose, and hid the one string that has to match the payload. Rename it in the
+  // exported sheet; Tag Name stays exactly as the device sends it.
+  const defs: Def[] = Object.entries(seen).flatMap(([key, val]) => {
+    const name = key;
+    // Nested timestamps are kept too — ingest delivers each machine's own clock, and the
+    // root-clock fill deliberately leaves them alone.
+    if (isTimestampKey(key)) return [{ name, type: "timestamp", dataType: "timestamp", tagName: key }];
     const jsType = typeof val;
     let dataType = "text"; let attrType = "dynamic";
     if (jsType === "number") { dataType = Number.isInteger(val as number) ? "number" : "double"; }
@@ -99,13 +115,12 @@ function extractFromPayload(text: string): { defs: Def[]; deviceId: string | nul
       const isSerial = ["serial","mac","id","name","point"].some((s) => lk.includes(s));
       attrType = isSerial ? "static" : "dynamic";
     }
-    return { name, type: attrType, dataType, tagName: key };
+    return [{ name, type: attrType, dataType, tagName: key }];
   });
-  return { defs, deviceId };
+  return { defs: [...idRow, ...defs], deviceId };
 }
-/** CSV pasted on THIS page always lands in the template being edited, so a Device
- *  Template Name column is optional here — but when one is present, rows naming a
- *  different template are dropped rather than silently absorbed. */
+/** CSV pasted on THIS page always lands in the template being edited; a legacy sheet
+ *  that still carries a Device Template Name column has its foreign rows dropped. */
 function parseCsvDefs(text: string, templateName: string): { defs: Def[]; error: string | null; skipped: number } {
   const { rows, errors } = parseTemplateCsv(text, { defaultTemplateName: templateName });
   if (errors.length > 0) return { defs: [], error: errors.slice(0, 4).join(" "), skipped: 0 };
@@ -129,6 +144,9 @@ export default function AssetTemplateDetails() {
   const [template, setTemplate] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
   const [editedDefs, setEditedDefs] = useState<Def[]>([]);
+  // The template owns the device id now — assets inherit it when the template is
+  // applied, so this is the one place it is typed.
+  const [deviceId, setDeviceId] = useState("");
   const [savingDefs, setSavingDefs] = useState(false);
   const [newDef, setNewDef] = useState<Def>({ name: "", type: "dynamic", dataType: "double", tagName: "", uom: "" });
   const [manualRowOpen, setManualRowOpen] = useState(false);
@@ -157,6 +175,7 @@ export default function AssetTemplateDetails() {
         const defs = Array.isArray(t?.attributeDefinitions) ? t.attributeDefinitions : [];
         setTemplate(t);
         setEditedDefs(defs);
+        setDeviceId(t?.deviceId ?? "");
         // Open the import panel once, up front, for a brand-new template — it must
         // NOT be re-derived from editedDefs.length on every render, or it would
         // snap shut the moment the first attribute is added (mid add-another-one flow).
@@ -187,7 +206,7 @@ export default function AssetTemplateDetails() {
     try {
       const res = await apiFetch(`/api/asset-templates/${template.id}`, {
         method: "PUT", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ attributeDefinitions: editedDefs }),
+        body: JSON.stringify({ attributeDefinitions: editedDefs, deviceId: deviceId.trim() || null }),
       });
       const data = await res.json();
       if (!res.ok) { toast({ title: "Save failed", description: data.error, variant: "destructive" }); return; }
@@ -234,18 +253,24 @@ export default function AssetTemplateDetails() {
     } catch (e: any) { setImportError(e.message); }
   }
   function handleImportConfirm() {
-    const finalDefs = importPreview.map((d, i) => previewUoms[i] !== undefined ? { ...d, uom: previewUoms[i] } : d);
-    setEditedDefs((p) => [...p, ...finalDefs]);
-    const did = detectedDeviceId;
+    const withUoms = importPreview.map((d, i) => previewUoms[i] !== undefined ? { ...d, uom: previewUoms[i] } : d);
+    // A `deviceid` row is the binding, not an attribute: it sets the template's device
+    // id and never becomes an attribute definition (which would be a dead row on every
+    // asset the template is applied to).
+    const { deviceId: rowDeviceId, attributes } = splitDeviceId(withUoms);
+    setEditedDefs((p) => [...p, ...attributes]);
+
+    const did = rowDeviceId ?? detectedDeviceId;
+    if (did) setDeviceId(did);
     closeImport();
     if (did) {
-      // Register the payload's deviceId so it can be bound to an asset in the wizard.
+      // Register the payload's deviceId so it is also selectable elsewhere.
       void apiFetch("/api/ingest/register-device", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ deviceId: did }),
       }).catch(() => {});
-      toast({ title: `Added ${finalDefs.length} definition(s)`, description: `Device "${did}" registered — you can now create an asset for it. Click Save to persist the template.` });
+      toast({ title: `Added ${attributes.length} definition(s)`, description: `Device ID set to "${did}". Click Save to persist the template.` });
     } else {
-      toast({ title: `Added ${finalDefs.length} definition(s)`, description: "Click Save to persist the template" });
+      toast({ title: `Added ${attributes.length} definition(s)`, description: "Click Save to persist the template" });
     }
   }
   function closeImport() {
@@ -263,7 +288,6 @@ export default function AssetTemplateDetails() {
 
   const summary = [
     { label: "Total Attributes", value: String(editedDefs.length), icon: Hash },
-    { label: "Created By", value: "—", icon: User },
     { label: "Created On", value: template.createdAt ? format(new Date(template.createdAt), "yyyy-MM-dd") : "—", icon: Calendar },
   ];
 
@@ -305,8 +329,20 @@ export default function AssetTemplateDetails() {
         </div>
       </div>
 
-      {/* Summary cards */}
+      {/* Summary cards. Device ID sits first and is editable — it is the binding the
+          whole template exists to carry, and assets inherit it on apply. */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+        <Card className="shadow-sm">
+          <CardContent className="p-4 flex items-center gap-3">
+            <div className="p-2 rounded-lg bg-primary/10 text-primary"><Radio className="w-4 h-4" /></div>
+            <div className="min-w-0 flex-1">
+              <p className="text-xs text-muted-foreground">Device ID</p>
+              <Input value={deviceId} onChange={(e) => setDeviceId(e.target.value)} disabled={!can("manage_templates")}
+                placeholder="e.g. energy — must match the payload"
+                className="h-7 text-sm font-mono border-0 bg-transparent px-0 focus:bg-background focus:border focus:border-border focus:px-2" />
+            </div>
+          </CardContent>
+        </Card>
         {summary.map((s) => (
           <Card key={s.label} className="shadow-sm">
             <CardContent className="p-4 flex items-center gap-3">
@@ -358,11 +394,6 @@ export default function AssetTemplateDetails() {
                 <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleParse} disabled={!importText.trim()}><Zap className="w-3 h-3 mr-1" /> Extract attributes from payload</Button>
                 {importPreview.length > 0 && (
                   <div className="space-y-2">
-                    {detectedDeviceId && (
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground bg-muted/40 rounded px-2.5 py-1.5">
-                        <CheckCircle2 className="w-3.5 h-3.5 text-green-500 shrink-0" /> Device ID detected: <code className="font-mono font-medium text-foreground">{detectedDeviceId}</code>
-                      </div>
-                    )}
                     <PreviewTable rows={importPreview} uomOverrides={previewUoms}
                       onUomChange={(i, v) => setPreviewUoms((p) => ({ ...p, [i]: v }))}
                       onTypeChange={(i, v) => setImportPreview((p) => p.map((d, idx) => idx === i ? { ...d, type: v } : d))}
@@ -378,7 +409,7 @@ export default function AssetTemplateDetails() {
                 <div className="rounded-md bg-muted/40 border border-border p-3 text-xs text-muted-foreground space-y-1">
                   <p className="font-semibold text-foreground">Columns</p>
                   <p>{TEMPLATE_CSV_HEADERS.map((h) => <code key={h} className="bg-muted px-1 rounded mr-1">{h}</code>)}</p>
-                  <p className="opacity-70">Tag Name must match the incoming payload key. Rows naming a different <span className="font-medium">Device Template Name</span> are skipped here — import a multi-template sheet from the Asset Templates page instead.</p>
+                  <p className="opacity-70">Tag Name must match the incoming payload key; Attribute Name is yours to choose. <span className="font-medium">Device Id</span> is the payload's device — every row in a section sheet repeats it.</p>
                 </div>
                 <div className="flex items-center justify-between">
                   <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide">CSV Data</label>
@@ -472,8 +503,8 @@ export default function AssetTemplateDetails() {
 
         <div className="overflow-auto">
           <table className="w-full text-xs">
-                {/* Column order mirrors the export CSV (minus Device Template Name, which
-                    is this template) so the sheet and this table read the same way. */}
+                {/* Column order mirrors the export sheet (minus Device Id, which is the
+                    template's) so the sheet and this table read the same way. */}
                 {editedDefs.length > 0 && (
                   <thead>
                     <tr className="border-b border-border bg-muted/50 text-muted-foreground">

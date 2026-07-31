@@ -5,9 +5,18 @@ import { z } from "zod/v4";
 export const assetsTable = pgTable("assets", {
   id: uuid("id").primaryKey().defaultRandom(),
   name: text("name").notNull(),
-  // Device ID. Null for child assets — they share the parent/root's device and
-  // have no device link of their own (telemetry is attributed to the device owner).
-  identifier: text("identifier").unique(),
+  /**
+   * Device ID — the payload's `deviceId`, which is what binds telemetry to this asset.
+   *
+   * Deliberately NOT unique. One gateway payload usually describes several sections of
+   * a plant (chiller, lighting, grid), and the natural modelling is one asset per
+   * section, each from its own section template, all carrying that same device id.
+   * Ingest partitions the payload by the tags each asset declares, so several assets
+   * sharing an id is a supported topology rather than a conflict.
+   *
+   * Null for grouping assets (Site / Unit / Process) — they hold no device link.
+   */
+  identifier: text("identifier"),
   parentId: uuid("parent_id"),
   templateId: uuid("template_id"),
   templateName: text("template_name"),

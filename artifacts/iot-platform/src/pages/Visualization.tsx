@@ -7,7 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, LayoutDashboard, FolderPlus } from "lucide-react";
+import { ArrowLeft, LayoutDashboard, FolderPlus, ChevronLeft, ChevronRight } from "lucide-react";
+import type { ImperativePanelHandle } from "react-resizable-panels";
 import { AssetVizPanel } from "@/features/dashboards/AssetVizPanel";
 import { AssetTreeProvider, type DashboardActions } from "@/components/asset-tree/AssetTreeContext";
 import { AssetTree } from "@/components/asset-tree/AssetTree";
@@ -50,6 +51,20 @@ export default function Visualization() {
   });
   const [futuristicIds, setFuturisticIds] = useState<Set<string>>(new Set());
   const [dashReloadNonce, setDashReloadNonce] = useState(0);
+  // State, not a ref: the portal target must trigger a re-render once the node
+  // exists, or AssetVizPanel would read `null` on the only render that mattered.
+  const [toolbarSlot, setToolbarSlot] = useState<HTMLDivElement | null>(null);
+
+  // Collapsible hierarchy pane. Driven through the panel's own imperative handle
+  // rather than by unmounting it, so its width — and any drag-resize the user did —
+  // is restored on expand instead of snapping back to the default.
+  const treePanelRef = useRef<ImperativePanelHandle>(null);
+  const [treeCollapsed, setTreeCollapsed] = useState(false);
+  function toggleTree() {
+    const panel = treePanelRef.current;
+    if (!panel) return;
+    if (panel.isCollapsed()) panel.expand(); else panel.collapse();
+  }
   const importInputRef = useRef<HTMLInputElement>(null);
   const importTargetRef = useRef<string | null>(null);
 
@@ -240,37 +255,77 @@ export default function Visualization() {
   const selectedNode = selId ? viz.nodes.find((n) => n.id === selId) ?? null : null;
 
   return (
-    <div className="p-4 h-full flex flex-col gap-3">
-      <div className="flex items-center gap-3 shrink-0">
+    <div className="p-3 h-full flex flex-col gap-2">
+      {/* One row for everything: Back, the page title, and the selected dashboard's
+          own toolbar — which AssetVizPanel portals into the slot below rather than
+          spending a second full-width strip on it. */}
+      <div className="flex items-center gap-3 shrink-0 flex-wrap">
         {/* Back = one level up within THIS section, not browser history (which
             could be any page the user happened to arrive from). */}
-        <button onClick={() => navigate("/data-explorer")} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+        <button onClick={() => navigate("/data-explorer")} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground shrink-0">
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
-        <div className="flex items-center gap-1.5">
-          <LayoutDashboard className="w-5 h-5 text-primary" />
-          <h1 className="text-lg font-bold">Visualization</h1>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <LayoutDashboard className="w-4 h-4 text-primary" />
+          <h1 className="text-base font-bold">Visualization</h1>
         </div>
+        <div ref={setToolbarSlot} className="flex flex-1 items-center gap-2 min-w-0 flex-wrap" />
       </div>
 
       <Card className="flex-1 min-h-0 overflow-hidden shadow-sm">
         <ResizablePanelGroup direction="horizontal" className="h-full">
-          <ResizablePanel defaultSize={26} minSize={18} maxSize={40}>
-            <div className="h-full border-r border-border overflow-auto">
-              {treeControls}
-              <AssetTreeProvider value={assetTreeCtx}>
-                <AssetTree emptyMessage='No nodes yet — click "New" to start building your hierarchy.' />
-              </AssetTreeProvider>
+          <ResizablePanel
+            ref={treePanelRef}
+            defaultSize={26} minSize={18} maxSize={40}
+            collapsible collapsedSize={0}
+            onCollapse={() => setTreeCollapsed(true)}
+            onExpand={() => setTreeCollapsed(false)}
+          >
+            {/* The scroll container is nested so the collapse tab below stays pinned
+                to the pane edge instead of scrolling away with the tree. */}
+            <div className="relative h-full">
+              <div className="h-full border-r border-border overflow-auto">
+                {treeControls}
+                <AssetTreeProvider value={assetTreeCtx}>
+                  <AssetTree emptyMessage='No nodes yet — click "New" to start building your hierarchy.' />
+                </AssetTreeProvider>
+              </div>
+              {/* Hidden while collapsed: at zero width this would sit on top of the
+                  expand tab in the pane next door. */}
+              {!treeCollapsed && (
+                <button
+                  onClick={toggleTree}
+                  title="Hide the hierarchy panel"
+                  aria-label="Hide the hierarchy panel"
+                  className="absolute right-0 top-1/2 -translate-y-1/2 z-20 flex h-7 w-4 items-center justify-center rounded-l border border-r-0 border-border bg-card text-muted-foreground shadow-sm hover:bg-muted hover:text-foreground"
+                >
+                  <ChevronLeft className="h-3.5 w-3.5" />
+                </button>
+              )}
             </div>
           </ResizablePanel>
           <ResizableHandle withHandle />
           <ResizablePanel defaultSize={74}>
-            <AssetVizPanel
-              nodeId={selId}
-              nodeName={selectedNode?.name}
-              reloadKey={dashReloadNonce}
-              futuristic={selId ? futuristicIds.has(selId) : false}
-            />
+            <div className="relative h-full">
+              <AssetVizPanel
+                nodeId={selId}
+                nodeName={selectedNode?.name}
+                reloadKey={dashReloadNonce}
+                futuristic={selId ? futuristicIds.has(selId) : false}
+                toolbarTarget={toolbarSlot}
+              />
+              {/* Only reachable route back once the pane has no width of its own. */}
+              {treeCollapsed && (
+                <button
+                  onClick={toggleTree}
+                  title="Show the hierarchy panel"
+                  aria-label="Show the hierarchy panel"
+                  className="absolute left-0 top-1/2 -translate-y-1/2 z-20 flex h-7 w-4 items-center justify-center rounded-r border border-l-0 border-border bg-card text-muted-foreground shadow-sm hover:bg-muted hover:text-foreground"
+                >
+                  <ChevronRight className="h-3.5 w-3.5" />
+                </button>
+              )}
+            </div>
           </ResizablePanel>
         </ResizablePanelGroup>
       </Card>

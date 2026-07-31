@@ -251,13 +251,31 @@ export function authorize(req: Request, res: Response, next: NextFunction): void
     if (!authConfig.sessionRequired && req.method === "GET") { next(); return; }
 
     const reason = req.authFailure ?? "no_session";
+
+    // A machine route (ingest, export) reached without a key is the common case
+    // here, and a bare "Authentication required" tells an integrator nothing —
+    // gateways surface it as "post failed, 401". Say which header is missing, and
+    // which scope it has to carry.
+    const machineRoute = rule?.allowApiKey === true;
+    const sentSomeKey = !!(req.headers["x-api-key"] || (req.headers["authorization"] as string | undefined)?.startsWith("Bearer "));
+
     res.status(401).json({
       error: reason === "session_expired"
         ? "Your session has expired. Please sign in again."
         : reason === "account_inactive"
           ? "Your account is no longer active. Contact your administrator."
-          : "Authentication required",
+          : machineRoute
+            ? sentSomeKey
+              ? "The API key sent with this request is not valid, has expired, or has been revoked."
+              : "This endpoint requires an API key."
+            : "Authentication required",
       code: reason === "no_session" ? "authentication_required" : reason,
+      ...(machineRoute && {
+        hint: `Send the client secret as  X-API-Key: <clientSecret>,  Authorization: Bearer <clientSecret>,  or  ?key=<clientSecret>  appended to this URL. ${
+          req.path.startsWith("/ingest") ? "The key must carry the ingest:write scope." : ""
+        }`.trim(),
+        docs: "Broker Management → API Client → reveal the secret for the client you are posting as.",
+      }),
     });
     return;
   }

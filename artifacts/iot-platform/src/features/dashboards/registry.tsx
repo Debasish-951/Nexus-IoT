@@ -1,3 +1,4 @@
+import { memo } from "react";
 import {
   Activity, ShieldCheck, Gauge as GaugeIcon, BadgeCheck, Percent, Timer, Clock, Zap,
   Boxes, Bell, LineChart as LineIcon, BarChart3, AreaChart as AreaIcon, PieChart as PieIcon,
@@ -6,14 +7,46 @@ import {
 } from "lucide-react";
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell,
-  RadialBarChart, RadialBar, XAxis, YAxis, Tooltip, Legend, ScatterChart as RScatterChart, Scatter, ReferenceLine,
+  RadialBarChart, RadialBar, XAxis, YAxis, Tooltip, Legend, ScatterChart as RScatterChart, Scatter, ReferenceLine, CartesianGrid,
 } from "recharts";
 import type { Widget } from "./types";
-import { useSeriesSet, aggregate, type SeriesSpec } from "./useWidgetData";
+import { useSeriesSet, useAttributeMeta, aggregate, type SeriesSpec } from "./useWidgetData";
 import type { TimeCfg } from "./timeRange";
 
 export const PALETTE = { primary: "#2563EB", success: "#22C55E", warning: "#F59E0B", critical: "#EF4444", neutral: "#64748B" };
 const COLORS = [PALETTE.primary, PALETTE.success, PALETTE.warning, PALETTE.critical, "#a855f7", "#06b6d4"];
+
+/**
+ * Shared <Tooltip> look for every chart type.
+ *
+ * Two real bugs, not just polish: (1) `contentStyle` alone left Recharts' own
+ * white-background default showing through as an unthemed box that stood out
+ * against a dark dashboard and was hard to read; (2) Recharts fades the tooltip
+ * in/out by default (its own `isAnimationActive`), and on a widget refreshing
+ * every few seconds a new fade can start before the last one finished, leaving
+ * a stale, textless tooltip shell rendered behind the current one — the "ghost
+ * white bars" while moving the cursor. `isAnimationActive={false}` removes the
+ * transition entirely, which is the actual fix; the styling is the readability
+ * half of the same complaint.
+ *
+ * Colors are the theme's own `--popover`/`--border` CSS variables (see
+ * index.css), so this matches light/dark mode automatically instead of a
+ * hardcoded scheme that would look wrong in the other one.
+ */
+const TOOLTIP_PROPS = {
+  isAnimationActive: false,
+  contentStyle: {
+    fontSize: 11,
+    background: "hsl(var(--popover))",
+    color: "hsl(var(--popover-foreground))",
+    border: "1px solid hsl(var(--popover-border))",
+    borderRadius: 6,
+    padding: "6px 10px",
+    boxShadow: "0 4px 12px rgba(0,0,0,0.25)",
+  },
+  labelStyle: { color: "hsl(var(--muted-foreground))", marginBottom: 2 },
+  itemStyle: { padding: 0 },
+} as const;
 
 export interface WidgetDef {
   type: string; label: string; icon: React.ElementType; category: string;
@@ -92,7 +125,20 @@ function fmt(v: number | null, c: Record<string, any>): string {
 }
 
 // ── Renderer ──
-export function WidgetView({ widget, refreshNonce }: { widget: Widget; refreshNonce?: string | number }) {
+// Wrapped in memo(): dragging or resizing ANY widget replaces the whole
+// customWidgets array, but unaffected widgets keep the exact same `widget`
+// object reference (see DashboardCanvas/AssetVizPanel's `.map`). Without this,
+// every WidgetView on the canvas — including Recharts-heavy charts — re-rendered
+// on every pointermove of a drag, which is what made the canvas feel laggy with
+// more than a couple of chart widgets on screen.
+export const WidgetView = memo(function WidgetView({ widget, refreshNonce, dashTimeCfg }: {
+  widget: Widget; refreshNonce?: string | number;
+  /** The dashboard-wide range. Used ONLY for the range portion of this widget's
+   *  query, and ONLY while the widget has no `timeIsCustom` range of its own —
+   *  granularity/aggregation/refresh always come from the widget's own config,
+   *  dashboard-wide or not (see the WidgetTimePopover module comment). */
+  dashTimeCfg?: TimeCfg | null;
+}) {
   const c = widget.config ?? {};
   const t = widget.type;
   // Series: scatter uses X/Y; charts support a primary metric + overlay series,
@@ -102,27 +148,70 @@ export function WidgetView({ widget, refreshNonce }: { widget: Widget; refreshNo
   const isScatter = t === "scatter";
   const isMultiSeriesChart = ["line", "area", "bar", "stackbar"].includes(t);
   const seriesList: SeriesSpec[] = [];
-  const seriesMeta: Record<string, { color?: string; label?: string }> = {};
+  // What each series was bound to, kept separate from its display name — the name
+  // can only be resolved after the attribute-name lookup a few lines down.
+  interface SeriesSrc { assetId?: string; tag?: string; color?: string; label?: string; unit?: string }
+  const seriesSrc: Record<string, SeriesSrc> = {};
   if (isScatter) {
     if (c.xTag) seriesList.push({ key: "x", assetId: c.assetId, tag: c.xTag });
     if (c.yTag) seriesList.push({ key: "y", assetId: c.assetId, tag: c.yTag });
   } else if (isMultiSeriesChart) {
-    const overlays: { assetId?: string; tag?: string; color?: string; label?: string }[] = Array.isArray(c.overlays) ? c.overlays : [];
+    const overlays: { assetId?: string; tag?: string; color?: string; label?: string; unit?: string }[] = Array.isArray(c.overlays) ? c.overlays : [];
     if (c.tag || overlays.length) {
-      if (c.tag) { seriesList.push({ key: "s0", assetId: c.assetId, tag: c.tag }); seriesMeta.s0 = { color: c.color, label: c.label || String(c.tag).split(".").pop() }; }
+      if (c.tag) {
+        seriesList.push({ key: "s0", assetId: c.assetId, tag: c.tag });
+        seriesSrc.s0 = { assetId: c.assetId, tag: c.tag, color: c.color, label: c.label, unit: c.unit };
+      }
       overlays.forEach((o, i) => {
         if (!o.tag) return;
         const key = `s${i + 1}`;
-        seriesList.push({ key, assetId: o.assetId || c.assetId, tag: o.tag });
-        seriesMeta[key] = { color: o.color, label: o.label || String(o.tag).split(".").pop() };
+        const assetId = o.assetId || c.assetId;
+        seriesList.push({ key, assetId, tag: o.tag });
+        seriesSrc[key] = { assetId, tag: o.tag, color: o.color, label: o.label, unit: o.unit };
       });
     } else if (Array.isArray(c.tags)) {
-      c.tags.forEach((tg: string, i: number) => { if (!tg) return; seriesList.push({ key: `s${i}`, assetId: c.assetId, tag: tg }); seriesMeta[`s${i}`] = { label: String(tg).split(".").pop() }; });
+      c.tags.forEach((tg: string, i: number) => {
+        if (!tg) return;
+        seriesList.push({ key: `s${i}`, assetId: c.assetId, tag: tg });
+        seriesSrc[`s${i}`] = { assetId: c.assetId, tag: tg };
+      });
     }
   } else if (c.tag) {
     seriesList.push({ key: "s0", assetId: c.assetId, tag: c.tag });
+    seriesSrc.s0 = { assetId: c.assetId, tag: c.tag, color: c.color, label: c.label, unit: c.unit };
   }
-  const timeCfg: TimeCfg = { rangeMinutes: c.rangeMinutes, rangeHours: c.rangeHours, customFrom: c.customFrom, customTo: c.customTo, granularity: c.granularity, aggType: c.aggType };
+
+  // A series is named after the attribute the user named, not the raw payload tag
+  // — "Chiller Energy", not "chiller.energy_kWh" — and carries the unit already
+  // declared in the template's UoM column. Precedence for both: the widget's own
+  // Label/UoM field (an explicit per-widget override) → what the attribute itself
+  // says → the tag's last segment / no unit as a last resort.
+  const attrMeta = useAttributeMeta(seriesList.map((s) => s.assetId));
+  const metaFor = (src: SeriesSrc | undefined) =>
+    (src?.assetId && src.tag) ? attrMeta.get(`${src.assetId}::${src.tag}`) : undefined;
+  const displayName = (src: SeriesSrc | undefined): string | undefined => {
+    if (!src) return undefined;
+    return src.label?.trim()
+      || metaFor(src)?.name
+      || (src.tag ? String(src.tag).split(".").pop() : undefined);
+  };
+  const displayUnit = (src: SeriesSrc | undefined): string | undefined =>
+    src?.unit?.trim() || metaFor(src)?.uom;
+  const seriesMeta: Record<string, { color?: string; label?: string; unit?: string }> = {};
+  for (const [key, src] of Object.entries(seriesSrc)) {
+    seriesMeta[key] = { color: src.color, label: displayName(src), unit: displayUnit(src) };
+  }
+  // Range comes from the widget's OWN setting once it has one (`timeIsCustom`, set
+  // the instant its clock-icon popover is applied); until then it tracks the
+  // dashboard-wide range LIVE — not a copy taken at some past moment, so it never
+  // goes stale and there is nothing to leave behind if the widget later gets its
+  // own range. Granularity/aggregation are always the widget's own, dashboard-wide
+  // range or not — the dashboard selector has no notion of either.
+  const isTimeCustom = !!c.timeIsCustom || c.allowOverride === false;
+  const range = isTimeCustom
+    ? { rangeMinutes: c.rangeMinutes, rangeHours: c.rangeHours, customFrom: c.customFrom, customTo: c.customTo }
+    : (dashTimeCfg ?? {});
+  const timeCfg: TimeCfg = { ...range, granularity: c.granularity, aggType: c.aggType };
   const refreshSec = c.refreshEnabled ? Math.round((c.refreshInterval ?? 30_000) / 1000) : (c.refreshSec ?? 0);
   const rows = useSeriesSet(seriesList, timeCfg, refreshSec, refreshNonce);
   const interpolated = !!c.interpolated;
@@ -133,6 +222,37 @@ export function WidgetView({ widget, refreshNonce }: { widget: Widget; refreshNo
   const chartData = bound ? rows : demoSeries();
   const seriesTags = bound ? seriesList.map((s) => s.key) : ["v"];
   const aggVal = bound ? aggregate(singleSeries as any, c.agg ?? "last") : null;
+
+  // Axis/legend split, matching how trend tools conventionally read:
+  //   • y-axis  → the unit of measure ALONE ("kWh"). It describes the scale, and a
+  //               scale has a unit, not a name.
+  //   • legend  → one entry per series, named after its attribute, under the x-axis.
+  // Cramming "{name} ({unit})" onto the y-axis (the old behaviour) had to be
+  // suppressed the moment a second series appeared, since one axis label cannot
+  // honestly speak for two attributes — so a multi-series chart ended up with no
+  // unit shown at all. Distinct units are joined rather than silently showing the
+  // first, which would mislabel the rest.
+  const units = [...new Set(
+    Object.values(seriesMeta).map((m) => m.unit?.trim()).filter((u): u is string => !!u),
+  )];
+  const yAxisLabel = units.length ? units.join(" / ") : undefined;
+  const yAxisProps = yAxisLabel
+    ? { label: { value: yAxisLabel, angle: -90, position: "insideLeft" as const, offset: 8, style: { fontSize: 9, textAnchor: "middle" as const } } }
+    : {};
+  // The label needs room the tight default margin doesn't leave.
+  const chartMarginLeft = yAxisLabel ? 4 : -18;
+
+  // The legend used to appear only for 2+ series, so a single-series chart showed
+  // its attribute name nowhere at all — which is exactly the "I set a Label and it
+  // isn't on the widget" complaint. Now any bound chart with a resolvable name
+  // shows it; unbound preview widgets (demo data, series key "v") still don't.
+  const showLegend = seriesTags.length > 1 || (bound && !!seriesMeta[firstKey ?? ""]?.label);
+  // No `iconType` — Recharts then derives each entry's swatch from its own series
+  // (a line for Line, a block for Bar), which is what makes an overlay of both
+  // readable at a glance.
+  const legendEl = showLegend
+    ? <Legend verticalAlign="bottom" height={20} iconSize={10} wrapperStyle={{ fontSize: 10 }} />
+    : null;
 
   // Control-limit (SPC) reference lines — drawn on time-series charts when set.
   // Each line's color/style is independently configurable from the Edit Widget dialog.
@@ -159,10 +279,12 @@ export function WidgetView({ widget, refreshNonce }: { widget: Widget; refreshNo
     const color = statusColor(value, c);
     return (
       <div className="h-full w-full flex flex-col justify-center px-1">
-        {/* Widgets ship with no default title (the user names them), so the caption
-            falls back to the series label, then the widget type's own name. */}
-        <p className="text-xs text-muted-foreground truncate">{c.title || c.label || widgetDef(t)?.label || "KPI"}{c.tag && !bound ? " (no data)" : ""}</p>
-        <p className="text-3xl font-bold tabular-nums" style={{ color }}>{typeof value === "number" ? fmt(value, c) : value}<span className="text-sm text-muted-foreground ml-1">{c.unit ?? ""}</span></p>
+        {/* The series name, NOT the title — the widget header already carries the
+            title, and printing it in both places put the same text on one widget
+            twice. A KPI has no legend, so this caption is where its attribute name
+            belongs. */}
+        <p className="text-xs text-muted-foreground truncate">{seriesMeta[firstKey ?? ""]?.label || widgetDef(t)?.label || "KPI"}{c.tag && !bound ? " (no data)" : ""}</p>
+        <p className="text-3xl font-bold tabular-nums" style={{ color }}>{typeof value === "number" ? fmt(value, c) : value}<span className="text-sm text-muted-foreground ml-1">{seriesMeta[firstKey ?? ""]?.unit ?? c.unit ?? ""}</span></p>
         {c.subtitle && <p className="text-[11px] text-muted-foreground truncate">{c.subtitle}</p>}
       </div>
     );
@@ -173,9 +295,9 @@ export function WidgetView({ widget, refreshNonce }: { widget: Widget; refreshNo
     const baseColor = c.color ?? PALETTE.primary;
     return (
       <ResponsiveContainer width="100%" height="100%">
-        <Chart data={chartData} margin={{ top: 6, right: 8, left: -18, bottom: 0 }}>
-          <XAxis dataKey="t" tick={{ fontSize: 9 }} /><YAxis tick={{ fontSize: 9 }} /><Tooltip contentStyle={{ fontSize: 11 }} />
-          {seriesTags.length > 1 && <Legend wrapperStyle={{ fontSize: 10 }} />}
+        <Chart data={chartData} margin={{ top: 6, right: 8, left: chartMarginLeft, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.5} vertical={false} /><XAxis dataKey="t" tick={{ fontSize: 9 }} /><YAxis tick={{ fontSize: 9 }} {...yAxisProps} /><Tooltip {...TOOLTIP_PROPS} />
+          {legendEl}
           {spcLines}
           {seriesTags.map((tg, i) => {
             const meta = seriesMeta[tg];
@@ -192,9 +314,9 @@ export function WidgetView({ widget, refreshNonce }: { widget: Widget; refreshNo
     const stackId = t === "stackbar" ? "s" : undefined;
     return (
       <ResponsiveContainer width="100%" height="100%">
-        <BarChart data={bound ? rows : demoSeries(12)} margin={{ top: 6, right: 8, left: -18, bottom: 0 }}>
-          <XAxis dataKey="t" tick={{ fontSize: 9 }} /><YAxis tick={{ fontSize: 9 }} /><Tooltip contentStyle={{ fontSize: 11 }} />
-          {seriesTags.length > 1 && <Legend wrapperStyle={{ fontSize: 10 }} />}
+        <BarChart data={bound ? rows : demoSeries(12)} margin={{ top: 6, right: 8, left: chartMarginLeft, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.5} vertical={false} /><XAxis dataKey="t" tick={{ fontSize: 9 }} /><YAxis tick={{ fontSize: 9 }} {...yAxisProps} /><Tooltip {...TOOLTIP_PROPS} />
+          {legendEl}
           {spcLines}
           {seriesTags.map((tg, i) => {
             const meta = seriesMeta[tg];
@@ -211,7 +333,7 @@ export function WidgetView({ widget, refreshNonce }: { widget: Widget; refreshNo
     return (
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={chartData} margin={{ top: 4, right: 4, left: 4, bottom: 4 }}>
-          <Tooltip contentStyle={{ fontSize: 11 }} />
+          <Tooltip {...TOOLTIP_PROPS} />
           {seriesTags.map((tg, i) => (
             <Line key={tg} type="monotone" dataKey={tg} stroke={seriesTags.length > 1 ? COLORS[i % COLORS.length] : baseColor} strokeWidth={1.5} dot={false} isAnimationActive={false} connectNulls={interpolated} />
           ))}
@@ -225,7 +347,7 @@ export function WidgetView({ widget, refreshNonce }: { widget: Widget; refreshNo
         <PieChart>
           <Pie data={demoPie} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius="80%" innerRadius={t === "donut" ? "55%" : 0} isAnimationActive={false}>
             {demoPie.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
-          </Pie><Tooltip contentStyle={{ fontSize: 11 }} />
+          </Pie><Tooltip {...TOOLTIP_PROPS} />
         </PieChart>
       </ResponsiveContainer>
     );
@@ -280,12 +402,20 @@ export function WidgetView({ widget, refreshNonce }: { widget: Widget; refreshNo
     const pts = (bound && c.xTag && c.yTag)
       ? rows.filter((r) => r.x != null && r.y != null).map((r) => ({ x: r.x, y: r.y }))
       : demoSeries().map((d, i) => ({ x: i, y: d.v }));
+    // Both scatter axes ARE attributes, so both get named after theirs — there is
+    // no legend to carry them here (a single scatter series has nothing to
+    // distinguish), which makes the axis titles the only place they can appear.
+    const xName = displayName({ assetId: c.assetId, tag: c.xTag });
+    const yName = displayName({ assetId: c.assetId, tag: c.yTag });
     return (
       <ResponsiveContainer width="100%" height="100%">
-        <RScatterChart margin={{ top: 6, right: 8, left: -18, bottom: 0 }}>
-          <XAxis dataKey="x" type="number" name={c.xTag ? String(c.xTag).split(".").pop() : "x"} tick={{ fontSize: 9 }} />
-          <YAxis dataKey="y" type="number" name={c.yTag ? String(c.yTag).split(".").pop() : "y"} tick={{ fontSize: 9 }} />
-          <Tooltip contentStyle={{ fontSize: 11 }} cursor={{ strokeDasharray: "3 3" }} />
+        <RScatterChart margin={{ top: 6, right: 8, left: yName ? 4 : -18, bottom: xName ? 14 : 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.5} />
+          <XAxis dataKey="x" type="number" name={xName ?? "x"} tick={{ fontSize: 9 }}
+            {...(xName ? { label: { value: xName, position: "insideBottom" as const, offset: -10, style: { fontSize: 9 } } } : {})} />
+          <YAxis dataKey="y" type="number" name={yName ?? "y"} tick={{ fontSize: 9 }}
+            {...(yName ? { label: { value: yName, angle: -90, position: "insideLeft" as const, offset: 8, style: { fontSize: 9, textAnchor: "middle" as const } } } : {})} />
+          <Tooltip {...TOOLTIP_PROPS} cursor={{ strokeDasharray: "3 3" }} />
           <Scatter data={pts} fill={color} isAnimationActive={false} />
         </RScatterChart>
       </ResponsiveContainer>
@@ -310,4 +440,4 @@ export function WidgetView({ widget, refreshNonce }: { widget: Widget; refreshNo
   const def = widgetDef(t);
   const Icon = def?.icon ?? Activity;
   return <div className="h-full flex flex-col items-center justify-center text-muted-foreground gap-1"><Icon className="w-6 h-6" /><span className="text-xs">{def?.label ?? t}</span></div>;
-}
+});

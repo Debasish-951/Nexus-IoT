@@ -1,4 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   MousePointerClick, RefreshCw, Maximize2, Minimize2, Wifi, WifiOff,
   Save, Plus, X, Clock, ClipboardPaste, CalendarDays,
@@ -18,9 +19,11 @@ import { widgetDef } from "./registry";
 import type { Widget } from "./types";
 import { useWsEvents } from "@/hooks/useWsEvents";
 import { newId } from "./useDashboards";
-import { RANGES, REFRESH_INTERVALS } from "./timeRange";
+import { RANGES, REFRESH_INTERVALS, type TimeCfg } from "./timeRange";
 
 const wkey = (nodeId: string) => `wsviz:widgets:${nodeId}`;
+const dashCfgKey = (nodeId: string) => `wsviz:dash-range:${nodeId}`;
+const dashRefreshKey = (nodeId: string) => `wsviz:dash-refresh:${nodeId}`;
 const CLIPBOARD_KEY = "wsviz:widget-clipboard";
 
 function readClipboard(): Widget | null {
@@ -32,7 +35,12 @@ function readClipboard(): Widget | null {
 // or metrics of their own, so nothing is pre-bound here. Each widget picks its
 // own asset + metric in the config panel, where the asset's attribute names and
 // units are surfaced alongside the raw telemetry tag.
-export function AssetVizPanel({ nodeId, nodeName, reloadKey, futuristic }: { nodeId: string | null; nodeName?: string; reloadKey?: number; futuristic?: boolean }) {
+export function AssetVizPanel({ nodeId, nodeName, reloadKey, futuristic, toolbarTarget }: {
+  nodeId: string | null; nodeName?: string; reloadKey?: number; futuristic?: boolean;
+  /** Element in the page header to render the toolbar into, so it shares a row
+   *  with "← Back / Visualization" instead of costing the canvas its own strip. */
+  toolbarTarget?: HTMLElement | null;
+}) {
   const [customWidgets, setCustomWidgets] = useState<Widget[]>([]);
   const [savedSnapshot, setSavedSnapshot] = useState("[]");
   const [selectedWidgetId, setSelectedWidgetId] = useState<string | null>(null);
@@ -43,9 +51,20 @@ export function AssetVizPanel({ nodeId, nodeName, reloadKey, futuristic }: { nod
   const editSnapshot = useRef<Widget | null>(null);
   const [showLibrary, setShowLibrary] = useState(false);
   const [fullscreen, setFullscreen] = useState(false);
+  // Anchored to the calendar button beside the range selector — a date range belongs
+  // next to the control it changes, not in a modal in the middle of the canvas.
   const [rangePopoverOpen, setRangePopoverOpen] = useState(false);
   const [customFrom, setCustomFrom] = useState("");
   const [customTo, setCustomTo] = useState("");
+  // The dashboard-wide range. Unlike the old design, this is NOT copied into each
+  // widget's own config — a widget that hasn't set its own range (no `timeIsCustom`)
+  // reads this LIVE, at render time, in WidgetView. Two problems that caused solved
+  // by that alone: a plain page reload used to lose this (it was pure component
+  // state with no persistence — restored below, same as the widgets themselves are),
+  // and a widget that never asked to follow the dashboard would still be left
+  // carrying a permanently-stamped copy of whatever this was set to at the moment
+  // someone touched the selector, even after the selector itself moved on.
+  const [dashTimeCfg, setDashTimeCfg] = useState<TimeCfg | null>(null);
   const { toast } = useToast();
 
   // Dashboard-wide auto-refresh — bumps globalRefreshTick, which every
@@ -97,6 +116,38 @@ export function AssetVizPanel({ nodeId, nodeName, reloadKey, futuristic }: { nod
     try { localStorage.setItem(wkey(nodeId), JSON.stringify(customWidgets)); } catch { /* ignore quota */ }
   }, [nodeId, customWidgets]);
 
+  // Persist the dashboard-wide range per node, same pattern as the widgets above.
+  useEffect(() => {
+    if (!nodeId) { setDashTimeCfg(null); return; }
+    try {
+      const raw = localStorage.getItem(dashCfgKey(nodeId));
+      setDashTimeCfg(raw ? JSON.parse(raw) : null);
+    } catch { setDashTimeCfg(null); }
+  }, [nodeId, reloadKey]);
+  useEffect(() => {
+    if (!nodeId) return;
+    try {
+      if (dashTimeCfg) localStorage.setItem(dashCfgKey(nodeId), JSON.stringify(dashTimeCfg));
+      else localStorage.removeItem(dashCfgKey(nodeId));
+    } catch { /* ignore quota */ }
+  }, [nodeId, dashTimeCfg]);
+
+  // Same for the dashboard-wide refresh toggle/interval — it was pure component
+  // state before, so a page reload silently turned it back off.
+  useEffect(() => {
+    if (!nodeId) { setDashRefreshEnabled(false); setDashRefreshInterval(1_000); return; }
+    try {
+      const raw = localStorage.getItem(dashRefreshKey(nodeId));
+      const saved = raw ? JSON.parse(raw) : null;
+      setDashRefreshEnabled(!!saved?.enabled);
+      setDashRefreshInterval(saved?.intervalMs ?? 1_000);
+    } catch { setDashRefreshEnabled(false); setDashRefreshInterval(1_000); }
+  }, [nodeId, reloadKey]);
+  useEffect(() => {
+    if (!nodeId) return;
+    try { localStorage.setItem(dashRefreshKey(nodeId), JSON.stringify({ enabled: dashRefreshEnabled, intervalMs: dashRefreshInterval })); } catch { /* ignore quota */ }
+  }, [nodeId, dashRefreshEnabled, dashRefreshInterval]);
+
   // ── Toolbar actions ──
   function saveNow() {
     if (!nodeId) return;
@@ -111,26 +162,34 @@ export function AssetVizPanel({ nodeId, nodeName, reloadKey, futuristic }: { nod
     catch { toast({ title: "Save failed", variant: "destructive" }); }
   }
 
+  // Sets the dashboard-wide range itself — nothing is written into any widget's
+  // config. A widget picks this up live (in WidgetView) unless it has its own
+  // `timeIsCustom` range, so there is nothing here to keep in sync and nothing
+  // stale left behind once a widget stops following it.
+  // Seeded from whatever range is already applied, so reopening shows the current
+  // dates instead of two blank fields.
+  function seedCustomRange() {
+    setCustomFrom(dashTimeCfg?.customFrom ?? "");
+    setCustomTo(dashTimeCfg?.customTo ?? "");
+  }
+  // Only ranges that are complete on their own reach here — "Custom range" is not
+  // offered in the selector precisely because it would need two dates this has no
+  // way to ask for. The calendar button's popover owns that path.
   function applyGlobalRange(minutes: number) {
-    setCustomWidgets((prev) => prev.map((w) => (
-      w.config?.allowOverride === false
-        ? w
-        : { ...w, config: { ...w.config, rangeMinutes: minutes, rangeHours: undefined, customFrom: undefined, customTo: undefined } }
-    )));
+    setDashTimeCfg({ rangeMinutes: minutes });
   }
   function applyGlobalCustomRange() {
     if (!customFrom || !customTo) return;
-    setCustomWidgets((prev) => prev.map((w) => (
-      w.config?.allowOverride === false
-        ? w
-        : { ...w, config: { ...w.config, rangeMinutes: -1, customFrom, customTo, rangeHours: undefined } }
-    )));
+    setDashTimeCfg({ rangeMinutes: -1, customFrom, customTo });
     setRangePopoverOpen(false);
   }
 
-  function updateConfig(id: string, patch: Record<string, any>) {
+  // Stable identity (empty deps — it only ever uses the functional setState form)
+  // so widgets that WidgetView.memo skips re-rendering during a drag/resize don't
+  // get invalidated just because this prop's reference changed.
+  const updateConfig = useCallback((id: string, patch: Record<string, any>) => {
     setCustomWidgets((prev) => prev.map((w) => (w.id === id ? { ...w, config: { ...w.config, ...patch } } : w)));
-  }
+  }, []);
   // Dropping a widget places it on the canvas immediately and opens its config
   // panel, so the dashboard is never blank while you configure.
   function onDropWidget(type: string, x: number, y: number) {
@@ -216,19 +275,33 @@ export function AssetVizPanel({ nodeId, nodeName, reloadKey, futuristic }: { nod
   const editWidget = customWidgets.find((w) => w.id === editWidgetId) ?? null;
   const draftWidget = customWidgets.find((w) => w.id === draftWidgetId) ?? null;
   const dirty = JSON.stringify(customWidgets) !== savedSnapshot;
+  const isDashCustom = dashTimeCfg?.rangeMinutes === -1;
+  // An inverted range is accepted by the API but yields an empty chart with nothing
+  // on screen to explain why, so block it at the source.
+  const customRangeInvalid = !!customFrom && !!customTo && new Date(customFrom) >= new Date(customTo);
 
   const rightPanelMode: "library" | "create" | "edit" | null =
     editWidget ? "edit" : draftWidget ? "create" : showLibrary ? "library" : null;
 
-  return (
-    <div className={cn("h-full flex flex-col", fullscreen && "fixed inset-0 z-50 bg-background")}>
-      {/* Toolbar */}
-      <div className="flex items-center gap-2 p-3 border-b border-border flex-wrap shrink-0">
-        <div className="flex-1 min-w-0">
-          <h2 className="text-lg font-bold truncate">{nodeName ?? "Dashboard"}</h2>
-          <p className="text-xs text-muted-foreground">{customWidgets.length} widget{customWidgets.length !== 1 ? "s" : ""}</p>
-        </div>
+  // Hoisted into the page header when a slot is offered (see Visualization.tsx),
+  // which reclaims this toolbar's entire strip for the canvas. Fullscreen is the
+  // exception: the panel goes `fixed inset-0` and covers the header, so a portalled
+  // toolbar would be hidden underneath — it renders in place there instead.
+  const inHeader = !!toolbarTarget && !fullscreen;
 
+  const toolbar = (
+    <>
+      <div className="flex items-baseline gap-1.5 min-w-0">
+        {inHeader && <span className="text-muted-foreground shrink-0">›</span>}
+        <h2 className="text-sm font-bold truncate leading-tight">{nodeName ?? "Dashboard"}</h2>
+        <span className="text-[11px] text-muted-foreground leading-tight whitespace-nowrap">
+          {customWidgets.length} widget{customWidgets.length !== 1 ? "s" : ""}
+        </span>
+      </div>
+
+      {/* `ml-auto` rather than a flex-1 title: keeps the controls hard right whether
+          this renders in the page header or as the panel's own bar. */}
+      <div className="ml-auto flex items-center gap-2 flex-wrap justify-end">
         <span className={cn("inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full font-medium", wsBadge.cls)}>
           <wsBadge.icon className="w-3 h-3" /> {wsBadge.label}
         </span>
@@ -246,28 +319,62 @@ export function AssetVizPanel({ nodeId, nodeName, reloadKey, futuristic }: { nod
           </Select>
         </div>
 
-        {/* Dashboard-wide time range */}
-        <div className="flex items-center gap-1.5 shrink-0">
+        {/* Dashboard-wide time range — read LIVE by any widget that has not set its
+            own range in its clock-icon popover; never copied into a widget's config. */}
+        <div className="flex items-center gap-1.5 shrink-0" title="Applies to widgets that haven't set their own time range">
           <Clock className="w-3.5 h-3.5 text-muted-foreground" />
-          <Select onValueChange={(v) => applyGlobalRange(Number(v))}>
-            <SelectTrigger className="h-8 w-40 text-xs"><SelectValue placeholder="Set all ranges…" /></SelectTrigger>
-            <SelectContent>{RANGES.filter((r) => r.minutes > 0).map((r) => <SelectItem key={r.minutes} value={String(r.minutes)}>{r.label}</SelectItem>)}</SelectContent>
+          {/* Every range that this control can apply on its own. WTD/MTD/YTD belong
+              here — getFromTo implements all three and they need no extra input — but
+              "Custom range" does not: it is meaningless without two dates, and the
+              calendar button beside this is where those are entered. */}
+          <Select value={dashTimeCfg?.rangeMinutes != null ? String(dashTimeCfg.rangeMinutes) : ""} onValueChange={(v) => applyGlobalRange(Number(v))}>
+            <SelectTrigger className="h-8 w-40 text-xs">
+              {/* Children override: with no "Custom range" item left to supply the
+                  trigger's text, an active custom range would otherwise leave this
+                  looking empty — as though no range were set at all. */}
+              <SelectValue placeholder="Set all ranges…">{isDashCustom ? "Custom range" : undefined}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {RANGES.filter((r) => r.minutes !== -1).map((r) => <SelectItem key={r.minutes} value={String(r.minutes)}>{r.label}</SelectItem>)}
+            </SelectContent>
           </Select>
-          <Popover open={rangePopoverOpen} onOpenChange={setRangePopoverOpen}>
+          <Popover
+            open={rangePopoverOpen}
+            onOpenChange={(o) => { if (o) seedCustomRange(); setRangePopoverOpen(o); }}
+          >
             <PopoverTrigger asChild>
-              <Button variant="outline" size="sm" title="Custom date range for all widgets"><CalendarDays className="w-4 h-4" /></Button>
+              <Button variant="outline" size="sm"
+                title={isDashCustom ? "Edit the custom date range" : "Custom date range for all widgets"}>
+                <CalendarDays className="w-4 h-4" />
+              </Button>
             </PopoverTrigger>
-            <PopoverContent align="end" className="w-72 p-3 space-y-2">
-              <p className="text-xs font-semibold">Custom range — all widgets</p>
+            <PopoverContent align="end" sideOffset={6} collisionPadding={10}
+              className="w-72 max-w-[calc(100vw-1.25rem)] p-3 space-y-3">
+              <div>
+                <p className="text-xs font-semibold">Custom range — all widgets</p>
+                <p className="text-[10px] text-muted-foreground mt-0.5">
+                  Applies to every widget that hasn't set its own range.
+                </p>
+              </div>
+              {/* Stacked, full width: two datetime-local inputs side by side cannot fit
+                  this width — they overflowed the panel's own edge before. */}
               <div className="space-y-1">
                 <Label className="text-[10px] text-muted-foreground">From</Label>
-                <Input type="datetime-local" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className="h-8 text-xs" />
+                <Input type="datetime-local" value={customFrom} onChange={(e) => setCustomFrom(e.target.value)} className="h-8 w-full min-w-0 text-xs" />
               </div>
               <div className="space-y-1">
                 <Label className="text-[10px] text-muted-foreground">To</Label>
-                <Input type="datetime-local" value={customTo} onChange={(e) => setCustomTo(e.target.value)} className="h-8 text-xs" />
+                <Input type="datetime-local" value={customTo} onChange={(e) => setCustomTo(e.target.value)} className="h-8 w-full min-w-0 text-xs" />
               </div>
-              <Button size="sm" className="w-full" disabled={!customFrom || !customTo} onClick={applyGlobalCustomRange}>Apply to all</Button>
+              {customRangeInvalid && (
+                <p className="text-[10px] text-destructive">"From" must be earlier than "To".</p>
+              )}
+              <div className="flex items-center justify-end gap-2">
+                <Button variant="outline" size="sm" className="h-7 text-xs" onClick={() => setRangePopoverOpen(false)}>Cancel</Button>
+                <Button size="sm" className="h-7 text-xs" disabled={!customFrom || !customTo || customRangeInvalid} onClick={applyGlobalCustomRange}>
+                  Apply to all
+                </Button>
+              </div>
             </PopoverContent>
           </Popover>
         </div>
@@ -278,9 +385,20 @@ export function AssetVizPanel({ nodeId, nodeName, reloadKey, futuristic }: { nod
             <ClipboardPaste className="w-4 h-4 mr-1" /> Paste
           </Button>
         )}
-        {dirty && (
-          <Button size="sm" onClick={saveNow} title="Save widgets"><Save className="w-4 h-4 mr-1" /> Save</Button>
-        )}
+        {/* Always visible — a conditionally-hidden Save button is a Save button
+            nobody can find when they actually need it. Disabled + "Saved" is the
+            signal that nothing is pending; any edit (drag, resize, config change,
+            even a single keystroke in the panel) flips `dirty` immediately since it
+            diffs the full widget list against the last saved snapshot. */}
+        <Button
+          size="sm"
+          variant={dirty ? "default" : "outline"}
+          disabled={!dirty}
+          onClick={saveNow}
+          title={dirty ? "Save widgets" : "All changes saved"}
+        >
+          <Save className="w-4 h-4 mr-1" /> {dirty ? "Save" : "Saved"}
+        </Button>
         <Button
           size="sm"
           onClick={() => {
@@ -293,6 +411,14 @@ export function AssetVizPanel({ nodeId, nodeName, reloadKey, futuristic }: { nod
           {rightPanelMode ? "Close" : "Add Widget"}
         </Button>
       </div>
+    </>
+  );
+
+  return (
+    <div className={cn("h-full flex flex-col", fullscreen && "fixed inset-0 z-50 bg-background")}>
+      {inHeader
+        ? createPortal(toolbar, toolbarTarget!)
+        : <div className="flex items-center gap-2 px-3 py-2 border-b border-border flex-wrap shrink-0">{toolbar}</div>}
 
       {/* Canvas + Widget Library / Config Panel */}
       <div className="flex-1 min-h-0 flex">
@@ -309,6 +435,7 @@ export function AssetVizPanel({ nodeId, nodeName, reloadKey, futuristic }: { nod
             onCopyWidget={onCopyWidget}
             onEditWidget={startEdit}
             futuristic={futuristic}
+            dashTimeCfg={dashTimeCfg}
           />
         </div>
         {rightPanelMode && (
@@ -339,6 +466,7 @@ export function AssetVizPanel({ nodeId, nodeName, reloadKey, futuristic }: { nod
           </div>
         )}
       </div>
+
     </div>
   );
 }
