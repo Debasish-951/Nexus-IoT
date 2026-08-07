@@ -60,11 +60,6 @@ export default function Assets() {
     return m;
   }, [allAssets]);
 
-  const allParentIds = useMemo(
-    () => allAssets.filter((a) => (childrenByParent[a.id]?.length ?? 0) > 0).map((a) => a.id),
-    [allAssets, childrenByParent],
-  );
-
   // Search filter: show matches + their ancestors (so the path stays visible),
   // and force-expand while filtering.
   const visibleIds = useMemo(() => {
@@ -90,9 +85,6 @@ export default function Assets() {
     (id: string) => setExpanded((prev) => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; }),
     [],
   );
-  const expandAll = () => setExpanded(new Set(allParentIds));
-  const collapseAll = () => setExpanded(new Set());
-
   const openAddChild = (parentId: string) => { setWizardParent(parentId); setWizardOpen(true); };
 
   function handleDelete(a: Asset) {
@@ -164,7 +156,15 @@ export default function Assets() {
           <ResizablePanelGroup direction="horizontal" className="h-full">
             <ResizablePanel
               ref={treePanelRef}
-              defaultSize={14} minSize={11} maxSize={22}
+              // Sizes are percentages of the card, so a narrow viewport turned
+              // the old 11% floor into a pane too thin to hold its own toolbar:
+              // the search field collapsed to its icon and the buttons clipped.
+              // The floor is now wide enough to keep the tree readable at any
+              // window size, and the default opens at the width the panel is
+              // actually usable at rather than the narrowest it tolerates.
+              // Collapsing to zero still works — that is `collapsedSize`, which
+              // bypasses `minSize`, and is why there is no CSS min-width here.
+              defaultSize={20} minSize={17} maxSize={32}
               collapsible collapsedSize={0}
               onCollapse={() => setTreeCollapsed(true)}
               onExpand={() => setTreeCollapsed(false)}
@@ -175,7 +175,6 @@ export default function Assets() {
                 <div className="flex flex-col h-full border-r border-border">
                   <TreeToolbar
                     query={search} setQuery={setSearch}
-                    onExpandAll={expandAll} onCollapseAll={collapseAll}
                     onAdd={() => { setWizardParent(""); setWizardOpen(true); }}
                     canManage={canManage}
                   />
@@ -200,7 +199,7 @@ export default function Assets() {
               </div>
             </ResizablePanel>
             <ResizableHandle withHandle />
-            <ResizablePanel defaultSize={86}>
+            <ResizablePanel defaultSize={80}>
               {/* Full asset details inline — no separate page. */}
               <div className="relative h-full">
                 <div className="h-full overflow-auto">

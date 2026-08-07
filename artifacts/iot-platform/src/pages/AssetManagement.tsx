@@ -1,9 +1,20 @@
+import type { ElementType } from "react";
 import { useLocation } from "wouter";
 import { motion } from "framer-motion";
 import { Card, CardContent } from "@/components/ui/card";
 import { Blocks, FileText, Image, ArrowRight, ArrowLeft, Boxes, Workflow } from "lucide-react";
+import { FEATURES, type FeatureKey } from "@/lib/features";
 
-const CARDS = [
+const CARDS: {
+  title: string;
+  description: string;
+  href: string;
+  icon: ElementType;
+  tint: string;
+  activeBg: string;
+  accent: string;
+  feature?: FeatureKey;
+}[] = [
   {
     title: "Asset Templates",
     description: "Create and manage reusable templates. Define attributes and schemas for your assets.",
@@ -39,6 +50,7 @@ const CARDS = [
     tint: "bg-amber-50 text-amber-600 dark:bg-amber-950/40 dark:text-amber-300",
     activeBg: "active:bg-amber-50/70 dark:active:bg-amber-950/30",
     accent: "#f59e0b",
+    feature: "hierarchyGenerator",
   },
 ];
 
@@ -64,7 +76,9 @@ export default function AssetManagement() {
       <p className="text-sm text-muted-foreground mb-6">Manage your assets and asset templates</p>
 
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-        {CARDS.map((c) => (
+        {/* Same switch as the sidebar and the router: a card for a route that
+            has been turned off would be a dead tile. */}
+        {CARDS.filter((c) => !c.feature || FEATURES[c.feature]).map((c) => (
           <motion.div
             key={c.href}
             whileHover={{ y: -8 }}

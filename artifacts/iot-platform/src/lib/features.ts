@@ -30,6 +30,15 @@ export const FEATURES = {
    * it is needed for commissioning or a demo.
    */
   payloadSimulator: envOn(import.meta.env.VITE_ENABLE_PAYLOAD_SIMULATOR),
+
+  /**
+   * Hierarchy Generator (`/hierarchy-generator`, pages/HierarchyGenerator.tsx).
+   *
+   * Turned off on request, with the page left intact so bringing it back is one
+   * flag flip. Assets are built through the tree and the create wizard in the
+   * meantime; nothing else depends on the generator.
+   */
+  hierarchyGenerator: envOn(import.meta.env.VITE_ENABLE_HIERARCHY_GENERATOR),
 } as const;
 
 export type FeatureKey = keyof typeof FEATURES;

@@ -1,21 +1,32 @@
-import { Search, Plus, ChevronsDownUp, ChevronsUpDown } from "lucide-react";
+import { Search, Plus } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 
+/**
+ * Search + create, above the asset tree.
+ *
+ * The "Expand all" / "Collapse all" pair that used to sit on a second row was
+ * removed on request. It was the first thing to break when the pane narrowed —
+ * "Collapse all" clipped mid-word — and per-node chevrons already cover the
+ * same ground. Search force-expands the matching paths on its own, which is the
+ * case "expand all" was really being used for.
+ *
+ * The remaining row wraps rather than squeezing: below roughly 240px the create
+ * button drops to its own line instead of crushing the search field down to its
+ * magnifier icon.
+ */
 export function TreeToolbar({
-  query, setQuery, onExpandAll, onCollapseAll, onAdd, canManage,
+  query, setQuery, onAdd, canManage,
 }: {
   query: string;
   setQuery: (q: string) => void;
-  onExpandAll: () => void;
-  onCollapseAll: () => void;
   onAdd: () => void;
   canManage: boolean;
 }) {
   return (
-    <div className="p-2 border-b border-border space-y-2">
-      <div className="flex items-center gap-1.5">
-        <div className="relative flex-1">
+    <div className="p-2 border-b border-border">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <div className="relative flex-1 min-w-[120px]">
           <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
           <Input
             value={query}
@@ -30,14 +41,6 @@ export function TreeToolbar({
             Create Asset
           </Button>
         )}
-      </div>
-      <div className="flex items-center gap-1">
-        <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-muted-foreground" onClick={onExpandAll} title="Expand all">
-          <ChevronsUpDown className="w-3.5 h-3.5 mr-1" /> Expand all
-        </Button>
-        <Button variant="ghost" size="sm" className="h-7 px-2 text-xs text-muted-foreground" onClick={onCollapseAll} title="Collapse all">
-          <ChevronsDownUp className="w-3.5 h-3.5 mr-1" /> Collapse all
-        </Button>
       </div>
     </div>
   );

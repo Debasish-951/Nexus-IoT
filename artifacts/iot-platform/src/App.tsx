@@ -78,7 +78,7 @@ const ROUTES: {
 }[] = [
   { path: "/",                     component: Dashboard,            module: "dashboard" },
   { path: "/asset-management",     component: AssetManagement,      module: "assets" },
-  { path: "/hierarchy-generator",  component: HierarchyGenerator,   module: "assets" },
+  { path: "/hierarchy-generator",  component: HierarchyGenerator,   module: "assets", feature: "hierarchyGenerator" },
   { path: "/assets",               component: Assets,               module: "assets" },
   { path: "/assets/:id",           component: AssetDetails,         module: "assets" },
   { path: "/asset-templates",      component: AssetTemplates,       module: "assets" },

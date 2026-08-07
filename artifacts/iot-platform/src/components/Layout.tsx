@@ -50,7 +50,7 @@ const navItems: NavItem[] = [
       { label: "Assets",              href: "/assets",              icon: Blocks,   module: "assets" },
       { label: "Asset Templates",     href: "/asset-templates",     icon: FileText, module: "assets" },
       { label: "Media Library",       href: "/media-library",       icon: Image,    module: "assets" },
-      { label: "Hierarchy Generator", href: "/hierarchy-generator", icon: Cpu,      module: "assets" },
+      { label: "Hierarchy Generator", href: "/hierarchy-generator", icon: Cpu,      module: "assets", feature: "hierarchyGenerator" },
     ],
   },
   {
