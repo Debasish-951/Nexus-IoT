@@ -41,6 +41,7 @@ import LiveTwin from "@/pages/LiveTwin";
 import DashboardTemplates from "@/pages/DashboardTemplates";
 import LiveFeed from "@/pages/LiveFeed";
 import AICopilot from "@/pages/AICopilot";
+import { FEATURES, type FeatureKey } from "@/lib/features";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -64,8 +65,17 @@ const queryClient = new QueryClient({
  * to a controlled module declare it, so a user who types the URL directly gets
  * the same answer as one who uses the nav. The API enforces the same rules —
  * this layer exists so the UI is coherent, not so it is secure.
+ *
+ * A route may also name a feature switch. A route whose switch is off is not
+ * registered at all, so the URL falls through to NotFound rather than rendering
+ * a page that is meant to be unavailable.
  */
-const ROUTES: { path: string; component: React.ComponentType; module?: string }[] = [
+const ROUTES: {
+  path: string;
+  component: React.ComponentType;
+  module?: string;
+  feature?: FeatureKey;
+}[] = [
   { path: "/",                     component: Dashboard,            module: "dashboard" },
   { path: "/asset-management",     component: AssetManagement,      module: "assets" },
   { path: "/hierarchy-generator",  component: HierarchyGenerator,   module: "assets" },
@@ -84,7 +94,7 @@ const ROUTES: { path: string; component: React.ComponentType; module?: string }[
   { path: "/destinations",         component: Destinations,         module: "brokers" },
   { path: "/integrations",         component: IntegrationHub,       module: "brokers" },
   { path: "/integration-guide",    component: IntegrationGuide },
-  { path: "/simulator",            component: IngestSimulator,      module: "brokers" },
+  { path: "/simulator",            component: IngestSimulator,      module: "brokers", feature: "payloadSimulator" },
   { path: "/api-clients",          component: ApiClients,           module: "api_clients" },
   { path: "/data-explorer",        component: DataExplorerHome,     module: "explorer" },
   { path: "/ai-copilot",           component: AICopilot,            module: "explorer" },
@@ -112,7 +122,9 @@ function AppRouter() {
         <Protected>
           <Layout>
             <Switch>
-              {ROUTES.map(({ path, component: Component, module }) => (
+              {ROUTES
+                .filter(({ feature }) => !feature || FEATURES[feature])
+                .map(({ path, component: Component, module }) => (
                 <Route key={path} path={path}>
                   <Protected module={module}>
                     <Component />

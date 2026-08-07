@@ -5,6 +5,9 @@
   "packageManager": "pnpm@10.26.1",
   "scripts": {
     "preinstall": "node scripts/preinstall.mjs",
+    "dev:api": "pnpm --filter @workspace/api-server run dev",
+    "dev:web": "pnpm --filter @workspace/iot-platform run dev",
+    "start": "node --enable-source-maps artifacts/api-server/dist/index.mjs",
     "build": "pnpm run typecheck && pnpm -r --if-present run build",
     "typecheck:libs": "tsc --build",
     "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"

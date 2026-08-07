@@ -1,0 +1,851 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Concept 3 — Signal | WS-Integrated Suite UI Modernization</title>
+<style>
+/* ============================================================
+   CONCEPT 3 — SIGNAL  ·  Operations Control Room
+   Lineage: Grafana, Datadog, industrial SCADA/HMI, Bloomberg
+   Philosophy: this is not a generic SaaS product — it is an
+   industrial telemetry platform. Lean into it. A permanent
+   system-status band, monospace for every identifier and value,
+   a status stripe on every row, alarms above everything else.
+   Data is the ornament.
+   ============================================================ */
+:root{
+  --bg:#05070A; --s1:#0B0F15; --s2:#11161E; --s3:#182029; --s4:#222C38;
+  --ink:#E8F0F7; --ink-2:#A9B8C7; --ink-3:#71828F; --ink-4:#4E5C6B;
+  --line:#1A222C; --line-2:#26313D;
+  --accent:#06B6D4; --accent-2:#22D3EE; --accent-soft:rgba(6,182,212,.11); --accent-line:rgba(6,182,212,.34);
+  --ok:#10B981; --ok-soft:rgba(16,185,129,.12); --ok-line:rgba(16,185,129,.3);
+  --warn:#F59E0B; --warn-soft:rgba(245,158,11,.12); --warn-line:rgba(245,158,11,.3);
+  --crit:#EF4444; --crit-soft:rgba(239,68,68,.13); --crit-line:rgba(239,68,68,.34);
+  --viol:#A855F7;
+  --r:2px;
+  --f:"Segoe UI",system-ui,-apple-system,Roboto,sans-serif;
+  --mono:Consolas,"Cascadia Mono",ui-monospace,"SF Mono",Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#020305;color:var(--ink-2);font-family:var(--f);font-size:12.5px;line-height:1.45;-webkit-font-smoothing:antialiased}
+/* ---------- Concept chrome ---------- */
+.meta{background:#080B10;color:#A9B8C7;padding:19px 24px;border-bottom:1px solid var(--line-2)}
+.meta h1{font-size:19px;color:#fff;font-weight:600;letter-spacing:-.2px}
+.meta .tag{display:inline-block;font-family:var(--mono);font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:var(--accent-2);border:1px solid var(--accent-line);padding:3px 8px;margin-bottom:9px}
+.meta p{font-size:12.5px;max-width:96ch;margin-top:8px;color:#8B9BAA}
+.specs{display:flex;flex-wrap:wrap;gap:22px;margin-top:15px;font-size:11px}
+.specs section{min-width:148px}
+.specs h4{font-family:var(--mono);font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:#4E5C6B;margin-bottom:6px}
+.sw{display:flex;gap:3px}.sw i{width:23px;height:23px;display:block;border:1px solid rgba(255,255,255,.08)}
+.specs code{font-family:var(--mono);font-size:10.5px;color:#94A6B6;display:block;line-height:1.75}
+.vpbar{display:flex;gap:0;align-items:center;background:#05070A;border-bottom:1px solid var(--line);padding:9px 24px}
+.vpbar span{font-family:var(--mono);font-size:10px;letter-spacing:.12em;text-transform:uppercase;color:#4E5C6B;margin-right:12px}
+.vpbar button{font-family:var(--mono);font-size:11px;background:var(--s2);color:var(--ink-3);border:1px solid var(--line-2);padding:6px 14px;cursor:pointer}
+.vpbar button:last-of-type{border-left:0}
+.vpbar button.on{background:var(--accent);color:#03181C;border-color:var(--accent);font-weight:700}
+.tabs{display:flex;background:#05070A;border-bottom:1px solid var(--line-2);padding:0 24px;overflow-x:auto}
+.tabs button{font-family:var(--mono);font-size:11.5px;background:none;border:0;border-bottom:2px solid transparent;padding:11px 14px;color:var(--ink-3);cursor:pointer;white-space:nowrap;letter-spacing:.03em;text-transform:uppercase}
+.tabs button.on{color:var(--accent-2);border-bottom-color:var(--accent);font-weight:700}
+.stage{padding:22px;display:flex;justify-content:center}
+.frame{width:100%;max-width:1440px;background:var(--bg);border:1px solid var(--line-2);overflow:hidden;box-shadow:0 18px 50px rgba(0,0,0,.6)}
+.frame.mobile{max-width:390px}
+.screen{display:none}.screen.on{display:block}
+/* ---------- Persistent system status band ---------- */
+.sysbar{height:28px;background:#080C12;border-bottom:1px solid var(--line-2);display:flex;align-items:center;padding:0 12px;gap:0;font-family:var(--mono);font-size:10.5px;overflow-x:auto}
+.sysbar .cell{display:flex;align-items:center;gap:6px;padding:0 12px;border-right:1px solid var(--line);height:100%;white-space:nowrap;flex:0 0 auto}
+.sysbar .cell:last-child{border-right:0;margin-left:auto}
+.sysbar .k{color:var(--ink-4);letter-spacing:.06em}
+.sysbar .v{color:var(--ink);font-weight:700}
+.led{width:7px;height:7px;border-radius:50%;flex:0 0 7px;position:relative}
+.led.ok{background:var(--ok);box-shadow:0 0 6px rgba(16,185,129,.6)}
+.led.warn{background:var(--warn);box-shadow:0 0 6px rgba(245,158,11,.6)}
+.led.crit{background:var(--crit);box-shadow:0 0 7px rgba(239,68,68,.7)}
+.led.off{background:var(--ink-4)}
+/* ---------- Shell ---------- */
+.app{display:flex;min-height:640px}
+.frame.mobile .app{flex-direction:column;min-height:720px}
+.rail{width:198px;flex:0 0 198px;background:#080B10;border-right:1px solid var(--line-2);display:flex;flex-direction:column}
+.frame.mobile .rail{display:none}
+.brand{height:38px;display:flex;align-items:center;gap:8px;padding:0 11px;border-bottom:1px solid var(--line-2)}
+.brand .logo{width:19px;height:19px;background:var(--accent);display:grid;place-items:center;color:#03181C;font-size:10px;font-weight:800;font-family:var(--mono)}
+.brand b{color:#fff;font-size:11.5px;font-weight:600;font-family:var(--mono);letter-spacing:.02em}
+.nav{flex:1;overflow-y:auto;padding:4px 0}
+.grp{font-family:var(--mono);font-size:9px;letter-spacing:.15em;text-transform:uppercase;color:#3F4C59;padding:10px 11px 4px}
+.nav a{display:flex;align-items:center;gap:8px;padding:5px 11px;color:var(--ink-2);text-decoration:none;font-size:12px;border-left:2px solid transparent}
+.nav a:hover{background:var(--s2);color:#fff}
+.nav a.on{background:var(--accent-soft);color:var(--accent-2);border-left-color:var(--accent);font-weight:600}
+.nav a i{font-style:normal;width:13px;text-align:center;opacity:.6;font-size:11px}
+.nav a .n{margin-left:auto;font-family:var(--mono);font-size:10px;color:var(--ink-4)}
+.nav a .n.crit{color:var(--crit);font-weight:700}
+.railfoot{border-top:1px solid var(--line-2);padding:7px 11px;font-family:var(--mono);font-size:10px;color:var(--ink-4)}
+.main{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--bg)}
+.mtop{display:none}
+.frame.mobile .mtop{display:flex;height:42px;background:#080B10;align-items:center;padding:0 12px;gap:10px;color:#fff;flex:0 0 42px;border-bottom:1px solid var(--line-2)}
+.frame.mobile .mtop b{font-size:13px;font-weight:600;font-family:var(--mono)}
+.topbar{height:38px;background:#080B10;border-bottom:1px solid var(--line-2);display:flex;align-items:center;padding:0 12px;gap:11px;flex:0 0 38px}
+.frame.mobile .topbar{display:none}
+.crumb{font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+.crumb b{color:var(--ink);font-weight:700}
+.tsearch{margin-left:auto;background:var(--s1);border:1px solid var(--line-2);height:24px;width:220px;display:flex;align-items:center;padding:0 8px;gap:6px;font-family:var(--mono);font-size:10.5px;color:var(--ink-4)}
+.ico{width:24px;height:24px;border:1px solid var(--line-2);display:grid;place-items:center;background:var(--s1);font-size:12px;color:var(--ink-3);position:relative}
+.badge{position:absolute;top:-5px;right:-5px;min-width:14px;height:14px;background:var(--crit);color:#fff;font-family:var(--mono);font-size:9px;display:grid;place-items:center;padding:0 3px;font-weight:700;border:1.5px solid #080B10}
+.avatar{width:24px;height:24px;background:var(--accent);color:#03181C;display:grid;place-items:center;font-family:var(--mono);font-size:10px;font-weight:800}
+.btabs{display:none}
+.frame.mobile .btabs{display:flex;background:#080B10;border-top:1px solid var(--line-2);flex:0 0 52px}
+.btabs a{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-family:var(--mono);font-size:9px;color:var(--ink-4);text-decoration:none;text-transform:uppercase}
+.btabs a.on{color:var(--accent-2)}
+.btabs a i{font-style:normal;font-size:15px}
+.content{flex:1;overflow-y:auto;padding:12px}
+.frame.mobile .content{padding:10px}
+/* Alarm band — above everything */
+.aband{border:1px solid var(--crit-line);background:var(--crit-soft);margin-bottom:12px}
+.aband.clear{border-color:var(--ok-line);background:var(--ok-soft)}
+.abh{padding:7px 11px;display:flex;align-items:center;gap:9px;border-bottom:1px solid var(--crit-line);font-family:var(--mono);font-size:11px}
+.aband.clear .abh{border-bottom:0}
+.abh .t{color:var(--crit);font-weight:700;letter-spacing:.06em;text-transform:uppercase}
+.aband.clear .abh .t{color:var(--ok)}
+.abh .r{margin-left:auto;display:flex;gap:7px}
+.phead{display:flex;align-items:flex-start;gap:11px;margin-bottom:11px;flex-wrap:wrap}
+.phead h2{font-size:16px;color:#fff;font-weight:600;letter-spacing:-.1px}
+.phead p{font-family:var(--mono);font-size:11px;color:var(--ink-3);margin-top:2px}
+.pacts{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap}
+.frame.mobile .pacts{margin-left:0;width:100%}
+.btn{font-family:var(--mono);font-size:11px;padding:5px 11px;border:1px solid var(--line-2);background:var(--s2);color:var(--ink-2);cursor:pointer;display:inline-flex;align-items:center;gap:5px;letter-spacing:.03em}
+.btn:hover{background:var(--s3);color:#fff;border-color:var(--accent-line)}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:#03181C;font-weight:700}
+.btn.dan{border-color:var(--crit-line);color:var(--crit)}
+.btn.sm{padding:3px 8px;font-size:10px}
+.seg{display:inline-flex;border:1px solid var(--line-2)}
+.seg button{font-family:var(--mono);font-size:10.5px;padding:4px 10px;background:var(--s2);border:0;border-right:1px solid var(--line);color:var(--ink-3);cursor:pointer}
+.seg button:last-child{border-right:0}
+.seg button.on{background:var(--accent);color:#03181C;font-weight:700}
+/* KPI tiles with threshold bands */
+.kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;margin-bottom:12px}
+.frame.mobile .kpis{grid-template-columns:repeat(2,1fr)}
+.kt{background:var(--s1);border:1px solid var(--line-2);padding:8px 10px;position:relative;overflow:hidden}
+.kt .stripe{position:absolute;left:0;top:0;bottom:0;width:2px;background:var(--ok)}
+.kt .stripe.warn{background:var(--warn)}.kt .stripe.crit{background:var(--crit)}.kt .stripe.n{background:var(--ink-4)}
+.kt .lbl{font-family:var(--mono);font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-4);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kt .val{font-family:var(--mono);font-size:21px;color:#fff;font-weight:700;line-height:1.15;margin-top:3px;letter-spacing:-.5px}
+.kt .val small{font-size:10px;color:var(--ink-3);font-weight:400;margin-left:2px}
+.kt .band{height:3px;background:var(--s3);margin-top:6px;position:relative;overflow:hidden}
+.kt .band i{position:absolute;top:0;bottom:0;left:0;background:var(--accent)}
+.kt .band .lim{position:absolute;top:-1px;bottom:-1px;width:1.5px;background:var(--crit)}
+.kt .sub{font-family:var(--mono);font-size:9.5px;color:var(--ink-4);margin-top:4px;display:flex;gap:5px;align-items:center}
+.d-up{color:var(--ok)}.d-dn{color:var(--crit)}
+/* Panels */
+.grid{display:grid;gap:8px}
+.g2{grid-template-columns:2fr 1fr}.g3{grid-template-columns:repeat(3,1fr)}.g4{grid-template-columns:repeat(4,1fr)}
+.frame.mobile .g2,.frame.mobile .g3,.frame.mobile .g4{grid-template-columns:1fr}
+.p{background:var(--s1);border:1px solid var(--line-2)}
+.ph{padding:6px 10px;border-bottom:1px solid var(--line-2);display:flex;align-items:center;gap:8px;background:#0A0E14}
+.ph h3{font-family:var(--mono);font-size:11px;color:var(--accent-2);font-weight:700;letter-spacing:.05em;text-transform:uppercase}
+.ph .r{margin-left:auto;display:flex;gap:5px;align-items:center}
+.pb{padding:10px}
+.tag{font-family:var(--mono);font-size:9.5px;padding:2px 6px;border:1px solid transparent;letter-spacing:.04em;text-transform:uppercase;font-weight:700;white-space:nowrap}
+.tag.ok{background:var(--ok-soft);color:var(--ok);border-color:var(--ok-line)}
+.tag.warn{background:var(--warn-soft);color:var(--warn);border-color:var(--warn-line)}
+.tag.crit{background:var(--crit-soft);color:var(--crit);border-color:var(--crit-line)}
+.tag.info{background:var(--accent-soft);color:var(--accent-2);border-color:var(--accent-line)}
+.tag.mut{background:var(--s3);color:var(--ink-3);border-color:var(--line-2)}
+/* Table — terminal density, status stripe per row */
+.tbl-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:11.5px}
+thead th{background:#0A0E14;border-bottom:1px solid var(--line-2);text-align:left;padding:6px 9px;font-family:var(--mono);font-size:9.5px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-4);white-space:nowrap;position:sticky;top:0}
+tbody td{border-bottom:1px solid var(--line);padding:5px 9px;color:var(--ink-2);vertical-align:middle}
+tbody tr:hover{background:var(--s2)}
+tbody tr:hover .rowact{opacity:1}
+tbody td.st{padding:0;width:3px}
+tbody td.st i{display:block;width:3px;height:22px;background:var(--ok)}
+tbody td.st i.warn{background:var(--warn)}tbody td.st i.crit{background:var(--crit)}tbody td.st i.n{background:var(--ink-4)}
+.num{text-align:right;font-family:var(--mono);font-variant-numeric:tabular-nums;white-space:nowrap;color:#fff}
+.mn{font-family:var(--mono);font-size:11px;color:var(--ink-3)}
+.lnk{color:var(--accent-2);text-decoration:none}
+.rowact{opacity:0;display:flex;gap:4px;transition:opacity .1s}
+.chk{width:12px;height:12px;border:1px solid var(--line-2);display:inline-block;vertical-align:middle;background:var(--s2)}
+.chk.on{background:var(--accent);border-color:var(--accent);position:relative}
+.chk.on:after{content:"";position:absolute;left:3px;top:.5px;width:4px;height:7px;border:solid #03181C;border-width:0 1.6px 1.6px 0;transform:rotate(45deg)}
+.tfoot{padding:6px 10px;border-top:1px solid var(--line-2);display:flex;align-items:center;gap:9px;font-family:var(--mono);font-size:10.5px;color:var(--ink-4);background:#0A0E14;flex-wrap:wrap}
+.pg{display:flex;margin-left:auto}
+.pg button{font-family:var(--mono);width:23px;height:23px;border:1px solid var(--line-2);background:var(--s2);color:var(--ink-2);font-size:10.5px;cursor:pointer;border-right:0}
+.pg button:last-child{border-right:1px solid var(--line-2)}
+.pg button.on{background:var(--accent);border-color:var(--accent);color:#03181C;font-weight:700}
+/* Forms — compact, keyboard-optimised */
+.form{max-width:700px}
+.fs{border:1px solid var(--line-2);background:var(--s1);margin-bottom:10px}
+.fs>h4{padding:6px 10px;border-bottom:1px solid var(--line-2);background:#0A0E14;font-family:var(--mono);font-size:10.5px;color:var(--accent-2);font-weight:700;letter-spacing:.07em;text-transform:uppercase}
+.fs>.in{padding:10px}
+.row{display:grid;grid-template-columns:170px 1fr;gap:11px;align-items:start;padding:5px 0}
+.frame.mobile .row{grid-template-columns:1fr;gap:4px}
+.row>label{font-family:var(--mono);font-size:11px;color:var(--ink-3);padding-top:6px;letter-spacing:.03em}
+.row>label b{color:var(--crit)}
+.row .hint{font-family:var(--mono);font-size:10px;color:var(--ink-4);margin-top:3px}
+.inp{width:100%;height:28px;border:1px solid var(--line-2);background:var(--s2);padding:0 8px;font-family:var(--mono);font-size:11.5px;color:#fff}
+.inp:focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 2px var(--accent-soft)}
+textarea.inp{height:auto;padding:6px 8px;resize:vertical;line-height:1.5}
+select.inp{cursor:pointer}
+.inp.err{border-color:var(--crit)}
+.errmsg{font-family:var(--mono);font-size:10px;color:var(--crit);margin-top:3px}
+.fbar{padding:8px 10px;border-top:1px solid var(--line-2);display:flex;gap:7px;justify-content:flex-end;background:#0A0E14}
+.tog{width:30px;height:16px;background:var(--s4);position:relative;display:inline-block;flex:0 0 30px;border:1px solid var(--line-2)}
+.tog:after{content:"";position:absolute;top:1.5px;left:1.5px;width:11px;height:11px;background:var(--ink-3)}
+.tog.on{background:var(--accent-soft);border-color:var(--accent)}
+.tog.on:after{left:16px;background:var(--accent)}
+/* Charts */
+.chart{width:100%;height:170px;display:block}
+.legend{display:flex;gap:13px;flex-wrap:wrap;padding-top:8px;font-family:var(--mono);font-size:10px;color:var(--ink-3)}
+.legend span{display:flex;align-items:center;gap:5px}
+.legend i{width:9px;height:2px;display:block}
+.axis{font-size:9px;fill:var(--ink-4);font-family:var(--mono)}
+/* Settings */
+.slay{display:grid;grid-template-columns:180px 1fr;gap:10px}
+.frame.mobile .slay{grid-template-columns:1fr}
+.snav{border:1px solid var(--line-2);background:var(--s1);align-self:start}
+.snav a{display:block;padding:6px 10px;font-family:var(--mono);font-size:11px;color:var(--ink-2);text-decoration:none;border-bottom:1px solid var(--line);border-left:2px solid transparent}
+.snav a:last-child{border-bottom:0}
+.snav a.on{background:var(--accent-soft);color:var(--accent-2);border-left-color:var(--accent);font-weight:700}
+.kv{display:grid;grid-template-columns:180px 1fr;gap:6px 11px;font-size:11.5px}
+.frame.mobile .kv{grid-template-columns:1fr;gap:2px 0}
+.kv dt{font-family:var(--mono);color:var(--ink-4);font-size:11px}
+.kv dd{color:var(--ink)}
+.note{border:1px solid var(--accent-line);background:var(--accent-soft);padding:8px 10px;font-size:11.5px;color:var(--ink-2);display:flex;gap:8px}
+.note b{color:var(--accent-2)}
+.ann{background:var(--warn-soft);border:1px solid var(--warn-line);padding:7px 10px;font-family:var(--mono);font-size:10.5px;color:var(--warn);margin-bottom:11px;line-height:1.5}
+.ann b{color:#FFCE7A}
+</style>
+</head>
+<body>
+
+<div class="meta">
+  <div class="tag">Concept 3 of 4</div>
+  <h1>Signal — Operations Control Room</h1>
+  <p><b style="color:#fff">Design philosophy:</b> Stop pretending this is a generic SaaS product. It is an industrial telemetry platform, so Signal borrows from the tools engineers already trust: a permanent system-status band across the top, monospace for every identifier and numeric value, a colour stripe on the left edge of every row, and alarms rendered above all other content. Highest density of the four — ~22 rows per screen — and the only concept where an operator can tell system health without clicking anything. Lineage: Grafana, Datadog, SCADA/HMI, Bloomberg Terminal.</p>
+  <div class="specs">
+    <section><h4>Surfaces</h4><div class="sw"><i style="background:#05070A"></i><i style="background:#0B0F15"></i><i style="background:#11161E"></i><i style="background:#182029"></i><i style="background:#222C38"></i></div></section>
+    <section><h4>Accent + status</h4><div class="sw"><i style="background:#06B6D4"></i><i style="background:#10B981"></i><i style="background:#F59E0B"></i><i style="background:#EF4444"></i><i style="background:#A855F7"></i></div></section>
+    <section><h4>Typography</h4><code>UI: Segoe UI 12.5px<br>Data: Consolas mono<br>all IDs + values mono</code></section>
+    <section><h4>Geometry</h4><code>radius 2px · rail 198px<br>rows 22px · pad 9px<br>status band 28px fixed</code></section>
+    <section><h4>Navigation</h4><code>compact rail + counts<br>system band always on<br>mobile: alarm-first tabs</code></section>
+  </div>
+</div>
+
+<div class="vpbar">
+  <span>Viewport</span>
+  <button id="b-desk" class="on" onclick="vp('desk')">Desktop 1440</button>
+  <button id="b-mob" onclick="vp('mob')">Mobile 390</button>
+</div>
+
+<div class="tabs">
+  <button class="on" onclick="show('dash',this)">Dashboard</button>
+  <button onclick="show('home',this)">Landing / Home</button>
+  <button onclick="show('table',this)">Data Table</button>
+  <button onclick="show('form',this)">Form</button>
+  <button onclick="show('anal',this)">Analytics</button>
+  <button onclick="show('set',this)">Settings</button>
+</div>
+
+<div class="stage">
+<div class="frame" id="frame">
+
+<!-- =================== DASHBOARD =================== -->
+<section class="screen on" id="dash">
+<div class="sysbar">
+  <div class="cell"><span class="led ok"></span><span class="k">API</span><span class="v">UP</span></div>
+  <div class="cell"><span class="led ok"></span><span class="k">DB</span><span class="v">PG16</span></div>
+  <div class="cell"><span class="led ok"></span><span class="k">WS</span><span class="v">4</span></div>
+  <div class="cell"><span class="led off"></span><span class="k">MQTT</span><span class="v">IDLE</span></div>
+  <div class="cell"><span class="k">INGEST</span><span class="v">118/min</span></div>
+  <div class="cell"><span class="k">ROWS</span><span class="v">3 386 688</span></div>
+  <div class="cell"><span class="led ok"></span><span class="k">ALARMS</span><span class="v">0</span></div>
+  <div class="cell"><span class="k">LAST</span><span class="v">4s ago</span></div>
+</div>
+<div class="app">
+  <aside class="rail">
+    <div class="brand"><div class="logo">WS</div><b>SIGNAL</b></div>
+    <nav class="nav">
+      <a href="#" class="on"><i>▤</i>Overview</a>
+      <div class="grp">Live</div>
+      <a href="#"><i>◔</i>Live Feed<span class="n">118/m</span></a>
+      <a href="#"><i>◈</i>Live Twin</a>
+      <a href="#"><i>◭</i>Alarms<span class="n">0</span></a>
+      <div class="grp">Configure</div>
+      <a href="#"><i>◫</i>Assets<span class="n">1</span></a>
+      <a href="#"><i>▤</i>Templates<span class="n">8</span></a>
+      <a href="#"><i>⚠</i>Rules<span class="n">0</span></a>
+      <div class="grp">Integration</div>
+      <a href="#"><i>≋</i>Brokers<span class="n">0</span></a>
+      <a href="#"><i>⚿</i>Endpoints<span class="n">1</span></a>
+      <a href="#"><i>➤</i>Destinations</a>
+      <div class="grp">Admin</div>
+      <a href="#"><i>◉</i>Users<span class="n">1</span></a>
+      <a href="#"><i>◇</i>Security</a>
+    </nav>
+    <div class="railfoot">v1.0 · pg16 · 1 instance</div>
+  </aside>
+  <div class="main">
+    <div class="mtop"><span>☰</span><b>OVERVIEW</b><span style="margin-left:auto"><span class="led ok"></span></span></div>
+    <div class="topbar">
+      <div class="crumb">EMS / <b>Overview</b></div>
+      <div class="tsearch">⌕ asset · tag · alarm</div>
+      <div class="ico">◔<span class="badge">3</span></div><div class="ico">☼</div><div class="avatar">DP</div>
+    </div>
+    <div class="content">
+      <div class="aband clear">
+        <div class="abh"><span class="led ok"></span><span class="t">No active alarms</span>
+          <span style="color:var(--ink-3)">0 rules configured · last event 2 days ago</span>
+          <div class="r"><button class="btn sm">Configure rules →</button></div></div>
+      </div>
+
+      <div class="kpis">
+        <div class="kt"><span class="stripe"></span><div class="lbl">Ingest rate</div><div class="val">118<small>/min</small></div>
+          <div class="band"><i style="width:62%"></i><span class="lim" style="left:100%"></span></div><div class="sub">62% of 190 cap</div></div>
+        <div class="kt"><span class="stripe"></span><div class="lbl">Chiller energy</div><div class="val">4659<small>kWh</small></div>
+          <div class="band"><i style="width:47%"></i></div><div class="sub"><span class="d-up">▲4.2%</span> 24h</div></div>
+        <div class="kt"><span class="stripe warn"></span><div class="lbl">Peak demand</div><div class="val">58.4<small>kW</small></div>
+          <div class="band"><i style="width:78%;background:var(--warn)"></i><span class="lim" style="left:78%"></span></div><div class="sub">78% of 75 limit</div></div>
+        <div class="kt"><span class="stripe"></span><div class="lbl">Daily cum</div><div class="val">32.17<small>kWh</small></div>
+          <div class="band"><i style="width:41%"></i></div><div class="sub"><span class="d-up">▲8.1%</span> vs yest</div></div>
+        <div class="kt"><span class="stripe n"></span><div class="lbl">Assets bound</div><div class="val">1<small>/1</small></div>
+          <div class="band"><i style="width:100%;background:var(--ok)"></i></div><div class="sub">24 attributes</div></div>
+        <div class="kt"><span class="stripe"></span><div class="lbl">Endpoints</div><div class="val">1</div>
+          <div class="band"><i style="width:100%"></i></div><div class="sub">1 active · 0 revoked</div></div>
+      </div>
+
+      <div class="grid g2" style="margin-bottom:8px">
+        <div class="p">
+          <div class="ph"><h3>Energy — EMS · 24h</h3><div class="r"><span class="tag mut">avg 5m</span><span class="tag info">live</span><button class="btn sm">⤢</button></div></div>
+          <div class="pb">
+            <svg class="chart" viewBox="0 0 700 170" preserveAspectRatio="none">
+              <g stroke="#1A222C" stroke-width="1">
+                <line x1="38" y1="18" x2="692" y2="18"/><line x1="38" y1="52" x2="692" y2="52"/>
+                <line x1="38" y1="86" x2="692" y2="86"/><line x1="38" y1="120" x2="692" y2="120"/><line x1="38" y1="146" x2="692" y2="146"/>
+              </g>
+              <rect x="38" y="18" width="654" height="12" fill="#EF4444" opacity=".07"/>
+              <line x1="38" y1="30" x2="692" y2="30" stroke="#EF4444" stroke-width="1" stroke-dasharray="4 3"/>
+              <text x="688" y="27" text-anchor="end" style="font-size:8.5px;fill:#EF4444;font-family:var(--mono)">HI 55</text>
+              <text class="axis" x="33" y="21" text-anchor="end">60</text><text class="axis" x="33" y="55" text-anchor="end">45</text>
+              <text class="axis" x="33" y="89" text-anchor="end">30</text><text class="axis" x="33" y="123" text-anchor="end">15</text>
+              <path d="M44,108 L108,92 L172,100 L236,68 L300,76 L364,44 L428,56 L492,34 L556,50 L620,26 L688,40" fill="none" stroke="#06B6D4" stroke-width="1.8"/>
+              <path d="M44,108 L108,92 L172,100 L236,68 L300,76 L364,44 L428,56 L492,34 L556,50 L620,26 L688,40 L688,146 L44,146 Z" fill="#06B6D4" opacity=".08"/>
+              <path d="M44,128 L108,122 L172,126 L236,114 L300,118 L364,106 L428,112 L492,100 L556,108 L620,96 L688,102" fill="none" stroke="#A855F7" stroke-width="1.8"/>
+              <circle cx="620" cy="26" r="3.5" fill="#06B6D4"/>
+              <text class="axis" x="44" y="163">00:00</text><text class="axis" x="236" y="163">06:00</text>
+              <text class="axis" x="428" y="163">12:00</text><text class="axis" x="620" y="163">18:00</text>
+            </svg>
+            <div class="legend"><span><i style="background:#06B6D4"></i>chiller.energy_kWh</span><span><i style="background:#A855F7"></i>interval_kwh</span></div>
+          </div>
+        </div>
+        <div class="p">
+          <div class="ph"><h3>Live tags</h3><div class="r"><span class="tag info">24</span></div></div>
+          <div class="tbl-wrap"><table>
+            <thead><tr><th></th><th>Tag</th><th class="num">Value</th><th>Age</th></tr></thead>
+            <tbody>
+              <tr><td class="st"><i></i></td><td class="mn">chiller.energy_kWh</td><td class="num">4659.17</td><td class="mn">4s</td></tr>
+              <tr><td class="st"><i></i></td><td class="mn">interval_kwh</td><td class="num">0.74</td><td class="mn">4s</td></tr>
+              <tr><td class="st"><i></i></td><td class="mn">daily_cum_kwh</td><td class="num">32.17</td><td class="mn">4s</td></tr>
+              <tr><td class="st"><i></i></td><td class="mn">wtd_cum_kwh</td><td class="num">319.98</td><td class="mn">4s</td></tr>
+              <tr><td class="st"><i class="warn"></i></td><td class="mn">mtd_cum_kwh</td><td class="num">968.87</td><td class="mn" style="color:var(--warn)">4m</td></tr>
+              <tr><td class="st"><i></i></td><td class="mn">ytd_cum_kwh</td><td class="num">4658.36</td><td class="mn">4s</td></tr>
+              <tr><td class="st"><i></i></td><td class="mn">grid.import_kW</td><td class="num">28.40</td><td class="mn">4s</td></tr>
+              <tr><td class="st"><i></i></td><td class="mn">genset.output_kW</td><td class="num">12.06</td><td class="mn">4s</td></tr>
+            </tbody>
+          </table></div>
+        </div>
+      </div>
+
+      <div class="grid g3">
+        <div class="p"><div class="ph"><h3>Throughput 12h</h3></div><div class="pb">
+          <svg class="chart" style="height:96px" viewBox="0 0 320 96" preserveAspectRatio="none">
+            <g fill="#06B6D4">
+              <rect x="8" y="48" width="16" height="40"/><rect x="32" y="36" width="16" height="52"/>
+              <rect x="56" y="42" width="16" height="46"/><rect x="80" y="24" width="16" height="64"/>
+              <rect x="104" y="30" width="16" height="58"/><rect x="128" y="16" width="16" height="72"/>
+              <rect x="152" y="22" width="16" height="66"/><rect x="176" y="10" width="16" height="78"/>
+              <rect x="200" y="18" width="16" height="70"/><rect x="224" y="26" width="16" height="62"/>
+              <rect x="248" y="14" width="16" height="74"/><rect x="272" y="20" width="16" height="68"/></g>
+            <rect x="296" y="32" width="16" height="56" fill="#222C38"/>
+          </svg>
+          <div class="legend"><span><i style="background:#06B6D4"></i>accepted</span><span><i style="background:#22C55E"></i>0 dropped</span></div>
+        </div></div>
+        <div class="p"><div class="ph"><h3>Event log</h3></div><div class="pb" style="padding:0"><table><tbody>
+          <tr><td class="st"><i></i></td><td class="mn" style="width:48px">17:44</td><td>template.updated</td><td class="mn">EMS</td></tr>
+          <tr><td class="st"><i></i></td><td class="mn">17:31</td><td>endpoint.copied</td><td class="mn">8c7ba26d</td></tr>
+          <tr><td class="st"><i></i></td><td class="mn">16:58</td><td>asset.bound</td><td class="mn">energy</td></tr>
+          <tr><td class="st"><i></i></td><td class="mn">16:12</td><td>attrs.declared</td><td class="mn">24</td></tr>
+          <tr><td class="st"><i class="n"></i></td><td class="mn">15:02</td><td>prune.run</td><td class="mn">0 rows</td></tr>
+        </tbody></table></div></div>
+        <div class="p"><div class="ph"><h3>Subsystems</h3></div><div class="pb">
+          <dl class="kv" style="grid-template-columns:1fr auto;font-size:11px">
+            <dt>api-server :8080</dt><dd><span class="tag ok">up</span></dd>
+            <dt>postgres 16.14</dt><dd><span class="tag ok">conn</span></dd>
+            <dt>websocket /api/ws</dt><dd><span class="tag ok">4</span></dd>
+            <dt>mqtt subscriber</dt><dd><span class="tag mut">idle</span></dd>
+            <dt>retention pruner</dt><dd><span class="tag mut">18:00</span></dd>
+            <dt>instances</dt><dd><span class="tag warn">1 only</span></dd>
+          </dl>
+          <div class="note" style="margin-top:9px;font-size:10.5px"><span>⚠</span><span>Single-instance by design — in-memory rate limits, WS registry and MQTT subscriber are process-local.</span></div>
+        </div></div>
+      </div>
+    </div>
+    <div class="btabs"><a href="#" class="on"><i>▤</i>Ovw</a><a href="#"><i>◭</i>Alarm</a><a href="#"><i>◔</i>Live</a><a href="#"><i>◫</i>Asset</a><a href="#"><i>≡</i>More</a></div>
+  </div>
+</div>
+</section>
+
+<!-- =================== LANDING / HOME (alarm-active state) =================== -->
+<section class="screen" id="home">
+<div class="sysbar">
+  <div class="cell"><span class="led ok"></span><span class="k">API</span><span class="v">UP</span></div>
+  <div class="cell"><span class="led ok"></span><span class="k">DB</span><span class="v">PG16</span></div>
+  <div class="cell"><span class="led ok"></span><span class="k">WS</span><span class="v">4</span></div>
+  <div class="cell"><span class="led off"></span><span class="k">MQTT</span><span class="v">IDLE</span></div>
+  <div class="cell"><span class="k">INGEST</span><span class="v">118/min</span></div>
+  <div class="cell"><span class="led crit"></span><span class="k">ALARMS</span><span class="v" style="color:var(--crit)">2</span></div>
+  <div class="cell"><span class="k">LAST</span><span class="v">2s ago</span></div>
+</div>
+<div class="app">
+  <aside class="rail">
+    <div class="brand"><div class="logo">WS</div><b>SIGNAL</b></div>
+    <nav class="nav">
+      <a href="#"><i>▤</i>Overview</a>
+      <div class="grp">Live</div>
+      <a href="#"><i>◔</i>Live Feed<span class="n">118/m</span></a>
+      <a href="#"><i>◈</i>Live Twin</a>
+      <a href="#" class="on"><i>◭</i>Alarms<span class="n crit">2</span></a>
+      <div class="grp">Configure</div>
+      <a href="#"><i>◫</i>Assets<span class="n">1</span></a>
+      <a href="#"><i>▤</i>Templates<span class="n">8</span></a>
+      <a href="#"><i>⚠</i>Rules<span class="n">3</span></a>
+      <div class="grp">Integration</div>
+      <a href="#"><i>≋</i>Brokers</a><a href="#"><i>⚿</i>Endpoints<span class="n">1</span></a>
+      <div class="grp">Admin</div>
+      <a href="#"><i>◉</i>Users<span class="n">1</span></a>
+    </nav>
+    <div class="railfoot">v1.0 · pg16 · 1 instance</div>
+  </aside>
+  <div class="main">
+    <div class="mtop"><span>☰</span><b>ALARMS</b><span style="margin-left:auto"><span class="led crit"></span></span></div>
+    <div class="topbar"><div class="crumb">EMS / <b>Alarms</b></div>
+      <div class="tsearch">⌕ asset · tag · alarm</div>
+      <div class="ico">◔<span class="badge">2</span></div><div class="ico">☼</div><div class="avatar">DP</div></div>
+    <div class="content">
+      <div class="ann"><b>Modernization note —</b> Signal is the only concept where an operator learns system state without clicking. The 28px band is always mounted; alarms render above all page content; row stripes carry status so colour is never the sole signal (stripe + tag + text).</div>
+      <div class="aband">
+        <div class="abh"><span class="led crit"></span><span class="t">2 active alarms</span>
+          <span style="color:var(--ink-3)">oldest 00:04:12 · unacknowledged</span>
+          <div class="r"><button class="btn sm dan">Acknowledge all</button><button class="btn sm">Silence 15m</button></div></div>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th></th><th>Severity</th><th>Rule</th><th>Asset</th><th>Tag</th><th class="num">Value</th><th class="num">Limit</th><th>Triggered</th><th style="width:130px"></th></tr></thead>
+          <tbody>
+            <tr><td class="st"><i class="crit"></i></td><td><span class="tag crit">critical</span></td>
+              <td>Peak demand exceeded</td><td>Grid</td><td class="mn">grid.import_kW</td>
+              <td class="num" style="color:var(--crit)">78.20</td><td class="num">75.00</td><td class="mn">18:02:14</td>
+              <td><div class="rowact"><button class="btn sm">Ack</button><button class="btn sm">Detail</button></div></td></tr>
+            <tr><td class="st"><i class="warn"></i></td><td><span class="tag warn">high</span></td>
+              <td>Rate of change</td><td>Chiller</td><td class="mn">chiller.energy_kWh</td>
+              <td class="num" style="color:var(--warn)">+14.8/m</td><td class="num">10.0/m</td><td class="mn">18:05:41</td>
+              <td><div class="rowact"><button class="btn sm">Ack</button><button class="btn sm">Detail</button></div></td></tr>
+          </tbody>
+        </table></div>
+      </div>
+
+      <div class="phead">
+        <div><h2>Alarm Management</h2><p>3 rules configured · 2 firing · threshold, rate-of-change, heartbeat</p></div>
+        <div class="pacts"><div class="seg"><button class="on">Active</button><button>History</button><button>Rules</button></div><button class="btn pri">+ New rule</button></div>
+      </div>
+
+      <div class="grid g4" style="margin-bottom:8px">
+        <div class="kt"><span class="stripe crit"></span><div class="lbl">Critical</div><div class="val" style="color:var(--crit)">1</div><div class="sub">unacknowledged</div></div>
+        <div class="kt"><span class="stripe warn"></span><div class="lbl">High</div><div class="val" style="color:var(--warn)">1</div><div class="sub">unacknowledged</div></div>
+        <div class="kt"><span class="stripe n"></span><div class="lbl">Medium / low</div><div class="val">0</div><div class="sub">—</div></div>
+        <div class="kt"><span class="stripe"></span><div class="lbl">MTTA 7d</div><div class="val">3<small>m 12s</small></div><div class="sub"><span class="d-up">▲</span> improving</div></div>
+      </div>
+
+      <div class="grid g2">
+        <div class="p"><div class="ph"><h3>Rules</h3><div class="r"><button class="btn sm">+ Add</button></div></div>
+          <div class="tbl-wrap"><table>
+            <thead><tr><th></th><th>Rule</th><th>Type</th><th>Metric</th><th class="num">Threshold</th><th>State</th></tr></thead>
+            <tbody>
+              <tr><td class="st"><i class="crit"></i></td><td>Peak demand exceeded</td><td><span class="tag mut">threshold</span></td><td class="mn">grid.import_kW</td><td class="num">&gt; 75.00</td><td><span class="tag crit">firing</span></td></tr>
+              <tr><td class="st"><i class="warn"></i></td><td>Rate of change</td><td><span class="tag mut">roc</span></td><td class="mn">chiller.energy_kWh</td><td class="num">&gt; 10.0/m</td><td><span class="tag warn">firing</span></td></tr>
+              <tr><td class="st"><i></i></td><td>Gateway heartbeat</td><td><span class="tag mut">heartbeat</span></td><td class="mn">—</td><td class="num">120 s</td><td><span class="tag ok">normal</span></td></tr>
+            </tbody>
+          </table></div>
+        </div>
+        <div class="p"><div class="ph"><h3>Notification routing</h3></div><div class="pb">
+          <dl class="kv" style="grid-template-columns:1fr auto;font-size:11px">
+            <dt>Webhook destinations</dt><dd><span class="tag mut">0</span></dd>
+            <dt>Delivery retry</dt><dd><span class="tag crit">none</span></dd>
+            <dt>Dead-letter queue</dt><dd><span class="tag crit">none</span></dd>
+            <dt>Notification groups</dt><dd><span class="tag mut">0</span></dd>
+          </dl>
+          <div class="note" style="margin-top:9px;font-size:10.5px"><span>⚠</span><span><b>No delivery guarantee.</b> Webhooks fire once with a 5s timeout and failures are swallowed — a destination that is down loses every alarm for the outage. Signal surfaces this instead of hiding it.</span></div>
+        </div></div>
+      </div>
+    </div>
+    <div class="btabs"><a href="#"><i>▤</i>Ovw</a><a href="#" class="on"><i>◭</i>Alarm</a><a href="#"><i>◔</i>Live</a><a href="#"><i>◫</i>Asset</a><a href="#"><i>≡</i>More</a></div>
+  </div>
+</div>
+</section>
+
+<!-- =================== DATA TABLE =================== -->
+<section class="screen" id="table">
+<div class="sysbar">
+  <div class="cell"><span class="led ok"></span><span class="k">API</span><span class="v">UP</span></div>
+  <div class="cell"><span class="led ok"></span><span class="k">DB</span><span class="v">PG16</span></div>
+  <div class="cell"><span class="led ok"></span><span class="k">WS</span><span class="v">4</span></div>
+  <div class="cell"><span class="k">INGEST</span><span class="v">118/min</span></div>
+  <div class="cell"><span class="k">ROWS</span><span class="v">3 386 688</span></div>
+  <div class="cell"><span class="led ok"></span><span class="k">ALARMS</span><span class="v">0</span></div>
+</div>
+<div class="app">
+  <aside class="rail">
+    <div class="brand"><div class="logo">WS</div><b>SIGNAL</b></div>
+    <nav class="nav">
+      <a href="#"><i>▤</i>Overview</a>
+      <div class="grp">Live</div>
+      <a href="#"><i>◔</i>Live Feed</a><a href="#"><i>◭</i>Alarms<span class="n">0</span></a>
+      <div class="grp">Configure</div>
+      <a href="#"><i>◫</i>Assets<span class="n">1</span></a>
+      <a href="#" class="on"><i>▤</i>Templates<span class="n">8</span></a>
+      <a href="#"><i>⚠</i>Rules</a>
+      <div class="grp">Integration</div>
+      <a href="#"><i>≋</i>Brokers</a><a href="#"><i>⚿</i>Endpoints<span class="n">1</span></a>
+      <div class="grp">Admin</div>
+      <a href="#"><i>◉</i>Users<span class="n">1</span></a>
+    </nav>
+    <div class="railfoot">v1.0 · pg16 · 1 instance</div>
+  </aside>
+  <div class="main">
+    <div class="mtop"><span>☰</span><b>TEMPLATES</b><span style="margin-left:auto"><span class="led ok"></span></span></div>
+    <div class="topbar"><div class="crumb">EMS / Configure / <b>Templates</b></div>
+      <div class="tsearch">⌕ asset · tag · alarm</div><div class="ico">◔</div><div class="ico">☼</div><div class="avatar">DP</div></div>
+    <div class="content">
+      <div class="ann"><b>Density comparison —</b> Signal fits ~22 rows in the same vertical space where Atlas fits 9 and Meridian 16. Every identifier is monospace so column widths stay stable as data changes — a subtle but real gain when scanning tag names.</div>
+      <div class="phead">
+        <div><h2>Asset Templates</h2><p>8 templates · 24 attributes declared · 4 in use</p></div>
+        <div class="pacts"><button class="btn">⭳ export</button><button class="btn">⭱ import</button><button class="btn pri">+ create</button></div>
+      </div>
+      <div class="p">
+        <div class="ph" style="gap:7px;flex-wrap:wrap">
+          <div class="tsearch" style="margin-left:0;width:190px">⌕ filter templates</div>
+          <button class="btn sm">type ▾</button><button class="btn sm">device ▾</button><button class="btn sm">in-use ▾</button>
+          <div class="r"><span class="tag info">2 sel</span><button class="btn sm">export</button><button class="btn sm dan">delete</button>
+            <div class="seg"><button>comfort</button><button class="on">compact</button></div></div>
+        </div>
+        <div class="tbl-wrap"><table>
+          <thead><tr><th></th><th style="width:28px"><span class="chk on"></span></th><th>Template</th><th>Type</th><th>Device ID</th><th class="num">Used</th><th class="num">Attrs</th><th>Updated</th><th style="width:96px"></th></tr></thead>
+          <tbody>
+            <tr><td class="st"><i></i></td><td><span class="chk on"></span></td><td><a href="#" class="lnk">EMS</a></td><td><span class="tag mut">energy</span></td><td class="mn">energy</td><td class="num">0</td><td class="num">24</td><td class="mn">02 Aug</td><td><div class="rowact"><button class="btn sm">edit</button><button class="btn sm">⋯</button></div></td></tr>
+            <tr><td class="st"><i></i></td><td><span class="chk on"></span></td><td><a href="#" class="lnk">EMS_Attribute</a></td><td><span class="tag mut">energy</span></td><td class="mn">energy</td><td class="num">1</td><td class="num">24</td><td class="mn">02 Aug</td><td><div class="rowact"><button class="btn sm">edit</button><button class="btn sm">⋯</button></div></td></tr>
+            <tr><td class="st"><i></i></td><td><span class="chk"></span></td><td><a href="#" class="lnk">Chiller Section</a></td><td><span class="tag mut">chiller</span></td><td class="mn">energy</td><td class="num">1</td><td class="num">6</td><td class="mn">02 Aug</td><td><div class="rowact"><button class="btn sm">edit</button><button class="btn sm">⋯</button></div></td></tr>
+            <tr><td class="st"><i></i></td><td><span class="chk"></span></td><td><a href="#" class="lnk">Grid Section</a></td><td><span class="tag mut">grid</span></td><td class="mn">energy</td><td class="num">1</td><td class="num">9</td><td class="mn">01 Aug</td><td><div class="rowact"><button class="btn sm">edit</button><button class="btn sm">⋯</button></div></td></tr>
+            <tr><td class="st"><i></i></td><td><span class="chk"></span></td><td><a href="#" class="lnk">Genset Section</a></td><td><span class="tag mut">genset</span></td><td class="mn">energy</td><td class="num">1</td><td class="num">9</td><td class="mn">01 Aug</td><td><div class="rowact"><button class="btn sm">edit</button><button class="btn sm">⋯</button></div></td></tr>
+            <tr><td class="st"><i class="n"></i></td><td><span class="chk"></span></td><td><a href="#" class="lnk">RF Dryer</a></td><td><span class="tag mut">process</span></td><td class="mn">rf-dryer</td><td class="num">0</td><td class="num">7</td><td class="mn">28 Jul</td><td><div class="rowact"><button class="btn sm">edit</button><button class="btn sm">⋯</button></div></td></tr>
+            <tr><td class="st"><i class="n"></i></td><td><span class="chk"></span></td><td><a href="#" class="lnk">Flow Sensor</a></td><td><span class="tag mut">sensor</span></td><td class="mn">—</td><td class="num">0</td><td class="num">4</td><td class="mn">24 Jul</td><td><div class="rowact"><button class="btn sm">edit</button><button class="btn sm">⋯</button></div></td></tr>
+            <tr><td class="st"><i class="n"></i></td><td><span class="chk"></span></td><td><a href="#" class="lnk">Rotating Equipment</a></td><td><span class="tag mut">motor</span></td><td class="mn">—</td><td class="num">0</td><td class="num">11</td><td class="mn">19 Jul</td><td><div class="rowact"><button class="btn sm">edit</button><button class="btn sm">⋯</button></div></td></tr>
+            <tr><td class="st"><i class="n"></i></td><td><span class="chk"></span></td><td><a href="#" class="lnk">Boiler</a></td><td><span class="tag mut">thermal</span></td><td class="mn">—</td><td class="num">0</td><td class="num">8</td><td class="mn">18 Jul</td><td><div class="rowact"><button class="btn sm">edit</button><button class="btn sm">⋯</button></div></td></tr>
+            <tr><td class="st"><i class="n"></i></td><td><span class="chk"></span></td><td><a href="#" class="lnk">Air Compressor</a></td><td><span class="tag mut">pneumatic</span></td><td class="mn">—</td><td class="num">0</td><td class="num">6</td><td class="mn">16 Jul</td><td><div class="rowact"><button class="btn sm">edit</button><button class="btn sm">⋯</button></div></td></tr>
+            <tr><td class="st"><i class="n"></i></td><td><span class="chk"></span></td><td><a href="#" class="lnk">Cooling Tower</a></td><td><span class="tag mut">hvac</span></td><td class="mn">—</td><td class="num">0</td><td class="num">5</td><td class="mn">14 Jul</td><td><div class="rowact"><button class="btn sm">edit</button><button class="btn sm">⋯</button></div></td></tr>
+            <tr><td class="st"><i class="n"></i></td><td><span class="chk"></span></td><td><a href="#" class="lnk">Pump Skid</a></td><td><span class="tag mut">hydraulic</span></td><td class="mn">—</td><td class="num">0</td><td class="num">7</td><td class="mn">12 Jul</td><td><div class="rowact"><button class="btn sm">edit</button><button class="btn sm">⋯</button></div></td></tr>
+            <tr><td class="st"><i class="n"></i></td><td><span class="chk"></span></td><td><a href="#" class="lnk">Solar Inverter</a></td><td><span class="tag mut">renewable</span></td><td class="mn">—</td><td class="num">0</td><td class="num">9</td><td class="mn">10 Jul</td><td><div class="rowact"><button class="btn sm">edit</button><button class="btn sm">⋯</button></div></td></tr>
+            <tr><td class="st"><i class="n"></i></td><td><span class="chk"></span></td><td><a href="#" class="lnk">Battery Bank</a></td><td><span class="tag mut">storage</span></td><td class="mn">—</td><td class="num">0</td><td class="num">6</td><td class="mn">08 Jul</td><td><div class="rowact"><button class="btn sm">edit</button><button class="btn sm">⋯</button></div></td></tr>
+          </tbody>
+        </table></div>
+        <div class="tfoot"><span>14 templates · 2 selected</span><span style="color:var(--ink-3)">density: compact (22px)</span>
+          <div class="pg"><button>‹</button><button class="on">1</button><button>2</button><button>›</button></div></div>
+      </div>
+    </div>
+    <div class="btabs"><a href="#"><i>▤</i>Ovw</a><a href="#"><i>◭</i>Alarm</a><a href="#"><i>◔</i>Live</a><a href="#" class="on"><i>◫</i>Asset</a><a href="#"><i>≡</i>More</a></div>
+  </div>
+</div>
+</section>
+
+<!-- =================== FORM =================== -->
+<section class="screen" id="form">
+<div class="sysbar">
+  <div class="cell"><span class="led ok"></span><span class="k">API</span><span class="v">UP</span></div>
+  <div class="cell"><span class="led ok"></span><span class="k">DB</span><span class="v">PG16</span></div>
+  <div class="cell"><span class="k">INGEST</span><span class="v">118/min</span></div>
+  <div class="cell"><span class="led ok"></span><span class="k">ALARMS</span><span class="v">0</span></div>
+</div>
+<div class="app">
+  <aside class="rail">
+    <div class="brand"><div class="logo">WS</div><b>SIGNAL</b></div>
+    <nav class="nav">
+      <a href="#"><i>▤</i>Overview</a>
+      <div class="grp">Live</div><a href="#"><i>◔</i>Live Feed</a><a href="#"><i>◭</i>Alarms</a>
+      <div class="grp">Configure</div><a href="#"><i>◫</i>Assets</a><a href="#"><i>▤</i>Templates</a>
+      <div class="grp">Integration</div>
+      <a href="#"><i>≋</i>Brokers</a>
+      <a href="#" class="on"><i>⚿</i>Endpoints<span class="n">1</span></a>
+      <a href="#"><i>➤</i>Destinations</a>
+      <div class="grp">Admin</div><a href="#"><i>◉</i>Users</a>
+    </nav>
+    <div class="railfoot">v1.0 · pg16 · 1 instance</div>
+  </aside>
+  <div class="main">
+    <div class="mtop"><span>←</span><b>NEW ENDPOINT</b></div>
+    <div class="topbar"><div class="crumb">EMS / Integration / Endpoints / <b>New</b></div>
+      <div class="tsearch">⌕ asset · tag · alarm</div><div class="ico">◔</div><div class="avatar">DP</div></div>
+    <div class="content">
+      <div class="ann"><b>Modernization note —</b> Signal keeps forms compact and keyboard-first: 28px fields, monospace inputs for anything machine-read (IDs, IPs, tags), and validation stated in machine terms so an engineer can act on it directly.</div>
+      <div class="phead"><div><h2>Create Ingest Endpoint</h2><p>project → scope → create · key generated server-side, shown once</p></div></div>
+      <div class="form">
+        <div class="fs"><h4>Binding</h4><div class="in">
+          <div class="row"><label>project <b>*</b></label><div>
+            <select class="inp"><option>EMS · e7b1b67c-6aa0-4643-8504-155a3fa0e323</option><option>+ create new project</option></select>
+            <div class="hint">root asset · shared by everyone assigned to it</div></div></div>
+          <div class="row"><label>client_name</label><div>
+            <input class="inp" placeholder="EMS Ingest">
+            <div class="hint">optional · defaults to "&lt;project&gt; Ingest"</div></div></div>
+          <div class="row"><label>device_id filter</label><div>
+            <input class="inp" value="energy" style="max-width:220px">
+            <div class="hint">exact, case-sensitive match against assets.identifier</div></div></div>
+        </div></div>
+        <div class="fs"><h4>Scope</h4><div class="in">
+          <div class="row"><label>granted</label><div>
+            <div style="border:1px solid var(--ok-line);background:var(--ok-soft);padding:8px 10px;display:flex;gap:8px;align-items:flex-start">
+              <span style="color:var(--ok);font-family:var(--mono)">[✓]</span>
+              <div><b style="color:#fff;font-family:var(--mono);font-size:11px">ingest:write</b>
+              <div style="font-family:var(--mono);font-size:10px;color:var(--ink-3);margin-top:2px">POST /api/ingest/* only · read scopes require admin grant</div></div></div>
+          </div></div>
+          <div class="row"><label>rate_limit_rpm</label><div>
+            <input class="inp" value="1200" style="max-width:130px">
+            <div class="hint">current gateway peak: 118/min (10% of limit)</div></div></div>
+          <div class="row"><label>expires_at</label><div>
+            <input class="inp" type="date" style="max-width:170px">
+            <div class="hint">blank = no expiry</div></div></div>
+          <div class="row"><label>allowed_ips</label><div>
+            <textarea class="inp err" rows="3">192.168.1.10
+10.0.0.0/24
+203.0.113.5</textarea>
+            <div class="errmsg">ERR line 2: CIDR unsupported — prefix match only. use 10.0.0.</div></div></div>
+          <div class="row"><label>status</label><div style="display:flex;align-items:center;gap:8px;padding-top:5px">
+            <span class="tog on"></span><span class="mn" style="color:var(--ok)">active on create</span></div></div>
+        </div>
+        <div class="fbar"><button class="btn">cancel</button><button class="btn pri">create endpoint</button></div></div>
+      </div>
+    </div>
+    <div class="btabs"><a href="#"><i>▤</i>Ovw</a><a href="#"><i>◭</i>Alarm</a><a href="#"><i>◔</i>Live</a><a href="#"><i>◫</i>Asset</a><a href="#" class="on"><i>≡</i>More</a></div>
+  </div>
+</div>
+</section>
+
+<!-- =================== ANALYTICS =================== -->
+<section class="screen" id="anal">
+<div class="sysbar">
+  <div class="cell"><span class="led ok"></span><span class="k">API</span><span class="v">UP</span></div>
+  <div class="cell"><span class="led ok"></span><span class="k">DB</span><span class="v">PG16</span></div>
+  <div class="cell"><span class="k">RANGE</span><span class="v">24h · 288 pts</span></div>
+  <div class="cell"><span class="k">AGG</span><span class="v">avg 5m</span></div>
+  <div class="cell"><span class="led warn"></span><span class="k">EXCURSION</span><span class="v" style="color:var(--warn)">1</span></div>
+</div>
+<div class="app">
+  <aside class="rail">
+    <div class="brand"><div class="logo">WS</div><b>SIGNAL</b></div>
+    <nav class="nav">
+      <a href="#"><i>▤</i>Overview</a>
+      <div class="grp">Live</div>
+      <a href="#" class="on"><i>◔</i>Analytics</a><a href="#"><i>◈</i>Live Twin</a><a href="#"><i>◭</i>Alarms</a>
+      <div class="grp">Series</div>
+      <a href="#"><i style="color:#06B6D4">■</i>chiller.energy</a>
+      <a href="#"><i style="color:#A855F7">■</i>grid.import</a>
+      <a href="#"><i style="color:#10B981">■</i>genset.output</a>
+      <div class="grp">Configure</div><a href="#"><i>◫</i>Assets</a>
+    </nav>
+    <div class="railfoot">v1.0 · pg16 · 1 instance</div>
+  </aside>
+  <div class="main">
+    <div class="mtop"><span>☰</span><b>ANALYTICS</b><span style="margin-left:auto"><span class="led warn"></span></span></div>
+    <div class="topbar"><div class="crumb">EMS / <b>Analytics</b></div>
+      <div class="tsearch">⌕ asset · tag · alarm</div><div class="ico">◔</div><div class="avatar">DP</div></div>
+    <div class="content">
+      <div class="phead"><div><h2>Energy Analytics</h2><p>EMS · 2026-08-02 00:00 → 23:59 · avg 5m · 288 points · 0 gaps</p></div>
+      <div class="pacts"><div class="seg"><button>1h</button><button class="on">24h</button><button>7d</button><button>30d</button><button>custom</button></div>
+      <button class="btn">⭳ csv</button></div></div>
+
+      <div class="kpis" style="grid-template-columns:repeat(5,1fr)">
+        <div class="kt"><span class="stripe"></span><div class="lbl">Consumption</div><div class="val">968.87<small>kWh</small></div><div class="band"><i style="width:64%"></i></div><div class="sub"><span class="d-up">▲8.1%</span> vs last mo</div></div>
+        <div class="kt"><span class="stripe warn"></span><div class="lbl">Peak demand</div><div class="val">58.4<small>kW</small></div><div class="band"><i style="width:78%;background:var(--warn)"></i><span class="lim" style="left:78%"></span></div><div class="sub">78% of 75 limit</div></div>
+        <div class="kt"><span class="stripe"></span><div class="lbl">Load factor</div><div class="val">0.71</div><div class="band"><i style="width:71%"></i></div><div class="sub"><span class="d-up">▲0.04</span> good</div></div>
+        <div class="kt"><span class="stripe"></span><div class="lbl">Cost est</div><div class="val">7.8<small>k INR</small></div><div class="band"><i style="width:55%"></i></div><div class="sub"><span class="d-dn">▼2.3%</span></div></div>
+        <div class="kt"><span class="stripe crit"></span><div class="lbl">UCL breaches</div><div class="val" style="color:var(--crit)">1</div><div class="band"><i style="width:4%;background:var(--crit)"></i></div><div class="sub">18:00 · 58.4 kW</div></div>
+      </div>
+
+      <div class="p" style="margin-bottom:8px">
+        <div class="ph"><h3>Consumption vs control limits</h3><div class="r"><span class="tag mut">avg 5m</span><span class="tag crit">1 breach</span><button class="btn sm">⚙</button><button class="btn sm">⤢</button></div></div>
+        <div class="pb">
+          <svg class="chart" style="height:236px" viewBox="0 0 900 236" preserveAspectRatio="none">
+            <g stroke="#1A222C" stroke-width="1">
+              <line x1="44" y1="22" x2="892" y2="22"/><line x1="44" y1="64" x2="892" y2="64"/>
+              <line x1="44" y1="106" x2="892" y2="106"/><line x1="44" y1="148" x2="892" y2="148"/><line x1="44" y1="190" x2="892" y2="190"/>
+            </g>
+            <rect x="44" y="22" width="848" height="20" fill="#EF4444" opacity=".08"/>
+            <line x1="44" y1="42" x2="892" y2="42" stroke="#EF4444" stroke-width="1" stroke-dasharray="5 3"/>
+            <text x="888" y="38" text-anchor="end" style="font-size:9px;fill:#EF4444;font-family:var(--mono)">UCL 55.0</text>
+            <line x1="44" y1="106" x2="892" y2="106" stroke="#71828F" stroke-width="1" stroke-dasharray="3 3"/>
+            <text x="888" y="102" text-anchor="end" style="font-size:9px;fill:#A9B8C7;font-family:var(--mono)">CL 33.0</text>
+            <line x1="44" y1="170" x2="892" y2="170" stroke="#EF4444" stroke-width="1" stroke-dasharray="5 3"/>
+            <text x="888" y="166" text-anchor="end" style="font-size:9px;fill:#EF4444;font-family:var(--mono)">LCL 12.0</text>
+            <text class="axis" x="39" y="25" text-anchor="end">60</text><text class="axis" x="39" y="67" text-anchor="end">45</text>
+            <text class="axis" x="39" y="109" text-anchor="end">30</text><text class="axis" x="39" y="151" text-anchor="end">15</text><text class="axis" x="39" y="193" text-anchor="end">0</text>
+            <path d="M50,138 L120,120 L190,128 L260,94 L330,102 L400,66 L470,80 L540,52 L610,66 L680,38 L750,56 L820,46 L888,62" fill="none" stroke="#06B6D4" stroke-width="2"/>
+            <path d="M50,138 L120,120 L190,128 L260,94 L330,102 L400,66 L470,80 L540,52 L610,66 L680,38 L750,56 L820,46 L888,62 L888,190 L50,190 Z" fill="#06B6D4" opacity=".08"/>
+            <circle cx="680" cy="38" r="4.5" fill="#EF4444" stroke="#05070A" stroke-width="2"/>
+            <text x="680" y="28" text-anchor="middle" style="font-size:9px;fill:#EF4444;font-family:var(--mono)">58.4</text>
+            <path d="M50,164 L120,156 L190,160 L260,144 L330,148 L400,132 L470,138 L540,126 L610,132 L680,120 L750,128 L820,122 L888,130" fill="none" stroke="#A855F7" stroke-width="2"/>
+            <path d="M50,180 L120,176 L190,178 L260,170 L330,172 L400,164 L470,168 L540,160 L610,164 L680,156 L750,162 L820,158 L888,164" fill="none" stroke="#10B981" stroke-width="2"/>
+            <text class="axis" x="50" y="212">00:00</text><text class="axis" x="260" y="212">06:00</text>
+            <text class="axis" x="470" y="212">12:00</text><text class="axis" x="680" y="212">18:00</text><text class="axis" x="862" y="212">23:59</text>
+          </svg>
+          <div class="legend"><span><i style="background:#06B6D4"></i>chiller.energy_kWh</span><span><i style="background:#A855F7"></i>grid.import_kW</span><span><i style="background:#10B981"></i>genset.output_kW</span><span style="margin-left:auto;color:var(--crit)">◉ breach 18:00:00 → 58.4 kW (UCL 55.0)</span></div>
+        </div>
+      </div>
+
+      <div class="grid g3">
+        <div class="p"><div class="ph"><h3>Section totals</h3></div><div class="tbl-wrap"><table>
+          <thead><tr><th></th><th>Section</th><th class="num">kWh</th><th class="num">%</th></tr></thead>
+          <tbody>
+            <tr><td class="st"><i></i></td><td class="mn">chiller</td><td class="num">512.40</td><td class="num">52.9</td></tr>
+            <tr><td class="st"><i></i></td><td class="mn">grid</td><td class="num">301.18</td><td class="num">31.1</td></tr>
+            <tr><td class="st"><i></i></td><td class="mn">genset</td><td class="num">155.29</td><td class="num">16.0</td></tr>
+            <tr style="background:#0A0E14"><td class="st"></td><td class="mn" style="color:#fff">TOTAL</td><td class="num">968.87</td><td class="num">100.0</td></tr>
+          </tbody></table></div></div>
+        <div class="p"><div class="ph"><h3>Hourly profile</h3></div><div class="pb">
+          <svg class="chart" style="height:140px" viewBox="0 0 320 140" preserveAspectRatio="none">
+            <g fill="#06B6D4">
+              <rect x="6" y="92" width="12" height="40"/><rect x="24" y="100" width="12" height="32"/>
+              <rect x="42" y="106" width="12" height="26"/><rect x="60" y="96" width="12" height="36"/>
+              <rect x="78" y="78" width="12" height="54"/><rect x="96" y="56" width="12" height="76"/>
+              <rect x="114" y="38" width="12" height="94"/><rect x="132" y="26" width="12" height="106"/>
+              <rect x="150" y="20" width="12" height="112"/><rect x="168" y="24" width="12" height="108"/>
+              <rect x="186" y="32" width="12" height="100"/><rect x="204" y="44" width="12" height="88"/>
+              <rect x="222" y="12" width="12" height="120" fill="#EF4444"/>
+              <rect x="240" y="50" width="12" height="82"/><rect x="258" y="66" width="12" height="66"/>
+              <rect x="276" y="82" width="12" height="50"/><rect x="294" y="94" width="12" height="38"/></g>
+            <text class="axis" x="6" y="139">06</text><text class="axis" x="150" y="139">12</text><text class="axis" x="222" y="139">18</text><text class="axis" x="294" y="139">22</text>
+          </svg>
+          <div class="legend"><span><i style="background:#EF4444"></i>peak hour 18:00</span></div>
+        </div></div>
+        <div class="p"><div class="ph"><h3>Ingest quality</h3></div><div class="pb">
+          <dl class="kv" style="grid-template-columns:1fr auto;font-size:11px">
+            <dt>points received</dt><dd class="num" style="font-size:11px">288</dd>
+            <dt>points expected</dt><dd class="num" style="font-size:11px">288</dd>
+            <dt>coverage</dt><dd><span class="tag ok">100%</span></dd>
+            <dt>gaps</dt><dd><span class="tag ok">0</span></dd>
+            <dt>interpolated</dt><dd class="num" style="font-size:11px">0</dd>
+            <dt>tags dropped</dt><dd><span class="tag warn">2</span></dd>
+          </dl>
+          <div class="note" style="margin-top:9px;font-size:10.5px"><span>⚠</span><span><b>2 undeclared tags discarded:</b> <span class="mn" style="font-size:10px">wtd_cum_kwh</span>, <span class="mn" style="font-size:10px">mtd_cum_kwh</span>. Ingest returned 200 OK — the drop is invisible to the gateway. <a href="#" class="lnk">declare →</a></span></div>
+        </div></div>
+      </div>
+    </div>
+    <div class="btabs"><a href="#"><i>▤</i>Ovw</a><a href="#"><i>◭</i>Alarm</a><a href="#" class="on"><i>◔</i>Live</a><a href="#"><i>◫</i>Asset</a><a href="#"><i>≡</i>More</a></div>
+  </div>
+</div>
+</section>
+
+<!-- =================== SETTINGS =================== -->
+<section class="screen" id="set">
+<div class="sysbar">
+  <div class="cell"><span class="led ok"></span><span class="k">API</span><span class="v">UP</span></div>
+  <div class="cell"><span class="led ok"></span><span class="k">DB</span><span class="v">PG16</span></div>
+  <div class="cell"><span class="k">SESSIONS</span><span class="v">1</span></div>
+  <div class="cell"><span class="led warn"></span><span class="k">MFA</span><span class="v" style="color:var(--warn)">OFF</span></div>
+</div>
+<div class="app">
+  <aside class="rail">
+    <div class="brand"><div class="logo">WS</div><b>SIGNAL</b></div>
+    <nav class="nav">
+      <a href="#"><i>▤</i>Overview</a>
+      <div class="grp">Live</div><a href="#"><i>◔</i>Live Feed</a><a href="#"><i>◭</i>Alarms</a>
+      <div class="grp">Configure</div><a href="#"><i>◫</i>Assets</a><a href="#"><i>▤</i>Templates</a>
+      <div class="grp">Integration</div><a href="#"><i>≋</i>Brokers</a><a href="#"><i>⚿</i>Endpoints</a>
+      <div class="grp">Admin</div>
+      <a href="#" class="on"><i>◉</i>Users<span class="n">1</span></a>
+      <a href="#"><i>◇</i>Security</a><a href="#"><i>▦</i>System</a>
+    </nav>
+    <div class="railfoot">v1.0 · pg16 · 1 instance</div>
+  </aside>
+  <div class="main">
+    <div class="mtop"><span>☰</span><b>ACCESS</b><span style="margin-left:auto"><span class="led warn"></span></span></div>
+    <div class="topbar"><div class="crumb">Admin / Users / <b>Access Control</b></div>
+      <div class="tsearch">⌕ asset · tag · alarm</div><div class="ico">◔</div><div class="avatar">DP</div></div>
+    <div class="content">
+      <div class="phead"><div><h2>Access Control</h2><p>enforced server-side · middleware/authorize.ts · deny-by-default</p></div>
+      <div class="pacts"><button class="btn">reset</button><button class="btn pri">save</button></div></div>
+      <div class="slay">
+        <nav class="snav">
+          <a href="#">profile</a><a href="#" class="on">access_control</a><a href="#">sessions</a>
+          <a href="#">password_policy</a><a href="#">api_scopes</a><a href="#">audit</a>
+        </nav>
+        <div>
+          <div class="p" style="margin-bottom:8px">
+            <div class="ph"><h3>debasish.panda</h3><div class="r"><span class="tag info">super_admin</span><span class="tag ok">active</span><span class="tag warn">mfa off</span></div></div>
+            <div class="pb"><dl class="kv">
+              <dt>user_id</dt><dd class="mn">a1f2c3d4-...-9e8f</dd>
+              <dt>email</dt><dd class="mn">debasish.panda@websynergies.com</dd>
+              <dt>last_login</dt><dd class="mn">2026-08-02 17:31:04 · 192.168.1.24</dd>
+              <dt>session_expires</dt><dd class="mn">idle 30m · absolute 12h</dd>
+              <dt>failed_attempts</dt><dd class="mn">0 / 5</dd>
+            </dl></div>
+          </div>
+          <div class="p" style="margin-bottom:8px">
+            <div class="ph"><h3>module_permissions</h3><div class="r"><span class="mn" style="font-size:10px">R · W · D</span></div></div>
+            <div class="tbl-wrap"><table>
+              <thead><tr><th></th><th>module</th><th style="width:38px;text-align:center">r</th><th style="width:38px;text-align:center">w</th><th style="width:38px;text-align:center">d</th><th>source</th></tr></thead>
+              <tbody>
+                <tr><td class="st"><i></i></td><td class="mn">assets</td><td style="text-align:center"><span class="chk on"></span></td><td style="text-align:center"><span class="chk on"></span></td><td style="text-align:center"><span class="chk on"></span></td><td><span class="tag mut">role</span></td></tr>
+                <tr><td class="st"><i></i></td><td class="mn">alarms</td><td style="text-align:center"><span class="chk on"></span></td><td style="text-align:center"><span class="chk on"></span></td><td style="text-align:center"><span class="chk on"></span></td><td><span class="tag mut">role</span></td></tr>
+                <tr><td class="st"><i class="warn"></i></td><td class="mn">brokers</td><td style="text-align:center"><span class="chk on"></span></td><td style="text-align:center"><span class="chk on"></span></td><td style="text-align:center"><span class="chk"></span></td><td><span class="tag warn">override</span></td></tr>
+                <tr><td class="st"><i></i></td><td class="mn">api_clients</td><td style="text-align:center"><span class="chk on"></span></td><td style="text-align:center"><span class="chk on"></span></td><td style="text-align:center"><span class="chk on"></span></td><td><span class="tag mut">role</span></td></tr>
+                <tr><td class="st"><i></i></td><td class="mn">visualization</td><td style="text-align:center"><span class="chk on"></span></td><td style="text-align:center"><span class="chk on"></span></td><td style="text-align:center"><span class="chk on"></span></td><td><span class="tag mut">role</span></td></tr>
+                <tr><td class="st"><i></i></td><td class="mn">users</td><td style="text-align:center"><span class="chk on"></span></td><td style="text-align:center"><span class="chk on"></span></td><td style="text-align:center"><span class="chk on"></span></td><td><span class="tag mut">role</span></td></tr>
+                <tr><td class="st"><i></i></td><td class="mn">security</td><td style="text-align:center"><span class="chk on"></span></td><td style="text-align:center"><span class="chk on"></span></td><td style="text-align:center"><span class="chk on"></span></td><td><span class="tag mut">role</span></td></tr>
+              </tbody>
+            </table></div>
+          </div>
+          <div class="p">
+            <div class="ph"><h3>grantable_api_scopes</h3></div>
+            <div class="tbl-wrap"><table>
+              <thead><tr><th></th><th>scope</th><th>kind</th><th style="width:52px;text-align:center">grant</th></tr></thead>
+              <tbody>
+                <tr><td class="st"><i></i></td><td class="mn">ingest:write</td><td><span class="tag info">write</span></td><td style="text-align:center"><span class="chk on"></span></td></tr>
+                <tr><td class="st"><i></i></td><td class="mn">read:assets</td><td><span class="tag mut">read</span></td><td style="text-align:center"><span class="chk on"></span></td></tr>
+                <tr><td class="st"><i></i></td><td class="mn">read:telemetry</td><td><span class="tag mut">read</span></td><td style="text-align:center"><span class="chk on"></span></td></tr>
+                <tr><td class="st"><i></i></td><td class="mn">read:alarms</td><td><span class="tag mut">read</span></td><td style="text-align:center"><span class="chk on"></span></td></tr>
+                <tr><td class="st"><i></i></td><td class="mn">read:alarm-history</td><td><span class="tag mut">read</span></td><td style="text-align:center"><span class="chk on"></span></td></tr>
+              </tbody>
+            </table></div>
+            <div class="pb"><div class="note" style="font-size:10.5px"><span>ⓘ</span><span>Checked on <span class="mn" style="font-size:10px">POST /api-clients</span> — a hand-rolled request from an engineer account requesting a read scope returns <span class="mn" style="font-size:10px">403 scope_forbidden</span>.</span></div></div>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="btabs"><a href="#"><i>▤</i>Ovw</a><a href="#"><i>◭</i>Alarm</a><a href="#"><i>◔</i>Live</a><a href="#"><i>◫</i>Asset</a><a href="#" class="on"><i>≡</i>More</a></div>
+  </div>
+</div>
+</section>
+
+</div>
+</div>
+
+<script>
+function show(id, btn){
+  document.querySelectorAll('.screen').forEach(function(s){ s.classList.remove('on'); });
+  document.getElementById(id).classList.add('on');
+  document.querySelectorAll('.tabs button').forEach(function(b){ b.classList.remove('on'); });
+  btn.classList.add('on');
+  window.scrollTo({top:0, behavior:'smooth'});
+}
+function vp(mode){
+  var f = document.getElementById('frame');
+  if(mode === 'mob'){ f.classList.add('mobile'); } else { f.classList.remove('mobile'); }
+  document.getElementById('b-desk').classList.toggle('on', mode === 'desk');
+  document.getElementById('b-mob').classList.toggle('on', mode === 'mob');
+}
+</script>
+</body>
+</html>

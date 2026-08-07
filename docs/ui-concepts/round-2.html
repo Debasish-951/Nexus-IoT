@@ -1,0 +1,216 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>UI Concepts — Round 2 · WS Integrated Suite</title>
+<style>
+:root{
+  --bg:#ffffff;--canvas:#f8f8f7;--ink:#111112;--ink2:#55555a;--ink3:#8b8b91;
+  --line:#e5e5e4;--line2:#f0f0ef;--acc:#4338ca;--acc-soft:#eeeefc;
+  --ok:#15803d;--warn:#a35b06;--bad:#b3261e;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root{--bg:#0e0e0f;--canvas:#141416;--ink:#f2f2f1;--ink2:#a5a5a8;--ink3:#75757a;
+    --line:#27272a;--line2:#1d1d20;--acc:#8b83f5;--acc-soft:#1c1a30;
+    --ok:#4ade80;--warn:#e0a83e;--bad:#f47066;}
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{font-family:var(--sans);background:var(--canvas);color:var(--ink);font-size:14.5px;line-height:1.6;-webkit-font-smoothing:antialiased}
+h1,h2,h3{margin:0;font-weight:600;letter-spacing:-.018em;text-wrap:balance}
+a{color:var(--acc)}
+.wrap{max-width:1000px;margin:0 auto;padding:0 26px}
+.hero{background:var(--bg);border-bottom:1px solid var(--line);padding:44px 0 38px}
+.eyebrow{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--acc);font-weight:700}
+.hero h1{font-size:31px;margin-top:11px}
+.hero p{font-size:15.5px;color:var(--ink2);max-width:70ch;margin:12px 0 0}
+main{padding:34px 0 70px}
+.sec{margin-bottom:38px}
+.sec>h2{font-size:15px;padding-bottom:11px;border-bottom:1px solid var(--line);margin-bottom:18px}
+.card{background:var(--bg);border:1px solid var(--line);border-radius:8px;overflow:hidden;margin-bottom:16px}
+.ch{display:flex;gap:16px;align-items:flex-start;padding:20px 22px;border-bottom:1px solid var(--line2);flex-wrap:wrap}
+.n{width:36px;height:36px;border-radius:8px;background:var(--acc-soft);color:var(--acc);display:grid;place-items:center;font-weight:700;font-size:15px;flex:none}
+.ch h3{font-size:18px}
+.ch .tl{font-size:13px;color:var(--ink3);margin-top:2px}
+.ch .go{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+.btn{display:inline-block;background:var(--acc);color:#fff;text-decoration:none;padding:8px 15px;border-radius:6px;font-size:13.5px;font-weight:500;white-space:nowrap}
+.btn:hover{opacity:.9}
+.btn.alt{background:var(--bg);color:var(--ink);border:1px solid var(--line)}
+.cb{padding:18px 22px}
+.cb p{margin:0 0 14px;color:var(--ink2);max-width:78ch}
+.cb p:last-child{margin-bottom:0}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:0 26px}
+@media (max-width:760px){.grid{grid-template-columns:1fr}}
+.gl h4{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink3);margin:0 0 7px;font-weight:700}
+ul{margin:0 0 16px;padding-left:19px;color:var(--ink2)}
+li{margin-bottom:5px}
+li b{color:var(--ink);font-weight:600}
+.swatches{display:flex;gap:0;border-radius:5px;overflow:hidden;border:1px solid var(--line);width:max-content;margin-bottom:14px}
+.swatches span{width:44px;height:26px;display:block}
+table{width:100%;border-collapse:collapse;font-size:13.5px}
+th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink3);font-weight:700;padding:0 11px 8px;border-bottom:1px solid var(--line)}
+th:first-child,td:first-child{padding-left:0}
+th.c,td.c{text-align:center}
+td{padding:9px 11px;border-bottom:1px solid var(--line2);color:var(--ink2)}
+td b{color:var(--ink)}
+.best{color:var(--ok);font-weight:700}
+.mid{color:var(--warn);font-weight:600}
+.low{color:var(--ink3)}
+.call{background:var(--acc-soft);border-left:3px solid var(--acc);border-radius:0 6px 6px 0;padding:15px 18px;margin:0 0 18px}
+.call b{color:var(--ink)}
+.call p{margin:0;color:var(--ink2)}
+.mono{font-family:var(--mono);font-size:12.5px}
+.old{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:16px 20px}
+.old h3{font-size:14px;margin-bottom:8px}
+.old ol{margin:0;padding-left:20px;color:var(--ink2);font-size:13.5px}
+.old li{margin-bottom:4px}
+</style>
+</head>
+<body>
+
+<div class="hero">
+  <div class="wrap">
+    <div class="eyebrow">Round 2 · three new directions</div>
+    <h1>UI concepts for WS Integrated Suite</h1>
+    <p>Round 1 explored structured enterprise, calm SaaS, control-room and editorial treatments. None landed. These three deliberately leave that territory: one strips decoration back to type and hairlines, one adopts the familiar cloud-console shape, and one changes the <em>layout model</em> rather than the styling. Every screen is real content from this platform — assets, telemetry, alarms, API endpoints, access control.</p>
+  </div>
+</div>
+
+<main class="wrap">
+
+  <div class="call">
+    <p><b>How to review these.</b> Each page has a tab bar for six screens and a Desktop / Mobile toggle. The amber note at the top of every screen says what that concept changes and why. If a direction is close but not right, say which parts work — colour, density, layout model — and the next round narrows rather than starts over.</p>
+  </div>
+
+  <div class="sec">
+    <h2>The three concepts</h2>
+
+    <div class="card">
+      <div class="ch">
+        <span class="n">5</span>
+        <div><h3>Slate — Quiet Precision</h3><div class="tl">Monochrome first · no cards · hairlines and whitespace · one accent</div></div>
+        <div class="go"><a class="btn" href="concept-5-slate.html">Open Slate</a></div>
+      </div>
+      <div class="cb">
+        <div class="swatches"><span style="background:#ffffff"></span><span style="background:#fafafa"></span><span style="background:#e7e7e6"></span><span style="background:#8b8b91"></span><span style="background:#0c0c0d"></span><span style="background:#0f6f68"></span></div>
+        <p>Structure comes entirely from alignment, hairlines and space. No card borders around KPIs, no tinted icon chips, no shadows, no gradients. Deep teal appears in exactly three places: the primary button, the active nav item, and the primary data series. Every identifier and measured value is monospace, so a device ID never reads as prose.</p>
+        <div class="grid">
+          <div class="gl"><h4>Strengths</h4><ul>
+            <li><b>Ages slowly.</b> Nothing here is a 2026 styling trend, so it won't look dated in three years.</li>
+            <li><b>Data is the loudest thing.</b> Removing box borders makes the numbers the first thing the eye lands on.</li>
+            <li><b>Cheapest to build.</b> Fewest visual primitives, so the least CSS and the fewest edge cases.</li>
+            <li><b>Prints and screenshots well</b> — relevant for shift reports and audit packs.</li>
+          </ul></div>
+          <div class="gl"><h4>Trade-offs</h4><ul>
+            <li><b>Reads as austere</b> to users who expect a friendlier product surface.</li>
+            <li><b>Grouping is implied, not drawn</b> — spacing must be exact or sections blur together.</li>
+            <li><b>Little room for brand expression</b> beyond the single accent.</li>
+          </ul></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="ch">
+        <span class="n">6</span>
+        <div><h3>Nimbus — Cloud Console</h3><div class="tl">Soft blue-grey canvas · white rounded cards · drawers not modals · deliberately familiar</div></div>
+        <div class="go"><a class="btn" href="concept-6-nimbus.html">Open Nimbus</a></div>
+      </div>
+      <div class="cb">
+        <div class="swatches"><span style="background:#f2f5fa"></span><span style="background:#ffffff"></span><span style="background:#dde3ed"></span><span style="background:#8792a6"></span><span style="background:#101828"></span><span style="background:#0b63ce"></span></div>
+        <p>The shape your operators already know from Azure IoT Central, AWS IoT and Google Cloud: a site picker at the top of the sidebar, grouped nav with monochrome icons, page-level tabs, white rounded cards on a soft canvas, labelled status pills, and a right-hand drawer for creation so the list behind it stays visible. Chosen for low training cost, not for novelty.</p>
+        <div class="grid">
+          <div class="gl"><h4>Strengths</h4><ul>
+            <li><b>Near-zero learning curve.</b> Anyone who has used a cloud console can operate it on day one.</li>
+            <li><b>Reads as enterprise-credible</b> in a procurement demo — the strongest option if you sell this.</li>
+            <li><b>Drawers keep context.</b> Cancelling a form never loses your filters or scroll position.</li>
+            <li><b>Roomiest for growth</b> — banners, toasts, empty states and wizards all have an obvious home.</li>
+          </ul></div>
+          <div class="gl"><h4>Trade-offs</h4><ul>
+            <li><b>Least distinctive.</b> It will be compared to the platforms it resembles, favourably or not.</li>
+            <li><b>Card padding costs density</b> — around 12 table rows where Workbench fits 22.</li>
+            <li><b>Blue is the expected IoT accent</b>, so it contributes nothing memorable.</li>
+          </ul></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="ch">
+        <span class="n">7</span>
+        <div><h3>Workbench — Master–Detail</h3><div class="tl">Persistent list beside a detail pane · no modals ever · dense · keyboard-first</div></div>
+        <div class="go"><a class="btn" href="concept-7-workbench.html">Open Workbench</a></div>
+      </div>
+      <div class="cb">
+        <div class="swatches"><span style="background:#ffffff"></span><span style="background:#fafaf9"></span><span style="background:#e7e5e4"></span><span style="background:#8c847d"></span><span style="background:#1c1917"></span><span style="background:#4338ca"></span></div>
+        <p>The one that changes the <em>layout model</em> rather than the styling. A list pane sits permanently beside a detail pane, so you work through alarms, assets or endpoints without navigating away and rebuilding your filters. Nothing opens in a modal — creating a record adds a draft to the list and edits it in the detail pane. Warm neutrals, one indigo accent, 26px rows, <span class="mono">j</span>/<span class="mono">k</span> to move and <span class="mono">e</span> to acknowledge.</p>
+        <div class="grid">
+          <div class="gl"><h4>Strengths</h4><ul>
+            <li><b>Best fit for the actual job.</b> Alarm triage is a queue, and this is the layout queues want.</li>
+            <li><b>Highest density.</b> ~22 table rows and a 5-cell fact grid in the same space.</li>
+            <li><b>No lost work.</b> A draft survives navigation; nothing is trapped behind a modal.</li>
+            <li><b>Rewards daily users</b> — keyboard flow gets genuinely fast with practice.</li>
+          </ul></div>
+          <div class="gl"><h4>Trade-offs</h4><ul>
+            <li><b>Biggest build.</b> Three-pane routing and draft state are real engineering, not restyling.</li>
+            <li><b>Weakest on mobile</b> — the split has to collapse to list-then-detail navigation.</li>
+            <li><b>Unfamiliar to occasional users</b>, who may not find the detail pane's tabs.</li>
+            <li><b>Dense by default</b> can feel cramped to managers who only read summaries.</li>
+          </ul></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="sec">
+    <h2>Side by side</h2>
+    <table>
+      <thead><tr><th>Criterion</th><th class="c">5 · Slate</th><th class="c">6 · Nimbus</th><th class="c">7 · Workbench</th></tr></thead>
+      <tbody>
+        <tr><td><b>Table density</b> (rows visible)</td><td class="c mid">16</td><td class="c low">12</td><td class="c best">22</td></tr>
+        <tr><td><b>Learning curve for a new operator</b></td><td class="c mid">Moderate</td><td class="c best">Lowest</td><td class="c low">Steepest</td></tr>
+        <tr><td><b>Speed for a daily power user</b></td><td class="c mid">Good</td><td class="c low">Adequate</td><td class="c best">Highest</td></tr>
+        <tr><td><b>Alarm-triage fit</b></td><td class="c mid">Good</td><td class="c mid">Good</td><td class="c best">Purpose-built</td></tr>
+        <tr><td><b>Demo / procurement credibility</b></td><td class="c mid">Understated</td><td class="c best">Strongest</td><td class="c mid">Technical</td></tr>
+        <tr><td><b>Mobile &amp; tablet</b></td><td class="c best">Adapts cleanly</td><td class="c best">Adapts cleanly</td><td class="c low">Needs rework</td></tr>
+        <tr><td><b>Implementation cost</b></td><td class="c best">Lowest</td><td class="c mid">Moderate</td><td class="c low">Highest</td></tr>
+        <tr><td><b>Resistance to looking dated</b></td><td class="c best">Highest</td><td class="c low">Tracks a trend</td><td class="c mid">Good</td></tr>
+        <tr><td><b>Accessibility headroom</b></td><td class="c best">Excellent</td><td class="c best">Excellent</td><td class="c mid">Good — watch 12px text</td></tr>
+        <tr><td><b>Brand expressiveness</b></td><td class="c low">Minimal</td><td class="c mid">Moderate</td><td class="c mid">Moderate</td></tr>
+      </tbody>
+    </table>
+    <p style="color:var(--ink2);margin-top:16px;max-width:78ch">There is no single winner, and the honest read is that the choice depends on who the primary user is. If it is a control-room operator working the platform all shift, <b>Workbench</b> wins on fit and pays for its build cost. If the platform gets demonstrated to buyers and handed to occasional users across several sites, <b>Nimbus</b> wins. If longevity and low maintenance matter most, <b>Slate</b> wins.</p>
+  </div>
+
+  <div class="sec">
+    <h2>A viable hybrid</h2>
+    <div class="call">
+      <p><b>Slate's surface treatment with Workbench's layout for queue-shaped screens.</b> Take Slate's palette, hairline structure and monochrome restraint as the design system — it is the cheapest to build and the slowest to date. Then apply the master–detail layout only where the work is genuinely a queue: Alarms, Assets and API Endpoints. Dashboards, Analytics and Settings stay single-pane. That gets the density and triage flow where they earn their cost, without three-pane routing across the whole app or a second visual language to maintain.</p>
+    </div>
+  </div>
+
+  <div class="sec">
+    <h2>Round 1, for reference</h2>
+    <div class="old">
+      <h3>Still available if any part of them was closer than it seemed</h3>
+      <ol>
+        <li><a href="concept-1-meridian.html">Meridian</a> — structured enterprise, SAP Fiori / ServiceNow lineage</li>
+        <li><a href="concept-2-atlas.html">Atlas</a> — calm modern SaaS, dark-first, Linear / Atlassian lineage</li>
+        <li><a href="concept-3-signal.html">Signal</a> — operations control room, Grafana / SCADA lineage</li>
+        <li><a href="concept-4-lumen.html">Lumen</a> — executive editorial, FT / consulting-report lineage</li>
+      </ol>
+      <p style="margin:11px 0 0;font-size:13.5px;color:var(--ink3)"><a href="index.html">Round 1 comparison hub →</a></p>
+    </div>
+  </div>
+
+  <div class="sec" style="margin-bottom:0">
+    <h2>Scope, unchanged</h2>
+    <p style="color:var(--ink2);max-width:80ch">These are presentation-layer proposals only. No concept changes an API contract, a database table, a calculation, a validation rule, an RBAC decision or an integration. Every screen is styled from real routes and real fields already in the platform, and each is a self-contained HTML file with inline CSS and no external requests — openable directly in any browser.</p>
+  </div>
+
+</main>
+</body>
+</html>

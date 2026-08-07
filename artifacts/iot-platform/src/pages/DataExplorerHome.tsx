@@ -41,7 +41,7 @@ export default function DataExplorerHome() {
         </button>
         <div className="flex items-center gap-2 mb-1">
           <BarChart2 className="w-6 h-6 text-primary" />
-          <h1 className="text-2xl font-bold">Data Explorer</h1>
+          <h1 className="text-2xl font-bold">Data Insights</h1>
         </div>
         <p className="text-sm text-muted-foreground mb-6">Explore live data and build visualizations</p>
 

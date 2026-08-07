@@ -1,0 +1,348 @@
+/* ============================================================================
+   SKIN: "Slate" — Quiet Precision
+   ============================================================================
+   Everything in this file is scoped under html[data-skin="slate"]. Nothing here
+   applies unless that attribute is present, so the original design language
+   ("Classic" / Electric Blue, defined in index.css) is reachable at any time by
+   flipping one attribute — see lib/appearance.ts.
+
+   The design language, in four rules:
+
+     1. Structure comes from hairlines, alignment and whitespace — not from
+        shadows, tints or nested boxes. Cards keep a 1px border and lose their
+        shadow entirely.
+     2. Colour is spent, not sprinkled. Deep teal appears on the primary action,
+        the active nav item and the focus ring. Nowhere else.
+     3. Numbers are the loudest thing on the page. Table figures get tabular
+        numerals so columns line up; headers recede to small uppercase labels.
+     4. Radius is 4px everywhere. Nothing is pill-shaped except things that are
+        genuinely switches.
+
+   WHY THIS IS A CSS-ONLY LAYER: the app is fully token-driven (shadcn HSL
+   custom properties consumed through Tailwind v4's `@theme inline`), so a skin
+   is a palette swap plus a handful of structural corrections. No component
+   logic, no routing, no data flow, no validation is touched by this file —
+   which is what makes the switch instant and the removal a one-line revert.
+
+   CASCADE NOTE: this file is loaded unlayered (imported from main.tsx after
+   index.css). Unlayered declarations outrank everything inside Tailwind's
+   `@layer utilities`, so these rules win over utility classes without needing
+   `!important`. That is deliberate but it also means every selector here must
+   be narrow — a broad selector in this file cannot be overridden from a
+   component. Keep them specific.
+   ========================================================================== */
+
+
+/* ── Slate · light ──────────────────────────────────────────────────────────
+   Paper-white surfaces on a near-white canvas, neutral greys with a barely
+   perceptible warm cast (the prototype's #e7e7e6 / #f5f5f4 family), and a
+   single deep-teal accent.
+
+   Accent is teal-800 (#0F6F68), not a brighter step: white text on it measures
+   6.0:1, which clears AA for body text on a button. A lighter teal would look
+   fresher and fail. Same reasoning as the Classic skin's blue-700 choice.
+   ------------------------------------------------------------------------- */
+html[data-skin="slate"] {
+  --background: 0 0% 98%;            /* #FAFAFA — canvas */
+  --foreground: 240 4% 5%;           /* #0C0C0D — ink */
+  --border: 60 3% 91%;               /* #E7E7E6 — the hairline that does all the work */
+  --input: 60 4% 86%;                /* #DCDCDA — one step darker so fields read as fields */
+  --ring: 176 76% 25%;               /* #0F6F68 */
+
+  --card: 0 0% 100%;                 /* #FFFFFF — surfaces sit above the canvas by value only */
+  --card-foreground: 240 4% 5%;
+  --card-border: 60 3% 87%;          /* #DFDFDD — the seam between two adjacent
+                                        widgets. It was 92% (#ECECEB), which is
+                                        5 points off a white card on a 98%
+                                        canvas: a row of tiles read as one flat
+                                        plane with no edge to find. Roughly the
+                                        weight of --input (86%), for the same
+                                        reason: a surface has to announce where
+                                        it stops. */
+
+  --popover: 0 0% 100%;
+  --popover-foreground: 240 4% 5%;
+  --popover-border: 60 3% 91%;
+
+  --primary: 176 76% 25%;            /* #0F6F68 — 6.0:1 with white text */
+  --primary-foreground: 0 0% 100%;
+
+  --secondary: 60 5% 96%;            /* #F5F5F4 */
+  --secondary-foreground: 40 3% 16%;
+
+  --muted: 60 5% 96%;                /* #F5F5F4 */
+  --muted-foreground: 240 3% 35%;    /* #57575C — 7.0:1 on the canvas */
+
+  --accent: 60 2% 94%;               /* #F0F0EF — hover wash, not a tint */
+  --accent-foreground: 240 4% 5%;
+
+  --destructive: 3 71% 41%;          /* #B3261E — 6.6:1 with white text */
+  --destructive-foreground: 0 0% 100%;
+
+  /* The sidebar goes LIGHT in this skin.
+     Classic keeps a dark rail against a light canvas to separate navigation
+     from content. Slate separates them with a single hairline instead, which is
+     the whole point of the design language — a dark rail would reintroduce the
+     heaviest block on the page. */
+  --sidebar: 0 0% 100%;              /* #FFFFFF */
+  --sidebar-foreground: 240 3% 35%;  /* #57575C */
+  --sidebar-border: 60 3% 91%;       /* #E7E7E6 */
+  --sidebar-primary: 176 76% 25%;    /* #0F6F68 — active item text + its left bar */
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 60 2% 94%;       /* #F0F0EF — hover/active wash */
+  --sidebar-accent-foreground: 240 4% 5%;
+  --sidebar-ring: 176 76% 25%;
+
+  --radius: 0.25rem;                 /* 4px */
+
+  /* Interaction washes, flattened. The Classic values are tuned for a surface
+     that already carries a shadow; without one they read as too strong. */
+  --elevate-1: rgba(0, 0, 0, .028);
+  --elevate-2: rgba(0, 0, 0, .062);
+  --button-outline: rgba(0, 0, 0, .09);
+  --badge-outline: rgba(0, 0, 0, .05);
+}
+
+
+/* ── Slate · dark ──────────────────────────────────────────────────────────
+   Not an inversion. The surface steps are close together (#0C0C0D → #131315 →
+   #191919) so a page full of panels reads as one plane, and the accent moves UP
+   to teal-400 (#2FB3A6) because the teal-800 used on white is invisible here.
+
+   That brighter teal is light enough that white text on it fails (2.6:1), so
+   --primary-foreground flips to near-black. Same trap the Classic skin
+   documents for its blue; different resolution, because the steps differ.
+   ------------------------------------------------------------------------- */
+html[data-skin="slate"].dark {
+  --background: 240 4% 5%;           /* #0C0C0D */
+  --foreground: 60 3% 95%;           /* #F2F2F1 */
+  --border: 240 5% 16%;              /* #26262A */
+  --input: 240 5% 19%;               /* #2E2E33 */
+  --ring: 174 58% 44%;               /* #2FB3A6 */
+
+  --card: 240 5% 8%;                 /* #131315 */
+  --card-foreground: 60 3% 95%;
+  --card-border: 240 5% 24%;         /* #3B3B41 — at 12% (#1D1D20) the hairline
+                                        was so close to the #131315 card fill
+                                        that adjacent tiles read as one slab
+                                        with no seam between them. Dark mode
+                                        needs the wider gap: the same numeric
+                                        step is far less visible down here than
+                                        it is near white. Still a grey hairline,
+                                        just resolvable. */
+
+  --popover: 0 0% 10%;               /* #191919 — a step above card, so an overlay
+                                        over a panel still reads as in front */
+  --popover-foreground: 60 3% 95%;
+  --popover-border: 240 5% 18%;
+
+  --primary: 174 58% 44%;            /* #2FB3A6 */
+  --primary-foreground: 240 4% 5%;   /* near-black: 8.1:1, where white gives 2.6:1 */
+
+  --secondary: 0 0% 10%;             /* #191919 */
+  --secondary-foreground: 60 3% 88%;
+
+  --muted: 0 0% 10%;                 /* #191919 */
+  --muted-foreground: 240 2% 65%;    /* #A5A5A8 */
+
+  --accent: 240 5% 12%;              /* #1D1D20 */
+  --accent-foreground: 60 3% 92%;
+
+  --destructive: 4 86% 68%;          /* #F47066 */
+  --destructive-foreground: 240 4% 5%;
+
+  --sidebar: 240 4% 5%;              /* #0C0C0D — level with the canvas; the
+                                        hairline is the only separation */
+  --sidebar-foreground: 240 2% 65%;
+  --sidebar-border: 240 5% 16%;
+  --sidebar-primary: 174 58% 44%;
+  --sidebar-primary-foreground: 240 4% 5%;
+  --sidebar-accent: 240 5% 12%;
+  --sidebar-accent-foreground: 60 3% 92%;
+  --sidebar-ring: 174 58% 44%;
+
+  --elevate-1: rgba(255, 255, 255, .035);
+  --elevate-2: rgba(255, 255, 255, .075);
+  --button-outline: rgba(255, 255, 255, .09);
+  --badge-outline: rgba(255, 255, 255, .05);
+}
+
+
+/* ── Chart series are deliberately NOT overridden ──────────────────────────
+   --chart-1..5 keep the Classic order (cyan, violet, lime, pink, blue). That
+   order was validated for colour-blind separation (OKLab ΔE) against both a
+   white and a dark card surface, and the worst adjacent pair only just clears
+   the floor. Substituting teal for cyan by eye would change every pair distance
+   in the set without re-running the validator, so charts keep the palette that
+   is known to pass. The teal accent is interface chrome, not a data colour —
+   which is also why a teal series could never be confused with a teal button.
+   ------------------------------------------------------------------------- */
+
+
+/* ── Flatten: no ambient glow ───────────────────────────────────────────────
+   Classic paints two radial auras behind the shell in dark mode. Slate has no
+   ambient light of any kind — surfaces are separated by value and hairlines. */
+html[data-skin="slate"] .app-shell,
+html[data-skin="slate"].dark .app-shell {
+  background-image: none;
+}
+
+
+/* ── De-card: hairline, no shadow, 4px ──────────────────────────────────────
+   `.bg-card` is the surface class every Card composes, so it is the precise
+   hook for the card treatment without editing card.tsx. Cards keep their border
+   (structure has to come from somewhere) and lose their shadow and their 12px
+   radius. */
+html[data-skin="slate"] .bg-card {
+  border-color: hsl(var(--card-border));
+  border-radius: 0.25rem;
+  box-shadow: none;
+}
+
+/* Bare `shadow` and `shadow-sm` are decorative elevation on in-page surfaces —
+   Card uses the former. Removed. `shadow-md` and above are NOT touched: those
+   are on overlays (dropdowns, dialogs, popovers, toasts) where the shadow is
+   load-bearing, because an overlay with no elevation cue against a same-value
+   panel behind it is genuinely ambiguous. */
+html[data-skin="slate"] .shadow,
+html[data-skin="slate"] .shadow-sm {
+  box-shadow: none;
+}
+
+/* Overlays get a defined, single-direction shadow rather than the token's
+   diffuse one — a crisper edge suits the flatter surfaces. */
+html[data-skin="slate"] .bg-popover {
+  border-radius: 0.25rem;
+  box-shadow: 0 10px 28px -8px rgba(0, 0, 0, .18), 0 2px 6px -2px rgba(0, 0, 0, .10);
+}
+html[data-skin="slate"].dark .bg-popover {
+  box-shadow: 0 10px 28px -8px rgba(0, 0, 0, .70), 0 2px 6px -2px rgba(0, 0, 0, .50);
+}
+
+
+/* ── Tables: recessive headers, aligned figures ─────────────────────────────
+   The single highest-value change in the skin, because operators live in these
+   tables. Headers become small uppercase labels so they stop competing with the
+   data; every cell gets tabular numerals so a column of readings scans
+   vertically as a column rather than as ragged text.
+
+   Scoped to `table` so it cannot reach a div-based grid that happens to use the
+   same classes. */
+html[data-skin="slate"] table th {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
+}
+
+html[data-skin="slate"] table td {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Row separators drop to the lighter hairline — a table of 20 rows with full
+   -strength borders reads as a grid of boxes rather than a list. */
+html[data-skin="slate"] table tbody tr {
+  border-color: hsl(var(--card-border));
+}
+
+
+/* ── Sidebar: text first, icons second ─────────────────────────────────────
+   The prototype had no icons in the rail at all. They stay here, because the
+   collapsed rail shows ONLY icons — removing them would leave a 48px column of
+   blank rows, which is a functional regression, not a restyle. Instead they
+   recede: dimmed for inactive items, full strength for the active one, so the
+   label leads and the icon supports.
+
+   The active item also gains Slate's signature 2px left bar. It is drawn as an
+   absolutely-positioned ::before rather than an inset shadow: an inset shadow
+   is clipped by the row's border-radius, so the bar curved in at both ends and
+   read as a bracket "[" instead of a straight rule. The pseudo-element is not
+   clipped, so the bar stays a clean vertical line, and it still costs no layout
+   and cannot shift the row. */
+html[data-skin="slate"] .bg-sidebar svg {
+  opacity: .68;
+}
+html[data-skin="slate"] .bg-sidebar .text-sidebar-primary svg,
+html[data-skin="slate"] .bg-sidebar a:hover svg,
+html[data-skin="slate"] .bg-sidebar button:hover svg {
+  opacity: 1;
+}
+
+html[data-skin="slate"] .bg-sidebar .bg-sidebar-accent {
+  border-radius: 0.25rem;
+  position: relative;
+}
+html[data-skin="slate"] .bg-sidebar .bg-sidebar-accent::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 2px;
+  background-color: hsl(var(--sidebar-primary));
+}
+
+/* The logo sits in a hardcoded white chip with a shadow — invisible seam on a
+   dark rail, an odd floating tile on a light one. Flattened in this skin. */
+html[data-skin="slate"] .bg-sidebar .bg-white {
+  box-shadow: none;
+}
+html[data-skin="slate"]:not(.dark) .bg-sidebar .bg-white {
+  background-color: transparent;
+}
+
+
+/* ── Focus: one visible ring, same everywhere ──────────────────────────────
+   index.css sets `*:focus-visible { outline: none }` and leaves each primitive
+   to draw its own ring, which means coverage depends on the component. Slate
+   restores a single explicit ring for keyboard users on the interactive
+   elements that matter, so tab-navigation is never invisible. Applies to
+   :focus-visible only, so it never fires on a mouse click. */
+html[data-skin="slate"] a:focus-visible,
+html[data-skin="slate"] button:focus-visible,
+html[data-skin="slate"] input:focus-visible,
+html[data-skin="slate"] select:focus-visible,
+html[data-skin="slate"] textarea:focus-visible,
+html[data-skin="slate"] [role="button"]:focus-visible,
+html[data-skin="slate"] [role="tab"]:focus-visible,
+html[data-skin="slate"] [role="menuitem"]:focus-visible,
+html[data-skin="slate"] [role="switch"]:focus-visible,
+html[data-skin="slate"] [tabindex="0"]:focus-visible {
+  outline: 2px solid hsl(var(--ring));
+  outline-offset: 1px;
+  border-radius: 0.25rem;
+}
+
+
+/* ── Scrollbar ─────────────────────────────────────────────────────────────
+   index.css hardcodes the sidebar scroll thumb (#232B3A) because the primitive
+   injects it and it never receives theme tokens. That colour is a dark-blue
+   slate — correct for Classic, wrong against a white Slate rail. Re-stated per
+   theme here for the same reason it was hardcoded there. */
+html[data-skin="slate"]:not(.dark) .sidebar-scroll .scroll-thumb {
+  background-color: #D6D6D4 !important;
+}
+html[data-skin="slate"]:not(.dark) .sidebar-scroll .scroll-thumb:hover {
+  background-color: #BDBDB9 !important;
+}
+html[data-skin="slate"].dark .sidebar-scroll .scroll-thumb {
+  background-color: #2E2E33 !important;
+}
+html[data-skin="slate"].dark .sidebar-scroll .scroll-thumb:hover {
+  background-color: #414147 !important;
+}
+
+
+/* ── Reduced motion ────────────────────────────────────────────────────────
+   Slate has no motion of its own, but the shell animates the sidebar width and
+   several primitives animate on open. Honour the OS preference. */
+@media (prefers-reduced-motion: reduce) {
+  html[data-skin="slate"] *,
+  html[data-skin="slate"] *::before,
+  html[data-skin="slate"] *::after {
+    animation-duration: .01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: .01ms !important;
+  }
+}

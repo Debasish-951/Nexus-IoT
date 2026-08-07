@@ -63,15 +63,24 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   // tenant-scoping can be added later without re-labelling existing admins.
   super_admin: ADMIN_PERMISSIONS,
   admin: ADMIN_PERMISSIONS,
-  // Manages people and dashboards inside one customer, but not brokers,
-  // API clients, or platform security configuration.
+  // Manages people and dashboards inside one customer, but not brokers or
+  // platform security configuration.
+  //
+  // `manage_api_clients` is granted so they can stand up an ingest endpoint for
+  // their own project without waiting on an administrator. What that endpoint may
+  // DO is bounded separately by ROLE_API_SCOPE_DEFAULTS — write-only — so this is
+  // "can commission a gateway", not "can mint a key that reads everything".
   customer_admin: [
     "view", "manage_assets", "manage_alarms", "acknowledge_alarms", "manage_users",
+    "manage_api_clients",
   ],
   engineer: [
     "view", "manage_assets", "manage_templates", "manage_alarms", "acknowledge_alarms",
-    "manage_brokers", "manage_destinations",
+    "manage_brokers", "manage_destinations", "manage_api_clients",
   ],
+  // Deliberately NOT granted to operator/viewer. These are read-only roles, and a
+  // credential outlives the session that created it — an account that cannot change
+  // anything through the UI should not be able to mint something that can.
   operator: ["view", "acknowledge_alarms"],
   viewer: ["view"],
 };
@@ -124,12 +133,12 @@ export const ROLE_MODULE_DEFAULTS: Record<Role, Record<string, ModuleAccess>> = 
     assets: ALL, visualization: ALL, analytics: ALL,
   },
   customer_admin: {
-    dashboard: true, alarms: true, brokers: false, api_clients: false, reports: true,
+    dashboard: true, alarms: true, brokers: false, api_clients: true, reports: true,
     live: true, explorer: true, users: true, security: false, activity_log: true,
     assets: RW, visualization: ALL, analytics: RO,
   },
   engineer: {
-    dashboard: true, alarms: true, brokers: true, api_clients: false, reports: true,
+    dashboard: true, alarms: true, brokers: true, api_clients: true, reports: true,
     live: true, explorer: true, users: false, security: false, activity_log: true,
     assets: RW, visualization: RW, analytics: RO,
   },
@@ -143,6 +152,44 @@ export const ROLE_MODULE_DEFAULTS: Record<Role, Record<string, ModuleAccess>> = 
     live: true, explorer: false, users: false, security: false, activity_log: false,
     assets: RO, visualization: RO, analytics: NONE,
   },
+};
+
+// ── API-client scopes a user may grant ───────────────────────────────────────
+//
+// Distinct from the user's own module access. These bound what a credential the
+// user creates is allowed to do, so that "can commission a gateway" does not
+// imply "can mint a key that reads the whole platform".
+
+/** Scope ids that may appear on an API client, and how to label them. */
+export const API_SCOPE_OPTIONS = [
+  { id: "ingest:write",       label: "Write Telemetry",    kind: "write" as const },
+  { id: "read:assets",        label: "Read Assets",        kind: "read"  as const },
+  { id: "read:telemetry",     label: "Read Telemetry",     kind: "read"  as const },
+  { id: "read:alarms",        label: "Read Alarms",        kind: "read"  as const },
+  { id: "read:alarm-history", label: "Read Alarm History", kind: "read"  as const },
+];
+
+export const API_SCOPE_IDS = API_SCOPE_OPTIONS.map((s) => s.id);
+/** The super-key. Only ever grantable by a full administrator. */
+export const API_SCOPE_ALL = "*";
+
+/**
+ * Who may grant what, by role.
+ *
+ * Engineers and customer admins commission gateways, so they get write — that is
+ * the whole job. Read scopes expose asset, telemetry and alarm data across the
+ * platform through a credential that outlives any session, so they stay with the
+ * administrators. Operators and viewers mint nothing.
+ *
+ * An administrator can override any of this per user in Access Control.
+ */
+export const ROLE_API_SCOPE_DEFAULTS: Record<Role, string[]> = {
+  super_admin:    [API_SCOPE_ALL, ...API_SCOPE_IDS],
+  admin:          [API_SCOPE_ALL, ...API_SCOPE_IDS],
+  customer_admin: ["ingest:write"],
+  engineer:       ["ingest:write"],
+  operator:       [],
+  viewer:         [],
 };
 
 /** Analytics/report sub-features (unchanged from Users.tsx). */
@@ -178,6 +225,8 @@ export interface EffectiveAccess {
   allowedDashboards: string[];
   restrictAnalytics: boolean;
   allowedAnalytics: string[];
+  /** API-client scopes this user may grant. See ROLE_API_SCOPE_DEFAULTS. */
+  apiScopes: string[];
 }
 
 export function isRole(value: string): value is Role {
@@ -242,7 +291,28 @@ export function resolveAccess(
     allowedDashboards: overrides?.allowedDashboards ?? [],
     restrictAnalytics: !!overrides?.restrictAnalytics,
     allowedAnalytics: overrides?.allowedAnalytics ?? [],
+    apiScopes: overrides?.apiScopes ?? [...(ROLE_API_SCOPE_DEFAULTS[role] ?? [])],
   };
+}
+
+/**
+ * Which of the requested scopes this user is NOT allowed to grant.
+ *
+ * An empty result means the request is permitted. Holding `*` permits everything,
+ * which is why only administrators have it by default.
+ *
+ * Requesting no scopes at all is rejected by the caller rather than here: an empty
+ * scopes array is treated as "all scopes" by apiKeyAuth, so it is a privilege
+ * escalation dressed as an omission.
+ */
+export function ungrantableScopes(access: EffectiveAccess, requested: string[]): string[] {
+  if (access.apiScopes.includes(API_SCOPE_ALL)) return [];
+  return requested.filter((s) => !access.apiScopes.includes(s));
+}
+
+/** Whether this user may create API credentials at all. */
+export function canCreateApiClients(access: EffectiveAccess): boolean {
+  return access.apiScopes.length > 0;
 }
 
 // ── Predicates used by the middleware ────────────────────────────────────────
@@ -289,10 +359,12 @@ export function rbacCatalog() {
       label: ROLE_LABELS[r],
       permissions: ROLE_PERMISSIONS[r],
       moduleDefaults: ROLE_MODULE_DEFAULTS[r],
+      apiScopeDefaults: ROLE_API_SCOPE_DEFAULTS[r],
     })),
     permissions: PERMISSIONS,
     modules: MODULES,
     analyticsOptions: ANALYTICS_OPTIONS,
+    apiScopeOptions: API_SCOPE_OPTIONS,
   };
 }
 
@@ -337,6 +409,12 @@ export function sanitiseAccessOverrides(input: unknown): UserAccessOverrides {
   if (src.allowedAnalytics !== undefined) {
     const valid = new Set(ANALYTICS_OPTIONS.map((o) => o.id));
     out.allowedAnalytics = ids(src.allowedAnalytics).filter((id) => valid.has(id));
+  }
+  if (src.apiScopes !== undefined) {
+    // Only known scope ids survive, so a hand-edited blob cannot invent a scope
+    // that later matches a route guard by accident.
+    const valid = new Set([API_SCOPE_ALL, ...API_SCOPE_IDS]);
+    out.apiScopes = [...new Set(ids(src.apiScopes).filter((id) => valid.has(id)))];
   }
 
   return out;

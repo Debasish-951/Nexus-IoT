@@ -17,7 +17,13 @@ export const attributesTable = pgTable("attributes", {
   quality: text("quality"),
   expression: text("expression"),
   timestamp: timestamp("timestamp", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
+  // Drives display order (see routes/attributes.ts) so attributes applied from a
+  // template keep the template's section layout instead of falling back to A–Z.
+  // Assigned as (current max for the asset) + 1 on every insert path, so new
+  // attributes always append after whatever's already there.
+  sortOrder: integer("sort_order").notNull().default(0),
 });
 
 export const insertAttributeSchema = createInsertSchema(attributesTable).omit({ id: true, updatedAt: true });

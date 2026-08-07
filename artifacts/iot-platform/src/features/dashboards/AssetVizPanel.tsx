@@ -15,16 +15,63 @@ import { cn } from "@/lib/utils";
 import { DashboardCanvas } from "./DashboardCanvas";
 import { WidgetPanel } from "./WidgetPanel";
 import { WidgetConfigPanel } from "./WidgetConfigPanel";
-import { widgetDef } from "./registry";
+import { widgetDef, migrateLegacyWidget } from "./registry";
 import type { Widget } from "./types";
 import { useWsEvents } from "@/hooks/useWsEvents";
 import { newId } from "./useDashboards";
 import { RANGES, REFRESH_INTERVALS, type TimeCfg } from "./timeRange";
+import { STALE_AFTER_MS } from "@/pages/assetShared";
 
 const wkey = (nodeId: string) => `wsviz:widgets:${nodeId}`;
 const dashCfgKey = (nodeId: string) => `wsviz:dash-range:${nodeId}`;
 const dashRefreshKey = (nodeId: string) => `wsviz:dash-refresh:${nodeId}`;
 const CLIPBOARD_KEY = "wsviz:widget-clipboard";
+
+// Every asset actually bound by a widget on the open dashboard — a Card's
+// metrics, a chart's overlays, and a plain single-attribute binding all count.
+// Used to answer "is THIS dashboard live", not "is anything anywhere live".
+function boundAssetIds(widgets: Widget[]): string[] {
+  const ids = new Set<string>();
+  for (const w of widgets) {
+    const c = w.config ?? {};
+    if (c.assetId) ids.add(c.assetId);
+    if (Array.isArray(c.overlays)) for (const o of c.overlays) if (o?.assetId) ids.add(o.assetId);
+    if (Array.isArray(c.metrics)) for (const m of c.metrics) if (m?.assetId) ids.add(m.assetId);
+  }
+  return [...ids];
+}
+
+// Polls each bound asset's health and reduces it to one live/inactive verdict
+// for the dashboard as a whole — reuses the same staleness window that drives
+// the "Offline" badge on the Asset Management pages, so "live" means the same
+// thing everywhere in the app. "none" = nothing bound yet (no widgets, or only
+// non-data ones like Text/Button) — treated as inactive by the caller.
+function useDashboardLiveStatus(assetIds: string[], refreshNonce: number): "live" | "inactive" | "none" {
+  const [status, setStatus] = useState<"live" | "inactive" | "none">("none");
+  const key = assetIds.join(",");
+  useEffect(() => {
+    if (assetIds.length === 0) { setStatus("none"); return; }
+    let cancelled = false;
+    async function check() {
+      const results = await Promise.all(assetIds.map(async (id) => {
+        try {
+          const res = await fetch(`/api/assets/${id}/health`, { credentials: "include" });
+          if (!res.ok) return false;
+          const health = await res.json();
+          if (!health?.lastSeen) return false;
+          const age = Date.now() - new Date(health.lastSeen).getTime();
+          return !isNaN(age) && age <= STALE_AFTER_MS;
+        } catch { return false; }
+      }));
+      if (!cancelled) setStatus(results.some(Boolean) ? "live" : "inactive");
+    }
+    check();
+    const iv = setInterval(check, 15_000);
+    return () => { cancelled = true; clearInterval(iv); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, refreshNonce]);
+  return status;
+}
 
 function readClipboard(): Widget | null {
   try { const raw = localStorage.getItem(CLIPBOARD_KEY); return raw ? JSON.parse(raw) : null; } catch { return null; }
@@ -88,6 +135,13 @@ export function AssetVizPanel({ nodeId, nodeName, reloadKey, futuristic, toolbar
     return m;
   }, [customWidgets, globalRefreshTick, widgetRefreshTick]);
 
+  // Whether THIS dashboard's own bound assets are actually receiving telemetry —
+  // separate from wsStatus below, which only says the browser's socket to our
+  // own server is up. A dashboard with a live socket but no recent data from any
+  // asset it's bound to is Inactive, not Live (see useDashboardLiveStatus).
+  const dashboardAssetIds = useMemo(() => boundAssetIds(customWidgets), [customWidgets]);
+  const liveStatus = useDashboardLiveStatus(dashboardAssetIds, globalRefreshTick);
+
   // Live WebSocket status — drives the badge. Telemetry can arrive many times a
   // second, so nudge the dashboard at most once per 7s.
   const lastWsRef = useRef(0);
@@ -104,7 +158,10 @@ export function AssetVizPanel({ nodeId, nodeName, reloadKey, futuristic, toolbar
     let loaded: Widget[] = [];
     try {
       const raw = localStorage.getItem(wkey(nodeId));
-      loaded = raw ? JSON.parse(raw) : [];
+      // Upgrades any pre-existing Custom KPI / Health Score / OEE / … widget to
+      // the general Card widget on load, so a dashboard saved before that
+      // consolidation still renders instead of quietly breaking.
+      loaded = raw ? (JSON.parse(raw) as Widget[]).map(migrateLegacyWidget) : [];
     } catch { loaded = []; }
     setCustomWidgets(loaded);
     setSavedSnapshot(JSON.stringify(loaded));
@@ -268,9 +325,16 @@ export function AssetVizPanel({ nodeId, nodeName, reloadKey, futuristic, toolbar
     );
   }
 
-  const wsBadge = wsStatus === "connected"
+  // Socket down/connecting takes priority — nothing about data freshness is
+  // knowable without it. Once connected, the badge reports whether THIS
+  // dashboard's bound assets are actually receiving telemetry, not merely
+  // whether the browser has a socket open to our own server (that's always
+  // "up" locally regardless of whether any device is really sending data).
+  const wsBadge = wsStatus !== "connected"
+    ? { cls: "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300", icon: WifiOff, label: wsStatus === "connecting" ? "Connecting" : "Reconnecting" }
+    : liveStatus === "live"
     ? { cls: "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300", icon: Wifi, label: "Live" }
-    : { cls: "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300", icon: WifiOff, label: wsStatus === "connecting" ? "Connecting" : "Reconnecting" };
+    : { cls: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300", icon: WifiOff, label: "Inactive" };
 
   const editWidget = customWidgets.find((w) => w.id === editWidgetId) ?? null;
   const draftWidget = customWidgets.find((w) => w.id === draftWidgetId) ?? null;

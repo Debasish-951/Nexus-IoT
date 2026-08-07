@@ -5,19 +5,42 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useListAssets } from "@workspace/api-client-react";
-import { WIDGET_CATEGORIES, PALETTE, widgetDef } from "./registry";
+import { WIDGET_CATEGORIES, PALETTE, SERIES_COLORS, widgetDef, CARD_ICONS, CARD_ICON_KEYS, GROUPED_TYPES } from "./registry";
 import { useMetricChoices } from "./useWidgetData";
 import { ColorField } from "./ColorField";
 import { AssetPickerDialog } from "./AssetPickerDialog";
 import { AttributeSelect } from "./AttributeSelect";
 
-const BINDABLE = new Set(["kpi", "health", "availability", "oee", "downtime", "runtime", "energy", "gauge", "thermometer", "tank", "battery", "progress", "line", "area", "bar", "stackbar", "table", "alarms", "events"]);
+// Gauge/Thermometer/Tank/Progress/Battery moved from single assetId+tag binding
+// to the grouped `metrics` model (same as Card) — their editor lives in the
+// GROUPED_TYPES block below, not here. Status/Traffic were never bindable —
+// they pick a state, still per-metric now instead of once for the whole widget.
+const BINDABLE = new Set(["line", "area", "bar", "stackbar", "table", "alarms", "events"]);
 const MULTI_SERIES = new Set(["line", "area", "bar", "stackbar"]);
 const SPC_TYPES = new Set(["line", "area", "bar", "stackbar"]);
+const GROUPED_SET = new Set<string>(GROUPED_TYPES);
+// Within GROUPED_TYPES, these two have no numeric value — a per-tile state pick
+// instead of a Data Source/Attribute binding.
+const STATE_TYPES = new Set(["status", "traffic"]);
+// These read a value against a 0..max scale — the rest (status/traffic, and
+// Card's plain text) don't.
+const SCALED_TYPES = new Set(["gauge", "thermometer", "tank", "battery"]);
+// Value-driven color coding (statusColor's critical/warn thresholds) applies to
+// every numeric mark, progress included — it just has no separate "max" since
+// it's always 0-100%.
+const THRESHOLD_TYPES = new Set(["gauge", "thermometer", "tank", "battery", "progress"]);
 
-// 12-swatch primary palette (matches the Analytics & KPI widget dialog).
-const COLOR_SWATCHES = ["#06b6d4", "#22C55E", "#a855f7", "#F59E0B", "#EF4444", "#6366f1", "#ec4899", "#f97316", "#14b8a6", "#84cc16", "#f59e0b", "#d946ef"];
-const SPC_COLORS = [PALETTE.warning, PALETTE.critical, PALETTE.success, PALETTE.primary, "#a855f7", "#f97316", PALETTE.neutral];
+/**
+ * Widget colour swatches. The first five are the validated categorical series
+ * colours (see SERIES_COLORS) so the obvious choice is also the correct one; the
+ * rest are extra options, since a colour the user picks deliberately is theirs to
+ * pick. The old list opened with amber and red, which quietly encouraged painting
+ * ordinary series in alarm colours.
+ */
+const COLOR_SWATCHES = [...SERIES_COLORS, "#0D9488", "#D946EF", "#7C3AED", "#0EA5E9", "#A16207", "#DB2777", PALETTE.neutral];
+
+/** Control-limit lines. Status colours ARE right here — a UCL/LCL breach is a state. */
+const SPC_COLORS = [PALETTE.warning, PALETTE.critical, PALETTE.success, PALETTE.primary, PALETTE.neutral];
 
 interface Overlay { assetId?: string; tag?: string; color?: string; label?: string; unit?: string }
 
@@ -75,7 +98,10 @@ function OverlaySeriesRow({ overlay, index, assets, defaultAssetId, onChange, on
 }) {
   const assetId = overlay.assetId ?? defaultAssetId ?? "";
   const metrics = useMetricChoices(assetId);
-  const color = overlay.color ?? SPC_COLORS[(index + 1) % SPC_COLORS.length];
+  // An added series gets the NEXT categorical colour, not an SPC/status colour —
+  // index+1 because the primary series already holds slot 0. Defaulting these to
+  // the SPC list (as before) meant series two and three arrived amber and red.
+  const color = overlay.color ?? SERIES_COLORS[(index + 1) % SERIES_COLORS.length];
   const selCls = "h-7 text-xs rounded-md border border-border bg-background px-1.5 min-w-0";
   const [pickerOpen, setPickerOpen] = useState(false);
   const assetName = assets.find((a) => a.id === assetId)?.name;
@@ -114,6 +140,150 @@ function OverlaySeriesRow({ overlay, index, assets, defaultAssetId, onChange, on
   );
 }
 
+interface GroupedMetric {
+  assetId?: string; tag?: string; label?: string; unit?: string; color?: string;
+  icon?: string;
+  /** A pasted emoji (or short glyph) wins over `icon` when set — the curated
+   *  preset list is a fast default, not a ceiling. */
+  customIcon?: string;
+  /** Tile fill. Unset = the default neutral tile. When set, label/value/icon
+   *  switch to an auto-computed black-or-white so a bright fill never buries
+   *  its own text (see contrastText in registry.tsx) — unless textColor below
+   *  is also set, which wins over that automatic choice. */
+  bgColor?: string;
+  /** Manual override for the auto-contrast text color on a filled tile. Only
+   *  meaningful (and only shown) once bgColor is set. */
+  textColor?: string;
+  /** Scale ceiling for Gauge/Thermometer/Tank/Battery (progress is always 0-100%). */
+  max?: number;
+  /** statusColor thresholds — Gauge/Thermometer/Tank/Battery/Progress. */
+  critical?: number; warn?: number;
+  /** Status/Traffic's own state, per tile now instead of once for the widget. */
+  state?: string;
+}
+
+/**
+ * One tile in a grouped widget (Card, or an Industrial mark — Gauge,
+ * Thermometer, Tank, Progress, Battery, Status, Traffic). `kind` is the
+ * widget's type and switches which extra fields apply: status/traffic pick a
+ * state instead of binding a Data Source; the four scaled marks get a Max;
+ * every numeric mark (progress included) gets Critical/Warn thresholds.
+ *
+ * Fields stack full-width rather than pairing up beside each other: the asset
+ * and attribute pickers both open searchable popups sized to their trigger, so
+ * squeezing the trigger into half a row squeezed the popup too — the classic
+ * "Chiller ..." / "Elevat..." truncation. Full width fixes both at once.
+ */
+function MetricRow({ metric, index, assets, kind, onChange, onRemove }: {
+  metric: GroupedMetric; index: number; assets: any[]; kind: string;
+  onChange: (patch: Partial<GroupedMetric>) => void; onRemove: () => void;
+}) {
+  const assetId = metric.assetId ?? "";
+  const metricChoices = useMetricChoices(assetId);
+  const color = metric.color || SERIES_COLORS[index % SERIES_COLORS.length];
+  const selCls = "h-8 text-sm rounded-md border border-border bg-background px-2 min-w-0 w-full";
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const assetName = assets.find((a) => a.id === assetId)?.name;
+  const customIcon = (metric.customIcon ?? "").trim();
+  const Icon = CARD_ICONS[metric.icon ?? ""] ?? CARD_ICONS.activity;
+  const isStateKind = STATE_TYPES.has(kind);
+  const isScaled = SCALED_TYPES.has(kind);
+  const hasThreshold = THRESHOLD_TYPES.has(kind);
+
+  return (
+    <div className="rounded-md border border-border p-2.5 space-y-2.5">
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-medium text-muted-foreground">Metric {index + 1}</span>
+        <button onClick={onRemove} title="Remove metric" className="text-muted-foreground hover:text-destructive shrink-0"><Trash2 className="w-3.5 h-3.5" /></button>
+      </div>
+
+      {isStateKind ? (
+        <Field label="State">
+          <select value={metric.state ?? "ok"} onChange={(e) => onChange({ state: e.target.value })} className={selCls}>
+            <option value="ok">OK</option><option value="warn">Warning</option><option value="critical">Critical</option>
+          </select>
+        </Field>
+      ) : (
+        <>
+          <Field label="Data Source">
+            <button type="button" onClick={() => setPickerOpen(true)}
+              className={cn(selCls, "text-left truncate", !assetName && "text-muted-foreground")}>
+              {assetName ?? "Data source…"}
+            </button>
+            <AssetPickerDialog
+              open={pickerOpen} assets={assets} value={assetId}
+              onClose={() => setPickerOpen(false)}
+              onSelect={(id) => onChange({ assetId: id, tag: "" })}
+            />
+          </Field>
+
+          <Field label="Attribute">
+            <AttributeSelect value={metric.tag ?? ""} options={metricChoices} disabled={!assetId}
+              placeholder="— select attribute —" onChange={(key) => onChange({ tag: key })} />
+          </Field>
+        </>
+      )}
+
+      <Field label="Icon">
+        <div className="flex items-center gap-2">
+          <div className="w-8 h-8 shrink-0 rounded-md border border-border bg-background flex items-center justify-center">
+            {customIcon ? <span style={{ fontSize: 16, lineHeight: 1 }}>{customIcon}</span> : <Icon className="w-4 h-4" style={{ color }} />}
+          </div>
+          <select value={metric.icon ?? "activity"} onChange={(e) => onChange({ icon: e.target.value })} className={cn(selCls, "flex-1")}>
+            {CARD_ICON_KEYS.map((k) => <option key={k} value={k}>{k}</option>)}
+          </select>
+        </div>
+        <Input value={metric.customIcon ?? ""} onChange={(e) => onChange({ customIcon: e.target.value })}
+          placeholder="Or paste your own emoji — overrides the preset above" className="h-8 text-sm mt-1.5" maxLength={4} />
+      </Field>
+
+      {isScaled && (
+        <Field label="Max"><Input type="number" value={metric.max ?? 100} onChange={(e) => onChange({ max: Number(e.target.value) || 100 })} className="h-8 text-sm" /></Field>
+      )}
+
+      {hasThreshold && (
+        <div className="grid grid-cols-2 gap-2">
+          <Field label="Warn ≥"><Input type="number" value={metric.warn ?? ""} onChange={(e) => onChange({ warn: e.target.value === "" ? undefined : Number(e.target.value) })} placeholder="—" className="h-8 text-sm" /></Field>
+          <Field label="Critical ≥"><Input type="number" value={metric.critical ?? ""} onChange={(e) => onChange({ critical: e.target.value === "" ? undefined : Number(e.target.value) })} placeholder="—" className="h-8 text-sm" /></Field>
+        </div>
+      )}
+
+      <Field label="Color">
+        <ColorField value={color} onChange={(hex) => onChange({ color: hex })} presets={COLOR_SWATCHES} />
+      </Field>
+
+      <Field label="Background Color">
+        <div className="flex items-center gap-1.5">
+          <div className="flex-1 min-w-0"><ColorField value={metric.bgColor} onChange={(hex) => onChange({ bgColor: hex })} presets={COLOR_SWATCHES} /></div>
+          {metric.bgColor && (
+            <button type="button" onClick={() => onChange({ bgColor: undefined })} title="Clear background" className="shrink-0 text-[11px] px-2 h-8 rounded-md border border-border text-muted-foreground hover:text-foreground">
+              Clear
+            </button>
+          )}
+        </div>
+        <p className="text-[11px] text-muted-foreground mt-1">Fills the whole tile — text switches to black or white automatically so it stays readable.</p>
+      </Field>
+
+      {metric.bgColor && (
+        <Field label="Text Color">
+          <div className="flex items-center gap-1.5">
+            <div className="flex-1 min-w-0"><ColorField value={metric.textColor} onChange={(hex) => onChange({ textColor: hex })} presets={COLOR_SWATCHES} /></div>
+            {metric.textColor && (
+              <button type="button" onClick={() => onChange({ textColor: undefined })} title="Back to automatic" className="shrink-0 text-[11px] px-2 h-8 rounded-md border border-border text-muted-foreground hover:text-foreground">
+                Auto
+              </button>
+            )}
+          </div>
+          <p className="text-[11px] text-muted-foreground mt-1">Overrides the automatic black/white — pick this if the auto choice doesn't read well.</p>
+        </Field>
+      )}
+
+      <Field label="Label"><Input value={metric.label ?? ""} onChange={(e) => onChange({ label: e.target.value })} placeholder="Attribute Name" className="h-8 text-sm" /></Field>
+      {!isStateKind && <Field label="UoM"><Input value={metric.unit ?? ""} onChange={(e) => onChange({ unit: e.target.value })} placeholder="From attribute" className="h-8 text-sm" /></Field>}
+    </div>
+  );
+}
+
 // Right-side panel for adding/configuring a widget — occupies the same slot as
 // the Widget Library. Nothing is committed to the dashboard until Save; the
 // parent owns whether that means appending a new widget or patching an existing one.
@@ -144,6 +314,8 @@ export function WidgetConfigPanel({
     const oldSingleTag = draft.tag ?? (Array.isArray(draft.tags) ? draft.tags[0] : undefined) ?? draft.xTag;
     const tagPatch = newType === "scatter"
       ? { xTag: oldSingleTag, yTag: undefined, tag: undefined, tags: undefined, overlays: undefined }
+      : GROUPED_SET.has(newType)
+      ? { tag: undefined, tags: undefined, xTag: undefined, yTag: undefined, overlays: undefined }
       : MULTI_SERIES.has(newType)
       ? { tag: oldSingleTag, xTag: undefined, yTag: undefined, tags: undefined }
       : { tag: oldSingleTag, tags: undefined, xTag: undefined, yTag: undefined, overlays: undefined };
@@ -213,12 +385,61 @@ export function WidgetConfigPanel({
         {type === "button" && (
           <Field label="Button label"><Input value={draft.label ?? ""} onChange={(e) => set({ label: e.target.value })} className="h-8 text-sm" /></Field>
         )}
-        {["status", "traffic"].includes(type) && (
-          <Field label="State">
-            <select value={draft.state ?? "ok"} onChange={(e) => set({ state: e.target.value })} className={selCls}>
-              <option value="ok">OK</option><option value="warn">Warning</option><option value="critical">Critical</option>
-            </select>
-          </Field>
+        {GROUPED_SET.has(type) && (
+          <div className="pt-2 mt-1 border-t border-border space-y-3">
+            <div className="flex items-center justify-between">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Metrics</p>
+              <button
+                onClick={() => set({ metrics: [...(Array.isArray(draft.metrics) ? draft.metrics : []), {}] })}
+                className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded border border-primary/40 text-primary hover:bg-primary/5"
+              >
+                <Plus className="w-2.5 h-2.5" /> Add Metric
+              </button>
+            </div>
+            <p className="text-[11px] text-muted-foreground -mt-1.5">One metric for a single value, or several to group readings into one grid.</p>
+            <div className="space-y-1.5">
+              {(Array.isArray(draft.metrics) ? draft.metrics : []).map((m: GroupedMetric, i: number) => (
+                <MetricRow
+                  key={i} metric={m} index={i} assets={assets} kind={type}
+                  onChange={(patch) => set({ metrics: draft.metrics.map((x: GroupedMetric, idx: number) => (idx === i ? { ...x, ...patch } : x)) })}
+                  onRemove={() => set({ metrics: draft.metrics.filter((_: GroupedMetric, idx: number) => idx !== i) })}
+                />
+              ))}
+            </div>
+
+            <div className="pt-2 mt-1 border-t border-border space-y-2">
+              <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Layout</p>
+              <div className="grid grid-cols-2 gap-2">
+                <Field label="Columns"><Input type="number" min={1} max={8} value={draft.columns ?? 2} onChange={(e) => set({ columns: Math.max(1, Number(e.target.value) || 1) })} className="h-8 text-sm" /></Field>
+                <Field label="Grid Gap (px)"><Input type="number" min={0} value={draft.gridGap ?? 8} onChange={(e) => set({ gridGap: Math.max(0, Number(e.target.value) || 0) })} className="h-8 text-sm" /></Field>
+              </div>
+              {/* Only Card's tiles are plain label+value text — every Industrial
+                  mark (a gauge, a bar, a set of lights) has its own fixed internal
+                  layout that "vertical/horizontal" has no meaning for. */}
+              {type === "card" && (
+                <Field label="Text Orientation">
+                  <div className="flex gap-4 text-xs">
+                    <label className="flex items-center gap-1.5"><input type="radio" checked={(draft.textOrientation ?? "vertical") === "vertical"} onChange={() => set({ textOrientation: "vertical" })} /> Vertical</label>
+                    <label className="flex items-center gap-1.5"><input type="radio" checked={draft.textOrientation === "horizontal"} onChange={() => set({ textOrientation: "horizontal" })} /> Horizontal</label>
+                  </div>
+                </Field>
+              )}
+              {!STATE_TYPES.has(type) && (
+                <Field label="Unit Placement">
+                  <div className="flex gap-4 text-xs">
+                    <label className="flex items-center gap-1.5"><input type="radio" checked={(draft.unitPlacement ?? "suffix") === "suffix"} onChange={() => set({ unitPlacement: "suffix" })} /> Suffix</label>
+                    <label className="flex items-center gap-1.5"><input type="radio" checked={draft.unitPlacement === "prefix"} onChange={() => set({ unitPlacement: "prefix" })} /> Prefix</label>
+                  </div>
+                </Field>
+              )}
+              <label className="flex items-center gap-1.5 text-xs"><input type="checkbox" checked={!!draft.showFullText} onChange={(e) => set({ showFullText: e.target.checked })} /> Show full text (don't truncate labels)</label>
+              <div className="grid grid-cols-3 gap-2">
+                <Field label="Radius"><Input type="number" min={0} value={draft.radius ?? 10} onChange={(e) => set({ radius: Math.max(0, Number(e.target.value) || 0) })} className="h-8 text-sm" /></Field>
+                <Field label="Title Size"><Input type="number" min={8} value={draft.titleFontSize ?? 13} onChange={(e) => set({ titleFontSize: Number(e.target.value) || 13 })} className="h-8 text-sm" /></Field>
+                <Field label="Value Size"><Input type="number" min={8} value={draft.valueFontSize ?? 20} onChange={(e) => set({ valueFontSize: Number(e.target.value) || 20 })} className="h-8 text-sm" /></Field>
+              </div>
+            </div>
+          </div>
         )}
 
         {bindable && (
@@ -322,14 +543,18 @@ export function WidgetConfigPanel({
           </div>
         )}
 
-        <Field label="Primary Color">
-          <ColorField value={draft.color} onChange={(hex) => set({ color: hex })} presets={COLOR_SWATCHES} />
-        </Field>
+        {/* Grouped widgets have no single primary color — every metric tile
+            picks its own, right in its row above. */}
+        {!GROUPED_SET.has(type) && (
+          <Field label="Primary Color">
+            <ColorField value={draft.color} onChange={(hex) => set({ color: hex })} presets={COLOR_SWATCHES} />
+          </Field>
+        )}
 
         <div className="pt-2 mt-1 border-t border-border space-y-1">
           <Label className="text-xs flex items-center gap-1.5"><ImageIcon className="w-3.5 h-3.5" /> Widget Image (optional)</Label>
           <Input value={draft.imageUrl ?? ""} onChange={(e) => set({ imageUrl: e.target.value })} className="h-8 text-sm font-mono" placeholder="Paste image URL or copy from Media Library" />
-          <p className="text-[11px] text-muted-foreground">Upload images first in <strong>Asset Management → Media Library</strong>, then copy the URL here.</p>
+          <p className="text-[11px] text-muted-foreground">Upload images first in <strong>Asset Hub → Media Library</strong>, then copy the URL here.</p>
         </div>
       </div>
 

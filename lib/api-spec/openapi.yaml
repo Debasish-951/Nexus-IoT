@@ -1006,10 +1006,16 @@ components:
           type: string
           format: date-time
           nullable: true
+        createdAt:
+          type: string
+          format: date-time
         updatedAt:
           type: string
           format: date-time
-      required: [id, assetId, name, type, dataType, thousandSeparator, updatedAt]
+        sortOrder:
+          type: integer
+          description: "Display order among this asset's attributes (ascending). Not user-editable; assigned by the server on creation."
+      required: [id, assetId, name, type, dataType, thousandSeparator, createdAt, updatedAt, sortOrder]
 
     CreateAttributeBody:
       type: object

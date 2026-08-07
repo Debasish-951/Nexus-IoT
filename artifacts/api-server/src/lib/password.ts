@@ -15,7 +15,8 @@ const scrypt = promisify(crypto.scrypt) as (
  * scrypt from node:crypto rather than bcrypt/argon2, for three reasons:
  *   1. OWASP lists scrypt as an acceptable password hash with these parameters.
  *   2. Zero new dependencies — the workspace pins `minimumReleaseAge: 1440`, and
- *      bcrypt/argon2 are native modules that need a per-OS build on Replit.
+ *      bcrypt/argon2 are native modules needing a per-OS compile, which makes
+ *      installs fragile across the platforms this repo is developed and run on.
  *   3. The stored format is self-describing and versioned, so migrating to
  *      argon2id later is a change to `hashPassword` only — `verifyPassword`
  *      keeps reading old hashes.

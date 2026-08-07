@@ -19,6 +19,17 @@ export interface UserAccessOverrides {
   allowedDashboards?: string[];
   restrictAnalytics?: boolean;
   allowedAnalytics?: string[];
+  /**
+   * API-client scopes this user is permitted to GRANT when creating a credential.
+   *
+   * Not the user's own access — it is the ceiling on what a credential they mint
+   * may do. Ingest-only users can hand a gateway a write key without also being
+   * able to hand out a key that reads every asset and alarm in the platform.
+   *
+   * `undefined` inherits the role default (see ROLE_API_SCOPE_DEFAULTS in
+   * rbac.ts). An empty array means the user may create no credentials at all.
+   */
+  apiScopes?: string[];
 }
 
 export const usersTable = pgTable("users", {

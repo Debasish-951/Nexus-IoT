@@ -12,6 +12,7 @@ import {
 import { BarChart2, Download, RefreshCw, Plus, X, TrendingUp } from "lucide-react";
 import { format, subMinutes, subHours, subDays } from "date-fns";
 import { cn } from "@/lib/utils";
+import { SERIES } from "@/lib/chartColors";
 
 function bucketForRange(hours: number): string {
   if (hours <= 1)        return "5m";
@@ -36,7 +37,8 @@ const TIME_RANGES = [
   { label: "Custom", hours: -1 },
 ];
 
-const COLORS = ["#3b82f6","#22c55e","#f97316","#a855f7","#ef4444","#14b8a6","#eab308","#6366f1","#ec4899","#84cc16"];
+/** Shared, CVD-validated series order — see src/lib/chartColors.ts. */
+const COLORS = SERIES;
 
 interface Series { assetId: string; assetName: string; metric: string; label: string; color: string; }
 

@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Concept 2 — Atlas | WS-Integrated Suite UI Modernization</title>
+<style>
+/* ============================================================
+   CONCEPT 2 — ATLAS  ·  Calm Modern SaaS
+   Lineage: Linear, Atlassian, Vercel, Height
+   Philosophy: remove every line that isn't earning its place.
+   Depth comes from layered surfaces, not borders. Dark-first,
+   because that is where this product already lives. Generous
+   spacing, 10px radius, keyboard-first navigation.
+   ============================================================ */
+:root{
+  --bg:#0A0C11; --s1:#12151C; --s2:#181C25; --s3:#20252F; --s4:#2A303C;
+  --ink:#F2F5FA; --ink-2:#C0C9D8; --ink-3:#8B96A8; --ink-4:#5F6A7B;
+  --line:#20242E; --line-2:#2C323E;
+  --accent:#3B82F6; --accent-2:#60A5FA; --accent-soft:rgba(59,130,246,.13); --accent-line:rgba(59,130,246,.32);
+  --ok:#34D399; --ok-soft:rgba(52,211,153,.12);
+  --warn:#FBBF24; --warn-soft:rgba(251,191,36,.12);
+  --crit:#F87171; --crit-soft:rgba(248,113,113,.12);
+  --viol:#A78BFA; --cyan:#22D3EE;
+  --r:10px; --r-sm:7px;
+  --f:"Segoe UI",system-ui,-apple-system,Roboto,"Helvetica Neue",sans-serif;
+  --mono:Consolas,"Cascadia Mono",ui-monospace,"SF Mono",Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#06070A;color:var(--ink-2);font-family:var(--f);font-size:13.5px;line-height:1.55;-webkit-font-smoothing:antialiased}
+/* ---------- Concept chrome ---------- */
+.meta{background:linear-gradient(180deg,#0E1218,#0A0C11);color:#C0C9D8;padding:20px 26px;border-bottom:1px solid var(--line)}
+.meta h1{font-size:20px;color:#fff;font-weight:650;letter-spacing:-.4px}
+.meta .tag{display:inline-block;font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:var(--accent-2);background:var(--accent-soft);border:1px solid var(--accent-line);padding:3px 9px;border-radius:20px;margin-bottom:9px}
+.meta p{font-size:13px;max-width:96ch;margin-top:8px;color:#98A3B4}
+.specs{display:flex;flex-wrap:wrap;gap:24px;margin-top:16px;font-size:11.5px}
+.specs section{min-width:150px}
+.specs h4{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:#5F6A7B;margin-bottom:7px;font-weight:600}
+.sw{display:flex;gap:4px}.sw i{width:24px;height:24px;border-radius:6px;display:block;border:1px solid rgba(255,255,255,.09)}
+.specs code{font-family:var(--mono);font-size:10.5px;color:#A8B4C6;display:block;line-height:1.75}
+.vpbar{display:flex;gap:8px;align-items:center;background:#0A0C11;border-bottom:1px solid var(--line);padding:10px 26px}
+.vpbar span{font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:#5F6A7B;margin-right:6px}
+.vpbar button{font-family:var(--f);font-size:12px;background:var(--s2);color:var(--ink-3);border:1px solid var(--line-2);padding:6px 15px;border-radius:20px;cursor:pointer}
+.vpbar button.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.tabs{display:flex;gap:5px;background:#0A0C11;padding:12px 26px;overflow-x:auto;border-bottom:1px solid var(--line)}
+.tabs button{font-family:var(--f);font-size:12.5px;background:transparent;border:1px solid transparent;padding:7px 15px;color:var(--ink-3);cursor:pointer;border-radius:20px;white-space:nowrap}
+.tabs button:hover{background:var(--s2);color:var(--ink)}
+.tabs button.on{background:var(--s3);color:#fff;border-color:var(--line-2);font-weight:600}
+.stage{padding:26px;display:flex;justify-content:center}
+.frame{width:100%;max-width:1440px;background:var(--bg);border:1px solid var(--line-2);border-radius:16px;overflow:hidden;box-shadow:0 24px 60px rgba(0,0,0,.5)}
+.frame.mobile{max-width:390px;border-radius:26px}
+.screen{display:none}.screen.on{display:block}
+/* ---------- Shell: icon rail + contextual panel ---------- */
+.app{display:flex;min-height:680px}
+.frame.mobile .app{flex-direction:column;min-height:740px}
+.irail{width:58px;flex:0 0 58px;background:#080A0E;display:flex;flex-direction:column;align-items:center;padding:12px 0;gap:5px;border-right:1px solid var(--line)}
+.frame.mobile .irail{display:none}
+.ilogo{width:32px;height:32px;border-radius:9px;background:linear-gradient(135deg,var(--accent),#7C3AED);display:grid;place-items:center;color:#fff;font-size:12px;font-weight:700;margin-bottom:9px}
+.irail a{width:36px;height:36px;border-radius:9px;display:grid;place-items:center;color:var(--ink-4);text-decoration:none;font-size:16px;position:relative}
+.irail a:hover{background:var(--s2);color:var(--ink-2)}
+.irail a.on{background:var(--accent-soft);color:var(--accent-2)}
+.irail a.on:before{content:"";position:absolute;left:-12px;top:9px;width:3px;height:18px;background:var(--accent);border-radius:0 3px 3px 0}
+.irail .sp{flex:1}
+.cpanel{width:222px;flex:0 0 222px;background:var(--s1);border-right:1px solid var(--line);display:flex;flex-direction:column;padding:14px 10px}
+.frame.mobile .cpanel{display:none}
+.cpanel h5{font-size:14px;color:#fff;font-weight:650;padding:0 8px 3px;letter-spacing:-.2px}
+.cpanel .sub{font-size:11.5px;color:var(--ink-4);padding:0 8px 12px}
+.kbar{background:var(--s2);border:1px solid var(--line-2);border-radius:var(--r-sm);height:32px;display:flex;align-items:center;padding:0 10px;gap:8px;font-size:12px;color:var(--ink-4);margin-bottom:14px;cursor:pointer}
+.kbar:hover{border-color:var(--accent-line)}
+.kbar kbd{margin-left:auto;font-family:var(--f);font-size:10px;background:var(--s3);border:1px solid var(--line-2);padding:2px 5px;border-radius:4px;color:var(--ink-3)}
+.cpanel .grp{font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink-4);padding:12px 8px 5px;font-weight:600}
+.cpanel a.item{display:flex;align-items:center;gap:9px;padding:7px 9px;border-radius:var(--r-sm);color:var(--ink-2);text-decoration:none;font-size:13px}
+.cpanel a.item:hover{background:var(--s2);color:#fff}
+.cpanel a.item.on{background:var(--s3);color:#fff;font-weight:600}
+.cpanel a.item i{font-style:normal;font-size:13px;opacity:.65;width:15px;text-align:center}
+.cpanel a.item .cnt{margin-left:auto;font-size:10.5px;color:var(--ink-4);font-variant-numeric:tabular-nums}
+.cfoot{margin-top:auto;padding:11px 8px 0;border-top:1px solid var(--line);display:flex;align-items:center;gap:9px}
+.uav{width:27px;height:27px;border-radius:8px;background:linear-gradient(135deg,var(--accent),#7C3AED);color:#fff;display:grid;place-items:center;font-size:10.5px;font-weight:700}
+.cfoot b{font-size:12px;color:var(--ink);font-weight:600;display:block;line-height:1.25}
+.cfoot small{font-size:10.5px;color:var(--ink-4)}
+/* main */
+.main{flex:1;min-width:0;display:flex;flex-direction:column;background:var(--bg)}
+.mtop{display:none}
+.frame.mobile .mtop{display:flex;height:52px;align-items:center;padding:0 16px;gap:12px;color:#fff;flex:0 0 52px;border-bottom:1px solid var(--line)}
+.frame.mobile .mtop b{font-size:15px;font-weight:650}
+.content{flex:1;overflow-y:auto;padding:24px 26px}
+.frame.mobile .content{padding:16px}
+.phead{display:flex;align-items:flex-start;gap:14px;margin-bottom:22px;flex-wrap:wrap}
+.phead h2{font-size:24px;color:#fff;font-weight:650;letter-spacing:-.6px}
+.phead p{font-size:13.5px;color:var(--ink-3);margin-top:4px}
+.pacts{margin-left:auto;display:flex;gap:8px;flex-wrap:wrap}
+.frame.mobile .pacts{margin-left:0;width:100%}
+.btn{font-family:var(--f);font-size:12.5px;padding:7px 14px;border-radius:var(--r-sm);border:1px solid var(--line-2);background:var(--s2);color:var(--ink-2);cursor:pointer;display:inline-flex;align-items:center;gap:7px;font-weight:500}
+.btn:hover{background:var(--s3);color:#fff}
+.btn.pri{background:var(--accent);border-color:var(--accent);color:#fff}
+.btn.pri:hover{background:#2563EB}
+.btn.gho{background:transparent;border-color:transparent;color:var(--ink-3)}
+.btn.gho:hover{background:var(--s2)}
+.btn.sm{padding:5px 10px;font-size:11.5px}
+.seg{display:inline-flex;background:var(--s2);border:1px solid var(--line-2);border-radius:20px;padding:2px}
+.seg button{font-family:var(--f);font-size:11.5px;padding:4px 12px;background:transparent;border:0;color:var(--ink-3);cursor:pointer;border-radius:16px}
+.seg button.on{background:var(--s4);color:#fff;font-weight:600}
+/* Hero metric + supporting grid (asymmetric) */
+.hero{display:grid;grid-template-columns:1.5fr 1fr 1fr;gap:14px;margin-bottom:14px}
+.frame.mobile .hero{grid-template-columns:1fr}
+.card{background:var(--s1);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.card.raise{background:var(--s2)}
+.ch{padding:14px 16px 0;display:flex;align-items:flex-start;gap:10px}
+.ch h3{font-size:13.5px;color:var(--ink);font-weight:600}
+.ch .r{margin-left:auto;display:flex;gap:6px;align-items:center}
+.cb{padding:14px 16px}
+.big{padding:18px}
+.big .lbl{font-size:11.5px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.09em;font-weight:600}
+.big .val{font-size:42px;color:#fff;font-weight:650;letter-spacing:-1.6px;line-height:1.05;margin:8px 0 4px;font-variant-numeric:tabular-nums}
+.big .val small{font-size:17px;color:var(--ink-3);font-weight:500;letter-spacing:0}
+.mini .lbl{font-size:11px;color:var(--ink-3);text-transform:uppercase;letter-spacing:.09em;font-weight:600}
+.mini .val{font-size:27px;color:#fff;font-weight:650;letter-spacing:-.9px;line-height:1.1;margin:6px 0 3px;font-variant-numeric:tabular-nums}
+.mini .val small{font-size:13px;color:var(--ink-3);font-weight:500;letter-spacing:0}
+.delta{font-size:12px;font-weight:600;display:inline-flex;align-items:center;gap:3px;font-variant-numeric:tabular-nums}
+.delta.up{color:var(--ok)}.delta.dn{color:var(--crit)}.delta.flat{color:var(--ink-4)}
+.pill{font-size:10.5px;padding:3px 9px;border-radius:20px;font-weight:600;white-space:nowrap;border:1px solid transparent}
+.pill.ok{background:var(--ok-soft);color:var(--ok);border-color:rgba(52,211,153,.28)}
+.pill.warn{background:var(--warn-soft);color:var(--warn);border-color:rgba(251,191,36,.28)}
+.pill.crit{background:var(--crit-soft);color:var(--crit);border-color:rgba(248,113,113,.28)}
+.pill.info{background:var(--accent-soft);color:var(--accent-2);border-color:var(--accent-line)}
+.pill.mut{background:var(--s3);color:var(--ink-3);border-color:var(--line-2)}
+.grid{display:grid;gap:14px}
+.g2{grid-template-columns:2fr 1fr}.g3{grid-template-columns:repeat(3,1fr)}.g4{grid-template-columns:repeat(4,1fr)}
+.frame.mobile .g2,.frame.mobile .g3,.frame.mobile .g4{grid-template-columns:1fr}
+/* Table — roomy, quiet, card-wrapped */
+.tbl-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+thead th{text-align:left;padding:11px 16px;font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--ink-4);font-weight:600;white-space:nowrap;border-bottom:1px solid var(--line)}
+tbody td{padding:13px 16px;color:var(--ink-2);border-bottom:1px solid var(--line);vertical-align:middle}
+tbody tr:last-child td{border-bottom:0}
+tbody tr:hover{background:var(--s2)}
+tbody tr:hover .rowact{opacity:1}
+.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.mn{font-family:var(--mono);font-size:11.5px;color:var(--ink-3)}
+.lnk{color:var(--accent-2);text-decoration:none;font-weight:500}
+.rowact{opacity:0;display:flex;gap:5px;transition:opacity .12s}
+.chk{width:15px;height:15px;border:1.5px solid var(--line-2);border-radius:4px;display:inline-block;vertical-align:middle;background:var(--s2)}
+.chk.on{background:var(--accent);border-color:var(--accent);position:relative}
+.chk.on:after{content:"";position:absolute;left:4px;top:1.5px;width:4px;height:8px;border:solid #fff;border-width:0 1.8px 1.8px 0;transform:rotate(45deg)}
+.tfoot{padding:12px 16px;border-top:1px solid var(--line);display:flex;align-items:center;gap:10px;font-size:12px;color:var(--ink-4);flex-wrap:wrap}
+.pg{display:flex;gap:4px;margin-left:auto}
+.pg button{font-family:var(--f);width:28px;height:28px;border:1px solid var(--line-2);background:var(--s2);color:var(--ink-2);font-size:12px;cursor:pointer;border-radius:6px}
+.pg button.on{background:var(--accent);border-color:var(--accent);color:#fff}
+/* Forms — single column, labels above, progressive disclosure */
+.form{max-width:620px}
+.fgrp{margin-bottom:20px}
+.fgrp>label{display:block;font-size:12.5px;color:var(--ink);font-weight:600;margin-bottom:6px}
+.fgrp>label span{color:var(--crit)}
+.fgrp .hint{font-size:12px;color:var(--ink-4);margin-top:6px}
+.inp{width:100%;height:38px;border:1px solid var(--line-2);border-radius:var(--r-sm);background:var(--s1);padding:0 12px;font-family:var(--f);font-size:13.5px;color:var(--ink)}
+.inp::placeholder{color:var(--ink-4)}
+.inp:focus{outline:0;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-soft);background:var(--s2)}
+textarea.inp{height:auto;padding:10px 12px;resize:vertical;line-height:1.5}
+select.inp{cursor:pointer}
+.disclose{border:1px solid var(--line);border-radius:var(--r);background:var(--s1);overflow:hidden;margin-bottom:20px}
+.disclose>summary{padding:13px 16px;cursor:pointer;font-size:13px;color:var(--ink-2);display:flex;align-items:center;gap:9px;list-style:none;font-weight:500}
+.disclose>summary::-webkit-details-marker{display:none}
+.disclose>summary:hover{background:var(--s2)}
+.disclose>summary:before{content:"▸";color:var(--ink-4);font-size:11px}
+.disclose[open]>summary:before{content:"▾"}
+.disclose>summary .pill{margin-left:auto}
+.disclose .dbody{padding:0 16px 16px;border-top:1px solid var(--line);padding-top:16px}
+.tog{width:38px;height:21px;border-radius:11px;background:var(--s4);position:relative;display:inline-block;flex:0 0 38px;cursor:pointer;transition:background .15s}
+.tog:after{content:"";position:absolute;top:2.5px;left:2.5px;width:16px;height:16px;border-radius:50%;background:#fff;transition:left .15s}
+.tog.on{background:var(--accent)}.tog.on:after{left:19.5px}
+.fbar{display:flex;gap:9px;justify-content:flex-end;padding-top:6px}
+/* Charts */
+.chart{width:100%;height:200px;display:block}
+.legend{display:flex;gap:16px;flex-wrap:wrap;padding-top:12px;font-size:12px;color:var(--ink-3)}
+.legend span{display:flex;align-items:center;gap:6px}
+.legend i{width:10px;height:3px;border-radius:2px;display:block}
+.axis{font-size:9.5px;fill:var(--ink-4);font-family:var(--f)}
+/* Command palette overlay demo */
+.ovl{position:relative}
+.kpal{position:absolute;top:52px;left:50%;transform:translateX(-50%);width:min(540px,92%);background:var(--s2);border:1px solid var(--line-2);border-radius:12px;box-shadow:0 26px 70px rgba(0,0,0,.66);overflow:hidden;z-index:40}
+.kpal .kin{padding:14px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:11px;font-size:15px;color:var(--ink-3)}
+.kpal .kin b{color:var(--ink);font-weight:400}
+.kpal .sect{font-size:9.5px;letter-spacing:.13em;text-transform:uppercase;color:var(--ink-4);padding:11px 16px 5px;font-weight:600}
+.kpal a{display:flex;align-items:center;gap:11px;padding:9px 16px;color:var(--ink-2);text-decoration:none;font-size:13px}
+.kpal a.on{background:var(--accent-soft);color:#fff}
+.kpal a .mn{margin-left:auto}
+.kpal a i{font-style:normal;opacity:.6;width:16px;text-align:center}
+.kfoot{padding:9px 16px;border-top:1px solid var(--line);font-size:11px;color:var(--ink-4);display:flex;gap:14px}
+/* Settings */
+.slay{display:grid;grid-template-columns:190px 1fr;gap:22px}
+.frame.mobile .slay{grid-template-columns:1fr}
+.snav a{display:block;padding:8px 12px;font-size:13px;color:var(--ink-3);text-decoration:none;border-radius:var(--r-sm);margin-bottom:2px}
+.snav a:hover{background:var(--s2);color:var(--ink)}
+.snav a.on{background:var(--s3);color:#fff;font-weight:600}
+.kv{display:grid;grid-template-columns:190px 1fr;gap:12px 16px;font-size:13px}
+.frame.mobile .kv{grid-template-columns:1fr;gap:3px 0}
+.kv dt{color:var(--ink-4)}.kv dd{color:var(--ink)}
+.note{border:1px solid var(--accent-line);background:var(--accent-soft);border-radius:var(--r);padding:13px 15px;font-size:12.5px;color:var(--ink-2);display:flex;gap:11px}
+.note b{color:#fff}
+.srow{display:flex;align-items:center;gap:14px;padding:15px 0;border-bottom:1px solid var(--line)}
+.srow:last-child{border-bottom:0}
+.srow .t{flex:1}
+.srow b{font-size:13px;color:var(--ink);font-weight:600;display:block}
+.srow small{font-size:12px;color:var(--ink-4)}
+.ann{background:var(--warn-soft);border:1px solid rgba(251,191,36,.3);border-radius:var(--r);padding:11px 14px;font-size:12.5px;color:var(--warn);margin-bottom:18px}
+.ann b{color:#FFD98A}
+.sparkbg{height:52px;margin-top:10px}
+</style>
+</head>
+<body>
+
+<div class="meta">
+  <div class="tag">Concept 2 of 4</div>
+  <h1>Atlas — Calm Modern SaaS</h1>
+  <p><b style="color:#fff">Design philosophy:</b> Remove every line that isn't earning its place. Atlas gets its structure from layered surfaces rather than borders — five elevation steps instead of a grid of rules — with 10px radii, generous padding, and a keyboard-first ⌘K palette as the primary way to move. It is dark-first because that is where this product already lives, so migration friction is lowest. The trade is honest: fewer rows fit on screen than Meridian.</p>
+  <div class="specs">
+    <section><h4>Surfaces</h4><div class="sw"><i style="background:#0A0C11"></i><i style="background:#12151C"></i><i style="background:#181C25"></i><i style="background:#20252F"></i><i style="background:#2A303C"></i></div></section>
+    <section><h4>Accent + semantic</h4><div class="sw"><i style="background:#3B82F6"></i><i style="background:#34D399"></i><i style="background:#FBBF24"></i><i style="background:#F87171"></i><i style="background:#A78BFA"></i></div></section>
+    <section><h4>Typography</h4><code>Segoe UI / system-ui<br>13.5 base · 24 / 42 display<br>-0.6px display tracking</code></section>
+    <section><h4>Geometry</h4><code>radius 10px · 7px inner<br>rail 58 + panel 222px<br>rows 48px · pad 16px</code></section>
+    <section><h4>Navigation</h4><code>icon rail + context panel<br>⌘K palette primary<br>mobile: sheets + FAB</code></section>
+  </div>
+</div>
+
+<div class="vpbar">
+  <span>Viewport</span>
+  <button id="b-desk" class="on" onclick="vp('desk')">Desktop 1440</button>
+  <button id="b-mob" onclick="vp('mob')">Mobile 390</button>
+</div>
+
+<div class="tabs">
+  <button class="on" onclick="show('dash',this)">Dashboard</button>
+  <button onclick="show('home',this)">Landing / Home</button>
+  <button onclick="show('table',this)">Data Table</button>
+  <button onclick="show('form',this)">Form</button>
+  <button onclick="show('anal',this)">Analytics</button>
+  <button onclick="show('set',this)">Settings</button>
+</div>
+
+<div class="stage">
+<div class="frame" id="frame">
+
+<!-- =================== DASHBOARD =================== -->
+<section class="screen on" id="dash">
+<div class="app">
+  <aside class="irail">
+    <div class="ilogo">WS</div>
+    <a href="#" class="on" title="Home">▤</a><a href="#" title="Assets">◫</a><a href="#" title="Data">◔</a>
+    <a href="#" title="AI">◈</a><a href="#" title="Alarms">◭</a><a href="#" title="Brokers">⇄</a>
+    <div class="sp"></div>
+    <a href="#" title="Settings">◇</a><a href="#" title="Help">?</a>
+  </aside>
+  <aside class="cpanel">
+    <h5>Home</h5><div class="sub">EMS workspace</div>
+    <div class="kbar">⌕ Jump to… <kbd>⌘K</kbd></div>
+    <div class="grp">Overview</div>
+    <a href="#" class="item on"><i>▤</i>Operations</a>
+    <a href="#" class="item"><i>◔</i>Live feed <span class="cnt">118/m</span></a>
+    <a href="#" class="item"><i>◭</i>Alarms <span class="cnt">0</span></a>
+    <div class="grp">Pinned</div>
+    <a href="#" class="item"><i>★</i>Chiller Energy</a>
+    <a href="#" class="item"><i>★</i>Grid Import</a>
+    <div class="grp">Recent</div>
+    <a href="#" class="item"><i>◷</i>EMS template</a>
+    <a href="#" class="item"><i>◷</i>API endpoint</a>
+    <div class="cfoot"><div class="uav">DP</div><div><b>Debasish Panda</b><small>super_admin</small></div></div>
+  </aside>
+  <div class="main">
+    <div class="mtop"><span>☰</span><b>Home</b><span style="margin-left:auto">⌕</span><div class="uav">DP</div></div>
+    <div class="content">
+      <div class="phead">
+        <div><h2>Good afternoon, Debasish</h2><p>EMS is healthy. 3.39M readings stored, last one 4 seconds ago.</p></div>
+        <div class="pacts">
+          <div class="seg"><button class="on">24h</button><button>7d</button><button>30d</button></div>
+          <button class="btn">Export</button><button class="btn pri">+ Widget</button>
+        </div>
+      </div>
+
+      <div class="hero">
+        <div class="card raise big">
+          <div class="lbl">Total consumption today</div>
+          <div class="val">32.17<small> kWh</small></div>
+          <div style="display:flex;align-items:center;gap:11px"><span class="delta up">▲ 8.1%</span><span style="font-size:12px;color:var(--ink-4)">vs yesterday</span></div>
+          <svg class="sparkbg" viewBox="0 0 400 52" preserveAspectRatio="none">
+            <path d="M0,40 L36,34 L72,37 L108,25 L144,29 L180,17 L216,22 L252,11 L288,17 L324,7 L360,14 L400,9" fill="none" stroke="#3B82F6" stroke-width="2"/>
+            <path d="M0,40 L36,34 L72,37 L108,25 L144,29 L180,17 L216,22 L252,11 L288,17 L324,7 L360,14 L400,9 L400,52 L0,52 Z" fill="url(#g1)"/>
+            <defs><linearGradient id="g1" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3B82F6" stop-opacity=".28"/><stop offset="1" stop-color="#3B82F6" stop-opacity="0"/></linearGradient></defs>
+          </svg>
+        </div>
+        <div class="card mini cb">
+          <div class="lbl">Ingest rate</div><div class="val">118<small>/min</small></div>
+          <span class="pill ok">62% of cap</span>
+          <div style="margin-top:11px;height:5px;background:var(--s3);border-radius:3px;overflow:hidden"><i style="display:block;height:100%;width:62%;background:var(--accent);border-radius:3px"></i></div>
+        </div>
+        <div class="card mini cb">
+          <div class="lbl">Active alarms</div><div class="val">0</div>
+          <span class="pill ok">All clear</span>
+          <div style="margin-top:14px;font-size:12px;color:var(--ink-4)">Last cleared 2 days ago</div>
+        </div>
+      </div>
+
+      <div class="grid g2" style="margin-bottom:14px">
+        <div class="card">
+          <div class="ch"><h3>Energy consumption</h3><div class="r"><span class="pill mut">5 min avg</span><button class="btn sm gho">⤢</button></div></div>
+          <div class="cb">
+            <svg class="chart" viewBox="0 0 700 200" preserveAspectRatio="none">
+              <g stroke="#20242E" stroke-width="1">
+                <line x1="40" y1="26" x2="690" y2="26"/><line x1="40" y1="66" x2="690" y2="66"/>
+                <line x1="40" y1="106" x2="690" y2="106"/><line x1="40" y1="146" x2="690" y2="146"/><line x1="40" y1="172" x2="690" y2="172"/>
+              </g>
+              <text class="axis" x="34" y="30" text-anchor="end">60</text><text class="axis" x="34" y="70" text-anchor="end">45</text>
+              <text class="axis" x="34" y="110" text-anchor="end">30</text><text class="axis" x="34" y="150" text-anchor="end">15</text>
+              <path d="M46,128 L110,110 L174,118 L238,84 L302,92 L366,58 L430,70 L494,46 L558,62 L622,38 L686,52" fill="none" stroke="#3B82F6" stroke-width="2.2"/>
+              <path d="M46,128 L110,110 L174,118 L238,84 L302,92 L366,58 L430,70 L494,46 L558,62 L622,38 L686,52 L686,172 L46,172 Z" fill="url(#g2)"/>
+              <defs><linearGradient id="g2" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3B82F6" stop-opacity=".22"/><stop offset="1" stop-color="#3B82F6" stop-opacity="0"/></linearGradient></defs>
+              <path d="M46,150 L110,144 L174,148 L238,134 L302,138 L366,126 L430,132 L494,120 L558,128 L622,116 L686,122" fill="none" stroke="#22D3EE" stroke-width="2.2"/>
+              <circle cx="622" cy="38" r="4.5" fill="#3B82F6" stroke="#0A0C11" stroke-width="2.5"/>
+              <text class="axis" x="46" y="192">00:00</text><text class="axis" x="238" y="192">06:00</text>
+              <text class="axis" x="430" y="192">12:00</text><text class="axis" x="622" y="192">18:00</text>
+            </svg>
+            <div class="legend"><span><i style="background:#3B82F6"></i>Chiller Energy</span><span><i style="background:#22D3EE"></i>Interval Energy</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="ch"><h3>Live attributes</h3><div class="r"><span class="pill info">24</span></div></div>
+          <div class="tbl-wrap"><table>
+            <tbody>
+              <tr><td>Chiller Energy</td><td class="num" style="color:#fff;font-weight:600">4 659.17</td><td style="width:20px"><span style="width:7px;height:7px;border-radius:50%;background:var(--ok);display:block"></span></td></tr>
+              <tr><td>Interval Energy</td><td class="num" style="color:#fff;font-weight:600">0.74</td><td><span style="width:7px;height:7px;border-radius:50%;background:var(--ok);display:block"></span></td></tr>
+              <tr><td>Daily Cumulative</td><td class="num" style="color:#fff;font-weight:600">32.17</td><td><span style="width:7px;height:7px;border-radius:50%;background:var(--ok);display:block"></span></td></tr>
+              <tr><td>WTD Cumulative</td><td class="num" style="color:#fff;font-weight:600">319.98</td><td><span style="width:7px;height:7px;border-radius:50%;background:var(--ok);display:block"></span></td></tr>
+              <tr><td>MTD Cumulative</td><td class="num" style="color:#fff;font-weight:600">968.87</td><td><span style="width:7px;height:7px;border-radius:50%;background:var(--warn);display:block"></span></td></tr>
+            </tbody>
+          </table></div>
+        </div>
+      </div>
+
+      <div class="grid g3">
+        <div class="card"><div class="ch"><h3>Throughput</h3></div><div class="cb">
+          <svg class="chart" style="height:110px" viewBox="0 0 320 110" preserveAspectRatio="none">
+            <g fill="#3B82F6"><rect x="8" y="56" width="15" height="46" rx="3"/><rect x="31" y="44" width="15" height="58" rx="3"/>
+            <rect x="54" y="50" width="15" height="52" rx="3"/><rect x="77" y="32" width="15" height="70" rx="3"/>
+            <rect x="100" y="38" width="15" height="64" rx="3"/><rect x="123" y="24" width="15" height="78" rx="3"/>
+            <rect x="146" y="30" width="15" height="72" rx="3"/><rect x="169" y="16" width="15" height="86" rx="3"/>
+            <rect x="192" y="24" width="15" height="78" rx="3"/><rect x="215" y="34" width="15" height="68" rx="3"/>
+            <rect x="238" y="20" width="15" height="82" rx="3"/><rect x="261" y="28" width="15" height="74" rx="3"/></g>
+            <rect x="284" y="40" width="15" height="62" rx="3" fill="#2A303C"/>
+          </svg>
+          <div class="legend"><span><i style="background:#3B82F6"></i>Accepted</span><span><i style="background:#2A303C"></i>Projected</span></div>
+        </div></div>
+        <div class="card"><div class="ch"><h3>Activity</h3></div><div class="cb" style="padding:6px 0"><table><tbody>
+          <tr><td class="mn" style="width:52px">17:44</td><td>Template <b style="color:var(--ink)">EMS</b> updated</td></tr>
+          <tr><td class="mn">17:31</td><td>Endpoint copied</td></tr>
+          <tr><td class="mn">16:58</td><td>Device <span class="mn">energy</span> bound</td></tr>
+          <tr><td class="mn">16:12</td><td>24 attributes declared</td></tr>
+        </tbody></table></div></div>
+        <div class="card"><div class="ch"><h3>Services</h3></div><div class="cb">
+          <div class="srow" style="padding:9px 0"><div class="t"><b>API server</b><small>port 8080</small></div><span class="pill ok">Healthy</span></div>
+          <div class="srow" style="padding:9px 0"><div class="t"><b>PostgreSQL 16</b><small>3.39M rows</small></div><span class="pill ok">Connected</span></div>
+          <div class="srow" style="padding:9px 0"><div class="t"><b>WebSocket</b><small>4 clients</small></div><span class="pill ok">Live</span></div>
+          <div class="srow" style="padding:9px 0"><div class="t"><b>MQTT</b><small>no brokers</small></div><span class="pill mut">Idle</span></div>
+        </div></div>
+      </div>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- =================== LANDING / HOME (with ⌘K palette) =================== -->
+<section class="screen" id="home">
+<div class="app">
+  <aside class="irail">
+    <div class="ilogo">WS</div>
+    <a href="#" title="Home">▤</a><a href="#" class="on" title="Assets">◫</a><a href="#" title="Data">◔</a>
+    <a href="#" title="AI">◈</a><a href="#" title="Alarms">◭</a><a href="#" title="Brokers">⇄</a>
+    <div class="sp"></div><a href="#" title="Settings">◇</a><a href="#" title="Help">?</a>
+  </aside>
+  <aside class="cpanel">
+    <h5>Asset Management</h5><div class="sub">1 asset · 24 attributes</div>
+    <div class="kbar">⌕ Jump to… <kbd>⌘K</kbd></div>
+    <div class="grp">Manage</div>
+    <a href="#" class="item on"><i>◫</i>Assets <span class="cnt">1</span></a>
+    <a href="#" class="item"><i>▤</i>Templates <span class="cnt">2</span></a>
+    <a href="#" class="item"><i>▣</i>Media <span class="cnt">0</span></a>
+    <a href="#" class="item"><i>⑃</i>Generator</a>
+    <div class="grp">Hierarchy</div>
+    <a href="#" class="item"><i>▾</i>EMS</a>
+    <a href="#" class="item" style="padding-left:26px">Chiller</a>
+    <a href="#" class="item" style="padding-left:26px">Grid</a>
+    <a href="#" class="item" style="padding-left:26px">Genset</a>
+    <div class="cfoot"><div class="uav">DP</div><div><b>Debasish Panda</b><small>super_admin</small></div></div>
+  </aside>
+  <div class="main ovl">
+    <div class="mtop"><span>☰</span><b>Assets</b><span style="margin-left:auto">⌕</span><div class="uav">DP</div></div>
+    <!-- Command palette demo -->
+    <div class="kpal">
+      <div class="kin">⌕ <b>chill</b><span style="width:1.5px;height:17px;background:var(--accent);display:inline-block"></span></div>
+      <div class="sect">Assets</div>
+      <a href="#" class="on"><i>◫</i>Chiller <span class="mn">under EMS</span></a>
+      <div class="sect">Attributes</div>
+      <a href="#"><i>◦</i>Chiller Energy <span class="mn">chiller.energy_kWh</span></a>
+      <a href="#"><i>◦</i>Chiller Flowrate <span class="mn">chiller.flow_m3h</span></a>
+      <div class="sect">Actions</div>
+      <a href="#"><i>+</i>Create asset under Chiller</a>
+      <a href="#"><i>◭</i>New alarm rule for Chiller</a>
+      <div class="kfoot"><span>↑↓ navigate</span><span>↵ open</span><span>esc close</span></div>
+    </div>
+    <div class="content" style="opacity:.32;pointer-events:none">
+      <div class="phead"><div><h2>Asset Management</h2><p>Model the plant hierarchy and bind devices to assets.</p></div></div>
+      <div class="grid g4" style="margin-bottom:14px">
+        <div class="card cb"><div style="width:34px;height:34px;border-radius:9px;background:var(--accent-soft);border:1px solid var(--accent-line);display:grid;place-items:center;color:var(--accent-2);font-size:16px;margin-bottom:12px">◫</div><b style="color:#fff;font-size:14.5px;display:block;margin-bottom:4px">Assets</b><p style="font-size:12.5px;color:var(--ink-3)">Browse the hierarchy.</p></div>
+        <div class="card cb"><div style="width:34px;height:34px;border-radius:9px;background:var(--accent-soft);border:1px solid var(--accent-line);display:grid;place-items:center;color:var(--accent-2);font-size:16px;margin-bottom:12px">▤</div><b style="color:#fff;font-size:14.5px;display:block;margin-bottom:4px">Templates</b><p style="font-size:12.5px;color:var(--ink-3)">Reusable attribute sets.</p></div>
+        <div class="card cb"><div style="width:34px;height:34px;border-radius:9px;background:var(--s3);display:grid;place-items:center;color:var(--ink-3);font-size:16px;margin-bottom:12px">▣</div><b style="color:#fff;font-size:14.5px;display:block;margin-bottom:4px">Media</b><p style="font-size:12.5px;color:var(--ink-3)">Images and documents.</p></div>
+        <div class="card cb"><div style="width:34px;height:34px;border-radius:9px;background:var(--s3);display:grid;place-items:center;color:var(--ink-3);font-size:16px;margin-bottom:12px">⑃</div><b style="color:#fff;font-size:14.5px;display:block;margin-bottom:4px">Generator</b><p style="font-size:12.5px;color:var(--ink-3)">Paste and auto-build.</p></div>
+      </div>
+      <div class="card"><div class="ch"><h3>Getting started</h3><div class="r"><span class="pill info">3 of 4</span></div></div>
+      <div class="tbl-wrap"><table><tbody>
+        <tr><td style="width:28px"><span class="chk on"></span></td><td>Create an ingest endpoint</td><td class="num"><span class="pill ok">Done</span></td></tr>
+        <tr><td><span class="chk on"></span></td><td>Post telemetry from a gateway</td><td class="num"><span class="pill ok">Done</span></td></tr>
+        <tr><td><span class="chk on"></span></td><td>Bind the device and declare attributes</td><td class="num"><span class="pill ok">Done</span></td></tr>
+        <tr><td><span class="chk"></span></td><td>Configure alarm rules</td><td class="num"><a href="#" class="lnk">Start →</a></td></tr>
+      </tbody></table></div></div>
+    </div>
+  </div>
+</div>
+<div style="padding:12px 26px 0;font-size:12px;color:var(--ink-4);text-align:center">↑ Atlas makes ⌘K the primary way to move — reaching any asset, attribute or action without touching the sidebar.</div>
+</section>
+
+<!-- =================== DATA TABLE =================== -->
+<section class="screen" id="table">
+<div class="app">
+  <aside class="irail">
+    <div class="ilogo">WS</div>
+    <a href="#" title="Home">▤</a><a href="#" class="on" title="Assets">◫</a><a href="#" title="Data">◔</a>
+    <a href="#" title="AI">◈</a><a href="#" title="Alarms">◭</a><a href="#" title="Brokers">⇄</a>
+    <div class="sp"></div><a href="#" title="Settings">◇</a><a href="#" title="Help">?</a>
+  </aside>
+  <aside class="cpanel">
+    <h5>Templates</h5><div class="sub">8 templates</div>
+    <div class="kbar">⌕ Jump to… <kbd>⌘K</kbd></div>
+    <div class="grp">Manage</div>
+    <a href="#" class="item"><i>◫</i>Assets <span class="cnt">1</span></a>
+    <a href="#" class="item on"><i>▤</i>Templates <span class="cnt">8</span></a>
+    <a href="#" class="item"><i>▣</i>Media</a><a href="#" class="item"><i>⑃</i>Generator</a>
+    <div class="grp">Filter</div>
+    <a href="#" class="item"><i>◦</i>In use <span class="cnt">4</span></a>
+    <a href="#" class="item"><i>◦</i>Unused <span class="cnt">4</span></a>
+    <div class="cfoot"><div class="uav">DP</div><div><b>Debasish Panda</b><small>super_admin</small></div></div>
+  </aside>
+  <div class="main">
+    <div class="mtop"><span>☰</span><b>Templates</b><span style="margin-left:auto">⌕</span><div class="uav">DP</div></div>
+    <div class="content">
+      <div class="ann"><b>Modernization note —</b> Atlas trades density for scanability: 48px rows, borderless columns, and hover-revealed actions. On a 1440px screen this shows ~9 rows where Meridian shows ~16 — a real cost for an operator, a real gain for occasional users.</div>
+      <div class="phead">
+        <div><h2>Asset Templates</h2><p>Reusable attribute definitions applied to assets.</p></div>
+        <div class="pacts"><button class="btn">⭳ Export</button><button class="btn">⭱ Import</button><button class="btn pri">+ Create</button></div>
+      </div>
+      <div class="card">
+        <div class="ch" style="padding:14px 16px;gap:9px;flex-wrap:wrap;border-bottom:1px solid var(--line)">
+          <div class="inp" style="width:250px;height:34px;display:flex;align-items:center;color:var(--ink-4);font-size:12.5px">⌕ Search templates…</div>
+          <button class="btn sm">Type ▾</button><button class="btn sm">Updated ▾</button>
+          <div class="r"><span class="pill info">2 selected</span><button class="btn sm">Export</button><button class="btn sm" style="color:var(--crit)">Delete</button></div>
+        </div>
+        <div class="tbl-wrap"><table>
+          <thead><tr>
+            <th style="width:40px"><span class="chk on"></span></th>
+            <th>Template</th><th>Type</th><th>Device ID</th><th class="num">In use</th><th class="num">Attributes</th><th>Updated</th><th style="width:80px"></th>
+          </tr></thead>
+          <tbody>
+            <tr><td><span class="chk on"></span></td><td><a href="#" class="lnk" style="font-weight:600">EMS</a></td><td><span class="pill mut">Energy meter</span></td><td class="mn">energy</td><td class="num">0</td><td class="num">24</td><td style="color:var(--ink-4)">02 Aug</td><td><div class="rowact"><button class="btn sm gho">Edit</button><button class="btn sm gho">⋯</button></div></td></tr>
+            <tr><td><span class="chk on"></span></td><td><a href="#" class="lnk" style="font-weight:600">EMS_Attribute</a></td><td><span class="pill mut">Energy meter</span></td><td class="mn">energy</td><td class="num">1</td><td class="num">24</td><td style="color:var(--ink-4)">02 Aug</td><td><div class="rowact"><button class="btn sm gho">Edit</button><button class="btn sm gho">⋯</button></div></td></tr>
+            <tr><td><span class="chk"></span></td><td><a href="#" class="lnk" style="font-weight:600">Chiller Section</a></td><td><span class="pill mut">Chiller</span></td><td class="mn">energy</td><td class="num">1</td><td class="num">6</td><td style="color:var(--ink-4)">02 Aug</td><td><div class="rowact"><button class="btn sm gho">Edit</button><button class="btn sm gho">⋯</button></div></td></tr>
+            <tr><td><span class="chk"></span></td><td><a href="#" class="lnk" style="font-weight:600">Grid Section</a></td><td><span class="pill mut">Grid</span></td><td class="mn">energy</td><td class="num">1</td><td class="num">9</td><td style="color:var(--ink-4)">01 Aug</td><td><div class="rowact"><button class="btn sm gho">Edit</button><button class="btn sm gho">⋯</button></div></td></tr>
+            <tr><td><span class="chk"></span></td><td><a href="#" class="lnk" style="font-weight:600">Genset Section</a></td><td><span class="pill mut">Genset</span></td><td class="mn">energy</td><td class="num">1</td><td class="num">9</td><td style="color:var(--ink-4)">01 Aug</td><td><div class="rowact"><button class="btn sm gho">Edit</button><button class="btn sm gho">⋯</button></div></td></tr>
+            <tr><td><span class="chk"></span></td><td><a href="#" class="lnk" style="font-weight:600">RF Dryer</a></td><td><span class="pill mut">Process</span></td><td class="mn">rf-dryer</td><td class="num">0</td><td class="num">7</td><td style="color:var(--ink-4)">28 Jul</td><td><div class="rowact"><button class="btn sm gho">Edit</button><button class="btn sm gho">⋯</button></div></td></tr>
+            <tr><td><span class="chk"></span></td><td><a href="#" class="lnk" style="font-weight:600">Flow Sensor</a></td><td><span class="pill mut">Sensor</span></td><td class="mn">—</td><td class="num">0</td><td class="num">4</td><td style="color:var(--ink-4)">24 Jul</td><td><div class="rowact"><button class="btn sm gho">Edit</button><button class="btn sm gho">⋯</button></div></td></tr>
+          </tbody>
+        </table></div>
+        <div class="tfoot"><span>8 templates</span><div class="pg"><button>‹</button><button class="on">1</button><button>›</button></div></div>
+      </div>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- =================== FORM =================== -->
+<section class="screen" id="form">
+<div class="app">
+  <aside class="irail">
+    <div class="ilogo">WS</div>
+    <a href="#" title="Home">▤</a><a href="#" title="Assets">◫</a><a href="#" title="Data">◔</a>
+    <a href="#" title="AI">◈</a><a href="#" title="Alarms">◭</a><a href="#" class="on" title="Brokers">⇄</a>
+    <div class="sp"></div><a href="#" title="Settings">◇</a><a href="#" title="Help">?</a>
+  </aside>
+  <aside class="cpanel">
+    <h5>Broker Management</h5><div class="sub">1 endpoint active</div>
+    <div class="kbar">⌕ Jump to… <kbd>⌘K</kbd></div>
+    <div class="grp">Integration</div>
+    <a href="#" class="item"><i>≋</i>Broker <span class="cnt">0</span></a>
+    <a href="#" class="item on"><i>⚿</i>API Client <span class="cnt">1</span></a>
+    <a href="#" class="item"><i>➤</i>Destinations</a>
+    <a href="#" class="item"><i>⊞</i>Integration Hub</a>
+    <a href="#" class="item"><i>?</i>Guide</a>
+    <div class="cfoot"><div class="uav">DP</div><div><b>Debasish Panda</b><small>super_admin</small></div></div>
+  </aside>
+  <div class="main">
+    <div class="mtop"><span>←</span><b>New endpoint</b></div>
+    <div class="content">
+      <div class="ann"><b>Modernization note —</b> Atlas keeps forms single-column with labels above (easiest to scan, best on mobile) and moves rarely-used fields — expiry, IP allowlist — behind progressive disclosure, so the common path is three fields instead of seven.</div>
+      <div class="phead"><div><h2>Create API End Point</h2><p>Pick a project and press Create. The key and its URL are generated for you.</p></div></div>
+      <div class="form">
+        <div class="fgrp">
+          <label>Project <span>*</span></label>
+          <select class="inp"><option>EMS</option><option>＋ Create a new project…</option></select>
+          <div class="hint">Everyone assigned to this project shares this endpoint.</div>
+        </div>
+        <div class="fgrp">
+          <label>Client name</label>
+          <input class="inp" placeholder="EMS Ingest">
+          <div class="hint">Optional — leave blank to name it <b style="color:var(--ink-2)">EMS Ingest</b>.</div>
+        </div>
+        <div class="fgrp">
+          <label>Access</label>
+          <div style="border:1px solid var(--accent-line);background:var(--accent-soft);border-radius:var(--r);padding:14px 15px;display:flex;gap:12px;align-items:flex-start">
+            <span style="color:var(--ok);font-size:16px;line-height:1.2">✓</span>
+            <div><b style="color:#fff;font-size:13px">Write Telemetry</b>
+            <div style="font-size:12.5px;color:var(--ink-3);margin-top:3px;line-height:1.5">This endpoint can post telemetry and nothing else. Read access is granted by an administrator under Users → Access Control.</div></div>
+          </div>
+        </div>
+        <details class="disclose">
+          <summary>Advanced security <span class="pill mut">optional</span></summary>
+          <div class="dbody">
+            <div class="fgrp"><label>Token expiry</label><input class="inp" type="date" style="max-width:210px"><div class="hint">Leave blank for no expiry.</div></div>
+            <div class="fgrp" style="margin-bottom:0"><label>IP allowlist</label>
+              <textarea class="inp" rows="3" style="font-family:var(--mono);font-size:12px">192.168.1.10
+203.0.113.5</textarea>
+              <div class="hint">One address per line. Leave blank to allow all.</div>
+            </div>
+          </div>
+        </details>
+        <div class="fgrp" style="display:flex;align-items:center;gap:14px">
+          <span class="tog on"></span>
+          <div><b style="color:var(--ink);font-size:13px;display:block">Active immediately</b><small style="font-size:12px;color:var(--ink-4)">The endpoint accepts telemetry as soon as it is created.</small></div>
+        </div>
+        <div class="fbar"><button class="btn">Cancel</button><button class="btn pri">Create endpoint</button></div>
+      </div>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- =================== ANALYTICS =================== -->
+<section class="screen" id="anal">
+<div class="app">
+  <aside class="irail">
+    <div class="ilogo">WS</div>
+    <a href="#" title="Home">▤</a><a href="#" title="Assets">◫</a><a href="#" class="on" title="Data">◔</a>
+    <a href="#" title="AI">◈</a><a href="#" title="Alarms">◭</a><a href="#" title="Brokers">⇄</a>
+    <div class="sp"></div><a href="#" title="Settings">◇</a><a href="#" title="Help">?</a>
+  </aside>
+  <aside class="cpanel">
+    <h5>Analytics</h5><div class="sub">EMS · 24 hours</div>
+    <div class="kbar">⌕ Jump to… <kbd>⌘K</kbd></div>
+    <div class="grp">Views</div>
+    <a href="#" class="item on"><i>◔</i>Energy</a>
+    <a href="#" class="item"><i>◔</i>Demand</a>
+    <a href="#" class="item"><i>◔</i>Power quality</a>
+    <div class="grp">Series</div>
+    <a href="#" class="item"><i style="color:#3B82F6">●</i>Chiller Energy</a>
+    <a href="#" class="item"><i style="color:#22D3EE">●</i>Grid Import</a>
+    <a href="#" class="item"><i style="color:#A78BFA">●</i>Genset Output</a>
+    <a href="#" class="item" style="color:var(--ink-4)"><i>+</i>Add series</a>
+    <div class="cfoot"><div class="uav">DP</div><div><b>Debasish Panda</b><small>super_admin</small></div></div>
+  </aside>
+  <div class="main">
+    <div class="mtop"><span>☰</span><b>Analytics</b><span style="margin-left:auto">⌕</span><div class="uav">DP</div></div>
+    <div class="content">
+      <div class="phead">
+        <div><h2>Energy Analytics</h2><p>EMS · 02 Aug 2026 · 5-minute average</p></div>
+        <div class="pacts"><div class="seg"><button>1h</button><button class="on">24h</button><button>7d</button><button>30d</button></div><button class="btn">⭳ Export</button></div>
+      </div>
+      <div class="grid g4" style="margin-bottom:14px">
+        <div class="card mini cb"><div class="lbl">Consumption</div><div class="val">968.87<small>kWh</small></div><span class="delta up">▲ 8.1%</span></div>
+        <div class="card mini cb"><div class="lbl">Peak demand</div><div class="val">58.4<small>kW</small></div><span class="pill warn">78% of limit</span></div>
+        <div class="card mini cb"><div class="lbl">Load factor</div><div class="val">0.71</div><span class="delta up">▲ 0.04</span></div>
+        <div class="card mini cb"><div class="lbl">Cost estimate</div><div class="val">₹7.8<small>k</small></div><span class="delta dn">▼ 2.3%</span></div>
+      </div>
+      <div class="card" style="margin-bottom:14px">
+        <div class="ch"><h3>Consumption with control limits</h3><div class="r"><span class="pill mut">avg</span><span class="pill crit">1 excursion</span><button class="btn sm gho">⚙</button></div></div>
+        <div class="cb">
+          <svg class="chart" style="height:260px" viewBox="0 0 900 260" preserveAspectRatio="none">
+            <g stroke="#20242E" stroke-width="1">
+              <line x1="46" y1="26" x2="890" y2="26"/><line x1="46" y1="72" x2="890" y2="72"/>
+              <line x1="46" y1="118" x2="890" y2="118"/><line x1="46" y1="164" x2="890" y2="164"/><line x1="46" y1="210" x2="890" y2="210"/>
+            </g>
+            <rect x="46" y="26" width="844" height="22" fill="#F87171" opacity=".07"/>
+            <line x1="46" y1="48" x2="890" y2="48" stroke="#F87171" stroke-width="1" stroke-dasharray="6 4"/>
+            <text x="884" y="43" text-anchor="end" style="font-size:10px;fill:#F87171;font-family:var(--f)">UCL 55</text>
+            <line x1="46" y1="118" x2="890" y2="118" stroke="#5F6A7B" stroke-width="1" stroke-dasharray="3 4"/>
+            <text x="884" y="113" text-anchor="end" style="font-size:10px;fill:#8B96A8;font-family:var(--f)">CL 33</text>
+            <text class="axis" x="40" y="30" text-anchor="end">60</text><text class="axis" x="40" y="76" text-anchor="end">45</text>
+            <text class="axis" x="40" y="122" text-anchor="end">30</text><text class="axis" x="40" y="168" text-anchor="end">15</text>
+            <path d="M52,152 L122,134 L192,142 L262,106 L332,114 L402,76 L472,90 L542,60 L612,74 L682,44 L752,62 L822,52 L886,68" fill="none" stroke="#3B82F6" stroke-width="2.4"/>
+            <path d="M52,152 L122,134 L192,142 L262,106 L332,114 L402,76 L472,90 L542,60 L612,74 L682,44 L752,62 L822,52 L886,68 L886,210 L52,210 Z" fill="url(#g3)"/>
+            <defs><linearGradient id="g3" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#3B82F6" stop-opacity=".2"/><stop offset="1" stop-color="#3B82F6" stop-opacity="0"/></linearGradient></defs>
+            <circle cx="682" cy="44" r="5.5" fill="#F87171" stroke="#0A0C11" stroke-width="2.5"/>
+            <path d="M52,180 L122,172 L192,176 L262,160 L332,164 L402,148 L472,154 L542,142 L612,148 L682,136 L752,144 L822,138 L886,146" fill="none" stroke="#22D3EE" stroke-width="2.4"/>
+            <path d="M52,198 L122,194 L192,196 L262,188 L332,190 L402,182 L472,186 L542,178 L612,182 L682,174 L752,180 L822,176 L886,182" fill="none" stroke="#A78BFA" stroke-width="2.4"/>
+            <text class="axis" x="52" y="236">00:00</text><text class="axis" x="262" y="236">06:00</text>
+            <text class="axis" x="472" y="236">12:00</text><text class="axis" x="682" y="236">18:00</text>
+          </svg>
+          <div class="legend"><span><i style="background:#3B82F6"></i>Chiller Energy</span><span><i style="background:#22D3EE"></i>Grid Import</span><span><i style="background:#A78BFA"></i>Genset Output</span></div>
+        </div>
+      </div>
+      <div class="grid g3">
+        <div class="card"><div class="ch"><h3>By section</h3></div><div class="tbl-wrap"><table>
+          <thead><tr><th>Section</th><th class="num">kWh</th><th class="num">Share</th></tr></thead>
+          <tbody>
+            <tr><td>Chiller</td><td class="num" style="color:#fff">512.40</td><td class="num">52.9%</td></tr>
+            <tr><td>Grid</td><td class="num" style="color:#fff">301.18</td><td class="num">31.1%</td></tr>
+            <tr><td>Genset</td><td class="num" style="color:#fff">155.29</td><td class="num">16.0%</td></tr>
+          </tbody></table></div></div>
+        <div class="card"><div class="ch"><h3>Hourly</h3></div><div class="cb">
+          <svg class="chart" style="height:158px" viewBox="0 0 320 158" preserveAspectRatio="none">
+            <g fill="#3B82F6">
+              <rect x="6" y="100" width="11" height="44" rx="3"/><rect x="24" y="108" width="11" height="36" rx="3"/>
+              <rect x="42" y="114" width="11" height="30" rx="3"/><rect x="60" y="104" width="11" height="40" rx="3"/>
+              <rect x="78" y="86" width="11" height="58" rx="3"/><rect x="96" y="64" width="11" height="80" rx="3"/>
+              <rect x="114" y="46" width="11" height="98" rx="3"/><rect x="132" y="34" width="11" height="110" rx="3"/>
+              <rect x="150" y="28" width="11" height="116" rx="3"/><rect x="168" y="32" width="11" height="112" rx="3"/>
+              <rect x="186" y="40" width="11" height="104" rx="3"/><rect x="204" y="52" width="11" height="92" rx="3"/>
+              <rect x="222" y="20" width="11" height="124" rx="3" fill="#F87171"/>
+              <rect x="240" y="58" width="11" height="86" rx="3"/><rect x="258" y="74" width="11" height="70" rx="3"/>
+              <rect x="276" y="90" width="11" height="54" rx="3"/><rect x="294" y="102" width="11" height="42" rx="3"/>
+            </g>
+          </svg>
+          <div class="legend"><span><i style="background:#F87171"></i>Peak 18:00</span></div>
+        </div></div>
+        <div class="card"><div class="ch"><h3>Data quality</h3></div><div class="cb">
+          <div class="srow" style="padding:9px 0"><div class="t"><b>Coverage</b><small>288 of 288 intervals</small></div><span class="pill ok">100%</span></div>
+          <div class="srow" style="padding:9px 0"><div class="t"><b>Gaps</b><small>no missing windows</small></div><span class="pill ok">None</span></div>
+          <div class="srow" style="padding:9px 0"><div class="t"><b>Dropped tags</b><small>not declared on any asset</small></div><span class="pill warn">2</span></div>
+          <div class="note" style="margin-top:12px;font-size:12px"><span>ⓘ</span><span><span class="mn" style="font-size:11.5px">wtd_cum_kwh</span> and <span class="mn" style="font-size:11.5px">mtd_cum_kwh</span> arrived but are not declared. <a href="#" class="lnk">Declare →</a></span></div>
+        </div></div>
+      </div>
+    </div>
+  </div>
+</div>
+</section>
+
+<!-- =================== SETTINGS =================== -->
+<section class="screen" id="set">
+<div class="app">
+  <aside class="irail">
+    <div class="ilogo">WS</div>
+    <a href="#" title="Home">▤</a><a href="#" title="Assets">◫</a><a href="#" title="Data">◔</a>
+    <a href="#" title="AI">◈</a><a href="#" title="Alarms">◭</a><a href="#" title="Brokers">⇄</a>
+    <div class="sp"></div><a href="#" class="on" title="Settings">◇</a><a href="#" title="Help">?</a>
+  </aside>
+  <aside class="cpanel">
+    <h5>Admin Center</h5><div class="sub">1 user · 1 session</div>
+    <div class="kbar">⌕ Jump to… <kbd>⌘K</kbd></div>
+    <div class="grp">Administration</div>
+    <a href="#" class="item on"><i>◉</i>Users <span class="cnt">1</span></a>
+    <a href="#" class="item"><i>◇</i>Security</a>
+    <a href="#" class="item"><i>◔</i>Notifications</a>
+    <a href="#" class="item"><i>▦</i>System</a>
+    <div class="cfoot"><div class="uav">DP</div><div><b>Debasish Panda</b><small>super_admin</small></div></div>
+  </aside>
+  <div class="main">
+    <div class="mtop"><span>☰</span><b>Access Control</b><span style="margin-left:auto">⌕</span><div class="uav">DP</div></div>
+    <div class="content">
+      <div class="phead"><div><h2>Access Control</h2><p>Enforced by the API, not only hidden in the UI.</p></div>
+      <div class="pacts"><button class="btn gho">Reset</button><button class="btn pri">Save changes</button></div></div>
+      <div class="slay">
+        <nav class="snav">
+          <a href="#">Profile</a><a href="#" class="on">Access Control</a><a href="#">Sessions</a>
+          <a href="#">Password policy</a><a href="#">Notifications</a><a href="#">Appearance</a>
+        </nav>
+        <div>
+          <div class="card" style="margin-bottom:14px"><div class="cb" style="display:flex;align-items:center;gap:14px">
+            <div class="uav" style="width:46px;height:46px;border-radius:12px;font-size:16px">DP</div>
+            <div style="flex:1"><b style="color:#fff;font-size:16px;font-weight:650;display:block">Debasish Panda</b>
+            <span style="font-size:12.5px;color:var(--ink-4)">debasish.panda@websynergies.com</span></div>
+            <span class="pill info">super_admin</span><span class="pill ok">active</span>
+          </div></div>
+          <div class="card" style="margin-bottom:14px">
+            <div class="ch"><h3>Module permissions</h3><div class="r"><span style="font-size:11.5px;color:var(--ink-4)">R · W · D</span></div></div>
+            <div class="cb" style="padding:4px 16px 14px">
+              <div class="srow"><div class="t"><b>Asset Management</b><small>Assets, templates, media</small></div>
+                <span class="chk on"></span><span class="chk on"></span><span class="chk on"></span><span class="pill mut">Role</span></div>
+              <div class="srow"><div class="t"><b>Alarm Management</b><small>Rules, acknowledge, history</small></div>
+                <span class="chk on"></span><span class="chk on"></span><span class="chk on"></span><span class="pill mut">Role</span></div>
+              <div class="srow" style="background:var(--warn-soft);margin:0 -16px;padding:15px 16px;border-radius:var(--r-sm)"><div class="t"><b>Broker Management</b><small>Brokers, destinations</small></div>
+                <span class="chk on"></span><span class="chk on"></span><span class="chk"></span><span class="pill warn">Overridden</span></div>
+              <div class="srow"><div class="t"><b>Visualization</b><small>Dashboards, widgets</small></div>
+                <span class="chk on"></span><span class="chk on"></span><span class="chk on"></span><span class="pill mut">Role</span></div>
+            </div>
+          </div>
+          <div class="card">
+            <div class="ch"><h3>API Clients — grantable scopes</h3></div>
+            <div class="cb" style="padding:4px 16px 14px">
+              <p style="font-size:12.5px;color:var(--ink-3);padding:8px 0 4px">When this user creates an endpoint, these are the scopes they may put on it.</p>
+              <div class="srow"><div class="t"><b>Write Telemetry</b><small class="mn">ingest:write</small></div><span class="pill info">write</span><span class="tog on"></span></div>
+              <div class="srow"><div class="t"><b>Read Assets</b><small class="mn">read:assets</small></div><span class="pill mut">read</span><span class="tog on"></span></div>
+              <div class="srow"><div class="t"><b>Read Telemetry</b><small class="mn">read:telemetry</small></div><span class="pill mut">read</span><span class="tog on"></span></div>
+              <div class="srow"><div class="t"><b>Read Alarms</b><small class="mn">read:alarms</small></div><span class="pill mut">read</span><span class="tog on"></span></div>
+              <div class="note" style="margin-top:14px"><span>ⓘ</span><span>Granting none means this user cannot create endpoints at all. Existing credentials are unaffected — checked by the API on every create.</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+</section>
+
+</div>
+</div>
+
+<script>
+function show(id, btn){
+  document.querySelectorAll('.screen').forEach(function(s){ s.classList.remove('on'); });
+  document.getElementById(id).classList.add('on');
+  document.querySelectorAll('.tabs button').forEach(function(b){ b.classList.remove('on'); });
+  btn.classList.add('on');
+  window.scrollTo({top:0, behavior:'smooth'});
+}
+function vp(mode){
+  var f = document.getElementById('frame');
+  if(mode === 'mob'){ f.classList.add('mobile'); } else { f.classList.remove('mobile'); }
+  document.getElementById('b-desk').classList.toggle('on', mode === 'desk');
+  document.getElementById('b-mob').classList.toggle('on', mode === 'mob');
+}
+</script>
+</body>
+</html>

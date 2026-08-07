@@ -9,6 +9,7 @@ import {
 } from "@workspace/api-zod";
 import { randomUUID } from "crypto";
 import { logActivity } from "./activity_log";
+import { ungrantableScopes, canCreateApiClients } from "../lib/rbac";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -96,6 +97,46 @@ router.post("/api-clients", async (req, res): Promise<void> => {
   const expiresAt   = body.expiresAt   ? new Date(body.expiresAt as string)   : null;
   const allowedIps  = Array.isArray(body.allowedIps) ? (body.allowedIps as string[]) : [];
   const description = typeof body.description === "string" ? body.description : null;
+
+  // ── Scope ceiling ──────────────────────────────────────────────────────────
+  //
+  // Enforced HERE, not only in the dialog. Hiding the read-scope checkboxes stops
+  // accidents; this stops a hand-rolled POST. `req.principal.access` is already
+  // resolved from role + per-user overrides by attachPrincipal, so the check is
+  // just a comparison.
+  //
+  // A machine caller (no principal) is unaffected — those routes are gated by
+  // apiKeyAuth scopes instead.
+  const access = req.principal?.access;
+  const requestedScopes = parsed.data.scopes ?? [];
+  if (access) {
+    if (!canCreateApiClients(access)) {
+      res.status(403).json({
+        error: "Your account is not permitted to create API credentials.",
+        code: "api_client_creation_forbidden",
+      });
+      return;
+    }
+    // An empty scopes array means "all scopes" to apiKeyAuth, so it is an
+    // escalation dressed as an omission — never accept it from a user.
+    if (requestedScopes.length === 0) {
+      res.status(400).json({
+        error: "At least one scope is required. A credential with no scopes would have full access.",
+        code: "scopes_required",
+      });
+      return;
+    }
+    const denied = ungrantableScopes(access, requestedScopes);
+    if (denied.length > 0) {
+      res.status(403).json({
+        error: `You are not permitted to grant: ${denied.join(", ")}.`,
+        code: "scope_forbidden",
+        deniedScopes: denied,
+        grantableScopes: access.apiScopes,
+      });
+      return;
+    }
+  }
 
   const projectId = typeof body.projectId === "string" && UUID_RE.test(body.projectId)
     ? body.projectId

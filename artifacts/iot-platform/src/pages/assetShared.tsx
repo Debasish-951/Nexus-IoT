@@ -15,6 +15,7 @@ import {
 } from "recharts";
 import { cn } from "@/lib/utils";
 import { format, subHours, subDays } from "date-fns";
+import { SERIES } from "@/lib/chartColors";
 
 // ── Types ───────────────────────────────────────────────────────────────────────
 export interface Asset {
@@ -177,9 +178,8 @@ const TIME_RANGES = [
   { label: "1 year", hours: 24 * 365 }, { label: "Custom", hours: -1 },
 ];
 
-export const CHART_COLORS = [
-  "#3b82f6","#22c55e","#f97316","#a855f7","#ef4444","#14b8a6","#eab308","#6366f1",
-];
+/** The shared, CVD-validated series order — see src/lib/chartColors.ts. */
+export const CHART_COLORS = SERIES;
 
 // ── Trends Panel ──────────────────────────────────────────────────────────────
 export function TrendsPanel({ assetId, attrList }: { assetId: string; attrList: any[] }) {

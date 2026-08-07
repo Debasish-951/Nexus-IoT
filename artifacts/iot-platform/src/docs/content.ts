@@ -45,15 +45,15 @@ export function buildDocumentContent(): ContentItem[] {
       "Chapter 1: Introduction & Overview",
       "Chapter 2: Navigation & Interface",
       "Chapter 3: Dashboard",
-      "Chapter 4: Asset Management",
-      "Chapter 5: Data Explorer",
-      "Chapter 6: Alarm Management",
-      "Chapter 7: Broker Management & Data Destinations",
+      "Chapter 4: Asset Hub",
+      "Chapter 5: Data Insights",
+      "Chapter 6: Event Manager",
+      "Chapter 7: Integration Hub & Data Destinations",
       "Chapter 8: Security — Users & API Clients",
       "Chapter 9: System Management",
       "Chapter 10: Visualization Dashboards",
       "Chapter 11: Live Telemetry Monitor",
-      "Chapter 12: Activity Log",
+      "Chapter 12: Audit Log",
       "Chapter 13: Payload Simulator",
       "Chapter 14: Role-Based Access Control",
     ]),
@@ -91,7 +91,7 @@ export function buildDocumentContent(): ContentItem[] {
       "Real-Time Telemetry — Stream live sensor readings to the browser via WebSocket with per-asset metric tiles and animated LIVE indicators.",
       "Alarm Rules Engine — Evaluate threshold, rate-of-change, heartbeat, and deviation rules on every ingest and fire webhook notifications.",
       "Dynamic & Runtime Attributes — Automatically update asset attribute values from incoming telemetry; compute derived values using a safe math expression engine.",
-      "Broker Management — Connect MQTT brokers, REST API sources, and Azure IoT Hubs with configurable payload mapping rules.",
+      "Integration Hub — Connect MQTT brokers, REST API sources, and Azure IoT Hubs with configurable payload mapping rules.",
       "Visualization Dashboards — Build named, persistent dashboards with 11 widget types (Line, Area, Bar, Gauge, Pie, Donut, KPI, Heatmap, Table, ScatterPlot, StackedBar) and global time-range control.",
       "Data Destinations — Forward alarm and telemetry events as HTTP POST webhooks to any external system with Bearer, API Key, or Basic Auth.",
       "Security & RBAC — Four built-in roles (Admin, Engineer, Operator, Viewer) with granular permission control applied to every UI element and route.",
@@ -132,7 +132,7 @@ export function buildDocumentContent(): ContentItem[] {
       "You will be presented with a login page. Sign in with your username (or email) and password. Once authenticated, the Dashboard loads.",
       "Your role (Admin, Engineer, Operator, or Viewer) determines which features and actions are available.",
       "Check the top-right corner for your profile and role. To work as a different role, sign out from the profile menu and log back in as that user.",
-      "Begin by navigating to Asset Management to create your first project and add assets.",
+      "Begin by navigating to Asset Hub to create your first project and add assets.",
     ]),
     pb(),
 
@@ -144,13 +144,14 @@ export function buildDocumentContent(): ContentItem[] {
       ["Group", "Pages Included"],
       [
         ["Home", "Dashboard — overview of the entire installation"],
-        ["Asset Management", "Asset Management (hierarchy + attributes), Asset Templates"],
-        ["Data Explorer", "Telemetry explorer and trend charts"],
-        ["Alarm Management", "Active Alarms, Alarm History, Alarm Rules"],
-        ["Broker Management", "Broker configuration, Data Destinations, Integration Hub, Integration Guide"],
-        ["Security", "User Management, API Clients"],
+        ["Asset Hub", "Assets (hierarchy + attributes), Asset Templates, Media Library"],
+        ["Data Insights", "Visualization, Live Twin, dashboard templates, Live Feed"],
+        ["AI Advisor", "Natural-language questions, health insights, recommendations"],
+        ["Event Manager", "Active Alarms, Alarm History, Alarm Rules"],
+        ["Integration Hub", "Broker configuration, API Clients, Destinations, Connections, Integration Guide"],
+        ["Governance", "User Management, Security Center, Notification Groups"],
         ["System", "Data Management, Reports"],
-        ["Activity Log", "Audit trail of all platform actions"],
+        ["Audit Log", "Audit trail of all platform actions"],
         ["Payload Simulator", "Browser-based device payload tester"],
       ]
     ),
@@ -159,14 +160,14 @@ export function buildDocumentContent(): ContentItem[] {
     h2("2.2 Header Bar"),
     p("The top header bar contains three main elements:"),
     ul([
-      "Broker Status Bar — A compact indicator showing the connection status of configured brokers (green = connected, amber = connecting, red = error). Clicking opens the Broker Management page.",
+      "Broker Status Bar — A compact indicator showing the connection status of configured brokers (green = connected, amber = connecting, red = error). Clicking opens the Integration Hub → Broker page.",
       "Notification Bell — Displays a badge with the count of active unacknowledged alarms. Clicking opens the Active Alarms page.",
       "User Profile Menu — Displays the logged-in user's name and role badge. Clicking opens a dropdown with options to change your password and sign out.",
     ]),
 
     h2("2.3 User Profile & Roles"),
     p("Each user signs in with their own credentials and has a single role (Admin, Engineer, Operator, or Viewer). The User Profile menu (top-right) shows your current name and role. To work under a different role, sign out and log back in as that user."),
-    p("On login, the platform automatically sends your identity in request headers (X-Actor-Name, X-Actor-Role, X-Actor-Username) so that all subsequent actions are recorded in the Activity Log under the correct identity."),
+    p("On login, the platform automatically sends your identity in request headers (X-Actor-Name, X-Actor-Role, X-Actor-Username) so that all subsequent actions are recorded in the Audit Log under the correct identity."),
     note("Login is credential-based (username/email + password). The signed-in identity and role are held for the current browser session; permissions are recalculated from the role on login."),
 
     h2("2.4 Responsive Layout"),
@@ -211,7 +212,7 @@ export function buildDocumentContent(): ContentItem[] {
     pb(),
 
     // ─── CHAPTER 4 ────────────────────────────────────────────────────────────
-    h1("Chapter 4: Asset Management"),
+    h1("Chapter 4: Asset Hub"),
     h2("4.1 Asset Hierarchy"),
     p("The platform models physical equipment using a hierarchical tree structure. The tree supports unlimited nesting. Every node in the tree is an 'Asset.' Assets at the root level are typically called Projects or Plants. Child assets represent individual machines, sub-systems, or measurement points."),
     p("For example:"),
@@ -221,11 +222,11 @@ export function buildDocumentContent(): ContentItem[] {
   │     └── Cooling Tower
   ├── Electrical Panel
   └── Solar Array`),
-    p("This hierarchy is displayed in the left panel of the Asset Management page. Each row shows the asset name, identifier, type, and maintenance status."),
+    p("This hierarchy is displayed in the left panel of the Assets page. Each row shows the asset name, identifier, type, and maintenance status."),
 
     h2("4.2 Creating a Root Project"),
     ol([
-      "Navigate to Asset Management from the left sidebar.",
+      "Navigate to Asset Hub → Assets from the left sidebar.",
       "Click the '+ Add New' button at the top of the asset panel or the 'New Root Project' button at the bottom of the tree.",
       "Enter the project Name (required) and optionally an Identifier, Description, and Asset Type.",
       "The Identifier field is critical — it must exactly match the 'deviceId' value sent by the physical device that will report data for this asset.",
@@ -289,7 +290,7 @@ export function buildDocumentContent(): ContentItem[] {
     p("Templates allow you to define a reusable set of attributes that can be stamped onto multiple assets. This is useful when many assets of the same type share the same attribute structure (e.g., all chillers have the same 8 monitoring points)."),
     h3("Creating a Template"),
     ol([
-      "Navigate to Asset Management → Asset Templates from the sidebar.",
+      "Navigate to Asset Hub → Asset Templates from the sidebar.",
       "Click 'New Template' and enter a name and description.",
       "Add attributes to the template exactly as you would for an individual asset, including expressions for runtime attributes.",
       "Save the template.",
@@ -361,7 +362,7 @@ export function buildDocumentContent(): ContentItem[] {
     pb(),
 
     // ─── CHAPTER 5 ────────────────────────────────────────────────────────────
-    h1("Chapter 5: Data Explorer"),
+    h1("Chapter 5: Data Insights"),
     h2("5.1 Overview"),
     p("The Data Explorer page provides an advanced telemetry query interface for exploring historical sensor data across all assets. Unlike the Trends tab (which is scoped to one asset), the Data Explorer allows cross-asset queries and more detailed time-range control."),
 
@@ -393,7 +394,7 @@ export function buildDocumentContent(): ContentItem[] {
     pb(),
 
     // ─── CHAPTER 6 ────────────────────────────────────────────────────────────
-    h1("Chapter 6: Alarm Management"),
+    h1("Chapter 6: Event Manager"),
     h2("6.1 Active Alarms"),
     p("The Active Alarms page shows all alarm instances that are currently active or acknowledged. Alarms are triggered automatically by the alarm rules engine whenever a telemetry value violates a configured rule."),
     p("Each alarm record shows:"),
@@ -431,11 +432,11 @@ export function buildDocumentContent(): ContentItem[] {
 
     h2("6.4 Acknowledging Alarms"),
     ol([
-      "Navigate to Alarm Management → Active Alarms.",
+      "Navigate to Event Manager → Alarm List.",
       "Locate the alarm to acknowledge.",
       "Click the 'Acknowledge' button in the alarm row.",
       "The status changes to 'Acknowledged' and the acknowledgedAt timestamp is recorded.",
-      "The action is also recorded in the Activity Log with the actor's identity.",
+      "The action is also recorded in the Audit Log with the actor's identity.",
     ]),
 
     h2("6.5 Filtering Alarms"),
@@ -503,7 +504,7 @@ export function buildDocumentContent(): ContentItem[] {
     pb(),
 
     // ─── CHAPTER 7 ────────────────────────────────────────────────────────────
-    h1("Chapter 7: Broker Management & Data Destinations"),
+    h1("Chapter 7: Integration Hub & Data Destinations"),
     h2("7.1 Broker Types"),
     p("The platform supports three broker types for receiving data from external systems:"),
     table(
@@ -517,7 +518,7 @@ export function buildDocumentContent(): ContentItem[] {
 
     h2("7.2 Creating an MQTT Broker"),
     ol([
-      "Navigate to Broker Management → Broker.",
+      "Navigate to Integration Hub → Broker.",
       "Click 'Add Broker' and select type: MQTT.",
       "Enter the broker configuration:",
     ]),
@@ -554,7 +555,7 @@ export function buildDocumentContent(): ContentItem[] {
 
     h3("7.5.1 Creating a Destination"),
     ol([
-      "Navigate to Broker Management → Destinations.",
+      "Navigate to Integration Hub → Destinations.",
       "Click 'Add Destination'.",
       "Fill in the destination configuration:",
     ]),
@@ -919,9 +920,9 @@ export function buildDocumentContent(): ContentItem[] {
     pb(),
 
     // ─── CHAPTER 12 ───────────────────────────────────────────────────────────
-    h1("Chapter 12: Activity Log"),
+    h1("Chapter 12: Audit Log"),
     h2("12.1 Overview"),
-    p("The Activity Log (/activity-log) is an immutable audit trail recording every significant action taken on the platform. It cannot be edited or deleted. It is the authoritative record for compliance, security auditing, and change management."),
+    p("The Audit Log (/activity-log) is an immutable audit trail recording every significant action taken on the platform. It cannot be edited or deleted. It is the authoritative record for compliance, security auditing, and change management."),
 
     h2("12.2 Logged Actions"),
     table(
@@ -1027,7 +1028,7 @@ export function buildDocumentContent(): ContentItem[] {
     ),
 
     h2("14.3 ReadOnly Banner"),
-    p("On pages where the active role cannot perform write actions, an amber ReadOnly Banner is displayed at the top of the page explaining the limitation. For example, on the Alarm Management page, a Viewer sees: 'Read-only — Viewers cannot create or modify alarm rules.'"),
+    p("On pages where the active role cannot perform write actions, an amber ReadOnly Banner is displayed at the top of the page explaining the limitation. For example, on the Alarm Rule page, a Viewer sees: 'Read-only — Viewers cannot create or modify alarm rules.'"),
 
     h2("14.4 RoleGuard"),
     p("The platform uses a RoleGuard component that wraps UI elements:"),
@@ -1041,7 +1042,7 @@ export function buildDocumentContent(): ContentItem[] {
     code("http", `X-Actor-Name: Debasish Panda
 X-Actor-Role: admin
 X-Actor-Username: Deb`),
-    p("These headers allow the API server to record the correct actor identity in the Activity Log without requiring a separate authentication middleware on every route."),
+    p("These headers allow the API server to record the correct actor identity in the Audit Log without requiring a separate authentication middleware on every route."),
     pb(),
 
     // ═══════════════════════════════════════════════════════════════════════════

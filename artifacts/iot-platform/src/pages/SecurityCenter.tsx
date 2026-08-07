@@ -467,7 +467,7 @@ export default function SecurityCenter() {
       <p className="flex items-center gap-1.5 text-[11px] text-muted-foreground">
         <UsersIcon className="h-3 w-3" />
         Viewing as {currentUser?.fullName}. Security events are retained
-        independently of the Activity Log and survive user deletion.
+        independently of the Audit Log and survive user deletion.
       </p>
     </div>
   );

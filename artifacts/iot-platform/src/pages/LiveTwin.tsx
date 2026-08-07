@@ -18,6 +18,7 @@ import { REFRESH_INTERVALS } from "@/features/dashboards/timeRange";
 import { ColorField } from "@/features/dashboards/ColorField";
 import { useWsEvents } from "@/hooks/useWsEvents";
 import { newId } from "@/features/dashboards/useDashboards";
+import { SERIES } from "@/lib/chartColors";
 
 // ── Live Twin ────────────────────────────────────────────────────────────────
 // A digital-twin view: drop a plant layout / machine photo in as the backdrop,
@@ -49,7 +50,8 @@ interface Twin {
 }
 interface MediaItem { id: string; name: string; url: string }
 
-const PALETTE = ["#06b6d4", "#22C55E", "#a855f7", "#F59E0B", "#EF4444", "#6366f1", "#ec4899", "#14b8a6"];
+/** Shared, CVD-validated series order — see src/lib/chartColors.ts. */
+const PALETTE = SERIES;
 
 function readTwins(): Twin[] {
   try { const r = localStorage.getItem(TWINS_KEY); const a = r ? JSON.parse(r) : []; return Array.isArray(a) ? a : []; } catch { return []; }

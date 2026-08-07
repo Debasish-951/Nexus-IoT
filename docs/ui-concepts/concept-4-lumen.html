@@ -1,0 +1,792 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Concept 4 — Lumen | WS-Integrated Suite UI Modernization</title>
+<style>
+/* ============================================================
+   CONCEPT 4 — LUMEN  ·  Executive Light / Editorial
+   Lineage: Bloomberg Green, FT/Economist data journalism,
+   Stripe Dashboard, McKinsey report design
+   Philosophy: built for the person who REVIEWS, not operates.
+   Typography carries the hierarchy — a serif display face against
+   a clean sans body. Charts are captioned and annotated like
+   figures in a report. Prints and exports to PDF cleanly.
+   ============================================================ */
+:root{
+  --paper:#FBFAF7; --card:#FFFFFF; --sunk:#F3F1EC; --band:#EFEDE7;
+  --ink:#14171C; --ink-2:#3D444F; --ink-3:#6B7280; --ink-4:#9AA1AB;
+  --line:#E2DFD8; --line-2:#C9C5BC;
+  --navy:#1B3A5C; --navy-2:#2E5C8A; --navy-soft:#EAF0F6; --navy-line:#B9CDE0;
+  --gold:#8A6D1F;
+  --ok:#1F6B4A; --ok-soft:#E8F2EC;
+  --warn:#8A5A1B; --warn-soft:#F7EFE1;
+  --crit:#8F2222; --crit-soft:#F7E7E7;
+  --r:4px;
+  --serif:Georgia,"Times New Roman",Cambria,serif;
+  --sans:"Segoe UI",system-ui,-apple-system,Roboto,"Helvetica Neue",sans-serif;
+  --mono:Consolas,"Cascadia Mono",ui-monospace,"SF Mono",Menlo,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#E8E5DE;color:var(--ink-2);font-family:var(--sans);font-size:13.5px;line-height:1.6;-webkit-font-smoothing:antialiased}
+/* ---------- Concept chrome ---------- */
+.meta{background:#14171C;color:#C2C7CF;padding:20px 26px}
+.meta h1{font-family:var(--serif);font-size:24px;color:#fff;font-weight:400;letter-spacing:-.2px}
+.meta .tag{display:inline-block;font-family:var(--sans);font-size:10px;letter-spacing:.15em;text-transform:uppercase;color:#B9CDE0;border:1px solid #2E3B4A;padding:3px 9px;margin-bottom:10px}
+.meta p{font-size:13px;max-width:96ch;margin-top:9px;color:#98A0AB}
+.specs{display:flex;flex-wrap:wrap;gap:24px;margin-top:16px;font-size:11.5px}
+.specs section{min-width:150px}
+.specs h4{font-size:9.5px;letter-spacing:.14em;text-transform:uppercase;color:#6B7280;margin-bottom:7px;font-weight:600}
+.sw{display:flex;gap:4px}.sw i{width:24px;height:24px;border-radius:3px;display:block;border:1px solid rgba(255,255,255,.1)}
+.specs code{font-family:var(--mono);font-size:10.5px;color:#A8AFB9;display:block;line-height:1.75}
+.vpbar{display:flex;gap:0;align-items:center;background:#1C2027;padding:10px 26px}
+.vpbar span{font-size:10px;letter-spacing:.13em;text-transform:uppercase;color:#6B7280;margin-right:12px}
+.vpbar button{font-family:var(--sans);font-size:11.5px;background:transparent;color:#98A0AB;border:1px solid #333B47;padding:6px 15px;cursor:pointer}
+.vpbar button:last-of-type{border-left:0}
+.vpbar button.on{background:#B9CDE0;color:#14171C;border-color:#B9CDE0;font-weight:600}
+.tabs{display:flex;background:var(--paper);border-bottom:1px solid var(--line-2);padding:0 26px;overflow-x:auto}
+.tabs button{font-family:var(--sans);font-size:12.5px;background:none;border:0;border-bottom:2px solid transparent;padding:12px 15px;color:var(--ink-3);cursor:pointer;white-space:nowrap}
+.tabs button.on{color:var(--navy);border-bottom-color:var(--navy);font-weight:600}
+.stage{padding:26px;display:flex;justify-content:center}
+.frame{width:100%;max-width:1400px;background:var(--paper);border:1px solid var(--line-2);border-radius:var(--r);overflow:hidden;box-shadow:0 3px 14px rgba(20,23,28,.1)}
+.frame.mobile{max-width:390px;box-shadow:0 12px 36px rgba(20,23,28,.22)}
+.screen{display:none}.screen.on{display:block}
+/* ---------- Horizontal top navigation ---------- */
+.topnav{background:var(--card);border-bottom:1px solid var(--line-2)}
+.tn1{display:flex;align-items:center;padding:0 22px;height:56px;gap:16px}
+.brand{display:flex;align-items:center;gap:10px}
+.brand .logo{width:30px;height:30px;background:var(--navy);border-radius:3px;display:grid;place-items:center;color:#fff;font-family:var(--serif);font-size:13px;font-weight:700}
+.brand b{font-family:var(--serif);font-size:16px;color:var(--ink);font-weight:400;letter-spacing:-.1px}
+.brand small{display:block;font-size:9.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-4);margin-top:-2px}
+.tn1 .sp{flex:1}
+.gsearch{background:var(--sunk);border:1px solid var(--line);border-radius:3px;height:32px;width:270px;display:flex;align-items:center;padding:0 11px;gap:8px;font-size:12.5px;color:var(--ink-4)}
+.frame.mobile .gsearch{display:none}
+.ico{width:32px;height:32px;border-radius:3px;display:grid;place-items:center;font-size:14px;color:var(--ink-3);position:relative;border:1px solid var(--line)}
+.badge{position:absolute;top:-5px;right:-5px;min-width:16px;height:16px;background:var(--crit);color:#fff;border-radius:9px;font-size:9.5px;display:grid;place-items:center;padding:0 4px;font-weight:700;border:1.5px solid var(--card)}
+.uchip{display:flex;align-items:center;gap:8px;padding:4px 9px 4px 4px;border:1px solid var(--line);border-radius:3px}
+.avatar{width:24px;height:24px;border-radius:2px;background:var(--navy);color:#fff;display:grid;place-items:center;font-size:10px;font-weight:700}
+.uchip b{font-size:12px;color:var(--ink);font-weight:600}
+.frame.mobile .uchip b{display:none}
+.tn2{display:flex;align-items:center;padding:0 22px;gap:2px;height:42px;border-top:1px solid var(--line);overflow-x:auto}
+.frame.mobile .tn2{display:none}
+.tn2 a{font-size:13px;color:var(--ink-2);text-decoration:none;padding:9px 13px;border-bottom:2px solid transparent;white-space:nowrap;display:flex;align-items:center;gap:6px}
+.tn2 a:hover{color:var(--navy)}
+.tn2 a.on{color:var(--navy);border-bottom-color:var(--navy);font-weight:600}
+.tn2 a span.c{font-size:10.5px;background:var(--sunk);border-radius:9px;padding:1px 6px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.mtop{display:none}
+.frame.mobile .mtop{display:flex;align-items:center;padding:0 16px;height:52px;gap:12px;border-bottom:1px solid var(--line)}
+.frame.mobile .mtop b{font-family:var(--serif);font-size:16px;color:var(--ink)}
+.btabs{display:none}
+.frame.mobile .btabs{display:flex;background:var(--card);border-top:1px solid var(--line-2)}
+.btabs a{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:9.5px;color:var(--ink-4);text-decoration:none;padding:9px 0}
+.btabs a.on{color:var(--navy)}
+.btabs a i{font-style:normal;font-size:16px}
+/* ---------- Content: report column ---------- */
+.wrap{padding:26px 22px;min-height:600px}
+.frame.mobile .wrap{padding:16px}
+.rcol{max-width:1120px;margin:0 auto}
+.crumb{font-size:11.5px;color:var(--ink-4);margin-bottom:12px;letter-spacing:.02em}
+.crumb b{color:var(--ink-3);font-weight:400}
+.rhead{border-bottom:2px solid var(--ink);padding-bottom:16px;margin-bottom:22px}
+.rhead .kicker{font-size:10px;letter-spacing:.16em;text-transform:uppercase;color:var(--navy-2);font-weight:700;margin-bottom:7px}
+.rhead h1{font-family:var(--serif);font-size:32px;color:var(--ink);font-weight:400;letter-spacing:-.6px;line-height:1.15}
+.frame.mobile .rhead h1{font-size:24px}
+.rhead .stand{font-size:14.5px;color:var(--ink-3);max-width:70ch;margin-top:9px;line-height:1.6}
+.rhead .byline{display:flex;gap:18px;flex-wrap:wrap;margin-top:14px;font-size:11.5px;color:var(--ink-4)}
+.rhead .byline b{color:var(--ink-2);font-weight:600}
+.acts{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px}
+.btn{font-family:var(--sans);font-size:12.5px;padding:7px 14px;border-radius:3px;border:1px solid var(--line-2);background:var(--card);color:var(--ink-2);cursor:pointer;display:inline-flex;align-items:center;gap:7px;font-weight:500}
+.btn:hover{background:var(--sunk)}
+.btn.pri{background:var(--navy);border-color:var(--navy);color:#fff}
+.btn.pri:hover{background:#15304C}
+.btn.sm{padding:5px 10px;font-size:11.5px}
+.seg{display:inline-flex;border:1px solid var(--line-2);border-radius:3px;overflow:hidden}
+.seg button{font-family:var(--sans);font-size:11.5px;padding:5px 12px;background:var(--card);border:0;border-right:1px solid var(--line);color:var(--ink-3);cursor:pointer}
+.seg button:last-child{border-right:0}
+.seg button.on{background:var(--navy);color:#fff;font-weight:600}
+/* Section headings — editorial */
+.sect{margin-bottom:30px}
+.sh{display:flex;align-items:baseline;gap:12px;border-bottom:1px solid var(--line-2);padding-bottom:8px;margin-bottom:16px}
+.sh .n{font-family:var(--serif);font-size:13px;color:var(--navy-2);font-weight:700;flex:0 0 auto}
+.sh h2{font-family:var(--serif);font-size:20px;color:var(--ink);font-weight:400;letter-spacing:-.3px}
+.sh .r{margin-left:auto;display:flex;gap:7px;align-items:center}
+.lede{font-size:14px;color:var(--ink-2);max-width:72ch;margin-bottom:16px;line-height:1.65}
+.lede b{color:var(--ink);font-weight:600}
+/* Figures */
+.fig{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:18px;margin-bottom:16px}
+.fig .fnum{font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--navy-2);font-weight:700;margin-bottom:5px}
+.fig h3{font-family:var(--serif);font-size:16px;color:var(--ink);font-weight:400;margin-bottom:3px}
+.fig .sub{font-size:12px;color:var(--ink-4);margin-bottom:15px}
+.fig .cap{font-size:12.5px;color:var(--ink-3);border-top:1px solid var(--line);margin-top:14px;padding-top:11px;line-height:1.6;max-width:76ch}
+.fig .cap b{color:var(--ink-2);font-weight:600}
+.chart{width:100%;height:230px;display:block}
+.legend{display:flex;gap:18px;flex-wrap:wrap;padding-top:12px;font-size:12px;color:var(--ink-3)}
+.legend span{display:flex;align-items:center;gap:6px}
+.legend i{width:14px;height:2.5px;display:block}
+.axis{font-size:10px;fill:var(--ink-4);font-family:var(--sans)}
+/* KPI — contextual, with a sentence */
+.kgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:20px}
+.frame.mobile .kgrid{grid-template-columns:1fr}
+.kc{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:16px}
+.kc .lbl{font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--ink-4);font-weight:700}
+.kc .val{font-family:var(--serif);font-size:34px;color:var(--ink);font-weight:400;letter-spacing:-1px;line-height:1.1;margin:9px 0 2px;font-variant-numeric:tabular-nums}
+.kc .val small{font-family:var(--sans);font-size:14px;color:var(--ink-3);letter-spacing:0}
+.kc .say{font-size:12.5px;color:var(--ink-3);line-height:1.55;margin-top:7px}
+.kc .say b{font-weight:600}
+.kc .say b.up{color:var(--ok)}.kc .say b.dn{color:var(--crit)}
+/* Tables — editorial, subtotals */
+.tbl{background:var(--card);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.tbl-wrap{overflow-x:auto}
+table{width:100%;border-collapse:collapse;font-size:13px}
+caption{caption-side:top;text-align:left;padding:15px 18px 0;font-family:var(--serif);font-size:16px;color:var(--ink);font-weight:400}
+thead th{text-align:left;padding:10px 18px;font-size:10.5px;letter-spacing:.1em;text-transform:uppercase;color:var(--ink-4);font-weight:700;white-space:nowrap;border-bottom:1.5px solid var(--ink)}
+tbody td{padding:11px 18px;color:var(--ink-2);border-bottom:1px solid var(--line);vertical-align:middle}
+tbody tr:hover{background:var(--sunk)}
+tbody tr:hover .rowact{opacity:1}
+tbody tr.sub td{background:var(--band);border-top:1.5px solid var(--line-2);border-bottom:0;font-weight:600;color:var(--ink)}
+.num{text-align:right;font-variant-numeric:tabular-nums;white-space:nowrap}
+.mn{font-family:var(--mono);font-size:11.5px;color:var(--ink-3)}
+.lnk{color:var(--navy-2);text-decoration:none;font-weight:600}
+.lnk:hover{text-decoration:underline}
+.rowact{opacity:0;display:flex;gap:5px;transition:opacity .12s}
+.pill{font-size:10.5px;padding:2px 8px;border-radius:3px;font-weight:600;white-space:nowrap;border:1px solid transparent}
+.pill.ok{background:var(--ok-soft);color:var(--ok);border-color:#BFDCCC}
+.pill.warn{background:var(--warn-soft);color:var(--warn);border-color:#E5CFA8}
+.pill.crit{background:var(--crit-soft);color:var(--crit);border-color:#E3BEBE}
+.pill.info{background:var(--navy-soft);color:var(--navy);border-color:var(--navy-line)}
+.pill.mut{background:var(--sunk);color:var(--ink-3);border-color:var(--line)}
+.chk{width:15px;height:15px;border:1px solid var(--line-2);border-radius:2px;display:inline-block;vertical-align:middle;background:var(--card)}
+.chk.on{background:var(--navy);border-color:var(--navy);position:relative}
+.chk.on:after{content:"";position:absolute;left:4px;top:1.5px;width:4px;height:8px;border:solid #fff;border-width:0 1.8px 1.8px 0;transform:rotate(45deg)}
+.tfoot{padding:11px 18px;border-top:1px solid var(--line);display:flex;align-items:center;gap:10px;font-size:12px;color:var(--ink-4);background:var(--sunk);flex-wrap:wrap}
+.pg{display:flex;margin-left:auto}
+.pg button{font-family:var(--sans);width:28px;height:28px;border:1px solid var(--line-2);background:var(--card);color:var(--ink-2);font-size:12px;cursor:pointer;border-right:0}
+.pg button:last-child{border-right:1px solid var(--line-2)}
+.pg button.on{background:var(--navy);border-color:var(--navy);color:#fff}
+/* Forms — generous, single column, help text */
+.form{max-width:640px}
+.fgrp{margin-bottom:22px;padding-bottom:22px;border-bottom:1px solid var(--line)}
+.fgrp:last-of-type{border-bottom:0}
+.fgrp>label{display:block;font-family:var(--serif);font-size:15px;color:var(--ink);font-weight:400;margin-bottom:3px}
+.fgrp>label span{color:var(--crit);font-family:var(--sans)}
+.fgrp .help{font-size:12.5px;color:var(--ink-3);margin-bottom:9px;line-height:1.55;max-width:64ch}
+.inp{width:100%;height:38px;border:1px solid var(--line-2);border-radius:3px;background:var(--card);padding:0 12px;font-family:var(--sans);font-size:13.5px;color:var(--ink)}
+.inp::placeholder{color:var(--ink-4)}
+.inp:focus{outline:0;border-color:var(--navy);box-shadow:0 0 0 3px var(--navy-soft)}
+textarea.inp{height:auto;padding:10px 12px;resize:vertical;line-height:1.55}
+select.inp{cursor:pointer}
+.tog{width:38px;height:21px;border-radius:11px;background:var(--line-2);position:relative;display:inline-block;flex:0 0 38px;cursor:pointer}
+.tog:after{content:"";position:absolute;top:2.5px;left:2.5px;width:16px;height:16px;border-radius:50%;background:#fff}
+.tog.on{background:var(--navy)}.tog.on:after{left:19.5px}
+.fbar{display:flex;gap:9px;justify-content:flex-end;padding-top:6px;border-top:1px solid var(--line-2);margin-top:6px;padding-top:18px}
+.note{border-left:3px solid var(--navy-2);background:var(--navy-soft);border-radius:0 var(--r) var(--r) 0;padding:13px 16px;font-size:12.5px;color:var(--ink-2);line-height:1.6}
+.note b{color:var(--navy)}
+.ann{border-left:3px solid var(--gold);background:var(--warn-soft);border-radius:0 var(--r) var(--r) 0;padding:12px 16px;font-size:12.5px;color:var(--warn);margin-bottom:20px;line-height:1.6}
+.ann b{color:#6B4A12;font-weight:700}
+/* Settings */
+.slay{display:grid;grid-template-columns:210px 1fr;gap:26px}
+.frame.mobile .slay{grid-template-columns:1fr}
+.snav a{display:block;padding:9px 13px;font-size:13px;color:var(--ink-2);text-decoration:none;border-left:2px solid transparent}
+.snav a:hover{color:var(--navy)}
+.snav a.on{border-left-color:var(--navy);color:var(--navy);font-weight:600;background:var(--navy-soft)}
+.kv{display:grid;grid-template-columns:200px 1fr;gap:11px 18px;font-size:13px}
+.frame.mobile .kv{grid-template-columns:1fr;gap:3px 0}
+.kv dt{color:var(--ink-4)}.kv dd{color:var(--ink)}
+.srow{display:flex;align-items:center;gap:16px;padding:15px 0;border-bottom:1px solid var(--line)}
+.srow:last-child{border-bottom:0}
+.srow .t{flex:1}
+.srow b{font-size:13.5px;color:var(--ink);font-weight:600;display:block}
+.srow small{font-size:12.5px;color:var(--ink-3)}
+.hero-cards{display:grid;grid-template-columns:repeat(4,1fr);gap:16px;margin-bottom:22px}
+.frame.mobile .hero-cards{grid-template-columns:1fr}
+.hc{background:var(--card);border:1px solid var(--line);border-radius:var(--r);padding:18px;text-decoration:none;display:block}
+.hc:hover{border-color:var(--navy-line);box-shadow:0 2px 8px rgba(27,58,92,.07)}
+.hc .n{font-family:var(--serif);font-size:12px;color:var(--navy-2);font-weight:700;margin-bottom:9px}
+.hc h3{font-family:var(--serif);font-size:17px;color:var(--ink);font-weight:400;margin-bottom:5px}
+.hc p{font-size:12.5px;color:var(--ink-3);line-height:1.55}
+.hc .f{margin-top:12px;padding-top:10px;border-top:1px solid var(--line);font-size:11.5px;color:var(--ink-4);font-variant-numeric:tabular-nums;display:flex;justify-content:space-between}
+</style>
+</head>
+<body>
+
+<div class="meta">
+  <div class="tag">Concept 4 of 4</div>
+  <h1>Lumen — Executive Light / Editorial</h1>
+  <p><b style="color:#fff">Design philosophy:</b> Built for the person who <i>reviews</i> rather than operates. Lumen borrows from data journalism and management consulting: a serif display face against a clean sans body, numbered sections, and charts presented as captioned <i>figures</i> with a sentence explaining what they show. Warm paper ground and a single deep-navy accent make it print and export to PDF cleanly — the only concept of the four designed to survive being pasted into a board pack. Horizontal navigation frees the full width for content.</p>
+  <div class="specs">
+    <section><h4>Paper &amp; ink</h4><div class="sw"><i style="background:#FBFAF7"></i><i style="background:#F3F1EC"></i><i style="background:#E2DFD8"></i><i style="background:#1B3A5C"></i><i style="background:#14171C"></i></div></section>
+    <section><h4>Semantic</h4><div class="sw"><i style="background:#1F6B4A"></i><i style="background:#8A5A1B"></i><i style="background:#8F2222"></i><i style="background:#8A6D1F"></i></div></section>
+    <section><h4>Typography</h4><code>Display: Georgia serif<br>Body: Segoe UI sans<br>Data: Consolas mono</code></section>
+    <section><h4>Geometry</h4><code>radius 4px · rows 42px<br>content max 1120px<br>generous 18px padding</code></section>
+    <section><h4>Navigation</h4><code>horizontal 2-tier top nav<br>breadcrumbs · full width<br>mobile: bottom tabs</code></section>
+  </div>
+</div>
+
+<div class="vpbar">
+  <span>Viewport</span>
+  <button id="b-desk" class="on" onclick="vp('desk')">Desktop 1400</button>
+  <button id="b-mob" onclick="vp('mob')">Mobile 390</button>
+</div>
+
+<div class="tabs">
+  <button class="on" onclick="show('dash',this)">Dashboard</button>
+  <button onclick="show('home',this)">Landing / Home</button>
+  <button onclick="show('table',this)">Data Table</button>
+  <button onclick="show('form',this)">Form</button>
+  <button onclick="show('anal',this)">Analytics</button>
+  <button onclick="show('set',this)">Settings</button>
+</div>
+
+<div class="stage">
+<div class="frame" id="frame">
+
+<!-- =================== DASHBOARD =================== -->
+<section class="screen on" id="dash">
+<div class="topnav">
+  <div class="tn1">
+    <div class="brand"><div class="logo">WS</div><div><b>Integrated Suite</b><small>Industrial IoT</small></div></div>
+    <div class="sp"></div>
+    <div class="gsearch">⌕ Search assets, alarms, endpoints…</div>
+    <div class="ico">◔<span class="badge">3</span></div><div class="ico">☼</div>
+    <div class="uchip"><div class="avatar">DP</div><b>Debasish</b><span style="color:var(--ink-4);font-size:10px">▾</span></div>
+  </div>
+  <div class="tn2">
+    <a href="#" class="on">Overview</a><a href="#">Assets <span class="c">1</span></a>
+    <a href="#">Analytics</a><a href="#">Alarms <span class="c">0</span></a>
+    <a href="#">Integration <span class="c">1</span></a><a href="#">Reports</a><a href="#">Administration</a>
+  </div>
+</div>
+<div class="mtop"><span>☰</span><b>Overview</b><span style="margin-left:auto">⌕</span><div class="avatar">DP</div></div>
+<div class="wrap">
+<div class="rcol">
+  <div class="crumb"><b>Integrated Suite</b> › Overview</div>
+  <div class="rhead">
+    <div class="kicker">Operations Report</div>
+    <h1>EMS Energy Management — Daily Overview</h1>
+    <p class="stand">All systems nominal. Consumption is tracking 8.1% above yesterday, driven by a single chiller start at 18:00 that briefly exceeded the upper control limit.</p>
+    <div class="byline">
+      <span>Period <b>02 Aug 2026, 00:00–23:59 IST</b></span>
+      <span>Source <b>1 gateway · device "energy"</b></span>
+      <span>Records <b>3,386,688</b></span>
+      <span>Updated <b>4 seconds ago</b></span>
+    </div>
+    <div class="acts">
+      <div class="seg"><button class="on">Today</button><button>7 days</button><button>30 days</button></div>
+      <button class="btn">⭳ Export CSV</button><button class="btn">⎙ Print / PDF</button><button class="btn pri">Share report</button>
+    </div>
+  </div>
+
+  <div class="sect">
+    <div class="sh"><span class="n">01</span><h2>Headline measures</h2></div>
+    <div class="kgrid">
+      <div class="kc"><div class="lbl">Consumption today</div><div class="val">32.17<small> kWh</small></div>
+        <div class="say"><b class="up">▲ 8.1%</b> against yesterday, within the expected band for a working Sunday.</div></div>
+      <div class="kc"><div class="lbl">Peak demand</div><div class="val">58.4<small> kW</small></div>
+        <div class="say">Reached <b>78%</b> of the 75 kW contracted limit at 18:00. No penalty exposure.</div></div>
+      <div class="kc"><div class="lbl">Ingest rate</div><div class="val">118<small> /min</small></div>
+        <div class="say">Steady at <b>62%</b> of the configured ceiling. Headroom is adequate.</div></div>
+      <div class="kc"><div class="lbl">Active alarms</div><div class="val">0</div>
+        <div class="say">No open alarms. Last event cleared <b>two days ago</b>.</div></div>
+    </div>
+  </div>
+
+  <div class="sect">
+    <div class="sh"><span class="n">02</span><h2>Consumption profile</h2>
+      <div class="r"><span class="pill mut">5-minute average</span><button class="btn sm">⚙ Configure</button></div></div>
+    <p class="lede">The trace below shows chiller energy against grid import across the day. <b>Both series follow the expected industrial duty pattern</b> — low overnight, rising from 06:00, peaking in the early evening.</p>
+    <div class="fig">
+      <div class="fnum">Figure 1</div>
+      <h3>Chiller energy and grid import, 5-minute average</h3>
+      <div class="sub">EMS · 02 Aug 2026 · kilowatt-hours</div>
+      <svg class="chart" viewBox="0 0 1000 230" preserveAspectRatio="none">
+        <g stroke="#E2DFD8" stroke-width="1">
+          <line x1="50" y1="24" x2="988" y2="24"/><line x1="50" y1="66" x2="988" y2="66"/>
+          <line x1="50" y1="108" x2="988" y2="108"/><line x1="50" y1="150" x2="988" y2="150"/><line x1="50" y1="188" x2="988" y2="188"/>
+        </g>
+        <text class="axis" x="44" y="28" text-anchor="end">60</text><text class="axis" x="44" y="70" text-anchor="end">45</text>
+        <text class="axis" x="44" y="112" text-anchor="end">30</text><text class="axis" x="44" y="154" text-anchor="end">15</text>
+        <text class="axis" x="44" y="192" text-anchor="end">0</text>
+        <path d="M56,142 L134,124 L212,132 L290,96 L368,104 L446,66 L524,80 L602,50 L680,64 L758,36 L836,54 L914,44 L984,60"
+              fill="none" stroke="#1B3A5C" stroke-width="2.2"/>
+        <path d="M56,142 L134,124 L212,132 L290,96 L368,104 L446,66 L524,80 L602,50 L680,64 L758,36 L836,54 L914,44 L984,60 L984,188 L56,188 Z"
+              fill="#1B3A5C" opacity=".07"/>
+        <path d="M56,168 L134,160 L212,164 L290,148 L368,152 L446,136 L524,142 L602,130 L680,136 L758,124 L836,132 L914,126 L984,134"
+              fill="none" stroke="#8A6D1F" stroke-width="2.2" stroke-dasharray="6 3"/>
+        <circle cx="758" cy="36" r="4.5" fill="#fff" stroke="#8F2222" stroke-width="2.2"/>
+        <text x="758" y="26" text-anchor="middle" style="font-size:10.5px;fill:#8F2222;font-family:var(--sans);font-weight:700">58.4 kW peak</text>
+        <text class="axis" x="56" y="212">00:00</text><text class="axis" x="290" y="212">06:00</text>
+        <text class="axis" x="524" y="212">12:00</text><text class="axis" x="758" y="212">18:00</text><text class="axis" x="956" y="212">23:59</text>
+      </svg>
+      <div class="legend"><span><i style="background:#1B3A5C"></i>Chiller energy (kWh)</span><span><i style="background:#8A6D1F"></i>Grid import (kW)</span></div>
+      <p class="cap"><b>Reading:</b> the single marked excursion at 18:00 reached 58.4 kW, 3.4 kW above the upper control limit. Duration was one 5-minute interval, consistent with a compressor start rather than a sustained load fault. No alarm rule is currently configured for this threshold.</p>
+    </div>
+  </div>
+
+  <div class="sect">
+    <div class="sh"><span class="n">03</span><h2>Consumption by section</h2></div>
+    <div class="tbl">
+      <div class="tbl-wrap"><table>
+        <caption>Table 1 — Energy attribution by plant section</caption>
+        <thead><tr><th>Section</th><th>Device tag</th><th class="num">Consumption (kWh)</th><th class="num">Share</th><th class="num">vs. prior period</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td><a href="#" class="lnk">Chiller</a></td><td class="mn">chiller.energy_kWh</td><td class="num">512.40</td><td class="num">52.9%</td><td class="num" style="color:var(--ok)">▲ 6.2%</td><td><span class="pill ok">Nominal</span></td></tr>
+          <tr><td><a href="#" class="lnk">Grid import</a></td><td class="mn">grid.import_kW</td><td class="num">301.18</td><td class="num">31.1%</td><td class="num" style="color:var(--ok)">▲ 11.4%</td><td><span class="pill ok">Nominal</span></td></tr>
+          <tr><td><a href="#" class="lnk">Genset</a></td><td class="mn">genset.output_kW</td><td class="num">155.29</td><td class="num">16.0%</td><td class="num" style="color:var(--crit)">▼ 3.1%</td><td><span class="pill warn">Stale 4 min</span></td></tr>
+          <tr class="sub"><td>Total</td><td></td><td class="num">968.87</td><td class="num">100.0%</td><td class="num">▲ 8.1%</td><td></td></tr>
+        </tbody>
+      </table></div>
+      <div class="tfoot"><span>Three sections · 24 attributes declared · 0 gaps in period</span><button class="btn sm">⭳ Export table</button></div>
+    </div>
+  </div>
+
+  <div class="sect">
+    <div class="sh"><span class="n">04</span><h2>System status</h2></div>
+    <div class="fig" style="padding:0">
+      <div style="padding:18px 18px 0"><div class="fnum">Table 2</div><h3>Platform subsystem health</h3></div>
+      <div style="padding:14px 18px 18px">
+        <div class="srow" style="padding:12px 0"><div class="t"><b>API server</b><small>Express 5 · port 8080 · single instance</small></div><span class="pill ok">Healthy</span></div>
+        <div class="srow" style="padding:12px 0"><div class="t"><b>PostgreSQL 16.14</b><small>3,386,688 telemetry rows · unpartitioned</small></div><span class="pill ok">Connected</span></div>
+        <div class="srow" style="padding:12px 0"><div class="t"><b>WebSocket</b><small>/api/ws · 4 connected clients</small></div><span class="pill ok">Live</span></div>
+        <div class="srow" style="padding:12px 0"><div class="t"><b>MQTT subscriber</b><small>No brokers configured</small></div><span class="pill mut">Idle</span></div>
+        <div class="srow" style="padding:12px 0"><div class="t"><b>Retention pruner</b><small>Hourly · next run 18:00</small></div><span class="pill mut">Scheduled</span></div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+<div class="btabs"><a href="#" class="on"><i>▤</i>Overview</a><a href="#"><i>◫</i>Assets</a><a href="#"><i>◔</i>Analytics</a><a href="#"><i>◭</i>Alarms</a><a href="#"><i>≡</i>More</a></div>
+</section>
+
+<!-- =================== LANDING / HOME =================== -->
+<section class="screen" id="home">
+<div class="topnav">
+  <div class="tn1">
+    <div class="brand"><div class="logo">WS</div><div><b>Integrated Suite</b><small>Industrial IoT</small></div></div>
+    <div class="sp"></div><div class="gsearch">⌕ Search assets, alarms, endpoints…</div>
+    <div class="ico">◔<span class="badge">3</span></div><div class="ico">☼</div>
+    <div class="uchip"><div class="avatar">DP</div><b>Debasish</b><span style="color:var(--ink-4);font-size:10px">▾</span></div>
+  </div>
+  <div class="tn2">
+    <a href="#">Overview</a><a href="#" class="on">Assets <span class="c">1</span></a>
+    <a href="#">Analytics</a><a href="#">Alarms <span class="c">0</span></a>
+    <a href="#">Integration <span class="c">1</span></a><a href="#">Reports</a><a href="#">Administration</a>
+  </div>
+</div>
+<div class="mtop"><span>☰</span><b>Assets</b><span style="margin-left:auto">⌕</span><div class="avatar">DP</div></div>
+<div class="wrap">
+<div class="rcol">
+  <div class="crumb"><b>Integrated Suite</b> › Assets</div>
+  <div class="ann"><b>Modernization note —</b> the current landing page uses four differently-tinted icon chips over a dotted graph-paper background, with a spring-physics hover that lifts and scales each card. Lumen replaces this with numbered sections, one accent, and no decorative motion — the register an executive audience expects.</div>
+  <div class="rhead">
+    <div class="kicker">Configuration</div>
+    <h1>Asset Management</h1>
+    <p class="stand">Model the plant hierarchy, define reusable attribute templates, and bind physical devices to the assets that represent them.</p>
+    <div class="byline"><span>Assets <b>1</b></span><span>Templates <b>8</b></span><span>Attributes declared <b>24</b></span><span>Devices seen <b>1</b></span></div>
+  </div>
+
+  <div class="sect">
+    <div class="sh"><span class="n">01</span><h2>Where to start</h2></div>
+    <div class="hero-cards">
+      <a href="#" class="hc"><div class="n">i</div><h3>Assets</h3><p>Browse and manage the hierarchy. Select a node for its full detail.</p>
+        <div class="f"><span>1 asset</span><span>→</span></div></a>
+      <a href="#" class="hc"><div class="n">ii</div><h3>Asset Templates</h3><p>Reusable attribute sets. Paste a device payload to derive tags.</p>
+        <div class="f"><span>8 templates</span><span>→</span></div></a>
+      <a href="#" class="hc"><div class="n">iii</div><h3>Media Library</h3><p>Images, drawings and documents attached to assets.</p>
+        <div class="f"><span>Empty</span><span>→</span></div></a>
+      <a href="#" class="hc"><div class="n">iv</div><h3>Hierarchy Generator</h3><p>Paste text, JSON or CSV and generate the structure automatically.</p>
+        <div class="f"><span>Ready</span><span>→</span></div></a>
+    </div>
+  </div>
+
+  <div class="sect">
+    <div class="sh"><span class="n">02</span><h2>Commissioning progress</h2>
+      <div class="r"><span class="pill info">3 of 4 complete</span></div></div>
+    <p class="lede">A device only produces stored telemetry once all four steps below are complete. <b>Steps must be performed in this order</b> — an endpoint must receive at least one payload before its device ID can be bound to an asset.</p>
+    <div class="tbl"><div class="tbl-wrap"><table>
+      <thead><tr><th style="width:44px"></th><th>Step</th><th>Detail</th><th>Status</th><th style="width:110px"></th></tr></thead>
+      <tbody>
+        <tr><td><span class="chk on"></span></td><td><b style="color:var(--ink)">Create an ingest endpoint</b></td><td class="mn">POST /api/ingest/k/8c7ba26d…</td><td><span class="pill ok">Complete</span></td><td></td></tr>
+        <tr><td><span class="chk on"></span></td><td><b style="color:var(--ink)">Post telemetry from the gateway</b></td><td>Registers the device ID as seen</td><td><span class="pill ok">Complete</span></td><td></td></tr>
+        <tr><td><span class="chk on"></span></td><td><b style="color:var(--ink)">Bind the device and declare attributes</b></td><td class="mn">energy → EMS · 24 attributes</td><td><span class="pill ok">Complete</span></td><td></td></tr>
+        <tr><td><span class="chk"></span></td><td><b style="color:var(--ink)">Configure alarm rules</b></td><td>No thresholds set for peak demand</td><td><span class="pill warn">Outstanding</span></td><td><a href="#" class="lnk">Begin →</a></td></tr>
+      </tbody>
+    </table></div></div>
+  </div>
+
+  <div class="sect">
+    <div class="sh"><span class="n">03</span><h2>Current hierarchy</h2></div>
+    <div class="tbl"><div class="tbl-wrap"><table>
+      <thead><tr><th>Asset</th><th>Device ID</th><th class="num">Children</th><th class="num">Attributes</th><th>Template</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr><td><b style="color:var(--ink)">EMS</b> <span class="pill mut" style="margin-left:6px">root · project</span></td><td class="mn">energy</td><td class="num">3</td><td class="num">24</td><td class="mn">EMS_Attribute</td><td><span class="pill ok">Live</span></td></tr>
+        <tr><td style="padding-left:38px">Chiller</td><td class="mn">energy</td><td class="num">0</td><td class="num">6</td><td class="mn">Chiller Section</td><td><span class="pill ok">Live</span></td></tr>
+        <tr><td style="padding-left:38px">Grid</td><td class="mn">energy</td><td class="num">0</td><td class="num">9</td><td class="mn">Grid Section</td><td><span class="pill ok">Live</span></td></tr>
+        <tr><td style="padding-left:38px">Genset</td><td class="mn">energy</td><td class="num">0</td><td class="num">9</td><td class="mn">Genset Section</td><td><span class="pill warn">Stale 4 min</span></td></tr>
+      </tbody>
+    </table></div>
+    <div class="tfoot"><span>Four assets · one shared device ID (supported topology)</span><button class="btn sm">+ Add child asset</button></div></div>
+  </div>
+</div>
+</div>
+<div class="btabs"><a href="#"><i>▤</i>Overview</a><a href="#" class="on"><i>◫</i>Assets</a><a href="#"><i>◔</i>Analytics</a><a href="#"><i>◭</i>Alarms</a><a href="#"><i>≡</i>More</a></div>
+</section>
+
+<!-- =================== DATA TABLE =================== -->
+<section class="screen" id="table">
+<div class="topnav">
+  <div class="tn1">
+    <div class="brand"><div class="logo">WS</div><div><b>Integrated Suite</b><small>Industrial IoT</small></div></div>
+    <div class="sp"></div><div class="gsearch">⌕ Search assets, alarms, endpoints…</div>
+    <div class="ico">◔<span class="badge">3</span></div><div class="ico">☼</div>
+    <div class="uchip"><div class="avatar">DP</div><b>Debasish</b><span style="color:var(--ink-4);font-size:10px">▾</span></div>
+  </div>
+  <div class="tn2">
+    <a href="#">Overview</a><a href="#" class="on">Assets <span class="c">1</span></a>
+    <a href="#">Analytics</a><a href="#">Alarms <span class="c">0</span></a>
+    <a href="#">Integration <span class="c">1</span></a><a href="#">Reports</a><a href="#">Administration</a>
+  </div>
+</div>
+<div class="mtop"><span>☰</span><b>Templates</b><span style="margin-left:auto">⌕</span><div class="avatar">DP</div></div>
+<div class="wrap">
+<div class="rcol">
+  <div class="crumb"><b>Integrated Suite</b> › Assets › Asset Templates</div>
+  <div class="ann"><b>Modernization note —</b> Lumen's table is the most print-friendly of the four: 1.5px rule under the header, right-aligned tabular numerics, a shaded subtotal row, and a caption above rather than a toolbar. This is the layout that survives being pasted into a PDF report.</div>
+  <div class="rhead">
+    <div class="kicker">Configuration</div>
+    <h1>Asset Templates</h1>
+    <p class="stand">Reusable attribute definitions. Applying a template to an asset creates its attributes and stamps its device binding.</p>
+    <div class="acts">
+      <div class="gsearch" style="width:250px;background:var(--card)">⌕ Search templates…</div>
+      <button class="btn sm">Type ▾</button><button class="btn sm">In use ▾</button>
+      <button class="btn">⭳ Export</button><button class="btn">⭱ Import</button><button class="btn pri">+ Create Template</button>
+    </div>
+  </div>
+
+  <div class="sect">
+    <div class="sh"><span class="n">01</span><h2>All templates</h2><div class="r"><span class="pill info">2 selected</span><button class="btn sm">Export selected</button><button class="btn sm" style="color:var(--crit)">Delete</button></div></div>
+    <div class="tbl"><div class="tbl-wrap"><table>
+      <caption>Table 1 — Asset templates, by most recently updated</caption>
+      <thead><tr>
+        <th style="width:44px"><span class="chk on"></span></th>
+        <th>Template name</th><th>Asset type</th><th>Device ID</th>
+        <th class="num">Assets using</th><th class="num">Attributes</th><th>Last updated</th><th style="width:96px"></th>
+      </tr></thead>
+      <tbody>
+        <tr><td><span class="chk on"></span></td><td><a href="#" class="lnk">EMS</a></td><td>Energy meter</td><td class="mn">energy</td><td class="num">0</td><td class="num">24</td><td>02 Aug 2026</td><td><div class="rowact"><button class="btn sm">Edit</button></div></td></tr>
+        <tr><td><span class="chk on"></span></td><td><a href="#" class="lnk">EMS_Attribute</a></td><td>Energy meter</td><td class="mn">energy</td><td class="num">1</td><td class="num">24</td><td>02 Aug 2026</td><td><div class="rowact"><button class="btn sm">Edit</button></div></td></tr>
+        <tr><td><span class="chk"></span></td><td><a href="#" class="lnk">Chiller Section</a></td><td>Chiller</td><td class="mn">energy</td><td class="num">1</td><td class="num">6</td><td>02 Aug 2026</td><td><div class="rowact"><button class="btn sm">Edit</button></div></td></tr>
+        <tr><td><span class="chk"></span></td><td><a href="#" class="lnk">Grid Section</a></td><td>Grid</td><td class="mn">energy</td><td class="num">1</td><td class="num">9</td><td>01 Aug 2026</td><td><div class="rowact"><button class="btn sm">Edit</button></div></td></tr>
+        <tr><td><span class="chk"></span></td><td><a href="#" class="lnk">Genset Section</a></td><td>Genset</td><td class="mn">energy</td><td class="num">1</td><td class="num">9</td><td>01 Aug 2026</td><td><div class="rowact"><button class="btn sm">Edit</button></div></td></tr>
+        <tr><td><span class="chk"></span></td><td><a href="#" class="lnk">RF Dryer</a></td><td>Process</td><td class="mn">rf-dryer</td><td class="num">0</td><td class="num">7</td><td>28 Jul 2026</td><td><div class="rowact"><button class="btn sm">Edit</button></div></td></tr>
+        <tr><td><span class="chk"></span></td><td><a href="#" class="lnk">Flow Sensor</a></td><td>Sensor</td><td class="mn">—</td><td class="num">0</td><td class="num">4</td><td>24 Jul 2026</td><td><div class="rowact"><button class="btn sm">Edit</button></div></td></tr>
+        <tr><td><span class="chk"></span></td><td><a href="#" class="lnk">Rotating Equipment</a></td><td>Motor</td><td class="mn">—</td><td class="num">0</td><td class="num">11</td><td>19 Jul 2026</td><td><div class="rowact"><button class="btn sm">Edit</button></div></td></tr>
+        <tr class="sub"><td></td><td>8 templates</td><td></td><td></td><td class="num">4 in use</td><td class="num">94</td><td></td><td></td></tr>
+      </tbody>
+    </table></div>
+    <div class="tfoot"><span>Showing 1–8 of 8</span>
+      <select class="inp" style="width:auto;height:28px;font-size:11.5px;padding:0 8px"><option>25 per page</option><option>50 per page</option></select>
+      <div class="pg"><button>‹</button><button class="on">1</button><button>›</button></div></div>
+    </div>
+  </div>
+</div>
+</div>
+<div class="btabs"><a href="#"><i>▤</i>Overview</a><a href="#" class="on"><i>◫</i>Assets</a><a href="#"><i>◔</i>Analytics</a><a href="#"><i>◭</i>Alarms</a><a href="#"><i>≡</i>More</a></div>
+</section>
+
+<!-- =================== FORM =================== -->
+<section class="screen" id="form">
+<div class="topnav">
+  <div class="tn1">
+    <div class="brand"><div class="logo">WS</div><div><b>Integrated Suite</b><small>Industrial IoT</small></div></div>
+    <div class="sp"></div><div class="gsearch">⌕ Search assets, alarms, endpoints…</div>
+    <div class="ico">◔<span class="badge">3</span></div><div class="ico">☼</div>
+    <div class="uchip"><div class="avatar">DP</div><b>Debasish</b><span style="color:var(--ink-4);font-size:10px">▾</span></div>
+  </div>
+  <div class="tn2">
+    <a href="#">Overview</a><a href="#">Assets <span class="c">1</span></a>
+    <a href="#">Analytics</a><a href="#">Alarms <span class="c">0</span></a>
+    <a href="#" class="on">Integration <span class="c">1</span></a><a href="#">Reports</a><a href="#">Administration</a>
+  </div>
+</div>
+<div class="mtop"><span>←</span><b>New endpoint</b></div>
+<div class="wrap">
+<div class="rcol">
+  <div class="crumb"><b>Integrated Suite</b> › Integration › API Clients › New</div>
+  <div class="ann"><b>Modernization note —</b> Lumen gives each field a serif label and a full sentence of guidance rather than a terse hint, and separates fields with rules. This is the slowest of the four forms to fill and the least likely to be filled in wrongly — the right trade for an infrequent, consequential action.</div>
+  <div class="rhead">
+    <div class="kicker">Integration</div>
+    <h1>Create API End Point</h1>
+    <p class="stand">Select the project this endpoint belongs to. The credential and its ingest URL are generated automatically and shown once.</p>
+  </div>
+  <div class="form">
+    <div class="fgrp">
+      <label>Project <span>*</span></label>
+      <p class="help">The project is a root-level asset. Everyone assigned to it shares this one endpoint, rather than each person holding a personal credential.</p>
+      <select class="inp"><option>EMS</option><option>＋ Create a new project…</option></select>
+    </div>
+    <div class="fgrp">
+      <label>Client name</label>
+      <p class="help">Optional. A name helps distinguish several endpoints within one project. If left blank this endpoint will be named <b style="color:var(--ink-2)">EMS Ingest</b>.</p>
+      <input class="inp" placeholder="EMS Ingest">
+    </div>
+    <div class="fgrp">
+      <label>Access scope</label>
+      <p class="help">This endpoint may post telemetry and do nothing else. Read scopes expose asset, telemetry and alarm data through a credential that outlives any session, so they are granted by an administrator under Administration → Access Control.</p>
+      <div class="note"><b>Write Telemetry</b> — <span class="mn" style="font-size:11.5px">ingest:write</span>. Verified server-side: a request from this account asking for a read scope is refused with <span class="mn" style="font-size:11.5px">403 scope_forbidden</span>.</div>
+    </div>
+    <div class="fgrp">
+      <label>Token expiry</label>
+      <p class="help">The credential stops being accepted after this date. Leave blank if the endpoint should not expire — appropriate for a permanently installed gateway.</p>
+      <input class="inp" type="date" style="max-width:230px">
+    </div>
+    <div class="fgrp">
+      <label>IP allowlist</label>
+      <p class="help">One address per line. Only requests originating from these addresses will be accepted. Leave blank to accept from anywhere, which is usual when the gateway's address is assigned dynamically.</p>
+      <textarea class="inp" rows="3" style="font-family:var(--mono);font-size:12px">192.168.1.10
+203.0.113.5</textarea>
+    </div>
+    <div class="fgrp" style="display:flex;align-items:center;gap:16px">
+      <span class="tog on"></span>
+      <div><b style="font-family:var(--serif);font-size:15px;color:var(--ink);font-weight:400;display:block">Active on creation</b>
+      <small style="font-size:12.5px;color:var(--ink-3)">The endpoint begins accepting telemetry immediately.</small></div>
+    </div>
+    <div class="fbar"><button class="btn">Cancel</button><button class="btn pri">Create endpoint</button></div>
+  </div>
+</div>
+</div>
+<div class="btabs"><a href="#"><i>▤</i>Overview</a><a href="#"><i>◫</i>Assets</a><a href="#"><i>◔</i>Analytics</a><a href="#"><i>◭</i>Alarms</a><a href="#" class="on"><i>≡</i>More</a></div>
+</section>
+
+<!-- =================== ANALYTICS =================== -->
+<section class="screen" id="anal">
+<div class="topnav">
+  <div class="tn1">
+    <div class="brand"><div class="logo">WS</div><div><b>Integrated Suite</b><small>Industrial IoT</small></div></div>
+    <div class="sp"></div><div class="gsearch">⌕ Search assets, alarms, endpoints…</div>
+    <div class="ico">◔<span class="badge">3</span></div><div class="ico">☼</div>
+    <div class="uchip"><div class="avatar">DP</div><b>Debasish</b><span style="color:var(--ink-4);font-size:10px">▾</span></div>
+  </div>
+  <div class="tn2">
+    <a href="#">Overview</a><a href="#">Assets <span class="c">1</span></a>
+    <a href="#" class="on">Analytics</a><a href="#">Alarms <span class="c">0</span></a>
+    <a href="#">Integration <span class="c">1</span></a><a href="#">Reports</a><a href="#">Administration</a>
+  </div>
+</div>
+<div class="mtop"><span>☰</span><b>Analytics</b><span style="margin-left:auto">⌕</span><div class="avatar">DP</div></div>
+<div class="wrap">
+<div class="rcol">
+  <div class="crumb"><b>Integrated Suite</b> › Analytics › Energy</div>
+  <div class="rhead">
+    <div class="kicker">Analytical Report</div>
+    <h1>Energy Performance Analysis</h1>
+    <p class="stand">Consumption, demand and load characteristics for EMS over the 24-hour period ending 23:59 on 02 August 2026, aggregated at five-minute intervals.</p>
+    <div class="byline"><span>Intervals <b>288 of 288</b></span><span>Coverage <b>100%</b></span><span>Aggregation <b>Average</b></span><span>Gaps <b>None</b></span></div>
+    <div class="acts">
+      <div class="seg"><button>1h</button><button class="on">24h</button><button>7d</button><button>30d</button><button>Custom</button></div>
+      <button class="btn">⭳ CSV</button><button class="btn">⎙ Print / PDF</button>
+    </div>
+  </div>
+
+  <div class="sect">
+    <div class="sh"><span class="n">01</span><h2>Summary measures</h2></div>
+    <div class="kgrid">
+      <div class="kc"><div class="lbl">Total consumption</div><div class="val">968.87<small> kWh</small></div>
+        <div class="say"><b class="up">▲ 8.1%</b> against the prior month, in line with seasonal cooling load.</div></div>
+      <div class="kc"><div class="lbl">Peak demand</div><div class="val">58.4<small> kW</small></div>
+        <div class="say"><b>78%</b> of the 75 kW contracted maximum. One excursion above the control limit.</div></div>
+      <div class="kc"><div class="lbl">Load factor</div><div class="val">0.71</div>
+        <div class="say"><b class="up">▲ 0.04</b>. Demand is reasonably even; little benefit from further peak shaving.</div></div>
+      <div class="kc"><div class="lbl">Estimated cost</div><div class="val">₹7.8<small>k</small></div>
+        <div class="say"><b class="dn">▼ 2.3%</b> despite higher volume, reflecting improved time-of-use placement.</div></div>
+    </div>
+  </div>
+
+  <div class="sect">
+    <div class="sh"><span class="n">02</span><h2>Statistical process control</h2></div>
+    <p class="lede">Consumption is plotted against control limits derived from the trailing 30-day distribution. <b>A single interval breached the upper control limit</b>, marked below.</p>
+    <div class="fig">
+      <div class="fnum">Figure 1</div>
+      <h3>Consumption against upper and lower control limits</h3>
+      <div class="sub">EMS · 02 Aug 2026 · kilowatts · UCL 55.0 / CL 33.0 / LCL 12.0</div>
+      <svg class="chart" style="height:280px" viewBox="0 0 1000 280" preserveAspectRatio="none">
+        <g stroke="#E2DFD8" stroke-width="1">
+          <line x1="52" y1="26" x2="988" y2="26"/><line x1="52" y1="76" x2="988" y2="76"/>
+          <line x1="52" y1="126" x2="988" y2="126"/><line x1="52" y1="176" x2="988" y2="176"/><line x1="52" y1="226" x2="988" y2="226"/>
+        </g>
+        <rect x="52" y="26" width="936" height="24" fill="#8F2222" opacity=".05"/>
+        <line x1="52" y1="50" x2="988" y2="50" stroke="#8F2222" stroke-width="1.2" stroke-dasharray="7 4"/>
+        <text x="982" y="45" text-anchor="end" style="font-size:10.5px;fill:#8F2222;font-family:var(--sans);font-weight:600">UCL 55.0</text>
+        <line x1="52" y1="126" x2="988" y2="126" stroke="#6B7280" stroke-width="1.2" stroke-dasharray="4 4"/>
+        <text x="982" y="121" text-anchor="end" style="font-size:10.5px;fill:#6B7280;font-family:var(--sans);font-weight:600">CL 33.0</text>
+        <line x1="52" y1="202" x2="988" y2="202" stroke="#8F2222" stroke-width="1.2" stroke-dasharray="7 4"/>
+        <text x="982" y="197" text-anchor="end" style="font-size:10.5px;fill:#8F2222;font-family:var(--sans);font-weight:600">LCL 12.0</text>
+        <text class="axis" x="46" y="30" text-anchor="end">60</text><text class="axis" x="46" y="80" text-anchor="end">45</text>
+        <text class="axis" x="46" y="130" text-anchor="end">30</text><text class="axis" x="46" y="180" text-anchor="end">15</text>
+        <text class="axis" x="46" y="230" text-anchor="end">0</text>
+        <path d="M58,164 L136,144 L214,152 L292,114 L370,122 L448,82 L526,96 L604,64 L682,80 L760,46 L838,66 L916,54 L984,72"
+              fill="none" stroke="#1B3A5C" stroke-width="2.4"/>
+        <path d="M58,164 L136,144 L214,152 L292,114 L370,122 L448,82 L526,96 L604,64 L682,80 L760,46 L838,66 L916,54 L984,72 L984,226 L58,226 Z"
+              fill="#1B3A5C" opacity=".06"/>
+        <circle cx="760" cy="46" r="5.5" fill="#fff" stroke="#8F2222" stroke-width="2.5"/>
+        <text x="760" y="34" text-anchor="middle" style="font-size:11px;fill:#8F2222;font-family:var(--sans);font-weight:700">58.4</text>
+        <path d="M58,190 L136,180 L214,184 L292,166 L370,170 L448,152 L526,158 L604,144 L682,150 L760,136 L838,146 L916,138 L984,148"
+              fill="none" stroke="#8A6D1F" stroke-width="2.2" stroke-dasharray="6 3"/>
+        <path d="M58,208 L136,204 L214,206 L292,196 L370,198 L448,190 L526,194 L604,186 L682,190 L760,182 L838,188 L916,184 L984,190"
+              fill="none" stroke="#1F6B4A" stroke-width="2.2"/>
+        <text class="axis" x="58" y="252">00:00</text><text class="axis" x="292" y="252">06:00</text>
+        <text class="axis" x="526" y="252">12:00</text><text class="axis" x="760" y="252">18:00</text><text class="axis" x="956" y="252">23:59</text>
+      </svg>
+      <div class="legend"><span><i style="background:#1B3A5C"></i>Chiller energy</span><span><i style="background:#8A6D1F"></i>Grid import</span><span><i style="background:#1F6B4A"></i>Genset output</span></div>
+      <p class="cap"><b>Reading:</b> the process is in control for 287 of 288 intervals. The 18:00 excursion reached 58.4 kW against a 55.0 kW upper limit — a 6.2% overshoot lasting one interval. Western Electric rules are not violated (no run of eight, no trend of six), so this is a single special-cause event rather than a shift in the process mean. <b>Recommendation:</b> configure a threshold alarm at 55 kW so the next occurrence is notified rather than discovered in review.</p>
+    </div>
+  </div>
+
+  <div class="sect">
+    <div class="sh"><span class="n">03</span><h2>Attribution and distribution</h2></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px" class="anal-2col">
+      <div class="tbl"><div class="tbl-wrap"><table>
+        <caption>Table 1 — Consumption by section</caption>
+        <thead><tr><th>Section</th><th class="num">kWh</th><th class="num">Share</th></tr></thead>
+        <tbody>
+          <tr><td>Chiller</td><td class="num">512.40</td><td class="num">52.9%</td></tr>
+          <tr><td>Grid import</td><td class="num">301.18</td><td class="num">31.1%</td></tr>
+          <tr><td>Genset</td><td class="num">155.29</td><td class="num">16.0%</td></tr>
+          <tr class="sub"><td>Total</td><td class="num">968.87</td><td class="num">100.0%</td></tr>
+        </tbody>
+      </table></div></div>
+      <div class="fig" style="margin-bottom:0">
+        <div class="fnum">Figure 2</div><h3>Hourly demand profile</h3><div class="sub">Peak hour highlighted</div>
+        <svg class="chart" style="height:172px" viewBox="0 0 460 172" preserveAspectRatio="none">
+          <g fill="#1B3A5C">
+            <rect x="10" y="112" width="20" height="46" rx="1"/><rect x="36" y="120" width="20" height="38" rx="1"/>
+            <rect x="62" y="126" width="20" height="32" rx="1"/><rect x="88" y="116" width="20" height="42" rx="1"/>
+            <rect x="114" y="98" width="20" height="60" rx="1"/><rect x="140" y="76" width="20" height="82" rx="1"/>
+            <rect x="166" y="58" width="20" height="100" rx="1"/><rect x="192" y="46" width="20" height="112" rx="1"/>
+            <rect x="218" y="40" width="20" height="118" rx="1"/><rect x="244" y="44" width="20" height="114" rx="1"/>
+            <rect x="270" y="52" width="20" height="106" rx="1"/><rect x="296" y="64" width="20" height="94" rx="1"/>
+            <rect x="322" y="30" width="20" height="128" rx="1" fill="#8F2222"/>
+            <rect x="348" y="70" width="20" height="88" rx="1"/><rect x="374" y="86" width="20" height="72" rx="1"/>
+            <rect x="400" y="102" width="20" height="56" rx="1"/><rect x="426" y="114" width="20" height="44" rx="1"/></g>
+          <text class="axis" x="10" y="170">06:00</text><text class="axis" x="218" y="170">12:00</text>
+          <text class="axis" x="322" y="170">18:00</text><text class="axis" x="426" y="170">22:00</text>
+        </svg>
+        <p class="cap"><b>Reading:</b> demand follows a single-peak industrial duty curve. The 18:00 bar corresponds to the control-limit excursion in Figure 1.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="sect">
+    <div class="sh"><span class="n">04</span><h2>Data quality</h2></div>
+    <div class="note"><b>Two metrics were received but not stored.</b> The tags <span class="mn" style="font-size:11.5px">wtd_cum_kwh</span> and <span class="mn" style="font-size:11.5px">mtd_cum_kwh</span> arrived in the payload but are not declared as attributes on any asset, so they were discarded. The ingest endpoint returned <span class="mn" style="font-size:11.5px">200 OK</span>, meaning the sending gateway has no indication that this occurred. Figures above are therefore complete for declared tags only. <a href="#" class="lnk">Declare these attributes →</a></div>
+  </div>
+</div>
+</div>
+<div class="btabs"><a href="#"><i>▤</i>Overview</a><a href="#"><i>◫</i>Assets</a><a href="#" class="on"><i>◔</i>Analytics</a><a href="#"><i>◭</i>Alarms</a><a href="#"><i>≡</i>More</a></div>
+</section>
+
+<!-- =================== SETTINGS =================== -->
+<section class="screen" id="set">
+<div class="topnav">
+  <div class="tn1">
+    <div class="brand"><div class="logo">WS</div><div><b>Integrated Suite</b><small>Industrial IoT</small></div></div>
+    <div class="sp"></div><div class="gsearch">⌕ Search assets, alarms, endpoints…</div>
+    <div class="ico">◔<span class="badge">3</span></div><div class="ico">☼</div>
+    <div class="uchip"><div class="avatar">DP</div><b>Debasish</b><span style="color:var(--ink-4);font-size:10px">▾</span></div>
+  </div>
+  <div class="tn2">
+    <a href="#">Overview</a><a href="#">Assets <span class="c">1</span></a>
+    <a href="#">Analytics</a><a href="#">Alarms <span class="c">0</span></a>
+    <a href="#">Integration <span class="c">1</span></a><a href="#">Reports</a><a href="#" class="on">Administration</a>
+  </div>
+</div>
+<div class="mtop"><span>☰</span><b>Access Control</b><span style="margin-left:auto">⌕</span><div class="avatar">DP</div></div>
+<div class="wrap">
+<div class="rcol">
+  <div class="crumb"><b>Integrated Suite</b> › Administration › Users › Access Control</div>
+  <div class="rhead">
+    <div class="kicker">Administration</div>
+    <h1>Access Control</h1>
+    <p class="stand">Module permissions, project visibility and API scope ceilings for this account. All grants below are enforced by the API on every request, not merely reflected in the interface.</p>
+    <div class="acts"><button class="btn">Reset to role defaults</button><button class="btn pri">Save changes</button></div>
+  </div>
+  <div class="slay">
+    <nav class="snav">
+      <a href="#">Profile</a><a href="#" class="on">Access Control</a><a href="#">Active sessions</a>
+      <a href="#">Password policy</a><a href="#">Notifications</a><a href="#">Appearance</a><a href="#">Audit trail</a>
+    </nav>
+    <div>
+      <div class="sect">
+        <div class="sh"><span class="n">01</span><h2>Account</h2></div>
+        <div class="fig"><dl class="kv">
+          <dt>Full name</dt><dd><b style="font-weight:600">Debasish Panda</b></dd>
+          <dt>Username</dt><dd class="mn" style="color:var(--ink)">debasish.panda</dd>
+          <dt>Email address</dt><dd>debasish.panda@websynergies.com</dd>
+          <dt>Role</dt><dd><span class="pill info">super_admin</span></dd>
+          <dt>Status</dt><dd><span class="pill ok">Active</span></dd>
+          <dt>Last sign-in</dt><dd>02 August 2026 at 17:31 from 192.168.1.24</dd>
+          <dt>Session policy</dt><dd>30 minutes idle · 12 hours absolute maximum</dd>
+          <dt>Multi-factor</dt><dd><span class="pill warn">Not enabled</span></dd>
+        </dl></div>
+      </div>
+
+      <div class="sect">
+        <div class="sh"><span class="n">02</span><h2>Module permissions</h2><div class="r"><span style="font-size:11.5px;color:var(--ink-4)">Read · Write · Delete</span></div></div>
+        <p class="lede">Where an administrator has set a module explicitly, that decision overrides the role default. Every change is recorded in the security event log as <span class="mn" style="font-size:11.5px">access.updated</span>.</p>
+        <div class="tbl"><div class="tbl-wrap"><table>
+          <thead><tr><th>Module</th><th style="width:60px;text-align:center">Read</th><th style="width:60px;text-align:center">Write</th><th style="width:60px;text-align:center">Delete</th><th>Source</th></tr></thead>
+          <tbody>
+            <tr><td>Asset Management</td><td style="text-align:center"><span class="chk on"></span></td><td style="text-align:center"><span class="chk on"></span></td><td style="text-align:center"><span class="chk on"></span></td><td><span class="pill mut">Role default</span></td></tr>
+            <tr><td>Alarm Management</td><td style="text-align:center"><span class="chk on"></span></td><td style="text-align:center"><span class="chk on"></span></td><td style="text-align:center"><span class="chk on"></span></td><td><span class="pill mut">Role default</span></td></tr>
+            <tr style="background:var(--warn-soft)"><td>Broker Management</td><td style="text-align:center"><span class="chk on"></span></td><td style="text-align:center"><span class="chk on"></span></td><td style="text-align:center"><span class="chk"></span></td><td><span class="pill warn">Overridden</span></td></tr>
+            <tr><td>API Clients</td><td style="text-align:center"><span class="chk on"></span></td><td style="text-align:center"><span class="chk on"></span></td><td style="text-align:center"><span class="chk on"></span></td><td><span class="pill mut">Role default</span></td></tr>
+            <tr><td>Visualization</td><td style="text-align:center"><span class="chk on"></span></td><td style="text-align:center"><span class="chk on"></span></td><td style="text-align:center"><span class="chk on"></span></td><td><span class="pill mut">Role default</span></td></tr>
+            <tr><td>User Management</td><td style="text-align:center"><span class="chk on"></span></td><td style="text-align:center"><span class="chk on"></span></td><td style="text-align:center"><span class="chk on"></span></td><td><span class="pill mut">Role default</span></td></tr>
+            <tr><td>Security Settings</td><td style="text-align:center"><span class="chk on"></span></td><td style="text-align:center"><span class="chk on"></span></td><td style="text-align:center"><span class="chk on"></span></td><td><span class="pill mut">Role default</span></td></tr>
+          </tbody>
+        </table></div></div>
+      </div>
+
+      <div class="sect">
+        <div class="sh"><span class="n">03</span><h2>API credential scope ceiling</h2></div>
+        <p class="lede">These are the scopes this account may place on an API credential it creates — <b>not</b> the account's own access. Write-only is the safe default: it permits commissioning a gateway without permitting the issue of a credential that can read the entire platform.</p>
+        <div class="fig">
+          <div class="srow"><div class="t"><b>Write Telemetry</b><small class="mn">ingest:write</small></div><span class="pill info">Write</span><span class="tog on"></span></div>
+          <div class="srow"><div class="t"><b>Read Assets</b><small class="mn">read:assets</small></div><span class="pill mut">Read</span><span class="tog on"></span></div>
+          <div class="srow"><div class="t"><b>Read Telemetry</b><small class="mn">read:telemetry</small></div><span class="pill mut">Read</span><span class="tog on"></span></div>
+          <div class="srow"><div class="t"><b>Read Alarms</b><small class="mn">read:alarms</small></div><span class="pill mut">Read</span><span class="tog on"></span></div>
+          <div class="srow"><div class="t"><b>Read Alarm History</b><small class="mn">read:alarm-history</small></div><span class="pill mut">Read</span><span class="tog on"></span></div>
+        </div>
+        <div class="note" style="margin-top:14px">Granting none of the above prevents this account from creating API endpoints at all. Existing credentials are unaffected — this governs only what may be created from this point forward, and it is verified on every create request.</div>
+      </div>
+    </div>
+  </div>
+</div>
+</div>
+<div class="btabs"><a href="#"><i>▤</i>Overview</a><a href="#"><i>◫</i>Assets</a><a href="#"><i>◔</i>Analytics</a><a href="#"><i>◭</i>Alarms</a><a href="#" class="on"><i>≡</i>More</a></div>
+</section>
+
+</div>
+</div>
+
+<script>
+function show(id, btn){
+  document.querySelectorAll('.screen').forEach(function(s){ s.classList.remove('on'); });
+  document.getElementById(id).classList.add('on');
+  document.querySelectorAll('.tabs button').forEach(function(b){ b.classList.remove('on'); });
+  btn.classList.add('on');
+  window.scrollTo({top:0, behavior:'smooth'});
+}
+function vp(mode){
+  var f = document.getElementById('frame');
+  if(mode === 'mob'){ f.classList.add('mobile'); } else { f.classList.remove('mobile'); }
+  document.getElementById('b-desk').classList.toggle('on', mode === 'desk');
+  document.getElementById('b-mob').classList.toggle('on', mode === 'mob');
+  // Analytics 2-col becomes 1-col on mobile
+  document.querySelectorAll('.anal-2col').forEach(function(el){
+    el.style.gridTemplateColumns = (mode === 'mob') ? '1fr' : '1fr 1fr';
+  });
+}
+</script>
+</body>
+</html>

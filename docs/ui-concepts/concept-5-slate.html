@@ -1,0 +1,798 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Concept 5 — Slate · Quiet Precision</title>
+<style>
+/* ============================================================
+   SLATE — Quiet Precision
+   Monochrome-first. No cards. Hairlines and whitespace only.
+   One accent colour, spent sparingly.
+   ============================================================ */
+:root{
+  --bg:#ffffff;
+  --canvas:#fafafa;
+  --sunk:#f5f5f4;
+  --ink:#0c0c0d;
+  --ink2:#57575c;
+  --ink3:#8b8b91;
+  --line:#e7e7e6;
+  --line2:#f1f1f0;
+  --acc:#0f6f68;
+  --acc-ink:#0b544e;
+  --acc-soft:#eaf3f2;
+  --ok:#15803d;
+  --warn:#a35b06;
+  --bad:#b3261e;
+  --r:4px;
+  --mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#0c0c0d; --canvas:#131315; --sunk:#191919;
+    --ink:#f2f2f1; --ink2:#a5a5a8; --ink3:#75757a;
+    --line:#26262a; --line2:#1d1d20;
+    --acc:#2fb3a6; --acc-ink:#5fd0c4; --acc-soft:#12241f;
+    --ok:#4ade80; --warn:#e0a83e; --bad:#f47066;
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{
+  font-family:var(--sans);
+  background:var(--canvas);
+  color:var(--ink);
+  font-size:14px;
+  line-height:1.5;
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3,h4{margin:0;font-weight:600;letter-spacing:-.014em;text-wrap:balance}
+a{color:inherit}
+button{font:inherit;cursor:pointer}
+.num{font-variant-numeric:tabular-nums}
+.mono{font-family:var(--mono);font-size:12.5px;letter-spacing:-.01em}
+
+/* ---------- prototype chrome (not part of the design) ---------- */
+.chrome{background:var(--ink);color:#fff;padding:14px 22px}
+@media (prefers-color-scheme:dark){.chrome{background:#000}}
+.chrome h1{font-size:15px;letter-spacing:-.01em}
+.chrome p{margin:3px 0 0;font-size:12.5px;color:#a1a1a6;max-width:70ch}
+.bar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:10px 22px;background:var(--bg);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:60}
+.tabs{display:flex;gap:2px;flex-wrap:wrap}
+.tabs button{background:none;border:0;padding:6px 11px;border-radius:var(--r);color:var(--ink2);font-size:13px}
+.tabs button:hover{background:var(--sunk);color:var(--ink)}
+.tabs button.on{background:var(--ink);color:var(--bg);font-weight:500}
+.vp{margin-left:auto;display:flex;gap:2px;border:1px solid var(--line);border-radius:var(--r);padding:2px}
+.vp button{background:none;border:0;padding:4px 10px;border-radius:2px;font-size:12px;color:var(--ink2)}
+.vp button.on{background:var(--sunk);color:var(--ink);font-weight:500}
+.frame{max-width:1360px;margin:22px auto;background:var(--bg);border:1px solid var(--line);overflow:hidden}
+.frame.mobile{max-width:414px}
+.screen{display:none}
+.screen.on{display:block}
+.note{background:var(--acc-soft);border-left:2px solid var(--acc);padding:9px 14px;font-size:12.5px;color:var(--acc-ink);line-height:1.55}
+@media (prefers-color-scheme:dark){.note{color:var(--acc-ink)}}
+.note b{font-weight:600}
+
+/* ---------- app shell ---------- */
+.app{display:grid;grid-template-columns:236px 1fr;min-height:720px}
+.frame.mobile .app{grid-template-columns:1fr}
+
+/* sidebar: text-only, no icon chips */
+.side{border-right:1px solid var(--line);background:var(--bg);padding:0 0 20px}
+.frame.mobile .side{display:none}
+.brand{padding:20px 20px 18px;border-bottom:1px solid var(--line2)}
+.brand .bm{font-size:14px;font-weight:600;letter-spacing:-.02em}
+.brand .bs{font-size:11.5px;color:var(--ink3);margin-top:1px}
+.navgrp{padding:18px 12px 0}
+.navgrp .lbl{font-size:10.5px;text-transform:uppercase;letter-spacing:.08em;color:var(--ink3);padding:0 8px 7px;font-weight:600}
+.nav a{display:flex;align-items:center;justify-content:space-between;gap:8px;padding:6px 8px;border-radius:var(--r);color:var(--ink2);text-decoration:none;font-size:13.5px;border-left:2px solid transparent;margin-left:-2px}
+.nav a:hover{background:var(--sunk);color:var(--ink)}
+.nav a.on{color:var(--ink);font-weight:600;border-left-color:var(--acc)}
+.nav a .ct{font-size:11px;color:var(--ink3);font-variant-numeric:tabular-nums}
+.nav a.on .ct{color:var(--ink2)}
+.sfoot{margin:20px 12px 0;padding:12px 8px 0;border-top:1px solid var(--line2);font-size:12px;color:var(--ink3)}
+.sfoot .who{color:var(--ink2);font-weight:500}
+
+/* main */
+.main{min-width:0;background:var(--bg)}
+.top{display:flex;align-items:center;gap:14px;padding:14px 26px;border-bottom:1px solid var(--line)}
+.crumb{font-size:12px;color:var(--ink3)}
+.crumb b{color:var(--ink2);font-weight:500}
+.kbd{margin-left:auto;display:flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:var(--r);padding:5px 9px;color:var(--ink3);font-size:12.5px;background:var(--bg);min-width:210px}
+.kbd kbd{font-family:var(--mono);font-size:10.5px;border:1px solid var(--line);border-radius:3px;padding:1px 4px;margin-left:auto;color:var(--ink2)}
+.frame.mobile .kbd{min-width:0}
+.frame.mobile .kbd span{display:none}
+
+.head{padding:24px 26px 18px;display:flex;align-items:flex-end;gap:18px;flex-wrap:wrap}
+.head h2{font-size:22px}
+.head p{margin:5px 0 0;color:var(--ink2);font-size:13px;max-width:62ch}
+.acts{margin-left:auto;display:flex;gap:7px;flex-wrap:wrap}
+.btn{border:1px solid var(--line);background:var(--bg);color:var(--ink);padding:6px 12px;border-radius:var(--r);font-size:13px}
+.btn:hover{background:var(--sunk)}
+.btn.pri{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:500}
+.btn.pri:hover{background:var(--acc-ink)}
+.btn.qt{border-color:transparent;color:var(--ink2)}
+.btn.qt:hover{color:var(--ink);background:var(--sunk)}
+.sec{padding:0 26px 26px}
+.frame.mobile .head,.frame.mobile .sec,.frame.mobile .top{padding-left:16px;padding-right:16px}
+
+/* section header = hairline + label, no card */
+.sh{display:flex;align-items:baseline;gap:12px;padding:22px 0 12px;border-top:1px solid var(--line);margin-top:4px}
+.sh h3{font-size:13px;letter-spacing:.01em}
+.sh .sub{font-size:12px;color:var(--ink3)}
+.sh .r{margin-left:auto;display:flex;gap:6px;align-items:center}
+
+/* KPI row: numbers on open ground, divided by hairlines */
+.kpis{display:grid;grid-template-columns:repeat(4,1fr);border-top:1px solid var(--line);border-bottom:1px solid var(--line)}
+.frame.mobile .kpis{grid-template-columns:1fr 1fr}
+.kpi{padding:18px 20px;border-left:1px solid var(--line2)}
+.kpi:first-child{border-left:0;padding-left:0}
+.frame.mobile .kpi:nth-child(3){border-left:0}
+.kpi .k{font-size:11px;text-transform:uppercase;letter-spacing:.07em;color:var(--ink3);font-weight:600}
+.kpi .v{font-size:27px;font-weight:600;letter-spacing:-.03em;margin-top:7px;font-variant-numeric:tabular-nums;line-height:1.1}
+.kpi .v small{font-size:13px;font-weight:500;color:var(--ink3);letter-spacing:0}
+.kpi .d{font-size:12px;color:var(--ink2);margin-top:5px;display:flex;align-items:center;gap:6px}
+.up{color:var(--ok)}.dn{color:var(--bad)}
+.spark{display:block;margin-top:10px}
+
+/* tables: hairlines only */
+table{width:100%;border-collapse:collapse}
+th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;color:var(--ink3);font-weight:600;padding:0 12px 8px;border-bottom:1px solid var(--line);white-space:nowrap}
+th:first-child,td:first-child{padding-left:0}
+th.r,td.r{text-align:right}
+td{padding:11px 12px;border-bottom:1px solid var(--line2);font-size:13.5px;color:var(--ink2);vertical-align:middle}
+tbody tr:hover td{background:var(--canvas)}
+td .p{color:var(--ink);font-weight:500}
+.tw{overflow-x:auto}
+.dot{width:6px;height:6px;border-radius:50%;display:inline-block;flex:none}
+.st{display:inline-flex;align-items:center;gap:7px;font-size:12.5px;white-space:nowrap}
+.st.ok{color:var(--ok)}.st.wa{color:var(--warn)}.st.ba{color:var(--bad)}.st.of{color:var(--ink3)}
+.st.ok .dot{background:var(--ok)}.st.wa .dot{background:var(--warn)}.st.ba .dot{background:var(--bad)}.st.of .dot{background:var(--ink3)}
+.tag{font-size:11px;border:1px solid var(--line);border-radius:2px;padding:1px 6px;color:var(--ink2);font-family:var(--mono)}
+
+/* chart */
+.chart{width:100%;height:auto;display:block}
+.gl{stroke:var(--line2);stroke-width:1}
+.al{stroke:var(--line);stroke-width:1}
+.at{fill:var(--ink3);font-size:10.5px;font-family:var(--sans)}
+.ln{fill:none;stroke:var(--acc);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.ln2{fill:none;stroke:var(--ink3);stroke-width:2;stroke-dasharray:3 3}
+.end{fill:var(--acc);stroke:var(--bg);stroke-width:2}
+.legend{display:flex;gap:18px;font-size:12px;color:var(--ink2);padding-top:10px;flex-wrap:wrap}
+.legend i{width:14px;height:2px;display:inline-block;vertical-align:middle;margin-right:6px}
+
+/* two-col */
+.cols{display:grid;grid-template-columns:1.55fr 1fr;gap:34px}
+.frame.mobile .cols{grid-template-columns:1fr;gap:0}
+
+/* list rows */
+.rows .row{display:flex;gap:12px;align-items:flex-start;padding:12px 0;border-bottom:1px solid var(--line2)}
+.rows .row .t{font-size:13.5px;color:var(--ink);font-weight:500}
+.rows .row .m{font-size:12px;color:var(--ink3);margin-top:2px}
+.rows .row .rt{margin-left:auto;text-align:right;font-size:12px;color:var(--ink3);white-space:nowrap}
+
+/* form: single column, labels above, hairline groups */
+.form{max-width:620px}
+.fg{padding:18px 0;border-bottom:1px solid var(--line2)}
+.fg:last-of-type{border-bottom:0}
+.fg label{display:block;font-size:13px;font-weight:600;color:var(--ink)}
+.fg .hint{font-size:12px;color:var(--ink3);margin-top:3px;line-height:1.5}
+.fg .opt{font-weight:400;color:var(--ink3);font-size:12px;margin-left:6px}
+input[type=text],select,textarea{width:100%;margin-top:9px;background:var(--bg);border:1px solid var(--line);border-radius:var(--r);padding:8px 10px;font:inherit;font-size:13.5px;color:var(--ink)}
+input[type=text]:focus,select:focus,textarea:focus{outline:2px solid var(--acc);outline-offset:-1px;border-color:var(--acc)}
+input::placeholder{color:var(--ink3)}
+.ro{background:var(--sunk);border:1px solid var(--line);border-radius:var(--r);padding:11px 13px;margin-top:9px}
+.ro .rt{font-size:12.5px;color:var(--ink2);line-height:1.55}
+.chk{display:flex;gap:9px;align-items:flex-start;padding:7px 0}
+.chk input{margin:2px 0 0;accent-color:var(--acc)}
+.chk .ct{font-size:13px;color:var(--ink)}
+.chk .cm{font-size:12px;color:var(--ink3)}
+.chk.dis .ct,.chk.dis .cm{color:var(--ink3)}
+.urlbox{display:flex;align-items:center;gap:10px;border:1px solid var(--line);border-radius:var(--r);padding:9px 11px;margin-top:9px;background:var(--sunk)}
+.urlbox .u{font-family:var(--mono);font-size:12px;color:var(--ink2);overflow-x:auto;white-space:nowrap;flex:1}
+.fbar{display:flex;gap:8px;align-items:center;padding:18px 0 0;border-top:1px solid var(--line)}
+.fbar .sp{margin-left:auto}
+
+/* segmented + chips */
+.seg{display:inline-flex;border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.seg button{background:var(--bg);border:0;border-left:1px solid var(--line);padding:5px 11px;font-size:12.5px;color:var(--ink2)}
+.seg button:first-child{border-left:0}
+.seg button.on{background:var(--sunk);color:var(--ink);font-weight:600}
+.chips{display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.chip{border:1px solid var(--line);border-radius:12px;padding:3px 10px;font-size:12px;color:var(--ink2);background:var(--bg)}
+.chip.on{border-color:var(--acc);color:var(--acc-ink);background:var(--acc-soft)}
+
+/* settings */
+.stabs{display:flex;gap:22px;border-bottom:1px solid var(--line);padding:0 26px}
+.frame.mobile .stabs{padding:0 16px;overflow-x:auto}
+.stabs a{padding:11px 0;font-size:13px;color:var(--ink2);text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-1px;white-space:nowrap}
+.stabs a.on{color:var(--ink);font-weight:600;border-bottom-color:var(--ink)}
+.tg{width:34px;height:19px;border-radius:10px;background:var(--line);border:0;position:relative;flex:none}
+.tg:after{content:"";position:absolute;top:2px;left:2px;width:15px;height:15px;border-radius:50%;background:var(--bg);transition:left .14s}
+.tg.on{background:var(--acc)}
+.tg.on:after{left:17px}
+.matrix td{font-size:13px}
+.matrix .y{color:var(--ok);font-weight:600}
+.matrix .n{color:var(--ink3)}
+
+/* mobile bottom nav */
+.mnav{display:none}
+.frame.mobile .mnav{display:grid;grid-template-columns:repeat(5,1fr);border-top:1px solid var(--line);position:sticky;bottom:0;background:var(--bg)}
+.mnav a{padding:10px 4px;text-align:center;font-size:10.5px;color:var(--ink3);text-decoration:none;border-top:2px solid transparent;margin-top:-1px}
+.mnav a.on{color:var(--ink);font-weight:600;border-top-color:var(--acc)}
+.hide-mob{display:block}
+.frame.mobile .hide-mob{display:none}
+</style>
+</head>
+<body data-concept="slate">
+
+<div class="chrome">
+  <h1>Concept 5 — Slate · Quiet Precision</h1>
+  <p>Monochrome first. No cards, no tinted icon chips, no shadows — structure comes from hairlines, alignment and whitespace. One accent colour (deep teal), spent only on the primary action, the active nav item and the primary data series. Reference points: Vercel dashboard, Stripe docs, Things 3.</p>
+</div>
+
+<div class="bar">
+  <div class="tabs">
+    <button class="on" onclick="show('s1',this)">Dashboard</button>
+    <button onclick="show('s2',this)">Home</button>
+    <button onclick="show('s3',this)">Assets · table</button>
+    <button onclick="show('s4',this)">Create endpoint · form</button>
+    <button onclick="show('s5',this)">Analytics</button>
+    <button onclick="show('s6',this)">Settings</button>
+  </div>
+  <div class="vp">
+    <button id="b-desk" class="on" onclick="vp('desk')">Desktop</button>
+    <button id="b-mob" onclick="vp('mob')">Mobile</button>
+  </div>
+</div>
+
+<div class="frame" id="frame">
+
+<!-- ========================= 1. DASHBOARD ========================= -->
+<section class="screen on" id="s1">
+  <div class="note"><b>What changes:</b> KPIs sit on open ground separated by hairlines instead of in four bordered boxes — the numbers become the loudest thing on the page. Sidebar is text-only with live counts. Every identifier is monospace so a device ID never gets confused with a label.</div>
+  <div class="app">
+    <aside class="side">
+      <div class="brand"><div class="bm">WS Integrated Suite</div><div class="bs">Plant 1 · Production</div></div>
+      <div class="navgrp"><div class="lbl">Monitor</div><nav class="nav">
+        <a href="#" class="on">Dashboards</a>
+        <a href="#">Live Twin</a>
+        <a href="#">Alarms <span class="ct">3</span></a>
+        <a href="#">Data Explorer</a>
+      </nav></div>
+      <div class="navgrp"><div class="lbl">Configure</div><nav class="nav">
+        <a href="#">Assets <span class="ct">148</span></a>
+        <a href="#">Asset Templates <span class="ct">12</span></a>
+        <a href="#">Alarm Rules <span class="ct">37</span></a>
+        <a href="#">Brokers <span class="ct">4</span></a>
+      </nav></div>
+      <div class="navgrp"><div class="lbl">Administer</div><nav class="nav">
+        <a href="#">API Endpoints <span class="ct">9</span></a>
+        <a href="#">Users <span class="ct">23</span></a>
+        <a href="#">Activity Log</a>
+      </nav></div>
+      <div class="sfoot"><div class="who">A. Kulkarni</div><div>Customer Admin</div></div>
+    </aside>
+
+    <div class="main">
+      <div class="top">
+        <div class="crumb">Dashboards / <b>Plant 1 Overview</b></div>
+        <div class="kbd"><span>Search assets, alarms, rules…</span><kbd>⌘K</kbd></div>
+      </div>
+
+      <div class="head">
+        <div>
+          <h2>Plant 1 Overview</h2>
+          <p>148 assets reporting · last ingest 4 seconds ago</p>
+        </div>
+        <div class="acts">
+          <div class="seg"><button>1h</button><button class="on">24h</button><button>7d</button><button>30d</button></div>
+          <button class="btn">Edit layout</button>
+          <button class="btn pri">Add widget</button>
+        </div>
+      </div>
+
+      <div class="sec" style="padding-bottom:0">
+        <div class="kpis">
+          <div class="kpi">
+            <div class="k">Active devices</div>
+            <div class="v">146<small> / 148</small></div>
+            <div class="d"><span class="st of"><span class="dot"></span>2 offline &gt; 15 min</span></div>
+            <svg class="spark" width="112" height="26" viewBox="0 0 112 26" aria-label="Active devices, stable over 24 hours">
+              <path class="ln" style="stroke:var(--ink3);stroke-width:1.5" d="M0 8 L14 7 L28 9 L42 6 L56 7 L70 12 L84 9 L98 8 L112 8"/>
+              <circle class="end" cx="112" cy="8" r="3"/>
+            </svg>
+          </div>
+          <div class="kpi">
+            <div class="k">Messages · 24h</div>
+            <div class="v">1.94<small>M</small></div>
+            <div class="d"><span class="up">▲ 6.2%</span><span style="color:var(--ink3)">vs prev 24h</span></div>
+            <svg class="spark" width="112" height="26" viewBox="0 0 112 26" aria-label="Message volume rising">
+              <path class="ln" style="stroke:var(--ink3);stroke-width:1.5" d="M0 19 L14 17 L28 18 L42 14 L56 13 L70 15 L84 10 L98 9 L112 6"/>
+              <circle class="end" cx="112" cy="6" r="3"/>
+            </svg>
+          </div>
+          <div class="kpi">
+            <div class="k">Open alarms</div>
+            <div class="v">3</div>
+            <div class="d"><span class="st ba"><span class="dot"></span>1 critical</span><span class="st wa"><span class="dot"></span>2 warning</span></div>
+            <svg class="spark" width="112" height="26" viewBox="0 0 112 26" aria-label="Alarm count over 24 hours">
+              <path class="ln" style="stroke:var(--ink3);stroke-width:1.5" d="M0 20 L14 20 L28 15 L42 20 L56 20 L70 12 L84 16 L98 14 L112 14"/>
+              <circle class="end" cx="112" cy="14" r="3"/>
+            </svg>
+          </div>
+          <div class="kpi">
+            <div class="k">Ingest latency p95</div>
+            <div class="v">212<small> ms</small></div>
+            <div class="d"><span class="up">▼ 18 ms</span><span style="color:var(--ink3)">improving</span></div>
+            <svg class="spark" width="112" height="26" viewBox="0 0 112 26" aria-label="Latency p95 falling">
+              <path class="ln" style="stroke:var(--ink3);stroke-width:1.5" d="M0 6 L14 9 L28 7 L42 11 L56 10 L70 13 L84 12 L98 15 L112 16"/>
+              <circle class="end" cx="112" cy="16" r="3"/>
+            </svg>
+          </div>
+        </div>
+      </div>
+
+      <div class="sec">
+        <div class="cols">
+          <div>
+            <div class="sh" style="border-top:0;padding-top:20px">
+              <h3>Energy consumption</h3>
+              <span class="sub">kWh · 15-minute aggregate</span>
+              <div class="r"><button class="btn qt">Export</button></div>
+            </div>
+            <svg class="chart" viewBox="0 0 660 232" role="img" aria-label="Energy consumption over 24 hours; today tracks slightly above yesterday, peaking at 14:00">
+              <g>
+                <line class="gl" x1="42" y1="20" x2="650" y2="20"/><line class="gl" x1="42" y1="66" x2="650" y2="66"/>
+                <line class="gl" x1="42" y1="112" x2="650" y2="112"/><line class="gl" x1="42" y1="158" x2="650" y2="158"/>
+                <line class="al" x1="42" y1="196" x2="650" y2="196"/>
+                <text class="at" x="34" y="24" text-anchor="end">480</text><text class="at" x="34" y="70" text-anchor="end">360</text>
+                <text class="at" x="34" y="116" text-anchor="end">240</text><text class="at" x="34" y="162" text-anchor="end">120</text>
+                <text class="at" x="34" y="200" text-anchor="end">0</text>
+                <text class="at" x="42" y="216">00:00</text><text class="at" x="194" y="216">06:00</text>
+                <text class="at" x="346" y="216">12:00</text><text class="at" x="498" y="216">18:00</text><text class="at" x="650" y="216" text-anchor="end">now</text>
+              </g>
+              <path class="ln2" d="M42 168 L118 160 L194 128 L270 96 L346 74 L422 88 L498 112 L574 140 L650 156"/>
+              <path class="ln" d="M42 162 L118 152 L194 118 L270 84 L346 58 L422 70 L498 98 L574 126 L650 138"/>
+              <circle class="end" cx="650" cy="138" r="4.5"/>
+              <text class="at" x="346" y="48" text-anchor="middle" style="fill:var(--ink2);font-weight:600">peak 412 kWh</text>
+            </svg>
+            <div class="legend">
+              <span><i style="background:var(--acc)"></i>Today · 8,412 kWh</span>
+              <span><i style="background:var(--ink3)"></i>Yesterday · 7,928 kWh</span>
+            </div>
+          </div>
+
+          <div>
+            <div class="sh" style="border-top:0;padding-top:20px"><h3>Open alarms</h3><div class="r"><button class="btn qt">View all</button></div></div>
+            <div class="rows">
+              <div class="row">
+                <span class="dot" style="background:var(--bad);margin-top:6px"></span>
+                <div><div class="t">Bearing temperature &gt; 85 °C</div><div class="m mono">FAN-04 · Line 2 · 91.4 °C</div></div>
+                <div class="rt">6 min</div>
+              </div>
+              <div class="row">
+                <span class="dot" style="background:var(--warn);margin-top:6px"></span>
+                <div><div class="t">Vibration rate-of-change</div><div class="m mono">PUMP-11 · Utilities · +2.1 mm/s per min</div></div>
+                <div class="rt">28 min</div>
+              </div>
+              <div class="row">
+                <span class="dot" style="background:var(--warn);margin-top:6px"></span>
+                <div><div class="t">No data received</div><div class="m mono">METER-07 · Substation B</div></div>
+                <div class="rt">1 h 12 m</div>
+              </div>
+            </div>
+
+            <div class="sh"><h3>Ingest sources</h3></div>
+            <div class="rows">
+              <div class="row"><div><div class="t">MQTT · broker-prod-01</div><div class="m mono">1.41M msg · 24h</div></div><div class="rt"><span class="st ok"><span class="dot"></span>Connected</span></div></div>
+              <div class="row"><div><div class="t">HTTP · Node-RED gateway</div><div class="m mono">498K msg · 24h</div></div><div class="rt"><span class="st ok"><span class="dot"></span>Healthy</span></div></div>
+              <div class="row"><div><div class="t">Azure IoT Hub</div><div class="m mono">31K msg · 24h</div></div><div class="rt"><span class="st wa"><span class="dot"></span>Throttled</span></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <nav class="mnav"><a href="#" class="on">Dash</a><a href="#">Twin</a><a href="#">Alarms</a><a href="#">Assets</a><a href="#">More</a></nav>
+    </div>
+  </div>
+</section>
+
+<!-- ========================= 2. HOME ========================= -->
+<section class="screen" id="s2">
+  <div class="note"><b>What changes:</b> the landing page answers “what needs me today” before it offers navigation. Attention items come first as plain rows, quick actions are text links rather than tiles, and system health is a single hairline strip instead of four status cards.</div>
+  <div class="app">
+    <aside class="side">
+      <div class="brand"><div class="bm">WS Integrated Suite</div><div class="bs">Plant 1 · Production</div></div>
+      <div class="navgrp"><div class="lbl">Monitor</div><nav class="nav">
+        <a href="#">Dashboards</a><a href="#">Live Twin</a><a href="#">Alarms <span class="ct">3</span></a><a href="#">Data Explorer</a>
+      </nav></div>
+      <div class="navgrp"><div class="lbl">Configure</div><nav class="nav">
+        <a href="#">Assets <span class="ct">148</span></a><a href="#">Asset Templates <span class="ct">12</span></a><a href="#">Alarm Rules <span class="ct">37</span></a><a href="#">Brokers <span class="ct">4</span></a>
+      </nav></div>
+      <div class="sfoot"><div class="who">A. Kulkarni</div><div>Customer Admin</div></div>
+    </aside>
+    <div class="main">
+      <div class="top"><div class="crumb"><b>Home</b></div><div class="kbd"><span>Search assets, alarms, rules…</span><kbd>⌘K</kbd></div></div>
+      <div class="head">
+        <div><h2>Good afternoon, Anand</h2><p>Three things need attention. Everything else is running normally.</p></div>
+      </div>
+
+      <div class="sec">
+        <div class="sh" style="border-top:0;padding-top:0"><h3>Needs attention</h3><span class="sub">3 items</span></div>
+        <div class="rows">
+          <div class="row">
+            <span class="dot" style="background:var(--bad);margin-top:6px"></span>
+            <div><div class="t">FAN-04 bearing temperature critical for 6 minutes</div><div class="m">Threshold 85 °C · currently 91.4 °C · no acknowledgement yet</div></div>
+            <div class="rt"><button class="btn">Acknowledge</button></div>
+          </div>
+          <div class="row">
+            <span class="dot" style="background:var(--warn);margin-top:6px"></span>
+            <div><div class="t">METER-07 has sent no data for 1 hour 12 minutes</div><div class="m">Last payload 13:48 · Substation B · MQTT topic <span class="mono">plant1/sub-b/meter07</span></div></div>
+            <div class="rt"><button class="btn">Diagnose</button></div>
+          </div>
+          <div class="row">
+            <span class="dot" style="background:var(--warn);margin-top:6px"></span>
+            <div><div class="t">Azure IoT Hub connection is being throttled</div><div class="m">31K of 50K daily quota consumed · consider raising the tier</div></div>
+            <div class="rt"><button class="btn">Review</button></div>
+          </div>
+        </div>
+
+        <div class="cols" style="margin-top:6px">
+          <div>
+            <div class="sh"><h3>Continue where you left off</h3></div>
+            <div class="rows">
+              <div class="row"><div><div class="t">Plant 1 Overview</div><div class="m">Dashboard · 14 widgets</div></div><div class="rt">Opened 2 h ago</div></div>
+              <div class="row"><div><div class="t">Compressor efficiency study</div><div class="m">Data Explorer · 6 series, 30-day window</div></div><div class="rt">Yesterday</div></div>
+              <div class="row"><div><div class="t">Line 2 vibration rules</div><div class="m">Alarm rules · 4 of 6 enabled</div></div><div class="rt">2 days ago</div></div>
+            </div>
+          </div>
+          <div>
+            <div class="sh"><h3>Quick actions</h3></div>
+            <div class="rows">
+              <div class="row"><div><div class="t">Create API endpoint</div><div class="m">Issue an ingest key for a new gateway</div></div><div class="rt">→</div></div>
+              <div class="row"><div><div class="t">Register an asset</div><div class="m">From a template or blank</div></div><div class="rt">→</div></div>
+              <div class="row"><div><div class="t">Add an alarm rule</div><div class="m">Threshold or rate-of-change</div></div><div class="rt">→</div></div>
+              <div class="row"><div><div class="t">Invite a user</div><div class="m">Assign a role and module access</div></div><div class="rt">→</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="sh"><h3>System</h3></div>
+        <div class="kpis" style="border-bottom:0">
+          <div class="kpi"><div class="k">API</div><div class="d" style="margin-top:8px"><span class="st ok"><span class="dot"></span>Operational</span></div></div>
+          <div class="kpi"><div class="k">WebSocket</div><div class="d" style="margin-top:8px"><span class="st ok"><span class="dot"></span>23 clients</span></div></div>
+          <div class="kpi"><div class="k">Database</div><div class="d" style="margin-top:8px"><span class="st ok"><span class="dot"></span>3.4M rows</span></div></div>
+          <div class="kpi"><div class="k">Retention</div><div class="d" style="margin-top:8px"><span class="st of"><span class="dot"></span>Pruned 03:00</span></div></div>
+        </div>
+      </div>
+      <nav class="mnav"><a href="#">Dash</a><a href="#" class="on">Home</a><a href="#">Alarms</a><a href="#">Assets</a><a href="#">More</a></nav>
+    </div>
+  </div>
+</section>
+
+<!-- ========================= 3. TABLE ========================= -->
+<section class="screen" id="s3">
+  <div class="note"><b>What changes:</b> ~16 rows visible without scrolling. Filters are one row of chips above the table, not a panel. Row status is a 6px dot plus a word — never colour alone. Identifiers, values and timestamps are monospace and right-aligned so columns scan vertically.</div>
+  <div class="app">
+    <aside class="side">
+      <div class="brand"><div class="bm">WS Integrated Suite</div><div class="bs">Plant 1 · Production</div></div>
+      <div class="navgrp"><div class="lbl">Monitor</div><nav class="nav">
+        <a href="#">Dashboards</a><a href="#">Live Twin</a><a href="#">Alarms <span class="ct">3</span></a><a href="#">Data Explorer</a>
+      </nav></div>
+      <div class="navgrp"><div class="lbl">Configure</div><nav class="nav">
+        <a href="#" class="on">Assets <span class="ct">148</span></a><a href="#">Asset Templates <span class="ct">12</span></a><a href="#">Alarm Rules <span class="ct">37</span></a><a href="#">Brokers <span class="ct">4</span></a>
+      </nav></div>
+      <div class="sfoot"><div class="who">A. Kulkarni</div><div>Customer Admin</div></div>
+    </aside>
+    <div class="main">
+      <div class="top"><div class="crumb">Configure / <b>Assets</b></div><div class="kbd"><span>Search assets, alarms, rules…</span><kbd>⌘K</kbd></div></div>
+      <div class="head">
+        <div><h2>Assets</h2><p>148 assets across 6 areas. 2 have not reported in over 15 minutes.</p></div>
+        <div class="acts"><button class="btn">Import CSV</button><button class="btn">Columns</button><button class="btn pri">New asset</button></div>
+      </div>
+      <div class="sec">
+        <div class="chips" style="padding-bottom:14px">
+          <input type="text" placeholder="Filter by name or device ID" style="width:250px;margin:0">
+          <span class="chip on">All areas</span><span class="chip">Line 1</span><span class="chip">Line 2</span><span class="chip">Utilities</span><span class="chip">Substation B</span>
+          <span style="width:1px;height:20px;background:var(--line);margin:0 4px"></span>
+          <span class="chip">Reporting</span><span class="chip">Silent</span><span class="chip">Maintenance</span>
+          <span style="margin-left:auto;font-size:12px;color:var(--ink3)" class="num">148 results</span>
+        </div>
+        <div class="tw">
+        <table>
+          <thead><tr>
+            <th style="width:26px"><input type="checkbox" aria-label="Select all"></th>
+            <th>Asset</th><th>Device ID</th><th>Template</th><th>Area</th><th>Status</th>
+            <th class="r">Last value</th><th class="r">Last seen</th><th class="r">Rules</th><th style="width:20px"></th>
+          </tr></thead>
+          <tbody>
+            <tr><td><input type="checkbox" aria-label="Select FAN-04"></td><td class="p">Cooling Fan 04</td><td class="mono">FAN-04</td><td>Rotating machine</td><td>Line 2</td><td><span class="st ba"><span class="dot"></span>Alarm</span></td><td class="r mono">91.4 °C</td><td class="r mono">4 s</td><td class="r num">6</td><td>›</td></tr>
+            <tr><td><input type="checkbox" aria-label="Select PUMP-11"></td><td class="p">Coolant Pump 11</td><td class="mono">PUMP-11</td><td>Rotating machine</td><td>Utilities</td><td><span class="st wa"><span class="dot"></span>Warning</span></td><td class="r mono">7.8 mm/s</td><td class="r mono">9 s</td><td class="r num">4</td><td>›</td></tr>
+            <tr><td><input type="checkbox" aria-label="Select METER-07"></td><td class="p">Energy Meter 07</td><td class="mono">METER-07</td><td>Power meter</td><td>Substation B</td><td><span class="st of"><span class="dot"></span>Silent</span></td><td class="r mono">—</td><td class="r mono">1 h 12 m</td><td class="r num">3</td><td>›</td></tr>
+            <tr><td><input type="checkbox" aria-label="Select EMS-01"></td><td class="p">EMS Gateway</td><td class="mono">EMS</td><td>Gateway</td><td>Plant 1</td><td><span class="st ok"><span class="dot"></span>Reporting</span></td><td class="r mono">412 kWh</td><td class="r mono">2 s</td><td class="r num">2</td><td>›</td></tr>
+            <tr><td><input type="checkbox" aria-label="Select COMP-02"></td><td class="p">Air Compressor 02</td><td class="mono">COMP-02</td><td>Compressor</td><td>Utilities</td><td><span class="st ok"><span class="dot"></span>Reporting</span></td><td class="r mono">6.4 bar</td><td class="r mono">3 s</td><td class="r num">5</td><td>›</td></tr>
+            <tr><td><input type="checkbox" aria-label="Select CHILL-01"></td><td class="p">Chiller 01</td><td class="mono">CHILL-01</td><td>Chiller</td><td>Utilities</td><td><span class="st ok"><span class="dot"></span>Reporting</span></td><td class="r mono">11.2 °C</td><td class="r mono">5 s</td><td class="r num">4</td><td>›</td></tr>
+            <tr><td><input type="checkbox" aria-label="Select CONV-03"></td><td class="p">Conveyor 03</td><td class="mono">CONV-03</td><td>Drive</td><td>Line 1</td><td><span class="st ok"><span class="dot"></span>Reporting</span></td><td class="r mono">1,480 rpm</td><td class="r mono">2 s</td><td class="r num">3</td><td>›</td></tr>
+            <tr><td><input type="checkbox" aria-label="Select CONV-04"></td><td class="p">Conveyor 04</td><td class="mono">CONV-04</td><td>Drive</td><td>Line 1</td><td><span class="st ok"><span class="dot"></span>Reporting</span></td><td class="r mono">1,502 rpm</td><td class="r mono">2 s</td><td class="r num">3</td><td>›</td></tr>
+            <tr><td><input type="checkbox" aria-label="Select OVEN-01"></td><td class="p">Curing Oven 01</td><td class="mono">OVEN-01</td><td>Thermal</td><td>Line 2</td><td><span class="st ok"><span class="dot"></span>Reporting</span></td><td class="r mono">184 °C</td><td class="r mono">6 s</td><td class="r num">7</td><td>›</td></tr>
+            <tr><td><input type="checkbox" aria-label="Select ROBO-02"></td><td class="p">Pick &amp; Place 02</td><td class="mono">ROBO-02</td><td>Robot cell</td><td>Line 2</td><td><span class="st of"><span class="dot"></span>Maintenance</span></td><td class="r mono">idle</td><td class="r mono">14 s</td><td class="r num">5</td><td>›</td></tr>
+            <tr><td><input type="checkbox" aria-label="Select TANK-05"></td><td class="p">Feed Tank 05</td><td class="mono">TANK-05</td><td>Vessel</td><td>Line 1</td><td><span class="st ok"><span class="dot"></span>Reporting</span></td><td class="r mono">72.5 %</td><td class="r mono">8 s</td><td class="r num">2</td><td>›</td></tr>
+            <tr><td><input type="checkbox" aria-label="Select VALVE-09"></td><td class="p">Control Valve 09</td><td class="mono">VALVE-09</td><td>Actuator</td><td>Line 1</td><td><span class="st ok"><span class="dot"></span>Reporting</span></td><td class="r mono">44 %</td><td class="r mono">3 s</td><td class="r num">1</td><td>›</td></tr>
+            <tr><td><input type="checkbox" aria-label="Select AHU-02"></td><td class="p">Air Handling Unit 02</td><td class="mono">AHU-02</td><td>HVAC</td><td>Plant 1</td><td><span class="st ok"><span class="dot"></span>Reporting</span></td><td class="r mono">21.8 °C</td><td class="r mono">11 s</td><td class="r num">4</td><td>›</td></tr>
+            <tr><td><input type="checkbox" aria-label="Select METER-01"></td><td class="p">Energy Meter 01</td><td class="mono">METER-01</td><td>Power meter</td><td>Substation A</td><td><span class="st ok"><span class="dot"></span>Reporting</span></td><td class="r mono">288 kWh</td><td class="r mono">4 s</td><td class="r num">3</td><td>›</td></tr>
+            <tr><td><input type="checkbox" aria-label="Select METER-02"></td><td class="p">Energy Meter 02</td><td class="mono">METER-02</td><td>Power meter</td><td>Substation A</td><td><span class="st ok"><span class="dot"></span>Reporting</span></td><td class="r mono">301 kWh</td><td class="r mono">4 s</td><td class="r num">3</td><td>›</td></tr>
+            <tr><td><input type="checkbox" aria-label="Select DRYER-01"></td><td class="p">Dryer 01</td><td class="mono">DRYER-01</td><td>Thermal</td><td>Line 2</td><td><span class="st ok"><span class="dot"></span>Reporting</span></td><td class="r mono">96 °C</td><td class="r mono">7 s</td><td class="r num">4</td><td>›</td></tr>
+          </tbody>
+        </table>
+        </div>
+        <div style="display:flex;align-items:center;gap:12px;padding-top:14px">
+          <span style="font-size:12px;color:var(--ink3)" class="num">Showing 1–16 of 148</span>
+          <div class="acts" style="margin-left:auto"><button class="btn">Previous</button><button class="btn">Next</button></div>
+        </div>
+      </div>
+      <nav class="mnav"><a href="#">Dash</a><a href="#">Twin</a><a href="#">Alarms</a><a href="#" class="on">Assets</a><a href="#">More</a></nav>
+    </div>
+  </div>
+</section>
+
+<!-- ========================= 4. FORM ========================= -->
+<section class="screen" id="s4">
+  <div class="note"><b>What changes:</b> a single-column form on the page itself — not a modal — so long forms scroll naturally and can be deep-linked. Groups are separated by hairlines instead of boxes. The write-scope restriction is shown as a read-only explanation rather than disabled checkboxes the user will try to click.</div>
+  <div class="app">
+    <aside class="side">
+      <div class="brand"><div class="bm">WS Integrated Suite</div><div class="bs">Plant 1 · Production</div></div>
+      <div class="navgrp"><div class="lbl">Administer</div><nav class="nav">
+        <a href="#" class="on">API Endpoints <span class="ct">9</span></a><a href="#">Users <span class="ct">23</span></a><a href="#">Activity Log</a>
+      </nav></div>
+      <div class="sfoot"><div class="who">A. Kulkarni</div><div>Customer Admin</div></div>
+    </aside>
+    <div class="main">
+      <div class="top"><div class="crumb">Administer / API Endpoints / <b>New</b></div><div class="kbd"><span>Search…</span><kbd>⌘K</kbd></div></div>
+      <div class="head">
+        <div><h2>Create API endpoint</h2><p>Issues an ingest URL with an embedded key. Point your gateway at it — no header configuration required.</p></div>
+      </div>
+      <div class="sec">
+        <div class="form">
+          <div class="fg">
+            <label for="f1">Client name <span class="opt">optional</span></label>
+            <div class="hint">A label for your own reference. Defaults to the project name if left blank.</div>
+            <input id="f1" type="text" placeholder="Line 2 Node-RED gateway" autocomplete="off">
+          </div>
+
+          <div class="fg">
+            <label for="f2">Project</label>
+            <div class="hint">Type to search existing projects, or enter a new name to create one.</div>
+            <input id="f2" type="text" value="Plant 1 — Energy" autocomplete="off" list="projects">
+            <datalist id="projects"><option>Plant 1 — Energy</option><option>Line 2 — Condition monitoring</option><option>Substation telemetry</option></datalist>
+            <div class="chips" style="margin-top:9px"><span class="chip on">Plant 1 — Energy</span><span class="chip">Line 2 — Condition monitoring</span><span class="chip">+ Create “Line 3 pilot”</span></div>
+          </div>
+
+          <div class="fg">
+            <label>Permissions</label>
+            <div class="hint">This endpoint receives telemetry. Write access is granted automatically.</div>
+            <div class="chk" style="padding-top:11px">
+              <input type="checkbox" checked disabled id="w1">
+              <div><div class="ct"><label for="w1">Write telemetry <span class="mono" style="color:var(--ink3)">ingest:write</span></label></div><div class="cm">Accept payloads for assets in this project.</div></div>
+            </div>
+            <div class="ro">
+              <div class="rt"><b>Read permissions are managed separately.</b> To let this key query assets, telemetry or alarm history, an administrator grants those scopes in <b>Users → Access Control → API client</b>. Keeping the grant path in one place means a key can never widen its own reach.</div>
+            </div>
+          </div>
+
+          <div class="fg">
+            <label for="f3">Rate limit</label>
+            <div class="hint">Requests per minute. Payloads above the limit return 429 and are not persisted.</div>
+            <select id="f3"><option>600 / minute (default)</option><option>1,200 / minute</option><option>6,000 / minute</option><option>Unlimited</option></select>
+          </div>
+
+          <div class="fg">
+            <label>Endpoint URL</label>
+            <div class="hint">Generated when you press Create. Copy once — the key is not shown again.</div>
+            <div class="urlbox">
+              <span class="u">https://iot.example.com/api/ingest/k/•••••••••••••••••••••/payload</span>
+              <button class="btn" style="flex:none">Copy</button>
+            </div>
+            <div class="hint" style="margin-top:8px">Accepts a single reading or an array of readings at the same path. <a href="#" style="color:var(--acc-ink)">Payload reference</a></div>
+          </div>
+
+          <div class="fbar">
+            <span style="font-size:12px;color:var(--ink3)">Created endpoints appear in the list immediately.</span>
+            <span class="sp"></span>
+            <button class="btn">Cancel</button>
+            <button class="btn pri">Create</button>
+          </div>
+        </div>
+      </div>
+      <nav class="mnav"><a href="#">Dash</a><a href="#">Twin</a><a href="#">Alarms</a><a href="#">Assets</a><a href="#" class="on">More</a></nav>
+    </div>
+  </div>
+</section>
+
+<!-- ========================= 5. ANALYTICS ========================= -->
+<section class="screen" id="s5">
+  <div class="note"><b>What changes:</b> every chart carries a one-line reading of what it shows, and no chart uses two y-axes. Comparison is done by indexing to a common base instead of stacking unrelated scales. A table view sits under each figure so the numbers are reachable without hovering.</div>
+  <div class="app">
+    <aside class="side">
+      <div class="brand"><div class="bm">WS Integrated Suite</div><div class="bs">Plant 1 · Production</div></div>
+      <div class="navgrp"><div class="lbl">Monitor</div><nav class="nav">
+        <a href="#">Dashboards</a><a href="#">Live Twin</a><a href="#">Alarms <span class="ct">3</span></a><a href="#" class="on">Data Explorer</a>
+      </nav></div>
+      <div class="sfoot"><div class="who">A. Kulkarni</div><div>Customer Admin</div></div>
+    </aside>
+    <div class="main">
+      <div class="top"><div class="crumb">Monitor / <b>Analytics</b></div><div class="kbd"><span>Search…</span><kbd>⌘K</kbd></div></div>
+      <div class="head">
+        <div><h2>Energy &amp; efficiency</h2><p>1 – 30 June · 6 assets · 15-minute aggregation</p></div>
+        <div class="acts">
+          <div class="seg"><button>24h</button><button>7d</button><button class="on">30d</button><button>Custom</button></div>
+          <button class="btn">Export CSV</button>
+        </div>
+      </div>
+      <div class="sec">
+        <div class="kpis">
+          <div class="kpi"><div class="k">Total consumption</div><div class="v">241.8<small> MWh</small></div><div class="d"><span class="dn">▲ 4.1%</span><span style="color:var(--ink3)">vs May</span></div></div>
+          <div class="kpi"><div class="k">Specific energy</div><div class="v">0.84<small> kWh/unit</small></div><div class="d"><span class="up">▼ 2.6%</span><span style="color:var(--ink3)">improving</span></div></div>
+          <div class="kpi"><div class="k">Peak demand</div><div class="v">618<small> kW</small></div><div class="d"><span style="color:var(--ink3)">18 June, 14:15</span></div></div>
+          <div class="kpi"><div class="k">Off-shift baseload</div><div class="v">11.4<small>%</small></div><div class="d"><span class="dn">▲ 1.2 pts</span><span style="color:var(--ink3)">worth review</span></div></div>
+        </div>
+
+        <div class="sh"><h3>Consumption by day</h3><span class="sub">MWh</span></div>
+        <p style="font-size:12.5px;color:var(--ink2);margin:0 0 12px">Reading: weekday consumption is flat at 8–9 MWh; the four low bars are Sundays. The 18 June spike coincides with the chiller running through the night shift.</p>
+        <svg class="chart" viewBox="0 0 1000 210" role="img" aria-label="Daily consumption bar chart for June; weekdays 8 to 9 MWh, Sundays around 3 MWh, spike on 18 June">
+          <line class="al" x1="40" y1="176" x2="990" y2="176"/>
+          <line class="gl" x1="40" y1="130" x2="990" y2="130"/><line class="gl" x1="40" y1="84" x2="990" y2="84"/><line class="gl" x1="40" y1="38" x2="990" y2="38"/>
+          <text class="at" x="33" y="180" text-anchor="end">0</text><text class="at" x="33" y="134" text-anchor="end">4</text><text class="at" x="33" y="88" text-anchor="end">8</text><text class="at" x="33" y="42" text-anchor="end">12</text>
+          <g fill="var(--acc)">
+            <rect x="44" y="82" width="22" height="94" rx="3"/><rect x="76" y="78" width="22" height="98" rx="3"/><rect x="108" y="86" width="22" height="90" rx="3"/>
+            <rect x="140" y="80" width="22" height="96" rx="3"/><rect x="172" y="84" width="22" height="92" rx="3"/><rect x="204" y="140" width="22" height="36" rx="3" fill="var(--ink3)"/>
+            <rect x="236" y="142" width="22" height="34" rx="3" fill="var(--ink3)"/><rect x="268" y="76" width="22" height="100" rx="3"/><rect x="300" y="82" width="22" height="94" rx="3"/>
+            <rect x="332" y="88" width="22" height="88" rx="3"/><rect x="364" y="80" width="22" height="96" rx="3"/><rect x="396" y="78" width="22" height="98" rx="3"/>
+            <rect x="428" y="144" width="22" height="32" rx="3" fill="var(--ink3)"/><rect x="460" y="146" width="22" height="30" rx="3" fill="var(--ink3)"/><rect x="492" y="74" width="22" height="102" rx="3"/>
+            <rect x="524" y="80" width="22" height="96" rx="3"/><rect x="556" y="84" width="22" height="92" rx="3"/><rect x="588" y="46" width="22" height="130" rx="3" fill="var(--acc-ink)"/>
+            <rect x="620" y="78" width="22" height="98" rx="3"/><rect x="652" y="140" width="22" height="36" rx="3" fill="var(--ink3)"/><rect x="684" y="142" width="22" height="34" rx="3" fill="var(--ink3)"/>
+            <rect x="716" y="80" width="22" height="96" rx="3"/><rect x="748" y="82" width="22" height="94" rx="3"/><rect x="780" y="86" width="22" height="90" rx="3"/>
+            <rect x="812" y="78" width="22" height="98" rx="3"/><rect x="844" y="84" width="22" height="92" rx="3"/><rect x="876" y="138" width="22" height="38" rx="3" fill="var(--ink3)"/>
+            <rect x="908" y="144" width="22" height="32" rx="3" fill="var(--ink3)"/><rect x="940" y="80" width="22" height="96" rx="3"/><rect x="968" y="84" width="22" height="92" rx="3"/>
+          </g>
+          <text class="at" x="599" y="38" text-anchor="middle" style="fill:var(--ink2);font-weight:600">11.3</text>
+          <text class="at" x="44" y="196">1 Jun</text><text class="at" x="300" y="196">9 Jun</text><text class="at" x="588" y="196">18 Jun</text><text class="at" x="990" y="196" text-anchor="end">30 Jun</text>
+        </svg>
+        <div class="legend"><span><i style="background:var(--acc)"></i>Production day</span><span><i style="background:var(--ink3)"></i>Weekend</span><span><i style="background:var(--acc-ink)"></i>Anomaly</span></div>
+
+        <div class="cols" style="margin-top:8px">
+          <div>
+            <div class="sh"><h3>Consumption vs output, indexed</h3><span class="sub">1 Jun = 100</span></div>
+            <p style="font-size:12.5px;color:var(--ink2);margin:0 0 12px">Reading: output grew faster than energy after 12 June, which is the efficiency gain the specific-energy KPI reports. Both series share one axis because both are indexed.</p>
+            <svg class="chart" viewBox="0 0 560 200" role="img" aria-label="Indexed comparison; output rises above energy after 12 June">
+              <line class="al" x1="40" y1="168" x2="550" y2="168"/>
+              <line class="gl" x1="40" y1="124" x2="550" y2="124"/><line class="gl" x1="40" y1="80" x2="550" y2="80"/><line class="gl" x1="40" y1="36" x2="550" y2="36"/>
+              <text class="at" x="33" y="172" text-anchor="end">90</text><text class="at" x="33" y="128" text-anchor="end">100</text><text class="at" x="33" y="84" text-anchor="end">110</text><text class="at" x="33" y="40" text-anchor="end">120</text>
+              <path class="ln2" d="M40 124 L125 120 L210 116 L295 112 L380 106 L465 102 L550 98"/>
+              <path class="ln" d="M40 124 L125 118 L210 110 L295 96 L380 78 L465 66 L550 58"/>
+              <circle class="end" cx="550" cy="58" r="4.5"/>
+              <text class="at" x="40" y="190">1 Jun</text><text class="at" x="295" y="190" text-anchor="middle">15 Jun</text><text class="at" x="550" y="190" text-anchor="end">30 Jun</text>
+            </svg>
+            <div class="legend"><span><i style="background:var(--acc)"></i>Output index · 115.2</span><span><i style="background:var(--ink3)"></i>Energy index · 104.1</span></div>
+          </div>
+          <div>
+            <div class="sh"><h3>By asset</h3><span class="sub">share of total</span></div>
+            <div class="tw">
+            <table>
+              <thead><tr><th>Asset</th><th class="r">MWh</th><th class="r">Share</th><th class="r">vs May</th></tr></thead>
+              <tbody>
+                <tr><td class="p">Chiller 01</td><td class="r mono">78.4</td><td class="r mono">32.4%</td><td class="r mono dn">+8.1%</td></tr>
+                <tr><td class="p">Air Compressor 02</td><td class="r mono">61.2</td><td class="r mono">25.3%</td><td class="r mono up">−2.0%</td></tr>
+                <tr><td class="p">Curing Oven 01</td><td class="r mono">44.9</td><td class="r mono">18.6%</td><td class="r mono dn">+3.4%</td></tr>
+                <tr><td class="p">Air Handling Unit 02</td><td class="r mono">28.1</td><td class="r mono">11.6%</td><td class="r mono up">−1.1%</td></tr>
+                <tr><td class="p">Conveyor 03 + 04</td><td class="r mono">17.6</td><td class="r mono">7.3%</td><td class="r mono">0.0%</td></tr>
+                <tr><td class="p">Other (11 assets)</td><td class="r mono">11.6</td><td class="r mono">4.8%</td><td class="r mono up">−0.4%</td></tr>
+              </tbody>
+            </table>
+            </div>
+            <p style="font-size:12.5px;color:var(--ink3);margin:12px 0 0">The chiller alone accounts for a third of plant consumption and all of the month-on-month increase.</p>
+          </div>
+        </div>
+      </div>
+      <nav class="mnav"><a href="#">Dash</a><a href="#">Twin</a><a href="#">Alarms</a><a href="#">Assets</a><a href="#" class="on">More</a></nav>
+    </div>
+  </div>
+</section>
+
+<!-- ========================= 6. SETTINGS ========================= -->
+<section class="screen" id="s6">
+  <div class="note"><b>What changes:</b> settings use in-page tabs rather than a second sidebar, so there is only ever one navigation column. The permission matrix is a table you can read across in one pass, and each toggle has its consequence written next to it instead of only a name.</div>
+  <div class="app">
+    <aside class="side">
+      <div class="brand"><div class="bm">WS Integrated Suite</div><div class="bs">Plant 1 · Production</div></div>
+      <div class="navgrp"><div class="lbl">Administer</div><nav class="nav">
+        <a href="#">API Endpoints <span class="ct">9</span></a><a href="#" class="on">Users <span class="ct">23</span></a><a href="#">Activity Log</a>
+      </nav></div>
+      <div class="sfoot"><div class="who">A. Kulkarni</div><div>Customer Admin</div></div>
+    </aside>
+    <div class="main">
+      <div class="top"><div class="crumb">Administer / <b>Access Control</b></div><div class="kbd"><span>Search…</span><kbd>⌘K</kbd></div></div>
+      <div class="head"><div><h2>Access Control</h2><p>Roles set a baseline. Per-user module overrides win over the role where they differ.</p></div><div class="acts"><button class="btn pri">Invite user</button></div></div>
+      <div class="stabs">
+        <a href="#" class="on">Roles &amp; permissions</a><a href="#">Users</a><a href="#">API client scopes</a><a href="#">Sessions</a><a href="#">Audit</a>
+      </div>
+      <div class="sec" style="padding-top:22px">
+        <div class="sh" style="border-top:0;padding-top:0"><h3>Permission matrix</h3><span class="sub">6 roles · 8 modules</span></div>
+        <div class="tw">
+        <table class="matrix">
+          <thead><tr><th>Module</th><th>Super Admin</th><th>Admin</th><th>Customer Admin</th><th>Engineer</th><th>Operator</th><th>Viewer</th></tr></thead>
+          <tbody>
+            <tr><td class="p">Dashboards</td><td class="y">Full</td><td class="y">Full</td><td class="y">Full</td><td class="y">Full</td><td>Read</td><td>Read</td></tr>
+            <tr><td class="p">Assets</td><td class="y">Full</td><td class="y">Full</td><td class="y">Full</td><td class="y">Full</td><td>Read</td><td>Read</td></tr>
+            <tr><td class="p">Asset templates</td><td class="y">Full</td><td class="y">Full</td><td>Read</td><td class="y">Full</td><td class="n">—</td><td class="n">—</td></tr>
+            <tr><td class="p">Alarm rules</td><td class="y">Full</td><td class="y">Full</td><td class="y">Full</td><td class="y">Full</td><td>Acknowledge</td><td>Read</td></tr>
+            <tr><td class="p">Brokers</td><td class="y">Full</td><td class="y">Full</td><td>Read</td><td class="y">Full</td><td class="n">—</td><td class="n">—</td></tr>
+            <tr><td class="p">API endpoints</td><td class="y">Full</td><td class="y">Full</td><td class="y">Create</td><td class="y">Create</td><td class="n">—</td><td class="n">—</td></tr>
+            <tr><td class="p">Users</td><td class="y">Full</td><td class="y">Full</td><td>Read</td><td class="n">—</td><td class="n">—</td><td class="n">—</td></tr>
+            <tr><td class="p">Activity log</td><td class="y">Full</td><td class="y">Full</td><td>Read</td><td>Read</td><td class="n">—</td><td class="n">—</td></tr>
+          </tbody>
+        </table>
+        </div>
+
+        <div class="sh"><h3>Security</h3></div>
+        <div class="rows">
+          <div class="row">
+            <div><div class="t">Require an authenticated session for all API routes</div><div class="m">When off, unauthenticated requests reach read routes. Leave on in production.</div></div>
+            <div class="rt"><button class="tg on" role="switch" aria-checked="true" aria-label="Require authenticated session"></button></div>
+          </div>
+          <div class="row">
+            <div><div class="t">Strip client-supplied actor headers</div><div class="m">Prevents a caller from claiming another identity in the activity log.</div></div>
+            <div class="rt"><button class="tg on" role="switch" aria-checked="true" aria-label="Strip actor headers"></button></div>
+          </div>
+          <div class="row">
+            <div><div class="t">Session-bound CSRF token</div><div class="m">Double-submit cookie validated against the stored session row.</div></div>
+            <div class="rt"><button class="tg on" role="switch" aria-checked="true" aria-label="CSRF token"></button></div>
+          </div>
+          <div class="row">
+            <div><div class="t">Allow API keys to be created by non-admins</div><div class="m">A user can never grant a scope wider than their own role ceiling.</div></div>
+            <div class="rt"><button class="tg" role="switch" aria-checked="false" aria-label="Allow non-admin key creation"></button></div>
+          </div>
+        </div>
+
+        <div class="sh"><h3>Data retention</h3></div>
+        <div class="rows">
+          <div class="row"><div><div class="t">Raw telemetry</div><div class="m">Pruned hourly. Currently 3,386,688 rows.</div></div><div class="rt"><select style="width:150px;margin:0"><option>90 days</option><option>180 days</option><option>365 days</option></select></div></div>
+          <div class="row"><div><div class="t">Alarm history</div><div class="m">Retained for compliance reporting.</div></div><div class="rt"><select style="width:150px;margin:0"><option>2 years</option><option>1 year</option><option>Forever</option></select></div></div>
+          <div class="row"><div><div class="t">Activity log</div><div class="m">Who changed what, and when.</div></div><div class="rt"><select style="width:150px;margin:0"><option>1 year</option><option>2 years</option><option>Forever</option></select></div></div>
+        </div>
+      </div>
+      <nav class="mnav"><a href="#">Dash</a><a href="#">Twin</a><a href="#">Alarms</a><a href="#">Assets</a><a href="#" class="on">More</a></nav>
+    </div>
+  </div>
+</section>
+
+</div>
+
+<script>
+function show(id, btn){
+  document.querySelectorAll('.screen').forEach(function(s){ s.classList.remove('on'); });
+  document.getElementById(id).classList.add('on');
+  document.querySelectorAll('.tabs button').forEach(function(b){ b.classList.remove('on'); });
+  btn.classList.add('on');
+  window.scrollTo({top:0, behavior:'smooth'});
+}
+function vp(mode){
+  var f = document.getElementById('frame');
+  if(mode === 'mob'){ f.classList.add('mobile'); } else { f.classList.remove('mobile'); }
+  document.getElementById('b-desk').classList.toggle('on', mode === 'desk');
+  document.getElementById('b-mob').classList.toggle('on', mode === 'mob');
+}
+document.querySelectorAll('.tg').forEach(function(t){
+  t.addEventListener('click', function(){
+    t.classList.toggle('on');
+    t.setAttribute('aria-checked', t.classList.contains('on') ? 'true' : 'false');
+  });
+});
+document.querySelectorAll('.chip').forEach(function(c){
+  c.addEventListener('click', function(){ c.classList.toggle('on'); });
+});
+</script>
+</body>
+</html>

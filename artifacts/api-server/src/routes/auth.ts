@@ -58,6 +58,9 @@ export function sessionPayload(user: User, csrfToken: string) {
     allowedDashboards: access.allowedDashboards,
     restrictAnalytics: access.restrictAnalytics,
     allowedAnalytics: access.allowedAnalytics,
+    // Ceiling on the scopes this user may put on an API credential. The dialog
+    // renders from this; the create route enforces it independently.
+    apiScopes: access.apiScopes,
   };
 }
 

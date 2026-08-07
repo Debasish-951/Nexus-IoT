@@ -19,11 +19,14 @@ router.get("/assets/:id/attributes", async (req, res): Promise<void> => {
     return;
   }
 
+  // Order by sortOrder, not name — attributes applied from a template are
+  // inserted in the template's own (sectioned) order, so this keeps that layout
+  // instead of scrambling it alphabetically.
   const attrs = await db
     .select()
     .from(attributesTable)
     .where(eq(attributesTable.assetId, params.data.id))
-    .orderBy(attributesTable.name);
+    .orderBy(attributesTable.sortOrder, attributesTable.createdAt);
 
   res.json(attrs);
 });
@@ -57,6 +60,8 @@ router.post("/assets/:id/attributes", async (req, res): Promise<void> => {
       decimalPlaces: typeof body.decimalPlaces === "number" ? body.decimalPlaces : null,
       thousandSeparator: typeof body.thousandSeparator === "boolean" ? body.thousandSeparator : false,
       expression: parsed.data.expression ?? null,
+      // Append after whatever this asset already has.
+      sortOrder: sql`(select coalesce(max(${attributesTable.sortOrder}), 0) + 1 from ${attributesTable} where ${attributesTable.assetId} = ${params.data.id})`,
     })
     .returning();
 

@@ -130,7 +130,7 @@ Full analysis in [docs/security/threat-model.md](../security/threat-model.md).
 ## Roadmap
 
 ### Immediate Actions (30 Days)
-1. Add proper authentication (Replit Auth or Clerk)
+1. Add proper authentication (SSO via OIDC or SAML)
 2. Hash API client secrets with bcrypt
 3. Add server-side role enforcement on write endpoints
 4. Restrict CORS to production domain

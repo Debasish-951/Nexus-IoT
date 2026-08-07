@@ -47,6 +47,14 @@ export interface SessionPayload extends CurrentUser {
   allowedDashboards: string[];
   restrictAnalytics: boolean;
   allowedAnalytics: string[];
+  /**
+   * API-client scopes this user may grant. `["*"]` means any.
+   *
+   * Optional so a session issued by an older server (or a cached payload from
+   * before this field existed) does not read as "no scopes" and lock the user
+   * out of a dialog they are entitled to use — see grantableApiScopes().
+   */
+  apiScopes?: string[];
 }
 
 interface UserContextValue {

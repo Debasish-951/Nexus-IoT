@@ -115,8 +115,12 @@ export function DashboardCanvas({
       onDrop={onDrop}
       className={cn("relative w-full h-full overflow-auto", futuristic ? "" : "bg-background")}
       style={futuristic ? {
-        backgroundColor: "#050914",
-        backgroundImage: `radial-gradient(circle at 25% 15%, rgba(56,189,248,0.14), transparent 55%), radial-gradient(circle at 85% 90%, rgba(168,85,247,0.14), transparent 55%)`,
+        // Presentation ("futuristic") mode keeps its own fixed dark ground — it is
+        // a deliberate single-look wall display, not a themed surface. Re-hued to
+        // blue/cyan so it sits in the Electric Blue family instead of the old
+        // sky-and-purple pairing.
+        backgroundColor: "#060A12",
+        backgroundImage: `radial-gradient(circle at 25% 15%, rgba(59,130,246,0.16), transparent 55%), radial-gradient(circle at 85% 90%, rgba(8,145,178,0.14), transparent 55%)`,
         backgroundSize: `auto, auto`,
       } : undefined}
     >
@@ -134,7 +138,10 @@ export function DashboardCanvas({
               key={w.id}
               onClick={(e) => { e.stopPropagation(); onSelect(w.id); }}
               className={cn("absolute rounded-lg bg-card border shadow-sm overflow-hidden flex flex-col",
-                selected ? "border-[#2563EB] ring-2 ring-[#2563EB]/30" : "border-border")}
+                // Themed, not a fixed blue: the selection ring is a UI accent and
+                // must follow --primary, or it drifts out of the palette the next
+                // time the theme changes.
+                selected ? "border-primary ring-2 ring-primary/30" : "border-border")}
               style={{
                 left: PAD + w.x * cellW + GAP / 2,
                 top: PAD + w.y * ROW_H + GAP / 2,
@@ -185,7 +192,7 @@ export function DashboardCanvas({
               {/* resize handle */}
               <div onPointerDown={(e) => startDrag(e, w, "resize")}
                 className="absolute bottom-0 right-0 w-3 h-3 cursor-se-resize"
-                style={{ background: "linear-gradient(135deg, transparent 50%, #94a3b8 50%)" }} />
+                style={{ background: "linear-gradient(135deg, transparent 50%, hsl(var(--muted-foreground)) 50%)" }} />
             </div>
           );
         })}

@@ -36,6 +36,7 @@ import { format, subMinutes, parseISO } from "date-fns";
 import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { toast } from "@/hooks/use-toast";
+import { SERIES } from "@/lib/chartColors";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const DASHBOARDS_KEY = "ws-analytics-v1";
@@ -49,11 +50,13 @@ const D = {
   purple:  "#a855f7", pink:    "#ec4899", orange:  "#f97316",
 };
 
-const NEON_PALETTE = [
-  "#06b6d4","#10b981","#a855f7","#f59e0b",
-  "#ef4444","#818cf8","#ec4899","#f97316",
-  "#22d3ee","#84cc16","#fb923c","#e879f9",
-];
+/**
+ * Series colours. Now the shared, CVD-validated order (src/lib/chartColors.ts)
+ * instead of a local 12-hue list that mixed amber, red and orange in among the
+ * identity colours — so this page's charts match the rest of the platform and no
+ * longer paint ordinary metrics in alarm colours.
+ */
+const NEON_PALETTE = SERIES;
 
 // ── SPC control-limit helpers (module-level so React never remounts inputs) ────
 const SPC_PALETTE = ["#f59e0b","#ef4444","#10b981","#3b82f6","#a855f7","#f97316","#e2e8f0"];
@@ -1975,7 +1978,7 @@ function WidgetDialog({ open, onOpenChange, initial, onSave, preselectedAssetId 
             )}
             {!imageUrl && (
               <p className="text-[10px]" style={{ color: D.muted }}>
-                Upload images first in <strong>Asset Management → Media Library</strong>, then copy the URL here.
+                Upload images first in <strong>Asset Hub → Media Library</strong>, then copy the URL here.
               </p>
             )}
           </div>

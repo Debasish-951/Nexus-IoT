@@ -223,8 +223,7 @@ export default function Visualization() {
 
   const treeControls = (
     <div className="border-b border-border">
-      <div className="flex items-center justify-between gap-2 px-3 py-2">
-        <span className="text-xs font-semibold text-primary">Dashboard Hierarchy</span>
+      <div className="flex items-center justify-end gap-2 px-3 py-2">
         <Button size="sm" className="h-7 px-2 text-xs whitespace-nowrap" onClick={() => openCreate(null)} title="Create a top-level dashboard">
           <FolderPlus className="w-3.5 h-3.5 mr-1" /> Create Dashboard
         </Button>
@@ -276,7 +275,7 @@ export default function Visualization() {
         <ResizablePanelGroup direction="horizontal" className="h-full">
           <ResizablePanel
             ref={treePanelRef}
-            defaultSize={26} minSize={18} maxSize={40}
+            defaultSize={14} minSize={11} maxSize={22}
             collapsible collapsedSize={0}
             onCollapse={() => setTreeCollapsed(true)}
             onExpand={() => setTreeCollapsed(false)}
@@ -305,7 +304,7 @@ export default function Visualization() {
             </div>
           </ResizablePanel>
           <ResizableHandle withHandle />
-          <ResizablePanel defaultSize={74}>
+          <ResizablePanel defaultSize={86}>
             <div className="relative h-full">
               <AssetVizPanel
                 nodeId={selId}

@@ -13,8 +13,9 @@ import { pruneExpiredSessions } from "./lib/sessions";
 // in this environment (e.g. activation links printed to the log in production).
 assertAuthConfigSane();
 
-// On Replit, PORT is injected by the platform.
-// For local development, default to 8080 so the frontend proxy works out of the box.
+// PORT is overridable by the environment (systemd unit, container, shell).
+// Defaults to 8080, which is the target the frontend dev proxy expects — see the
+// `proxy` block in artifacts/iot-platform/vite.config.ts.
 const rawPort = process.env["PORT"] ?? "8080";
 const port = Number(rawPort);
 if (Number.isNaN(port) || port <= 0) {

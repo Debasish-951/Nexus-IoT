@@ -1,0 +1,804 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Concept 7 — Workbench · Master–Detail</title>
+<style>
+/* ============================================================
+   WORKBENCH — Master–Detail
+   The differentiator is LAYOUT, not palette: a persistent list
+   beside a detail pane. You never navigate away from your place,
+   and nothing opens in a modal. Warm neutrals + one indigo accent.
+   Reference points: Sentry issues, Apple Mail, Superhuman.
+   ============================================================ */
+:root{
+  --bg:#ffffff;
+  --pane:#fafaf9;
+  --rail:#f5f5f4;
+  --line:#e7e5e4;
+  --line2:#f0efee;
+  --ink:#1c1917;
+  --ink2:#57534e;
+  --ink3:#8c847d;
+  --acc:#4338ca;
+  --acc2:#3730a3;
+  --acc-soft:#eeeefc;
+  --ok:#15803d;
+  --warn:#b45309;
+  --bad:#b91c1c;
+  --sel:#eeeefc;
+  --r:5px;
+  --mono:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+  --sans:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --bg:#131211;--pane:#1a1918;--rail:#0f0e0e;
+    --line:#2a2827;--line2:#211f1e;
+    --ink:#f5f5f4;--ink2:#a8a29e;--ink3:#7c756f;
+    --acc:#8b83f5;--acc2:#a5a0f8;--acc-soft:#1d1b33;--sel:#1d1b33;
+    --ok:#4ade80;--warn:#e0a83e;--bad:#f47066;
+  }
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{font-family:var(--sans);background:var(--pane);color:var(--ink);font-size:13.5px;line-height:1.45;-webkit-font-smoothing:antialiased}
+h1,h2,h3,h4{margin:0;font-weight:600;letter-spacing:-.012em;text-wrap:balance}
+button{font:inherit;cursor:pointer}
+a{color:inherit}
+.num{font-variant-numeric:tabular-nums}
+.mono{font-family:var(--mono);font-size:12px}
+kbd{font-family:var(--mono);font-size:10px;border:1px solid var(--line);border-radius:3px;padding:1px 4px;color:var(--ink3);background:var(--bg)}
+
+/* prototype chrome */
+.chrome{background:#1c1917;color:#fff;padding:14px 22px}
+.chrome h1{font-size:15px}
+.chrome p{margin:3px 0 0;font-size:12.5px;color:#a8a29e;max-width:72ch}
+.bar{display:flex;gap:6px;flex-wrap:wrap;align-items:center;padding:10px 22px;background:var(--bg);border-bottom:1px solid var(--line);position:sticky;top:0;z-index:60}
+.tabs{display:flex;gap:2px;flex-wrap:wrap}
+.tabs button{background:none;border:0;padding:6px 11px;border-radius:var(--r);color:var(--ink2);font-size:13px}
+.tabs button:hover{background:var(--pane)}
+.tabs button.on{background:var(--acc);color:#fff;font-weight:500}
+.vp{margin-left:auto;display:flex;gap:2px;border:1px solid var(--line);border-radius:var(--r);padding:2px}
+.vp button{background:none;border:0;padding:4px 10px;border-radius:3px;font-size:12px;color:var(--ink2)}
+.vp button.on{background:var(--pane);color:var(--ink);font-weight:600}
+.frame{max-width:1360px;margin:22px auto;background:var(--bg);border:1px solid var(--line);border-radius:8px;overflow:hidden}
+.frame.mobile{max-width:414px}
+.screen{display:none}.screen.on{display:block}
+.note{background:var(--acc-soft);border-bottom:1px solid var(--line);padding:10px 16px;font-size:12.5px;color:var(--acc2);line-height:1.55}
+.note b{font-weight:600}
+
+/* ---- shell: rail | list | detail ---- */
+.app{display:grid;grid-template-columns:54px 336px 1fr;min-height:700px}
+.app.wide{grid-template-columns:54px 1fr}
+.frame.mobile .app,.frame.mobile .app.wide{grid-template-columns:1fr}
+
+/* icon rail */
+.rl{background:var(--rail);border-right:1px solid var(--line);display:flex;flex-direction:column;align-items:center;padding:10px 0;gap:3px}
+.frame.mobile .rl{display:none}
+.rl .lg{width:30px;height:30px;border-radius:7px;background:var(--acc);display:grid;place-items:center;margin-bottom:10px}
+.rl a{width:34px;height:34px;border-radius:var(--r);display:grid;place-items:center;color:var(--ink3);text-decoration:none}
+.rl a:hover{background:var(--bg);color:var(--ink)}
+.rl a.on{background:var(--bg);color:var(--acc);box-shadow:inset 0 0 0 1px var(--line)}
+.rl a svg{stroke:currentColor;fill:none}
+.rl .sp{flex:1}
+
+/* list pane */
+.lp{background:var(--pane);border-right:1px solid var(--line);display:flex;flex-direction:column;min-width:0}
+.frame.mobile .lp{border-right:0}
+.lph{padding:11px 13px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px}
+.lph h3{font-size:13px}
+.lph .ct{font-size:11px;color:var(--ink3);background:var(--bg);border:1px solid var(--line);border-radius:9px;padding:0 6px}
+.lph .r{margin-left:auto;display:flex;gap:4px}
+.ib{background:none;border:0;color:var(--ink3);padding:3px 5px;border-radius:3px;font-size:13px}
+.ib:hover{background:var(--bg);color:var(--ink)}
+.lpf{padding:8px 13px;border-bottom:1px solid var(--line);display:flex;gap:5px;flex-wrap:wrap}
+.sg{display:inline-flex;border:1px solid var(--line);border-radius:var(--r);overflow:hidden;background:var(--bg)}
+.sg button{background:none;border:0;border-left:1px solid var(--line);padding:3px 9px;font-size:11.5px;color:var(--ink2)}
+.sg button:first-child{border-left:0}
+.sg button.on{background:var(--sel);color:var(--acc2);font-weight:600}
+.lpl{overflow-y:auto;flex:1}
+.li{display:flex;gap:9px;padding:9px 13px;border-bottom:1px solid var(--line2);cursor:pointer;border-left:2px solid transparent}
+.li:hover{background:var(--bg)}
+.li.on{background:var(--bg);border-left-color:var(--acc)}
+.li .st{width:6px;height:6px;border-radius:50%;flex:none;margin-top:6px}
+.li .bd{min-width:0;flex:1}
+.li .t{font-size:13px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.li.on .t{color:var(--acc2)}
+.li .m{font-size:11.5px;color:var(--ink3);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.li .rt{font-size:11px;color:var(--ink3);flex:none;text-align:right;font-variant-numeric:tabular-nums}
+.lpb{padding:7px 13px;border-top:1px solid var(--line);display:flex;gap:9px;align-items:center;font-size:11px;color:var(--ink3)}
+
+/* detail pane */
+.dp{min-width:0;display:flex;flex-direction:column;background:var(--bg)}
+.dph{padding:13px 20px;border-bottom:1px solid var(--line)}
+.frame.mobile .dph{padding:13px 15px}
+.dph .cr{font-size:11.5px;color:var(--ink3);margin-bottom:4px}
+.dph .rw{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.dph h2{font-size:18px}
+.dph .sub{font-size:12.5px;color:var(--ink2);margin-top:3px}
+.acts{margin-left:auto;display:flex;gap:6px;flex-wrap:wrap;align-items:center}
+.btn{border:1px solid var(--line);background:var(--bg);color:var(--ink);padding:5px 11px;border-radius:var(--r);font-size:12.5px}
+.btn:hover{background:var(--pane)}
+.btn.pri{background:var(--acc);border-color:var(--acc);color:#fff;font-weight:500}
+.btn.pri:hover{background:var(--acc2)}
+.btn.qt{border-color:transparent;color:var(--ink2)}
+.btn.qt:hover{background:var(--pane);color:var(--ink)}
+.dtabs{display:flex;gap:18px;padding:0 20px;border-bottom:1px solid var(--line);background:var(--bg);overflow-x:auto}
+.frame.mobile .dtabs{padding:0 15px}
+.dtabs a{padding:9px 0;font-size:12.5px;color:var(--ink2);text-decoration:none;border-bottom:2px solid transparent;white-space:nowrap}
+.dtabs a.on{color:var(--ink);font-weight:600;border-bottom-color:var(--acc)}
+.dpb{padding:18px 20px;overflow-y:auto;flex:1}
+.frame.mobile .dpb{padding:15px}
+.dpf{padding:6px 20px;border-top:1px solid var(--line);background:var(--pane);display:flex;gap:14px;align-items:center;font-size:11px;color:var(--ink3);flex-wrap:wrap}
+.frame.mobile .dpf{padding:6px 15px}
+
+/* facts grid — inline, label:value, no cards */
+.facts{display:grid;grid-template-columns:repeat(auto-fit,minmax(148px,1fr));gap:1px;background:var(--line2);border:1px solid var(--line);border-radius:var(--r);overflow:hidden}
+.facts div{background:var(--bg);padding:10px 12px}
+.facts .fk{font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink3);font-weight:600}
+.facts .fv{font-size:19px;font-weight:600;letter-spacing:-.02em;margin-top:4px;font-variant-numeric:tabular-nums;line-height:1.15}
+.facts .fv small{font-size:12px;color:var(--ink3);font-weight:500}
+.facts .fm{font-size:11px;color:var(--ink3);margin-top:3px}
+.up{color:var(--ok)}.dn{color:var(--bad)}
+
+/* section */
+.sh{display:flex;align-items:baseline;gap:10px;margin:20px 0 10px}
+.sh h3{font-size:12.5px}
+.sh .sub{font-size:11.5px;color:var(--ink3)}
+.sh .r{margin-left:auto;display:flex;gap:5px;align-items:center}
+.sh:first-child{margin-top:0}
+
+/* status text */
+.st2{display:inline-flex;align-items:center;gap:6px;font-size:12px;white-space:nowrap}
+.st2 .d{width:6px;height:6px;border-radius:50%;flex:none}
+.ok{color:var(--ok)}.wa{color:var(--warn)}.ba{color:var(--bad)}.of{color:var(--ink3)}
+.st2.ok .d{background:var(--ok)}.st2.wa .d{background:var(--warn)}.st2.ba .d{background:var(--bad)}.st2.of .d{background:var(--ink3)}
+
+/* dense table */
+table{width:100%;border-collapse:collapse}
+th{text-align:left;font-size:10.5px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink3);font-weight:600;padding:7px 10px;border-bottom:1px solid var(--line);white-space:nowrap;background:var(--pane);position:sticky;top:0}
+th.r,td.r{text-align:right}
+td{padding:6px 10px;border-bottom:1px solid var(--line2);font-size:12.5px;color:var(--ink2);white-space:nowrap}
+tbody tr:hover td{background:var(--pane)}
+td .p{color:var(--ink);font-weight:500}
+.tw{overflow-x:auto;border:1px solid var(--line);border-radius:var(--r)}
+.rowst{border-left:3px solid transparent}
+tr.crit .rowst{border-left-color:var(--bad)}
+tr.warn .rowst{border-left-color:var(--warn)}
+tr.mnt .rowst{border-left-color:var(--ink3)}
+
+/* chart */
+.chart{width:100%;height:auto;display:block}
+.gl{stroke:var(--line2);stroke-width:1}
+.al{stroke:var(--line);stroke-width:1}
+.at{fill:var(--ink3);font-size:10px;font-family:var(--sans)}
+.ln{fill:none;stroke:var(--acc);stroke-width:2;stroke-linejoin:round;stroke-linecap:round}
+.ln2{fill:none;stroke:var(--ink3);stroke-width:2;stroke-dasharray:3 3}
+.end{fill:var(--acc);stroke:var(--bg);stroke-width:2}
+.legend{display:flex;gap:15px;font-size:11.5px;color:var(--ink2);padding-top:9px;flex-wrap:wrap}
+.legend i{width:12px;height:2px;display:inline-block;vertical-align:middle;margin-right:5px}
+
+/* inline form (no modal) */
+.form{max-width:600px}
+.fr{display:grid;grid-template-columns:170px 1fr;gap:14px;padding:12px 0;border-bottom:1px solid var(--line2);align-items:start}
+.frame.mobile .fr{grid-template-columns:1fr;gap:5px}
+.fr .lb{font-size:12.5px;font-weight:600;padding-top:6px}
+.fr .lb .opt{display:block;font-weight:400;color:var(--ink3);font-size:11px;margin-top:1px}
+.fr .hint{font-size:11.5px;color:var(--ink3);margin-top:5px;line-height:1.5}
+input[type=text],select,textarea{width:100%;background:var(--bg);border:1px solid var(--line);border-radius:var(--r);padding:6px 9px;font:inherit;font-size:12.5px;color:var(--ink)}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--acc);outline-offset:-1px;border-color:var(--acc)}
+input::placeholder{color:var(--ink3)}
+.locked{display:flex;gap:8px;align-items:flex-start;background:var(--pane);border:1px solid var(--line);border-radius:var(--r);padding:9px 11px}
+.locked .lk{color:var(--ink3);flex:none;margin-top:1px}
+.locked .lt{font-size:12px;color:var(--ink2);line-height:1.5}
+.locked .lt b{color:var(--ink)}
+.urlbox{display:flex;align-items:center;gap:8px;background:var(--pane);border:1px solid var(--line);border-radius:var(--r);padding:6px 9px}
+.urlbox .u{font-family:var(--mono);font-size:11px;color:var(--ink2);overflow-x:auto;white-space:nowrap;flex:1}
+.fbar{display:flex;gap:7px;align-items:center;padding:14px 0 0}
+.fbar .sp{margin-left:auto}
+.chips{display:flex;gap:5px;flex-wrap:wrap;margin-top:6px}
+.chip{border:1px solid var(--line);border-radius:11px;padding:2px 9px;font-size:11.5px;color:var(--ink2);background:var(--bg)}
+.chip.on{border-color:var(--acc);background:var(--sel);color:var(--acc2);font-weight:600}
+
+/* toggles */
+.tg{width:32px;height:18px;border-radius:9px;background:var(--line);border:0;position:relative;flex:none}
+.tg:after{content:"";position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--bg)}
+.tg.on{background:var(--acc)}
+.tg.on:after{left:16px}
+.rows .row{display:flex;gap:11px;align-items:flex-start;padding:10px 0;border-bottom:1px solid var(--line2)}
+.rows .t{font-size:12.5px;font-weight:600}
+.rows .m{font-size:11.5px;color:var(--ink3);margin-top:1px}
+.rows .rt{margin-left:auto;flex:none;text-align:right;font-size:11.5px;color:var(--ink3)}
+.matrix td{font-size:12px}
+.matrix .y{color:var(--ok);font-weight:600}
+.matrix .n{color:var(--ink3)}
+
+/* mobile nav */
+.mnav{display:none}
+.frame.mobile .mnav{display:grid;grid-template-columns:repeat(5,1fr);border-top:1px solid var(--line);background:var(--bg);position:sticky;bottom:0}
+.mnav a{padding:9px 4px;text-align:center;font-size:10px;color:var(--ink3);text-decoration:none;border-top:2px solid transparent;margin-top:-1px}
+.mnav a.on{color:var(--acc);font-weight:600;border-top-color:var(--acc)}
+.frame.mobile .dp{display:none}
+.frame.mobile .app.wide .dp{display:flex}
+</style>
+</head>
+<body data-concept="workbench">
+
+<div class="chrome">
+  <h1>Concept 7 — Workbench · Master–Detail</h1>
+  <p>The differentiator here is layout rather than colour. A persistent list sits beside a detail pane, so you work through items without ever navigating away and losing your filters. Nothing opens in a modal — creating a record adds a draft to the list and edits it in place. Dense 26px rows, keyboard-first (<kbd style="color:#d6d3d1;border-color:#57534e">j</kbd> <kbd style="color:#d6d3d1;border-color:#57534e">k</kbd> to move, <kbd style="color:#d6d3d1;border-color:#57534e">e</kbd> to acknowledge), warm neutrals with one indigo accent.</p>
+</div>
+
+<div class="bar">
+  <div class="tabs">
+    <button class="on" onclick="show('s1',this)">Dashboard</button>
+    <button onclick="show('s2',this)">Home · triage</button>
+    <button onclick="show('s3',this)">Assets · table</button>
+    <button onclick="show('s4',this)">Create endpoint · inline</button>
+    <button onclick="show('s5',this)">Analytics</button>
+    <button onclick="show('s6',this)">Settings</button>
+  </div>
+  <div class="vp">
+    <button id="b-desk" class="on" onclick="vp('desk')">Desktop</button>
+    <button id="b-mob" onclick="vp('mob')">Mobile</button>
+  </div>
+</div>
+
+<div class="frame" id="frame">
+
+<!-- ============ 1. DASHBOARD ============ -->
+<section class="screen on" id="s1">
+  <div class="note"><b>What changes:</b> the list of dashboards stays beside the one you are viewing, so switching between them is one click and never a round trip through a menu. KPIs are a joined fact grid rather than four floating cards. A status bar at the bottom shows connection state and shortcuts permanently.</div>
+  <div class="app">
+    <nav class="rl">
+      <span class="lg"><svg width="16" height="16" viewBox="0 0 16 16" stroke="#fff" stroke-width="1.7"><path d="M2 11h3l2-6 2 9 2-5h3"/></svg></span>
+      <a href="#" class="on" title="Dashboards"><svg width="17" height="17" viewBox="0 0 16 16" stroke-width="1.5"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg></a>
+      <a href="#" title="Alarms"><svg width="17" height="17" viewBox="0 0 16 16" stroke-width="1.5"><path d="M8 2a4 4 0 00-4 4v3l-1.5 2h11L12 9V6a4 4 0 00-4-4z"/></svg></a>
+      <a href="#" title="Assets"><svg width="17" height="17" viewBox="0 0 16 16" stroke-width="1.5"><path d="M8 2l5 3v6l-5 3-5-3V5l5-3z"/></svg></a>
+      <a href="#" title="Data Explorer"><svg width="17" height="17" viewBox="0 0 16 16" stroke-width="1.5"><path d="M2 12l3-4 3 2 3-6 3 4"/></svg></a>
+      <a href="#" title="Brokers"><svg width="17" height="17" viewBox="0 0 16 16" stroke-width="1.5"><circle cx="8" cy="8" r="2"/><path d="M8 2v2M8 12v2M2 8h2M12 8h2"/></svg></a>
+      <span class="sp"></span>
+      <a href="#" title="Settings"><svg width="17" height="17" viewBox="0 0 16 16" stroke-width="1.5"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.5 3.5l1.4 1.4M11.1 11.1l1.4 1.4M12.5 3.5l-1.4 1.4M4.9 11.1L3.5 12.5"/></svg></a>
+      <a href="#" title="Profile"><svg width="17" height="17" viewBox="0 0 16 16" stroke-width="1.5"><circle cx="8" cy="6" r="2.5"/><path d="M3.5 13a4.5 4.5 0 019 0"/></svg></a>
+    </nav>
+
+    <div class="lp">
+      <div class="lph"><h3>Dashboards</h3><span class="ct">7</span><div class="r"><button class="ib" title="Search">⌕</button><button class="ib" title="New">+</button></div></div>
+      <div class="lpf"><div class="sg"><button class="on">All</button><button>Mine</button><button>Shared</button></div></div>
+      <div class="lpl">
+        <div class="li on"><span class="st" style="background:var(--bad)"></span><div class="bd"><div class="t">Plant 1 Overview</div><div class="m">14 widgets · 1 critical alarm</div></div><span class="rt">now</span></div>
+        <div class="li"><span class="st" style="background:var(--ok)"></span><div class="bd"><div class="t">Energy &amp; Utilities</div><div class="m">9 widgets · 4 assets</div></div><span class="rt">2h</span></div>
+        <div class="li"><span class="st" style="background:var(--warn)"></span><div class="bd"><div class="t">Line 2 Condition</div><div class="m">11 widgets · 2 warnings</div></div><span class="rt">2h</span></div>
+        <div class="li"><span class="st" style="background:var(--ok)"></span><div class="bd"><div class="t">Substation telemetry</div><div class="m">6 widgets · 8 assets</div></div><span class="rt">1d</span></div>
+        <div class="li"><span class="st" style="background:var(--ok)"></span><div class="bd"><div class="t">Compressor efficiency</div><div class="m">5 widgets · shared</div></div><span class="rt">1d</span></div>
+        <div class="li"><span class="st" style="background:var(--ink3)"></span><div class="bd"><div class="t">Shift handover</div><div class="m">7 widgets · read-only</div></div><span class="rt">3d</span></div>
+        <div class="li"><span class="st" style="background:var(--ink3)"></span><div class="bd"><div class="t">Commissioning · Line 3</div><div class="m">Draft · 2 widgets</div></div><span class="rt">6d</span></div>
+      </div>
+      <div class="lpb"><kbd>j</kbd><kbd>k</kbd> move · <kbd>↵</kbd> open · <kbd>⌘K</kbd> search</div>
+    </div>
+
+    <div class="dp">
+      <div class="dph">
+        <div class="cr">Dashboards / Plant 1 Overview</div>
+        <div class="rw">
+          <div><h2>Plant 1 Overview</h2><div class="sub">148 assets · last ingest 4 s ago · 14 widgets</div></div>
+          <div class="acts">
+            <div class="sg"><button>1h</button><button class="on">24h</button><button>7d</button><button>30d</button></div>
+            <button class="btn">Edit</button><button class="btn pri">Add widget</button>
+          </div>
+        </div>
+      </div>
+      <div class="dtabs"><a href="#" class="on">Overview</a><a href="#">Energy</a><a href="#">Condition</a><a href="#">Alarms</a><a href="#">Widgets</a></div>
+      <div class="dpb">
+        <div class="facts">
+          <div><div class="fk">Active devices</div><div class="fv">146<small> / 148</small></div><div class="fm of">2 offline &gt; 15 min</div></div>
+          <div><div class="fk">Messages 24h</div><div class="fv">1.94<small>M</small></div><div class="fm up">▲ 6.2% vs prev</div></div>
+          <div><div class="fk">Open alarms</div><div class="fv ba">3</div><div class="fm">1 critical · 2 warning</div></div>
+          <div><div class="fk">Latency p95</div><div class="fv">212<small> ms</small></div><div class="fm up">▼ 18 ms</div></div>
+          <div><div class="fk">Uptime 30d</div><div class="fv">99.94<small>%</small></div><div class="fm">1 incident</div></div>
+        </div>
+
+        <div class="sh"><h3>Energy consumption</h3><span class="sub">kWh · 15-minute aggregate</span><div class="r"><button class="btn qt">Export</button><button class="btn qt">Full screen</button></div></div>
+        <svg class="chart" viewBox="0 0 900 214" role="img" aria-label="Energy consumption over 24 hours; today tracks above yesterday and peaks at 412 kWh at 14:00">
+          <line class="gl" x1="42" y1="22" x2="890" y2="22"/><line class="gl" x1="42" y1="62" x2="890" y2="62"/><line class="gl" x1="42" y1="102" x2="890" y2="102"/><line class="gl" x1="42" y1="142" x2="890" y2="142"/>
+          <line class="al" x1="42" y1="180" x2="890" y2="180"/>
+          <text class="at" x="35" y="26" text-anchor="end">480</text><text class="at" x="35" y="66" text-anchor="end">360</text><text class="at" x="35" y="106" text-anchor="end">240</text><text class="at" x="35" y="146" text-anchor="end">120</text><text class="at" x="35" y="184" text-anchor="end">0</text>
+          <path class="ln2" d="M42 154 L148 147 L254 118 L360 90 L466 70 L572 82 L678 104 L784 128 L890 142"/>
+          <path class="ln" d="M42 148 L148 140 L254 108 L360 78 L466 55 L572 66 L678 92 L784 116 L890 126"/>
+          <circle class="end" cx="890" cy="126" r="4"/>
+          <text class="at" x="466" y="45" text-anchor="middle" style="fill:var(--ink2);font-weight:600">peak 412 kWh · 14:00</text>
+          <text class="at" x="42" y="200">00:00</text><text class="at" x="360" y="200" text-anchor="middle">09:00</text><text class="at" x="678" y="200" text-anchor="middle">18:00</text><text class="at" x="890" y="200" text-anchor="end">now</text>
+        </svg>
+        <div class="legend"><span><i style="background:var(--acc)"></i>Today · 8,412 kWh</span><span><i style="background:var(--ink3)"></i>Yesterday · 7,928 kWh</span></div>
+
+        <div class="sh"><h3>Assets needing attention</h3><span class="sub">3 of 148</span><div class="r"><button class="btn qt">Acknowledge all <kbd>⇧E</kbd></button></div></div>
+        <div class="tw">
+          <table>
+            <thead><tr><th style="width:3px"></th><th>Asset</th><th>Device</th><th>Condition</th><th class="r">Value</th><th class="r">Threshold</th><th class="r">Duration</th><th class="r">Ack</th></tr></thead>
+            <tbody>
+              <tr class="crit"><td class="rowst"></td><td class="p">Cooling Fan 04</td><td class="mono">FAN-04</td><td class="ba">Bearing temperature high</td><td class="r mono">91.4 °C</td><td class="r mono">85.0 °C</td><td class="r mono">6 m</td><td class="r"><button class="btn">Ack</button></td></tr>
+              <tr class="warn"><td class="rowst"></td><td class="p">Coolant Pump 11</td><td class="mono">PUMP-11</td><td class="wa">Vibration rate-of-change</td><td class="r mono">+2.1 mm/s·min</td><td class="r mono">+1.5</td><td class="r mono">28 m</td><td class="r"><button class="btn">Ack</button></td></tr>
+              <tr class="warn"><td class="rowst"></td><td class="p">Energy Meter 07</td><td class="mono">METER-07</td><td class="wa">No data received</td><td class="r mono">—</td><td class="r mono">15 m</td><td class="r mono">1 h 12 m</td><td class="r"><button class="btn">Ack</button></td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="sh"><h3>Ingest sources</h3></div>
+        <div class="tw">
+          <table>
+            <thead><tr><th>Source</th><th>Type</th><th class="r">Messages 24h</th><th class="r">Last message</th><th>State</th></tr></thead>
+            <tbody>
+              <tr><td class="p">broker-prod-01</td><td>MQTT</td><td class="r mono">1,412,880</td><td class="r mono">2 s</td><td><span class="st2 ok"><span class="d"></span>Connected</span></td></tr>
+              <tr><td class="p">Node-RED gateway</td><td>HTTP</td><td class="r mono">498,120</td><td class="r mono">3 s</td><td><span class="st2 ok"><span class="d"></span>Healthy</span></td></tr>
+              <tr><td class="p">Azure IoT Hub</td><td>AMQP</td><td class="r mono">31,004</td><td class="r mono">1 h 12 m</td><td><span class="st2 wa"><span class="d"></span>Throttled</span></td></tr>
+              <tr><td class="p">Legacy PLC bridge</td><td>HTTP</td><td class="r mono">0</td><td class="r mono">27 d</td><td><span class="st2 of"><span class="d"></span>Idle</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="dpf"><span class="st2 ok"><span class="d"></span>WebSocket live</span><span>148 assets</span><span>Plant 1 · Production</span><span style="margin-left:auto"><kbd>⌘K</kbd> command · <kbd>?</kbd> shortcuts</span></div>
+      <nav class="mnav"><a href="#" class="on">Dash</a><a href="#">Alarms</a><a href="#">Assets</a><a href="#">Explore</a><a href="#">More</a></nav>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 2. HOME / TRIAGE ============ -->
+<section class="screen" id="s2">
+  <div class="note"><b>What changes:</b> home is a triage queue, not a welcome screen. The list is everything that wants a decision; the detail pane is the one you are deciding about, with the evidence and the action side by side. Acknowledging advances to the next item — the pattern email clients use to clear a backlog.</div>
+  <div class="app">
+    <nav class="rl">
+      <span class="lg"><svg width="16" height="16" viewBox="0 0 16 16" stroke="#fff" stroke-width="1.7"><path d="M2 11h3l2-6 2 9 2-5h3"/></svg></span>
+      <a href="#" class="on" title="Triage"><svg width="17" height="17" viewBox="0 0 16 16" stroke-width="1.5"><path d="M2 4h12M2 8h12M2 12h7"/></svg></a>
+      <a href="#" title="Dashboards"><svg width="17" height="17" viewBox="0 0 16 16" stroke-width="1.5"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg></a>
+      <a href="#" title="Assets"><svg width="17" height="17" viewBox="0 0 16 16" stroke-width="1.5"><path d="M8 2l5 3v6l-5 3-5-3V5l5-3z"/></svg></a>
+      <a href="#" title="Data Explorer"><svg width="17" height="17" viewBox="0 0 16 16" stroke-width="1.5"><path d="M2 12l3-4 3 2 3-6 3 4"/></svg></a>
+      <span class="sp"></span>
+      <a href="#" title="Settings"><svg width="17" height="17" viewBox="0 0 16 16" stroke-width="1.5"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2"/></svg></a>
+    </nav>
+    <div class="lp">
+      <div class="lph"><h3>Needs attention</h3><span class="ct">6</span><div class="r"><button class="ib">⌕</button><button class="ib">⇅</button></div></div>
+      <div class="lpf"><div class="sg"><button class="on">Open</button><button>Acknowledged</button><button>All</button></div></div>
+      <div class="lpl">
+        <div class="li on"><span class="st" style="background:var(--bad)"></span><div class="bd"><div class="t">FAN-04 bearing temperature</div><div class="m">Critical · 91.4 °C · unacknowledged</div></div><span class="rt">6m</span></div>
+        <div class="li"><span class="st" style="background:var(--warn)"></span><div class="bd"><div class="t">PUMP-11 vibration climbing</div><div class="m">Warning · +2.1 mm/s per minute</div></div><span class="rt">28m</span></div>
+        <div class="li"><span class="st" style="background:var(--warn)"></span><div class="bd"><div class="t">METER-07 silent</div><div class="m">Warning · no payload since 13:48</div></div><span class="rt">1h</span></div>
+        <div class="li"><span class="st" style="background:var(--warn)"></span><div class="bd"><div class="t">Azure IoT Hub throttled</div><div class="m">Warning · 31K of 50K daily quota</div></div><span class="rt">3h</span></div>
+        <div class="li"><span class="st" style="background:var(--ink3)"></span><div class="bd"><div class="t">Legacy PLC bridge unused</div><div class="m">Info · no traffic for 27 days</div></div><span class="rt">27d</span></div>
+        <div class="li"><span class="st" style="background:var(--ink3)"></span><div class="bd"><div class="t">Retention nearing limit</div><div class="m">Info · 3.39M rows, 90-day window</div></div><span class="rt">1d</span></div>
+      </div>
+      <div class="lpb"><kbd>j</kbd><kbd>k</kbd> move · <kbd>e</kbd> acknowledge · <kbd>s</kbd> snooze</div>
+    </div>
+    <div class="dp">
+      <div class="dph">
+        <div class="cr">Needs attention / Alarm 4d81c2</div>
+        <div class="rw">
+          <div><h2>Bearing temperature above 85 °C</h2><div class="sub"><span class="st2 ba"><span class="d"></span>Critical</span> · Cooling Fan 04 · Line 2 · active 6 minutes</div></div>
+          <div class="acts"><button class="btn">Snooze 1 h <kbd>s</kbd></button><button class="btn">Open asset</button><button class="btn pri">Acknowledge <kbd>e</kbd></button></div>
+        </div>
+      </div>
+      <div class="dtabs"><a href="#" class="on">Evidence</a><a href="#">Rule</a><a href="#">History <span style="color:var(--ink3)">14</span></a><a href="#">Asset</a><a href="#">Notes</a></div>
+      <div class="dpb">
+        <div class="facts">
+          <div><div class="fk">Current</div><div class="fv ba">91.4<small> °C</small></div><div class="fm">rising 0.4 °C/min</div></div>
+          <div><div class="fk">Threshold</div><div class="fv">85.0<small> °C</small></div><div class="fm">exceeded by 6.4</div></div>
+          <div><div class="fk">Duration</div><div class="fv">6<small> min</small></div><div class="fm">since 15:02</div></div>
+          <div><div class="fk">Prior 30 d</div><div class="fv">3</div><div class="fm">same rule fired</div></div>
+        </div>
+
+        <div class="sh"><h3>Temperature, last 3 hours</h3><span class="sub">°C · 1-minute samples</span></div>
+        <svg class="chart" viewBox="0 0 900 200" role="img" aria-label="Bearing temperature rose steadily from 74 to 91.4 degrees, crossing the 85 degree threshold at 15:02">
+          <line class="gl" x1="42" y1="24" x2="890" y2="24"/><line class="gl" x1="42" y1="64" x2="890" y2="64"/><line class="gl" x1="42" y1="104" x2="890" y2="104"/><line class="gl" x1="42" y1="144" x2="890" y2="144"/>
+          <line class="al" x1="42" y1="168" x2="890" y2="168"/>
+          <text class="at" x="35" y="28" text-anchor="end">95</text><text class="at" x="35" y="68" text-anchor="end">88</text><text class="at" x="35" y="108" text-anchor="end">81</text><text class="at" x="35" y="148" text-anchor="end">74</text>
+          <line x1="42" y1="76" x2="890" y2="76" stroke="var(--bad)" stroke-width="1.5" stroke-dasharray="6 4"/>
+          <text class="at" x="886" y="70" text-anchor="end" style="fill:var(--bad);font-weight:700">threshold 85 °C</text>
+          <path class="ln" d="M42 146 L148 142 L254 136 L360 128 L466 118 L572 104 L678 88 L784 66 L890 42"/>
+          <circle class="end" cx="890" cy="42" r="4" style="fill:var(--bad)"/>
+          <text class="at" x="42" y="188">12:12</text><text class="at" x="466" y="188" text-anchor="middle">13:42</text><text class="at" x="890" y="188" text-anchor="end">15:08 now</text>
+        </svg>
+        <div class="legend"><span><i style="background:var(--acc)"></i>bearing_temp · FAN-04</span><span><i style="background:var(--bad)"></i>Rule threshold</span></div>
+
+        <div class="sh"><h3>Context at the moment of the alarm</h3></div>
+        <div class="tw">
+          <table>
+            <thead><tr><th>Attribute</th><th class="r">At 15:02</th><th class="r">Now</th><th class="r">Normal range</th><th>Assessment</th></tr></thead>
+            <tbody>
+              <tr><td class="p">bearing_temp</td><td class="r mono">85.2 °C</td><td class="r mono ba">91.4 °C</td><td class="r mono">62 – 80</td><td class="ba">Out of range</td></tr>
+              <tr><td class="p">vibration_rms</td><td class="r mono">4.1 mm/s</td><td class="r mono wa">6.2 mm/s</td><td class="r mono">2.0 – 5.0</td><td class="wa">Elevated</td></tr>
+              <tr><td class="p">motor_current</td><td class="r mono">18.4 A</td><td class="r mono">18.9 A</td><td class="r mono">16 – 21</td><td class="ok">Normal</td></tr>
+              <tr><td class="p">speed</td><td class="r mono">1,480 rpm</td><td class="r mono">1,478 rpm</td><td class="r mono">1,450 – 1,510</td><td class="ok">Normal</td></tr>
+              <tr><td class="p">ambient_temp</td><td class="r mono">31.2 °C</td><td class="r mono">31.8 °C</td><td class="r mono">18 – 35</td><td class="ok">Normal</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <p style="font-size:12px;color:var(--ink2);margin:11px 0 0;max-width:78ch">Temperature and vibration are both rising while current and speed hold steady — consistent with a lubrication or bearing-wear fault rather than a load change. The same rule fired three times in the last 30 days, each time on the night shift.</p>
+      </div>
+      <div class="dpf"><span class="st2 ba"><span class="d"></span>1 critical open</span><span>5 more in queue</span><span style="margin-left:auto"><kbd>e</kbd> acknowledge and advance</span></div>
+      <nav class="mnav"><a href="#" class="on">Triage</a><a href="#">Dash</a><a href="#">Assets</a><a href="#">Explore</a><a href="#">More</a></nav>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 3. TABLE (wide mode) ============ -->
+<section class="screen" id="s3">
+  <div class="note"><b>What changes:</b> the list pane collapses so the table gets the whole width — around 22 rows at 26px without scrolling, roughly twice the density of the current build. A 3px stripe on the left of each row carries status, so the eye finds problems down the edge without reading a single cell.</div>
+  <div class="app wide">
+    <nav class="rl">
+      <span class="lg"><svg width="16" height="16" viewBox="0 0 16 16" stroke="#fff" stroke-width="1.7"><path d="M2 11h3l2-6 2 9 2-5h3"/></svg></span>
+      <a href="#" title="Triage"><svg width="17" height="17" viewBox="0 0 16 16" stroke-width="1.5"><path d="M2 4h12M2 8h12M2 12h7"/></svg></a>
+      <a href="#" title="Dashboards"><svg width="17" height="17" viewBox="0 0 16 16" stroke-width="1.5"><rect x="2" y="2" width="5" height="5" rx="1"/><rect x="9" y="2" width="5" height="5" rx="1"/><rect x="2" y="9" width="5" height="5" rx="1"/><rect x="9" y="9" width="5" height="5" rx="1"/></svg></a>
+      <a href="#" class="on" title="Assets"><svg width="17" height="17" viewBox="0 0 16 16" stroke-width="1.5"><path d="M8 2l5 3v6l-5 3-5-3V5l5-3z"/></svg></a>
+      <a href="#" title="Data Explorer"><svg width="17" height="17" viewBox="0 0 16 16" stroke-width="1.5"><path d="M2 12l3-4 3 2 3-6 3 4"/></svg></a>
+      <span class="sp"></span>
+      <a href="#" title="Settings"><svg width="17" height="17" viewBox="0 0 16 16" stroke-width="1.5"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2"/></svg></a>
+    </nav>
+    <div class="dp">
+      <div class="dph">
+        <div class="cr">Assets</div>
+        <div class="rw">
+          <div><h2>Assets</h2><div class="sub">148 across 6 areas · 2 silent for more than 15 minutes</div></div>
+          <div class="acts">
+            <input type="text" placeholder="Filter…  /" style="width:180px" autocomplete="off">
+            <div class="sg"><button class="on">Table</button><button>Split</button><button>Tree</button></div>
+            <button class="btn">Columns</button><button class="btn pri">New asset</button>
+          </div>
+        </div>
+      </div>
+      <div class="dtabs"><a href="#" class="on">All <span style="color:var(--ink3)">148</span></a><a href="#">Reporting <span style="color:var(--ink3)">144</span></a><a href="#">Silent <span style="color:var(--ink3)">2</span></a><a href="#">Maintenance <span style="color:var(--ink3)">2</span></a><a href="#">Unassigned <span style="color:var(--ink3)">0</span></a></div>
+      <div class="dpb" style="padding-top:12px">
+        <div style="display:flex;gap:5px;flex-wrap:wrap;margin-bottom:10px">
+          <span class="chip on">All areas</span><span class="chip">Line 1</span><span class="chip">Line 2</span><span class="chip">Utilities</span><span class="chip">Substation A</span><span class="chip">Substation B</span>
+          <span style="margin-left:auto;font-size:11.5px;color:var(--ink3)" class="num">148 rows · 22 shown</span>
+        </div>
+        <div class="tw">
+          <table>
+            <thead><tr><th style="width:3px"></th><th style="width:26px"><input type="checkbox" aria-label="Select all"></th><th>Asset</th><th>Device ID</th><th>Template</th><th>Area</th><th>Status</th><th class="r">Last value</th><th class="r">Last seen</th><th class="r">Rules</th><th class="r">Msgs 24h</th></tr></thead>
+            <tbody>
+              <tr class="crit"><td class="rowst"></td><td><input type="checkbox" aria-label="Select FAN-04"></td><td class="p">Cooling Fan 04</td><td class="mono">FAN-04</td><td>Rotating machine</td><td>Line 2</td><td><span class="st2 ba"><span class="d"></span>Alarm</span></td><td class="r mono">91.4 °C</td><td class="r mono">4 s</td><td class="r num">6</td><td class="r mono">21,440</td></tr>
+              <tr class="warn"><td class="rowst"></td><td><input type="checkbox" aria-label="Select PUMP-11"></td><td class="p">Coolant Pump 11</td><td class="mono">PUMP-11</td><td>Rotating machine</td><td>Utilities</td><td><span class="st2 wa"><span class="d"></span>Warning</span></td><td class="r mono">7.8 mm/s</td><td class="r mono">9 s</td><td class="r num">4</td><td class="r mono">19,880</td></tr>
+              <tr class="warn"><td class="rowst"></td><td><input type="checkbox" aria-label="Select METER-07"></td><td class="p">Energy Meter 07</td><td class="mono">METER-07</td><td>Power meter</td><td>Substation B</td><td><span class="st2 of"><span class="d"></span>Silent</span></td><td class="r mono">—</td><td class="r mono">1 h 12 m</td><td class="r num">3</td><td class="r mono">2,104</td></tr>
+              <tr><td class="rowst"></td><td><input type="checkbox" aria-label="Select EMS"></td><td class="p">EMS Gateway</td><td class="mono">EMS</td><td>Gateway</td><td>Plant 1</td><td><span class="st2 ok"><span class="d"></span>Reporting</span></td><td class="r mono">412 kWh</td><td class="r mono">2 s</td><td class="r num">2</td><td class="r mono">86,400</td></tr>
+              <tr><td class="rowst"></td><td><input type="checkbox" aria-label="Select COMP-02"></td><td class="p">Air Compressor 02</td><td class="mono">COMP-02</td><td>Compressor</td><td>Utilities</td><td><span class="st2 ok"><span class="d"></span>Reporting</span></td><td class="r mono">6.4 bar</td><td class="r mono">3 s</td><td class="r num">5</td><td class="r mono">28,800</td></tr>
+              <tr><td class="rowst"></td><td><input type="checkbox" aria-label="Select CHILL-01"></td><td class="p">Chiller 01</td><td class="mono">CHILL-01</td><td>Chiller</td><td>Utilities</td><td><span class="st2 ok"><span class="d"></span>Reporting</span></td><td class="r mono">11.2 °C</td><td class="r mono">5 s</td><td class="r num">4</td><td class="r mono">28,800</td></tr>
+              <tr><td class="rowst"></td><td><input type="checkbox" aria-label="Select CONV-03"></td><td class="p">Conveyor 03</td><td class="mono">CONV-03</td><td>Drive</td><td>Line 1</td><td><span class="st2 ok"><span class="d"></span>Reporting</span></td><td class="r mono">1,480 rpm</td><td class="r mono">2 s</td><td class="r num">3</td><td class="r mono">43,200</td></tr>
+              <tr><td class="rowst"></td><td><input type="checkbox" aria-label="Select CONV-04"></td><td class="p">Conveyor 04</td><td class="mono">CONV-04</td><td>Drive</td><td>Line 1</td><td><span class="st2 ok"><span class="d"></span>Reporting</span></td><td class="r mono">1,502 rpm</td><td class="r mono">2 s</td><td class="r num">3</td><td class="r mono">43,200</td></tr>
+              <tr><td class="rowst"></td><td><input type="checkbox" aria-label="Select OVEN-01"></td><td class="p">Curing Oven 01</td><td class="mono">OVEN-01</td><td>Thermal</td><td>Line 2</td><td><span class="st2 ok"><span class="d"></span>Reporting</span></td><td class="r mono">184 °C</td><td class="r mono">6 s</td><td class="r num">7</td><td class="r mono">14,400</td></tr>
+              <tr class="mnt"><td class="rowst"></td><td><input type="checkbox" aria-label="Select ROBO-02"></td><td class="p">Pick &amp; Place 02</td><td class="mono">ROBO-02</td><td>Robot cell</td><td>Line 2</td><td><span class="st2 of"><span class="d"></span>Maintenance</span></td><td class="r mono">idle</td><td class="r mono">14 s</td><td class="r num">5</td><td class="r mono">6,120</td></tr>
+              <tr><td class="rowst"></td><td><input type="checkbox" aria-label="Select TANK-05"></td><td class="p">Feed Tank 05</td><td class="mono">TANK-05</td><td>Vessel</td><td>Line 1</td><td><span class="st2 ok"><span class="d"></span>Reporting</span></td><td class="r mono">72.5 %</td><td class="r mono">8 s</td><td class="r num">2</td><td class="r mono">8,640</td></tr>
+              <tr><td class="rowst"></td><td><input type="checkbox" aria-label="Select VALVE-09"></td><td class="p">Control Valve 09</td><td class="mono">VALVE-09</td><td>Actuator</td><td>Line 1</td><td><span class="st2 ok"><span class="d"></span>Reporting</span></td><td class="r mono">44 %</td><td class="r mono">3 s</td><td class="r num">1</td><td class="r mono">28,800</td></tr>
+              <tr><td class="rowst"></td><td><input type="checkbox" aria-label="Select AHU-02"></td><td class="p">Air Handling Unit 02</td><td class="mono">AHU-02</td><td>HVAC</td><td>Plant 1</td><td><span class="st2 ok"><span class="d"></span>Reporting</span></td><td class="r mono">21.8 °C</td><td class="r mono">11 s</td><td class="r num">4</td><td class="r mono">8,640</td></tr>
+              <tr><td class="rowst"></td><td><input type="checkbox" aria-label="Select METER-01"></td><td class="p">Energy Meter 01</td><td class="mono">METER-01</td><td>Power meter</td><td>Substation A</td><td><span class="st2 ok"><span class="d"></span>Reporting</span></td><td class="r mono">288 kWh</td><td class="r mono">4 s</td><td class="r num">3</td><td class="r mono">17,280</td></tr>
+              <tr><td class="rowst"></td><td><input type="checkbox" aria-label="Select METER-02"></td><td class="p">Energy Meter 02</td><td class="mono">METER-02</td><td>Power meter</td><td>Substation A</td><td><span class="st2 ok"><span class="d"></span>Reporting</span></td><td class="r mono">301 kWh</td><td class="r mono">4 s</td><td class="r num">3</td><td class="r mono">17,280</td></tr>
+              <tr><td class="rowst"></td><td><input type="checkbox" aria-label="Select METER-03"></td><td class="p">Energy Meter 03</td><td class="mono">METER-03</td><td>Power meter</td><td>Substation A</td><td><span class="st2 ok"><span class="d"></span>Reporting</span></td><td class="r mono">264 kWh</td><td class="r mono">5 s</td><td class="r num">3</td><td class="r mono">17,280</td></tr>
+              <tr><td class="rowst"></td><td><input type="checkbox" aria-label="Select DRYER-01"></td><td class="p">Dryer 01</td><td class="mono">DRYER-01</td><td>Thermal</td><td>Line 2</td><td><span class="st2 ok"><span class="d"></span>Reporting</span></td><td class="r mono">96 °C</td><td class="r mono">7 s</td><td class="r num">4</td><td class="r mono">14,400</td></tr>
+              <tr><td class="rowst"></td><td><input type="checkbox" aria-label="Select MIXER-01"></td><td class="p">Mixer 01</td><td class="mono">MIXER-01</td><td>Rotating machine</td><td>Line 1</td><td><span class="st2 ok"><span class="d"></span>Reporting</span></td><td class="r mono">742 rpm</td><td class="r mono">3 s</td><td class="r num">4</td><td class="r mono">28,800</td></tr>
+              <tr><td class="rowst"></td><td><input type="checkbox" aria-label="Select PUMP-04"></td><td class="p">Feed Pump 04</td><td class="mono">PUMP-04</td><td>Rotating machine</td><td>Line 1</td><td><span class="st2 ok"><span class="d"></span>Reporting</span></td><td class="r mono">3.2 mm/s</td><td class="r mono">6 s</td><td class="r num">4</td><td class="r mono">19,880</td></tr>
+              <tr class="mnt"><td class="rowst"></td><td><input type="checkbox" aria-label="Select ROBO-01"></td><td class="p">Pick &amp; Place 01</td><td class="mono">ROBO-01</td><td>Robot cell</td><td>Line 2</td><td><span class="st2 of"><span class="d"></span>Maintenance</span></td><td class="r mono">idle</td><td class="r mono">22 s</td><td class="r num">5</td><td class="r mono">6,120</td></tr>
+              <tr><td class="rowst"></td><td><input type="checkbox" aria-label="Select COMP-01"></td><td class="p">Air Compressor 01</td><td class="mono">COMP-01</td><td>Compressor</td><td>Utilities</td><td><span class="st2 ok"><span class="d"></span>Reporting</span></td><td class="r mono">6.1 bar</td><td class="r mono">3 s</td><td class="r num">5</td><td class="r mono">28,800</td></tr>
+              <tr><td class="rowst"></td><td><input type="checkbox" aria-label="Select CHILL-02"></td><td class="p">Chiller 02</td><td class="mono">CHILL-02</td><td>Chiller</td><td>Utilities</td><td><span class="st2 ok"><span class="d"></span>Reporting</span></td><td class="r mono">12.4 °C</td><td class="r mono">5 s</td><td class="r num">4</td><td class="r mono">28,800</td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;margin-top:11px">
+          <span style="font-size:11.5px;color:var(--ink3)" class="num">Rows 1–22 of 148</span>
+          <div class="acts"><button class="btn qt">Load 50 more</button><button class="btn">Export CSV</button></div>
+        </div>
+      </div>
+      <div class="dpf"><span class="st2 ok"><span class="d"></span>Live</span><span>2 silent · 2 in maintenance</span><span style="margin-left:auto"><kbd>/</kbd> filter · <kbd>j</kbd><kbd>k</kbd> row · <kbd>↵</kbd> open in split view</span></div>
+      <nav class="mnav"><a href="#">Triage</a><a href="#">Dash</a><a href="#" class="on">Assets</a><a href="#">Explore</a><a href="#">More</a></nav>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 4. INLINE CREATE ============ -->
+<section class="screen" id="s4">
+  <div class="note"><b>What changes:</b> no modal. Pressing <kbd>N</kbd> adds a draft at the top of the list and the detail pane becomes the form — so the endpoints you already have stay visible while you name the new one, and an interruption never destroys your input. Label-left rows keep long explanations legible without stretching the field.</div>
+  <div class="app">
+    <nav class="rl">
+      <span class="lg"><svg width="16" height="16" viewBox="0 0 16 16" stroke="#fff" stroke-width="1.7"><path d="M2 11h3l2-6 2 9 2-5h3"/></svg></span>
+      <a href="#" title="Triage"><svg width="17" height="17" viewBox="0 0 16 16" stroke-width="1.5"><path d="M2 4h12M2 8h12M2 12h7"/></svg></a>
+      <a href="#" title="Assets"><svg width="17" height="17" viewBox="0 0 16 16" stroke-width="1.5"><path d="M8 2l5 3v6l-5 3-5-3V5l5-3z"/></svg></a>
+      <a href="#" class="on" title="API endpoints"><svg width="17" height="17" viewBox="0 0 16 16" stroke-width="1.5"><circle cx="6" cy="8" r="3"/><path d="M9 8h5M12 8v3"/></svg></a>
+      <span class="sp"></span>
+      <a href="#" title="Settings"><svg width="17" height="17" viewBox="0 0 16 16" stroke-width="1.5"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2"/></svg></a>
+    </nav>
+    <div class="lp">
+      <div class="lph"><h3>API endpoints</h3><span class="ct">9</span><div class="r"><button class="ib">⌕</button><button class="ib" title="New (N)">+</button></div></div>
+      <div class="lpf"><div class="sg"><button class="on">All</button><button>Ingest</button><button>Read</button></div></div>
+      <div class="lpl">
+        <div class="li on"><span class="st" style="background:var(--acc)"></span><div class="bd"><div class="t">Untitled endpoint</div><div class="m">Draft · not yet created</div></div><span class="rt">now</span></div>
+        <div class="li"><span class="st" style="background:var(--ok)"></span><div class="bd"><div class="t">EMS gateway</div><div class="m">Plant 1 — Energy · 1.41M msg</div></div><span class="rt">2s</span></div>
+        <div class="li"><span class="st" style="background:var(--ok)"></span><div class="bd"><div class="t">Line 2 Node-RED</div><div class="m">Line 2 — Condition · 498K msg</div></div><span class="rt">3s</span></div>
+        <div class="li"><span class="st" style="background:var(--warn)"></span><div class="bd"><div class="t">Substation collector</div><div class="m">Substation telemetry · 31K msg</div></div><span class="rt">1h</span></div>
+        <div class="li"><span class="st" style="background:var(--ok)"></span><div class="bd"><div class="t">BI read-only</div><div class="m">read:telemetry, read:assets</div></div><span class="rt">18m</span></div>
+        <div class="li"><span class="st" style="background:var(--ink3)"></span><div class="bd"><div class="t">Legacy PLC bridge</div><div class="m">No traffic for 27 days</div></div><span class="rt">27d</span></div>
+      </div>
+      <div class="lpb"><kbd>n</kbd> new · <kbd>⌫</kbd> revoke · <kbd>c</kbd> copy URL</div>
+    </div>
+    <div class="dp">
+      <div class="dph">
+        <div class="cr">API endpoints / Draft</div>
+        <div class="rw">
+          <div><h2>New endpoint</h2><div class="sub">Generates an ingest URL with the key embedded — no header configuration on the gateway</div></div>
+          <div class="acts"><button class="btn">Discard</button><button class="btn pri">Create <kbd>⌘↵</kbd></button></div>
+        </div>
+      </div>
+      <div class="dpb">
+        <div class="form">
+          <div class="fr">
+            <div class="lb">Client name<span class="opt">optional</span></div>
+            <div><input type="text" placeholder="Line 3 pilot gateway" autocomplete="off"><div class="hint">A label for your own reference. Defaults to the project name if left blank.</div></div>
+          </div>
+          <div class="fr">
+            <div class="lb">Project</div>
+            <div>
+              <input type="text" value="Plant 1 — Energy" autocomplete="off" list="wp">
+              <datalist id="wp"><option>Plant 1 — Energy</option><option>Line 2 — Condition monitoring</option><option>Substation telemetry</option></datalist>
+              <div class="chips"><span class="chip on">Plant 1 — Energy</span><span class="chip">Line 2 — Condition</span><span class="chip">Substation telemetry</span><span class="chip">+ Create “Line 3 pilot”</span></div>
+              <div class="hint">Pick an existing project or type a new name to create one.</div>
+            </div>
+          </div>
+          <div class="fr">
+            <div class="lb">Permissions</div>
+            <div>
+              <div style="display:flex;gap:8px;align-items:center;font-size:12.5px"><input type="checkbox" checked disabled style="width:auto;accent-color:var(--acc)"> <span><b>Write telemetry</b> <span class="mono" style="color:var(--ink3)">ingest:write</span></span></div>
+              <div class="locked" style="margin-top:8px">
+                <span class="lk"><svg width="13" height="13" viewBox="0 0 14 14" fill="none" stroke="currentColor" stroke-width="1.6"><rect x="3" y="6" width="8" height="6" rx="1"/><path d="M5 6V4.5a2 2 0 014 0V6"/></svg></span>
+                <div class="lt"><b>Read scopes are granted elsewhere.</b> To let this key query assets, telemetry or alarm history, an administrator adds those scopes under <b>Users → Access Control → API client</b>. A key can never widen its own reach, and the grant is recorded against the administrator who made it.</div>
+              </div>
+            </div>
+          </div>
+          <div class="fr">
+            <div class="lb">Rate limit</div>
+            <div><select><option>600 / minute (default)</option><option>1,200 / minute</option><option>6,000 / minute</option><option>Unlimited</option></select><div class="hint">Payloads above the limit return 429 and are not persisted.</div></div>
+          </div>
+          <div class="fr">
+            <div class="lb">Endpoint URL</div>
+            <div>
+              <div class="urlbox"><span class="u">https://iot.example.com/api/ingest/k/•••••••••••••••••/payload</span><button class="btn" style="flex:none;padding:4px 9px">Copy <kbd>c</kbd></button></div>
+              <div class="hint">Generated on create. Copy it once — the key is never shown again. The same path accepts a single reading or an array.</div>
+            </div>
+          </div>
+          <div class="fr" style="border-bottom:0">
+            <div class="lb">Test payload</div>
+            <div>
+              <textarea rows="5" style="font-family:var(--mono);font-size:11.5px">{
+  "deviceId": "METER-08",
+  "ts": "2026-08-04T15:08:22Z",
+  "metrics": { "energy_kwh": 412.6, "voltage": 402.1 }
+}</textarea>
+              <div class="hint"><span class="ok">✓</span> Validates against the ingest schema. <span class="wa">deviceId <span class="mono">METER-08</span> does not match any registered asset yet</span> — register it, or the reading is stored unattributed.</div>
+            </div>
+          </div>
+          <div class="fbar">
+            <span style="font-size:11.5px;color:var(--ink3)">Draft is kept if you navigate away</span>
+            <span class="sp"></span>
+            <button class="btn">Discard</button><button class="btn pri">Create endpoint</button>
+          </div>
+        </div>
+      </div>
+      <div class="dpf"><span class="st2 of"><span class="d"></span>Draft unsaved</span><span style="margin-left:auto"><kbd>⌘↵</kbd> create · <kbd>esc</kbd> discard</span></div>
+      <nav class="mnav"><a href="#">Triage</a><a href="#">Dash</a><a href="#">Assets</a><a href="#">Explore</a><a href="#" class="on">More</a></nav>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 5. ANALYTICS ============ -->
+<section class="screen" id="s5">
+  <div class="note"><b>What changes:</b> saved queries live in the list pane, so a study you built last month is one click away rather than something you rebuild from filters. Each figure states what it shows in a line of prose, and the comparison indexes both series to a common base instead of using two y-axes.</div>
+  <div class="app">
+    <nav class="rl">
+      <span class="lg"><svg width="16" height="16" viewBox="0 0 16 16" stroke="#fff" stroke-width="1.7"><path d="M2 11h3l2-6 2 9 2-5h3"/></svg></span>
+      <a href="#" title="Triage"><svg width="17" height="17" viewBox="0 0 16 16" stroke-width="1.5"><path d="M2 4h12M2 8h12M2 12h7"/></svg></a>
+      <a href="#" title="Assets"><svg width="17" height="17" viewBox="0 0 16 16" stroke-width="1.5"><path d="M8 2l5 3v6l-5 3-5-3V5l5-3z"/></svg></a>
+      <a href="#" class="on" title="Data Explorer"><svg width="17" height="17" viewBox="0 0 16 16" stroke-width="1.5"><path d="M2 12l3-4 3 2 3-6 3 4"/></svg></a>
+      <span class="sp"></span>
+      <a href="#" title="Settings"><svg width="17" height="17" viewBox="0 0 16 16" stroke-width="1.5"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2"/></svg></a>
+    </nav>
+    <div class="lp">
+      <div class="lph"><h3>Saved queries</h3><span class="ct">11</span><div class="r"><button class="ib">⌕</button><button class="ib">+</button></div></div>
+      <div class="lpf"><div class="sg"><button class="on">Mine</button><button>Shared</button><button>Recent</button></div></div>
+      <div class="lpl">
+        <div class="li on"><span class="st" style="background:var(--acc)"></span><div class="bd"><div class="t">Energy &amp; efficiency · June</div><div class="m">6 assets · 30 d · sum 15 min</div></div><span class="rt">now</span></div>
+        <div class="li"><span class="st" style="background:var(--ink3)"></span><div class="bd"><div class="t">Compressor efficiency study</div><div class="m">2 assets · 90 d · avg 1 h</div></div><span class="rt">1d</span></div>
+        <div class="li"><span class="st" style="background:var(--ink3)"></span><div class="bd"><div class="t">Off-shift baseload</div><div class="m">14 assets · 30 d · min 1 h</div></div><span class="rt">3d</span></div>
+        <div class="li"><span class="st" style="background:var(--ink3)"></span><div class="bd"><div class="t">Chiller COP trend</div><div class="m">Derived expression · 60 d</div></div><span class="rt">1w</span></div>
+        <div class="li"><span class="st" style="background:var(--ink3)"></span><div class="bd"><div class="t">Line 2 vibration envelope</div><div class="m">4 assets · 7 d · max 1 min</div></div><span class="rt">1w</span></div>
+        <div class="li"><span class="st" style="background:var(--ink3)"></span><div class="bd"><div class="t">Substation load balance</div><div class="m">8 assets · 24 h · avg 5 min</div></div><span class="rt">2w</span></div>
+      </div>
+      <div class="lpb"><kbd>⌘S</kbd> save query · <kbd>⌘E</kbd> export</div>
+    </div>
+    <div class="dp">
+      <div class="dph">
+        <div class="cr">Data Explorer / Energy &amp; efficiency · June</div>
+        <div class="rw">
+          <div><h2>Energy &amp; efficiency</h2><div class="sub">1 – 30 June 2026 · 6 assets · sum, 15-minute buckets · compared with May</div></div>
+          <div class="acts"><button class="btn">Edit query</button><button class="btn">Export CSV</button><button class="btn pri">Save</button></div>
+        </div>
+      </div>
+      <div class="dtabs"><a href="#" class="on">Charts</a><a href="#">Table</a><a href="#">Query</a><a href="#">Derived expressions</a></div>
+      <div class="dpb">
+        <div class="facts">
+          <div><div class="fk">Total</div><div class="fv">241.8<small> MWh</small></div><div class="fm dn">▲ 4.1% vs May</div></div>
+          <div><div class="fk">Specific energy</div><div class="fv">0.84<small> kWh/u</small></div><div class="fm up">▼ 2.6%</div></div>
+          <div><div class="fk">Peak demand</div><div class="fv">618<small> kW</small></div><div class="fm">18 Jun 14:15</div></div>
+          <div><div class="fk">Baseload</div><div class="fv">11.4<small>%</small></div><div class="fm dn">▲ 1.2 pts</div></div>
+          <div><div class="fk">Cost estimate</div><div class="fv">₹19.3<small>L</small></div><div class="fm">at ₹8.0 / kWh</div></div>
+        </div>
+
+        <div class="sh"><h3>Consumption by day</h3><span class="sub">MWh</span><div class="r"><button class="btn qt">Table view</button></div></div>
+        <p style="font-size:12px;color:var(--ink2);margin:0 0 10px;max-width:88ch">Weekdays are flat at 8–9 MWh and the low bars are Sundays. The 18 June spike is the chiller running through the night shift — it accounts for most of the month-on-month increase.</p>
+        <svg class="chart" viewBox="0 0 900 190" role="img" aria-label="Daily consumption for June: weekdays 8 to 9 MWh, weekends about 3 MWh, an 11.3 MWh anomaly on 18 June">
+          <line class="al" x1="38" y1="158" x2="890" y2="158"/>
+          <line class="gl" x1="38" y1="118" x2="890" y2="118"/><line class="gl" x1="38" y1="78" x2="890" y2="78"/><line class="gl" x1="38" y1="38" x2="890" y2="38"/>
+          <text class="at" x="31" y="162" text-anchor="end">0</text><text class="at" x="31" y="122" text-anchor="end">4</text><text class="at" x="31" y="82" text-anchor="end">8</text><text class="at" x="31" y="42" text-anchor="end">12</text>
+          <g fill="var(--acc)">
+            <rect x="42" y="74" width="20" height="84" rx="3"/><rect x="71" y="70" width="20" height="88" rx="3"/><rect x="100" y="78" width="20" height="80" rx="3"/><rect x="129" y="72" width="20" height="86" rx="3"/><rect x="158" y="76" width="20" height="82" rx="3"/>
+            <rect x="187" y="126" width="20" height="32" rx="3" fill="var(--ink3)"/><rect x="216" y="128" width="20" height="30" rx="3" fill="var(--ink3)"/>
+            <rect x="245" y="68" width="20" height="90" rx="3"/><rect x="274" y="74" width="20" height="84" rx="3"/><rect x="303" y="80" width="20" height="78" rx="3"/><rect x="332" y="72" width="20" height="86" rx="3"/><rect x="361" y="70" width="20" height="88" rx="3"/>
+            <rect x="390" y="130" width="20" height="28" rx="3" fill="var(--ink3)"/><rect x="419" y="132" width="20" height="26" rx="3" fill="var(--ink3)"/>
+            <rect x="448" y="66" width="20" height="92" rx="3"/><rect x="477" y="72" width="20" height="86" rx="3"/><rect x="506" y="76" width="20" height="82" rx="3"/>
+            <rect x="535" y="40" width="20" height="118" rx="3" fill="var(--bad)"/>
+            <rect x="564" y="70" width="20" height="88" rx="3"/><rect x="593" y="126" width="20" height="32" rx="3" fill="var(--ink3)"/><rect x="622" y="128" width="20" height="30" rx="3" fill="var(--ink3)"/>
+            <rect x="651" y="72" width="20" height="86" rx="3"/><rect x="680" y="74" width="20" height="84" rx="3"/><rect x="709" y="78" width="20" height="80" rx="3"/><rect x="738" y="70" width="20" height="88" rx="3"/><rect x="767" y="76" width="20" height="82" rx="3"/>
+            <rect x="796" y="124" width="20" height="34" rx="3" fill="var(--ink3)"/><rect x="825" y="130" width="20" height="28" rx="3" fill="var(--ink3)"/>
+            <rect x="854" y="72" width="20" height="86" rx="3"/>
+          </g>
+          <text class="at" x="545" y="33" text-anchor="middle" style="fill:var(--bad);font-weight:700">11.3</text>
+          <text class="at" x="42" y="178">1 Jun</text><text class="at" x="274" y="178" text-anchor="middle">9 Jun</text><text class="at" x="535" y="178" text-anchor="middle">18 Jun</text><text class="at" x="890" y="178" text-anchor="end">30 Jun</text>
+        </svg>
+        <div class="legend"><span><i style="background:var(--acc)"></i>Production day</span><span><i style="background:var(--ink3)"></i>Weekend</span><span><i style="background:var(--bad)"></i>Anomaly</span></div>
+
+        <div class="sh"><h3>Energy vs output, indexed</h3><span class="sub">1 June = 100 · one shared axis</span></div>
+        <p style="font-size:12px;color:var(--ink2);margin:0 0 10px;max-width:88ch">Output grew faster than energy after 12 June, and that widening gap is the efficiency gain the specific-energy figure reports. Both series are indexed, so a single axis is honest here.</p>
+        <svg class="chart" viewBox="0 0 900 180" role="img" aria-label="Indexed comparison; output index reaches 115.2 while energy index reaches 104.1">
+          <line class="al" x1="38" y1="150" x2="890" y2="150"/>
+          <line class="gl" x1="38" y1="112" x2="890" y2="112"/><line class="gl" x1="38" y1="74" x2="890" y2="74"/><line class="gl" x1="38" y1="36" x2="890" y2="36"/>
+          <text class="at" x="31" y="154" text-anchor="end">90</text><text class="at" x="31" y="116" text-anchor="end">100</text><text class="at" x="31" y="78" text-anchor="end">110</text><text class="at" x="31" y="40" text-anchor="end">120</text>
+          <path class="ln2" d="M38 112 L180 108 L322 104 L464 100 L606 94 L748 90 L890 86"/>
+          <path class="ln" d="M38 112 L180 106 L322 98 L464 84 L606 66 L748 56 L890 48"/>
+          <circle class="end" cx="890" cy="48" r="4"/>
+          <text class="at" x="38" y="172">1 Jun</text><text class="at" x="464" y="172" text-anchor="middle">15 Jun</text><text class="at" x="890" y="172" text-anchor="end">30 Jun</text>
+        </svg>
+        <div class="legend"><span><i style="background:var(--acc)"></i>Output index · 115.2</span><span><i style="background:var(--ink3)"></i>Energy index · 104.1</span></div>
+
+        <div class="sh"><h3>By asset</h3><span class="sub">share of the 241.8 MWh total</span></div>
+        <div class="tw">
+          <table>
+            <thead><tr><th>Asset</th><th>Area</th><th class="r">MWh</th><th class="r">Share</th><th class="r">Peak kW</th><th class="r">vs May</th><th class="r">Baseload</th></tr></thead>
+            <tbody>
+              <tr><td class="p">Chiller 01</td><td>Utilities</td><td class="r mono">78.4</td><td class="r mono">32.4%</td><td class="r mono">214</td><td class="r mono dn">+8.1%</td><td class="r mono">18.2%</td></tr>
+              <tr><td class="p">Air Compressor 02</td><td>Utilities</td><td class="r mono">61.2</td><td class="r mono">25.3%</td><td class="r mono">168</td><td class="r mono up">−2.0%</td><td class="r mono">9.4%</td></tr>
+              <tr><td class="p">Curing Oven 01</td><td>Line 2</td><td class="r mono">44.9</td><td class="r mono">18.6%</td><td class="r mono">142</td><td class="r mono dn">+3.4%</td><td class="r mono">4.1%</td></tr>
+              <tr><td class="p">Air Handling Unit 02</td><td>Plant 1</td><td class="r mono">28.1</td><td class="r mono">11.6%</td><td class="r mono">61</td><td class="r mono up">−1.1%</td><td class="r mono">22.6%</td></tr>
+              <tr><td class="p">Conveyor 03 + 04</td><td>Line 1</td><td class="r mono">17.6</td><td class="r mono">7.3%</td><td class="r mono">38</td><td class="r mono">0.0%</td><td class="r mono">2.0%</td></tr>
+              <tr><td class="p">Other · 11 assets</td><td>—</td><td class="r mono">11.6</td><td class="r mono">4.8%</td><td class="r mono">29</td><td class="r mono up">−0.4%</td><td class="r mono">6.8%</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+      <div class="dpf"><span>2,880 buckets · 6 series</span><span>Query ran in 412 ms</span><span style="margin-left:auto"><kbd>⌘S</kbd> save · <kbd>⌘E</kbd> export</span></div>
+      <nav class="mnav"><a href="#">Triage</a><a href="#">Dash</a><a href="#">Assets</a><a href="#" class="on">Explore</a><a href="#">More</a></nav>
+    </div>
+  </div>
+</section>
+
+<!-- ============ 6. SETTINGS ============ -->
+<section class="screen" id="s6">
+  <div class="note"><b>What changes:</b> the list pane becomes the settings index, which removes the second sidebar the current build needs. Every switch states its consequence, not just its name, and the permission matrix is one table read across in a single pass rather than a per-role drill-down.</div>
+  <div class="app">
+    <nav class="rl">
+      <span class="lg"><svg width="16" height="16" viewBox="0 0 16 16" stroke="#fff" stroke-width="1.7"><path d="M2 11h3l2-6 2 9 2-5h3"/></svg></span>
+      <a href="#" title="Triage"><svg width="17" height="17" viewBox="0 0 16 16" stroke-width="1.5"><path d="M2 4h12M2 8h12M2 12h7"/></svg></a>
+      <a href="#" title="Assets"><svg width="17" height="17" viewBox="0 0 16 16" stroke-width="1.5"><path d="M8 2l5 3v6l-5 3-5-3V5l5-3z"/></svg></a>
+      <a href="#" title="Data Explorer"><svg width="17" height="17" viewBox="0 0 16 16" stroke-width="1.5"><path d="M2 12l3-4 3 2 3-6 3 4"/></svg></a>
+      <span class="sp"></span>
+      <a href="#" class="on" title="Settings"><svg width="17" height="17" viewBox="0 0 16 16" stroke-width="1.5"><circle cx="8" cy="8" r="2.2"/><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.5 3.5l1.4 1.4M11.1 11.1l1.4 1.4M12.5 3.5l-1.4 1.4M4.9 11.1L3.5 12.5"/></svg></a>
+    </nav>
+    <div class="lp">
+      <div class="lph"><h3>Settings</h3><div class="r"><button class="ib">⌕</button></div></div>
+      <div class="lpl">
+        <div class="li"><div class="bd"><div class="t">Profile</div><div class="m">Name, contact, preferences</div></div></div>
+        <div class="li on"><span class="st" style="background:var(--acc)"></span><div class="bd"><div class="t">Access control</div><div class="m">Roles, users, API scopes</div></div></div>
+        <div class="li"><div class="bd"><div class="t">Sessions</div><div class="m">23 active · CSRF, timeouts</div></div></div>
+        <div class="li"><div class="bd"><div class="t">Data retention</div><div class="m">Telemetry, alarms, audit</div></div></div>
+        <div class="li"><div class="bd"><div class="t">Brokers &amp; ingest</div><div class="m">4 sources configured</div></div></div>
+        <div class="li"><div class="bd"><div class="t">Webhooks</div><div class="m">3 endpoints · 1 failing</div></div></div>
+        <div class="li"><div class="bd"><div class="t">Activity log</div><div class="m">Who changed what</div></div></div>
+        <div class="li"><div class="bd"><div class="t">Appearance</div><div class="m">Theme, density, units</div></div></div>
+      </div>
+      <div class="lpb"><kbd>⌘K</kbd> jump to any setting</div>
+    </div>
+    <div class="dp">
+      <div class="dph">
+        <div class="cr">Settings / Access control</div>
+        <div class="rw"><div><h2>Access control</h2><div class="sub">Roles set a baseline; a per-user module override wins where the two differ</div></div>
+        <div class="acts"><button class="btn">Export matrix</button><button class="btn pri">Invite user</button></div></div>
+      </div>
+      <div class="dtabs"><a href="#" class="on">Roles &amp; permissions</a><a href="#">Users <span style="color:var(--ink3)">23</span></a><a href="#">API client scopes <span style="color:var(--ink3)">9</span></a><a href="#">Overrides <span style="color:var(--ink3)">4</span></a></div>
+      <div class="dpb">
+        <div class="sh"><h3>Permission matrix</h3><span class="sub">6 roles · 8 modules</span><div class="r"><button class="btn qt">Reset to defaults</button></div></div>
+        <div class="tw">
+          <table class="matrix">
+            <thead><tr><th>Module</th><th>Super Admin</th><th>Admin</th><th>Customer Admin</th><th>Engineer</th><th>Operator</th><th>Viewer</th></tr></thead>
+            <tbody>
+              <tr><td class="p">Dashboards</td><td class="y">Full</td><td class="y">Full</td><td class="y">Full</td><td class="y">Full</td><td>Read</td><td>Read</td></tr>
+              <tr><td class="p">Assets</td><td class="y">Full</td><td class="y">Full</td><td class="y">Full</td><td class="y">Full</td><td>Read</td><td>Read</td></tr>
+              <tr><td class="p">Asset templates</td><td class="y">Full</td><td class="y">Full</td><td>Read</td><td class="y">Full</td><td class="n">—</td><td class="n">—</td></tr>
+              <tr><td class="p">Alarm rules</td><td class="y">Full</td><td class="y">Full</td><td class="y">Full</td><td class="y">Full</td><td>Acknowledge</td><td>Read</td></tr>
+              <tr><td class="p">Brokers</td><td class="y">Full</td><td class="y">Full</td><td>Read</td><td class="y">Full</td><td class="n">—</td><td class="n">—</td></tr>
+              <tr><td class="p">API endpoints</td><td class="y">Full</td><td class="y">Full</td><td class="y">Create</td><td class="y">Create</td><td class="n">—</td><td class="n">—</td></tr>
+              <tr><td class="p">Users</td><td class="y">Full</td><td class="y">Full</td><td>Read</td><td class="n">—</td><td class="n">—</td><td class="n">—</td></tr>
+              <tr><td class="p">Activity log</td><td class="y">Full</td><td class="y">Full</td><td>Read</td><td>Read</td><td class="n">—</td><td class="n">—</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="sh"><h3>API scope ceiling</h3><span class="sub">the widest scope a role may grant to a key</span></div>
+        <div class="tw">
+          <table>
+            <thead><tr><th>Role</th><th>May create keys</th><th>Scopes it may grant</th><th class="r">Keys owned</th></tr></thead>
+            <tbody>
+              <tr><td class="p">Super Admin</td><td class="ok">Yes</td><td class="mono">* (all scopes)</td><td class="r num">2</td></tr>
+              <tr><td class="p">Admin</td><td class="ok">Yes</td><td class="mono">* (all scopes)</td><td class="r num">3</td></tr>
+              <tr><td class="p">Customer Admin</td><td class="ok">Yes</td><td class="mono">ingest:write</td><td class="r num">3</td></tr>
+              <tr><td class="p">Engineer</td><td class="ok">Yes</td><td class="mono">ingest:write</td><td class="r num">1</td></tr>
+              <tr><td class="p">Operator</td><td class="of">No</td><td class="of">—</td><td class="r num">0</td></tr>
+              <tr><td class="p">Viewer</td><td class="of">No</td><td class="of">—</td><td class="r num">0</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <div class="sh"><h3>Security</h3></div>
+        <div class="rows">
+          <div class="row"><div><div class="t">Require an authenticated session on all API routes</div><div class="m">When off, unauthenticated requests reach read routes. Keep on in production.</div></div><div class="rt"><button class="tg on" role="switch" aria-checked="true" aria-label="Require session"></button></div></div>
+          <div class="row"><div><div class="t">Strip client-supplied actor headers</div><div class="m">Stops a caller claiming another identity in the activity log.</div></div><div class="rt"><button class="tg on" role="switch" aria-checked="true" aria-label="Strip actor headers"></button></div></div>
+          <div class="row"><div><div class="t">Session-bound CSRF token</div><div class="m">Double-submit cookie validated against the stored session row.</div></div><div class="rt"><button class="tg on" role="switch" aria-checked="true" aria-label="CSRF"></button></div></div>
+          <div class="row"><div><div class="t">Let non-admins create API keys</div><div class="m">Subject to the scope ceiling above — a user can never exceed their own role.</div></div><div class="rt"><button class="tg on" role="switch" aria-checked="true" aria-label="Non-admin keys"></button></div></div>
+          <div class="row" style="border-bottom:0"><div><div class="t">Show full key value after creation</div><div class="m">Off means the key is displayed once and only its hash is stored.</div></div><div class="rt"><button class="tg" role="switch" aria-checked="false" aria-label="Show key"></button></div></div>
+        </div>
+      </div>
+      <div class="dpf"><span>23 users · 6 roles · 4 overrides</span><span style="margin-left:auto">Last change 2 days ago by A. Kulkarni</span></div>
+      <nav class="mnav"><a href="#">Triage</a><a href="#">Dash</a><a href="#">Assets</a><a href="#">Explore</a><a href="#" class="on">Settings</a></nav>
+    </div>
+  </div>
+</section>
+
+</div>
+
+<script>
+function show(id, btn){
+  document.querySelectorAll('.screen').forEach(function(s){ s.classList.remove('on'); });
+  document.getElementById(id).classList.add('on');
+  document.querySelectorAll('.tabs button').forEach(function(b){ b.classList.remove('on'); });
+  btn.classList.add('on');
+  window.scrollTo({top:0, behavior:'smooth'});
+}
+function vp(mode){
+  var f = document.getElementById('frame');
+  if(mode === 'mob'){ f.classList.add('mobile'); } else { f.classList.remove('mobile'); }
+  document.getElementById('b-desk').classList.toggle('on', mode === 'desk');
+  document.getElementById('b-mob').classList.toggle('on', mode === 'mob');
+}
+document.querySelectorAll('.tg').forEach(function(t){
+  t.addEventListener('click', function(){
+    t.classList.toggle('on');
+    t.setAttribute('aria-checked', t.classList.contains('on') ? 'true' : 'false');
+  });
+});
+document.querySelectorAll('.chip').forEach(function(c){
+  c.addEventListener('click', function(){ c.classList.toggle('on'); });
+});
+document.querySelectorAll('.lpl').forEach(function(list){
+  list.querySelectorAll('.li').forEach(function(item){
+    item.addEventListener('click', function(){
+      list.querySelectorAll('.li').forEach(function(i){ i.classList.remove('on'); });
+      item.classList.add('on');
+    });
+  });
+});
+</script>
+</body>
+</html>

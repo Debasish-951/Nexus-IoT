@@ -210,7 +210,7 @@ export default function ActivityLog() {
         <div>
           <h1 className="text-xl font-semibold flex items-center gap-2">
             <Activity className="w-5 h-5 text-primary" />
-            Activity Log
+            Audit Log
           </h1>
           <p className="text-sm text-muted-foreground">
             Audit trail of platform actions — {total.toLocaleString()} event{total !== 1 ? "s" : ""}

@@ -237,7 +237,7 @@ rather than invented, to avoid a second permission vocabulary.
 
 | Control | Choice | Rationale |
 |---|---|---|
-| Password hash | **scrypt** (`node:crypto`), `N=2^16, r=8, p=2`, 16-byte salt, 64-byte key | OWASP-approved; zero new dependencies, so it survives the `minimumReleaseAge: 1440` policy and needs no native build on Replit. Stored as `scrypt$N$r$p$salt$hash` so argon2id can be swapped in later behind the same verify(). |
+| Password hash | **scrypt** (`node:crypto`), `N=2^16, r=8, p=2`, 16-byte salt, 64-byte key | OWASP-approved; zero new dependencies, so it survives the `minimumReleaseAge: 1440` policy and needs no per-OS native build. Stored as `scrypt$N$r$p$salt$hash` so argon2id can be swapped in later behind the same verify(). |
 | Hash comparison | `crypto.timingSafeEqual` | Constant-time |
 | Session token | 32 random bytes, base64url; **SHA-256 stored**, raw value only in the cookie | DB compromise does not yield usable sessions |
 | Session cookie | `is_session`; `HttpOnly`, `SameSite=Lax`, `Secure` in production, `Path=/` | XSS cannot read it; Lax blocks cross-site POST |

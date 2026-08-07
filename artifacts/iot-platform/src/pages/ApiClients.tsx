@@ -5,6 +5,7 @@ import {
   useUpdateApiClient,
   useDeleteApiClient,
   getListApiClientsQueryKey,
+  useCreateAsset,
 } from "@workspace/api-client-react";
 import { useQueryClient, useQuery } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -73,6 +74,30 @@ const SCOPES = [
 ];
 
 const ALL_SCOPES_ID = "*";
+const WRITE_SCOPE_ID = "ingest:write";
+/** Sentinel for the "create a new project" option in the Project select. */
+const NEW_PROJECT = "__new__";
+
+/**
+ * Scopes the signed-in user may grant, resolved from the session.
+ *
+ * Read scopes expose asset, telemetry and alarm data through a credential that
+ * outlives any session, so they belong to administrators; a normal user gets
+ * write-only. An administrator can widen this per user under
+ * Users → Access Control → API Clients.
+ *
+ * The server enforces the same ceiling on POST /api/api-clients — this only
+ * decides what the form offers. A session from before `apiScopes` existed falls
+ * back to write-only rather than to nothing, so nobody is locked out by a stale
+ * payload.
+ */
+function grantableApiScopes(sessionScopes: string[] | undefined): string[] {
+  if (!sessionScopes) return [WRITE_SCOPE_ID];
+  if (sessionScopes.includes(ALL_SCOPES_ID)) {
+    return [ALL_SCOPES_ID, ...SCOPES.map((s) => s.id)];
+  }
+  return sessionScopes;
+}
 
 // ── Expiry badge ───────────────────────────────────────────────────────────────
 function ExpiryBadge({ expiresAt }: { expiresAt: string | null }) {
@@ -327,8 +352,13 @@ function RotateDialog({
 interface CreateForm {
   name: string;
   description: string;
-  /** Root-level asset this client belongs to. "" = platform-wide. */
+  /**
+   * Root-level asset this client belongs to. "" = platform-wide,
+   * NEW_PROJECT = create one from `newProjectName` on submit.
+   */
   projectId: string;
+  /** Only read when projectId === NEW_PROJECT. */
+  newProjectName: string;
   scopes: string[];
   allScopes: boolean;
   expiresAt: string;
@@ -339,11 +369,28 @@ function CreateDialog({
   open, onClose, onCreated,
 }: { open: boolean; onClose: () => void; onCreated: (client: Record<string, unknown>) => void }) {
   const { toast } = useToast();
+  const { session } = useCurrentUser();
   const createClient = useCreateApiClient();
+  const createAsset = useCreateAsset();
+  const qc = useQueryClient();
+
+  const grantable = grantableApiScopes(session?.apiScopes);
+  const canGrantAll = grantable.includes(ALL_SCOPES_ID);
+  const grantableScopes = SCOPES.filter((s) => canGrantAll || grantable.includes(s.id));
+  /** Write-only user: nothing to choose, so don't render a chooser. */
+  const writeOnly = grantableScopes.length === 1 && grantableScopes[0]?.id === WRITE_SCOPE_ID;
+
   const form = useForm<CreateForm>({
-    defaultValues: { name: "", description: "", projectId: "", scopes: [], allScopes: false, expiresAt: "", allowedIps: "" },
+    // `ingest:write` is pre-selected because posting telemetry is what this
+    // dialog is for — and because an empty scopes array is treated as "all
+    // scopes" by apiKeyAuth, so shipping the form with none ticked would make
+    // the easiest path also the most privileged one.
+    defaultValues: { name: "", description: "", projectId: "", newProjectName: "", scopes: ["ingest:write"], allScopes: false, expiresAt: "", allowedIps: "" },
   });
   const watchAllScopes = form.watch("allScopes");
+  const watchProjectId = form.watch("projectId");
+  const watchNewProject = form.watch("newProjectName");
+  const creatingProject = watchProjectId === NEW_PROJECT;
 
   // Projects the caller may attach a client to. The API applies the same scope
   // check on write, so this select is convenience, not the control.
@@ -356,27 +403,101 @@ function CreateDialog({
     staleTime: 60_000,
   });
 
-  function onSubmit(data: CreateForm) {
+  /**
+   * What the endpoint is called when the user leaves Client Name blank.
+   *
+   * Naming a credential is bookkeeping, not a decision — the project is the
+   * thing anyone actually looks for. So the project supplies the name, and the
+   * field becomes an override rather than a required step. Shown live as the
+   * input's placeholder so the derived value is never a surprise.
+   */
+  const derivedName = (() => {
+    if (creatingProject) {
+      const typed = watchNewProject.trim();
+      return typed ? `${typed} Ingest` : "Ingest Endpoint";
+    }
+    const project = projects.find((p) => p.id === watchProjectId);
+    return project ? `${project.name} Ingest` : "Ingest Endpoint";
+  })();
+
+  async function onSubmit(data: CreateForm) {
     const finalScopes = data.allScopes ? [ALL_SCOPES_ID] : data.scopes;
+
+    // An empty scopes array is a super-key server-side (apiKeyAuth skips the
+    // scope check entirely when the list is empty), so it must never be the
+    // result of the user simply not choosing.
+    if (!data.allScopes && finalScopes.length === 0) {
+      toast({
+        title: "Select at least one scope",
+        description: "An endpoint saved with no scopes would be granted full access.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     const allowedIps = data.allowedIps
       .split(/[\n,]+/)
       .map((s) => s.trim())
       .filter(Boolean);
+
+    /**
+     * Resolve the project, creating it first if the user typed a new name.
+     *
+     * A "project" in this platform IS a root-level asset — that is what
+     * api_clients.project_id points at, and what allowedProjects holds. So
+     * creating one here is a real asset create, not a label: it will appear under
+     * Asset Management, which is correct and is what makes the endpoint bindable.
+     */
+    let projectId: string | null = data.projectId || null;
+    if (creatingProject) {
+      const projectName = data.newProjectName.trim();
+      if (!projectName) {
+        toast({ title: "Enter a project name", variant: "destructive" });
+        return;
+      }
+      if (projects.some((p) => p.name.toLowerCase() === projectName.toLowerCase())) {
+        toast({
+          title: "That project already exists",
+          description: "Pick it from the list instead of creating a duplicate.",
+          variant: "destructive",
+        });
+        return;
+      }
+      try {
+        // parentId null = root level, which is what makes it a project.
+        // Empty identifier: a project groups devices, it is not itself a device —
+        // the route stores `devId || null`, so this lands as a NULL device id.
+        const created = await createAsset.mutateAsync({
+          data: { name: projectName, identifier: "", parentId: null },
+        });
+        projectId = (created as unknown as { id?: string })?.id ?? null;
+        if (!projectId) throw new Error("The server did not return the new project's id.");
+        await qc.invalidateQueries({ queryKey: ["api-client-projects"] });
+      } catch (err) {
+        toast({
+          title: "Could not create the project",
+          description: err instanceof Error ? err.message : "The server rejected it.",
+          variant: "destructive",
+        });
+        return;
+      }
+    }
+
     createClient.mutate(
       {
         data: {
-          name: data.name,
+          name: data.name.trim() || derivedName,
           scopes: finalScopes,
           description: data.description || undefined,
           // "" means unassigned — send null so the server clears it explicitly.
-          projectId: data.projectId || null,
+          projectId,
           expiresAt: data.expiresAt || undefined,
           allowedIps,
         } as Parameters<typeof createClient.mutate>[0]["data"],
       },
       {
         onSuccess: (created) => {
-          toast({ title: "API client created" });
+          toast({ title: "API endpoint created" });
           onCreated(created as unknown as Record<string, unknown>);
           form.reset();
         },
@@ -389,20 +510,26 @@ function CreateDialog({
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto" data-testid="add-client-dialog">
         <DialogHeader>
-          <DialogTitle>Create API Client</DialogTitle>
+          <DialogTitle>Create API End Point</DialogTitle>
           <DialogDescription>
-            A bearer token will be generated automatically. It will be visible in the client list.
+            Pick a project and press Create. The key and its ingest URL are generated
+            for you and appear under Integration Hub, ready to copy.
           </DialogDescription>
         </DialogHeader>
         <Form {...form}>
           <form onSubmit={form.handleSubmit(onSubmit)} className="space-y-4">
-            {/* Name */}
-            <FormField control={form.control} name="name" rules={{ required: true }} render={({ field }) => (
+            {/* Name — optional. Defaults to "<Project> Ingest"; see derivedName. */}
+            <FormField control={form.control} name="name" render={({ field }) => (
               <FormItem>
-                <FormLabel>Client Name *</FormLabel>
+                <FormLabel>
+                  Client Name <span className="text-muted-foreground font-normal text-xs">(optional)</span>
+                </FormLabel>
                 <FormControl>
-                  <Input placeholder="e.g. Grafana Export, Python ETL, SCADA Gateway" {...field} data-testid="client-name-input" />
+                  <Input placeholder={derivedName} {...field} data-testid="client-name-input" />
                 </FormControl>
+                <FormDescription className="text-xs">
+                  Leave blank to name it <span className="text-foreground">{derivedName}</span>.
+                </FormDescription>
               </FormItem>
             )} />
 
@@ -421,15 +548,35 @@ function CreateDialog({
                     {projects.map((p) => (
                       <option key={p.id} value={p.id}>{p.name}</option>
                     ))}
+                    <option value={NEW_PROJECT}>＋ Create a new project…</option>
                   </select>
                 </FormControl>
                 <FormDescription>
-                  {projects.length === 0
-                    ? "No projects yet. A project is a top-level asset — create one under Asset Management."
-                    : "Everyone assigned to this project shares this client's ingest endpoint."}
+                  {creatingProject
+                    ? "The project is created as a top-level asset, then this endpoint is bound to it."
+                    : projects.length === 0
+                      ? "No projects yet — choose “Create a new project” to make one here."
+                      : "Everyone assigned to this project shares this endpoint."}
                 </FormDescription>
               </FormItem>
             )} />
+
+            {/* New project name — only when the sentinel option is selected. */}
+            {creatingProject && (
+              <FormField control={form.control} name="newProjectName" render={({ field }) => (
+                <FormItem>
+                  <FormLabel>New Project Name *</FormLabel>
+                  <FormControl>
+                    <Input placeholder="e.g. Plant 2 — Coimbatore" autoFocus {...field} />
+                  </FormControl>
+                  <FormDescription className="text-xs">
+                    Creates a top-level asset with this name. Add the devices under it in
+                    Asset Hub — telemetry is only stored once a device below this
+                    project carries a matching Device ID.
+                  </FormDescription>
+                </FormItem>
+              )} />
+            )}
 
             {/* Description */}
             <FormField control={form.control} name="description" render={({ field }) => (
@@ -441,11 +588,30 @@ function CreateDialog({
               </FormItem>
             )} />
 
-            {/* Scopes */}
+            {/* Scopes.
+                A write-only user has no decision to make here, so the section
+                collapses to a statement of what the key will do. Read scopes are
+                an administrator's grant — see grantableApiScopes(). */}
+            {writeOnly ? (
+              <div className="space-y-2">
+                <p className="text-sm font-medium">Access</p>
+                <div className="flex items-start gap-3 p-3 rounded-lg border border-primary/50 bg-primary/5">
+                  <Activity className="w-3.5 h-3.5 mt-0.5 text-green-600 dark:text-green-400 shrink-0" />
+                  <div>
+                    <p className="text-xs font-semibold">Write Telemetry</p>
+                    <p className="text-[10px] text-muted-foreground mt-0.5">
+                      This endpoint can post telemetry and nothing else. Read access is
+                      granted by an administrator under Users → Access Control.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            ) : (
             <div className="space-y-2">
               <p className="text-sm font-medium">Scopes</p>
-              <p className="text-xs text-muted-foreground">Control what data this client can read.</p>
+              <p className="text-xs text-muted-foreground">Control what this endpoint can do.</p>
 
+              {canGrantAll && (
               <Controller control={form.control} name="allScopes" render={({ field }) => (
                 <label className={cn(
                   "flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors",
@@ -461,11 +627,12 @@ function CreateDialog({
                   </div>
                 </label>
               )} />
+              )}
 
               {!watchAllScopes && (
                 <Controller control={form.control} name="scopes" render={({ field }) => (
                   <div className="space-y-1.5">
-                    {SCOPES.map((s) => {
+                    {grantableScopes.map((s) => {
                       const checked = (field.value as string[]).includes(s.id);
                       return (
                         <label key={s.id} className={cn(
@@ -490,6 +657,7 @@ function CreateDialog({
                 )} />
               )}
             </div>
+            )}
 
             {/* Expiry */}
             <FormField control={form.control} name="expiresAt" render={({ field }) => (
@@ -521,7 +689,7 @@ function CreateDialog({
             <DialogFooter>
               <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
               <Button type="submit" disabled={createClient.isPending}>
-                {createClient.isPending ? "Creating…" : "Create Client"}
+                {createClient.isPending ? "Creating…" : "Create"}
               </Button>
             </DialogFooter>
           </form>
@@ -574,7 +742,7 @@ export default function ApiClients() {
         </div>
         {can("manage_api_clients") && (
           <Button onClick={() => setCreateOpen(true)} size="sm" data-testid="add-client-btn">
-            <Plus className="w-4 h-4 mr-1.5" /> New Client
+            <Plus className="w-4 h-4 mr-1.5" /> Create API End Point
           </Button>
         )}
       </div>

@@ -72,7 +72,7 @@ Integrated Suite is an industrial IoT data acquisition and analytics platform th
 
 ## Assumptions
 
-- Platform runs on a single-node Replit environment; horizontal scaling is not yet implemented.
+- Platform runs on a single-node self-hosted environment; horizontal scaling is not yet implemented.
 - Authentication is UI-layer RBAC only — the API itself does not enforce role checks; enforcement relies on API client scopes for machine access and frontend guards for human access.
 - MQTT broker connectivity requires network reachability from the API server container to the broker host.
 - Payload deviceId must match an asset's `identifier` field exactly (case-sensitive) for telemetry to be attributed.

@@ -16,6 +16,17 @@ const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 
 const router: IRouter = Router();
 
+// Next sortOrder value for a batch of attribute inserts on one asset — callers
+// increment their own local counter from this base across the loop so every
+// row in the batch lands after whatever the asset already has, in list order.
+async function nextSortOrderFor(assetId: string): Promise<number> {
+  const [row] = await db
+    .select({ max: sql<number>`coalesce(max(${attributesTable.sortOrder}), 0)` })
+    .from(attributesTable)
+    .where(eq(attributesTable.assetId, assetId));
+  return (row?.max ?? 0) + 1;
+}
+
 router.get("/assets", async (req, res): Promise<void> => {
   const query = ListAssetsQueryParams.safeParse(req.query);
   if (!query.success) { res.status(400).json({ error: query.error.message }); return; }
@@ -228,6 +239,10 @@ router.post("/assets/:id/attributes/bulk", async (req, res): Promise<void> => {
   const validTypes      = ["static", "dynamic", "metric", "timestamp"];
   const validDataTypes  = ["text", "number", "double", "boolean", "timestamp"];
 
+  // New rows append after whatever this asset already has, in the order the
+  // import listed them — not alphabetically once displayed.
+  let nextSortOrder = await nextSortOrderFor(id);
+
   let created = 0;
   let skipped = 0;
   const skippedItems: string[] = [];
@@ -263,6 +278,7 @@ router.post("/assets/:id/attributes/bulk", async (req, res): Promise<void> => {
         tagName:  item.tagName ? item.tagName.trim() : null,
         uom:      item.uom     ? item.uom.trim()     : null,
         decimalPlaces: Number.isInteger(item.decimalPlaces) ? item.decimalPlaces : null,
+        sortOrder: nextSortOrder++,
       });
       // Update local sets to catch duplicates within the same batch
       existingNames.add(nameKey);
@@ -358,6 +374,10 @@ router.post("/assets/:id/apply-template", async (req, res): Promise<void> => {
   // "<deviceId>.<metric>", and a bare tag keeps a template portable between assets.
   const prefix = "";
 
+  // Attributes land on the asset in the template's own (sectioned) order —
+  // not alphabetically — so the asset view reads the same way the template does.
+  let nextSortOrder = await nextSortOrderFor(id);
+
   let created = 0;
   let skipped = 0;
   const skippedItems: string[] = [];
@@ -392,6 +412,7 @@ router.post("/assets/:id/apply-template", async (req, res): Promise<void> => {
         uom:        def.uom        ?? null,
         expression: def.expression ?? null,
         decimalPlaces: Number.isInteger(def.decimalPlaces) ? def.decimalPlaces : null,
+        sortOrder:  nextSortOrder++,
       });
       existingNames.add(nameKey);
       if (tagKey) existingTagNames.add(tagKey);

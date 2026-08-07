@@ -68,8 +68,8 @@ These are injected by `setActorHeaders()` in the generated fetch client and writ
 
 | Secret | Storage | Access |
 |--------|---------|--------|
-| `DATABASE_URL` | Replit Secrets | API Server process only |
-| `SESSION_SECRET` | Replit Secrets | API Server process only |
+| `DATABASE_URL` | `.env` file, root-owned, mode 600 | API Server process only |
+| `SESSION_SECRET` | `.env` file, root-owned, mode 600 | API Server process only |
 | `API client secrets` | PostgreSQL `api_clients.client_secret` | Plaintext — not hashed (gap) |
 | `MQTT credentials` | PostgreSQL `brokers.mqtt_password` | Plaintext in DB (gap) |
 
@@ -84,10 +84,10 @@ These are injected by `setActorHeaders()` in the generated fetch client and writ
 
 | Data | At Rest | In Transit |
 |------|---------|-----------|
-| PostgreSQL data | Replit managed encryption at rest | TLS enforced by Replit managed DB |
+| PostgreSQL data | Managed by the database host (verify it is enabled) | TLS enforced by the database connection |
 | MQTT credentials | Plaintext in DB | Not encrypted at rest |
-| HTTP traffic | — | HTTPS (TLS 1.2+) via Replit proxy (mTLS) |
-| WebSocket | — | WSS (TLS) via Replit proxy |
+| HTTP traffic | — | HTTPS (TLS 1.2+) terminated at the reverse proxy |
+| WebSocket | — | WSS (TLS) via the reverse proxy |
 | Webhook outbound | — | HTTPS target URL (depends on receiver) |
 
 ---
@@ -123,7 +123,7 @@ app.use(cors({ origin: process.env.ALLOWED_ORIGIN || '*' }));
 
 | Gap | Severity | Recommendation |
 |-----|----------|---------------|
-| No user login / session auth | Critical | Implement Replit Auth or Clerk for human authentication |
+| No user login / session auth | Critical | Implement SSO (OIDC or SAML) for human authentication |
 | API secrets stored plaintext | High | Hash secrets with bcrypt; store only the hash |
 | MQTT passwords stored plaintext | High | Encrypt at rest using a KMS or application-level encryption |
 | Open CORS | Medium | Restrict to known frontend origin in production |

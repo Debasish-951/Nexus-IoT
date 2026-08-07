@@ -6,7 +6,7 @@
 
 ## Executive Summary
 
-Integrated Suite is a three-tier industrial IoT platform composed of a React SPA frontend, an Express 5 REST/WebSocket API backend, and a PostgreSQL relational database. It is packaged as a pnpm monorepo with shared contract-first OpenAPI code generation binding the layers together. The system is designed for single-node deployment on Replit with a path-based reverse proxy providing unified access to both the API and the frontend.
+Integrated Suite is a three-tier industrial IoT platform composed of a React SPA frontend, an Express 5 REST/WebSocket API backend, and a PostgreSQL relational database. It is packaged as a pnpm monorepo with shared contract-first OpenAPI code generation binding the layers together. The system is designed for single-node deployment behind a path-based reverse proxy providing unified access to both the API and the frontend.
 
 ---
 
@@ -99,7 +99,7 @@ graph TB
 | API framework | Express 5 | Stable, minimal, first-class async error handling |
 | ORM | Drizzle ORM | TypeScript-native, no runtime overhead, schema-first migrations |
 | Database | PostgreSQL 15 | JSONB support, TIMESTAMPTZ, composite indexes for time-series queries |
-| Frontend | React 19 + Vite | Fast HMR, tree-shaking, Replit-optimised build |
+| Frontend | React 19 + Vite | Fast HMR, tree-shaking, optimised production build |
 | State management | TanStack Query v5 | Cache-first data fetching, automatic background refetch |
 | Real-time | ws (WebSocket) | Lightweight, co-hosted with HTTP server, no separate broker needed |
 | Logging | pino + pino-http | Structured JSON, minimal overhead, request correlation |

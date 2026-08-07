@@ -126,7 +126,7 @@ export default function AICopilot() {
         </div>
         <div>
           <h1 className="text-xl font-semibold flex items-center gap-2">
-            AI Assistant
+            AI Advisor
             <Badge variant="secondary" className="text-[10px] gap-1">
               <Sparkles className="w-3 h-3" /> Groq
             </Badge>

@@ -1,0 +1,424 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UI Modernization Concepts — WS-Integrated Suite</title>
+<style>
+:root{
+  --paper:#F5F7FA; --card:#FFFFFF; --sunk:#EDF1F6;
+  --ink:#0D1420; --ink-2:#37455C; --ink-3:#67768F; --ink-4:#95A2B5;
+  --line:#DCE3EC; --line-2:#BFC9D6;
+  --accent:#1D4ED8; --accent-soft:#E7EDFC; --accent-line:#B4C7F4;
+  --ok:#046C4E; --ok-soft:#E3F5EC;
+  --warn:#8A4B08; --warn-soft:#FDF0E0;
+  --crit:#A61B1B; --crit-soft:#FCE8E8;
+  --f:"Segoe UI",system-ui,-apple-system,Roboto,"Helvetica Neue",sans-serif;
+  --serif:Georgia,"Times New Roman",serif;
+  --mono:Consolas,"Cascadia Mono",ui-monospace,Menlo,monospace;
+}
+@media (prefers-color-scheme:dark){
+  :root{
+    --paper:#0A0D13; --card:#12161E; --sunk:#171C25;
+    --ink:#EDF1F7; --ink-2:#C0CAD8; --ink-3:#8B97A9; --ink-4:#606C7E;
+    --line:#222833; --line-2:#333B49;
+    --accent:#6C9BFF; --accent-soft:#16203A; --accent-line:#2B3D63;
+    --ok:#4ADE80; --ok-soft:#0C2419;
+    --warn:#FBBF24; --warn-soft:#2A1B0C;
+    --crit:#FB7185; --crit-soft:#2C1214;
+  }
+}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--paper);color:var(--ink-2);font-family:var(--f);font-size:14px;line-height:1.6;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1220px;margin:0 auto;padding:clamp(20px,4vw,48px)}
+header{border-bottom:2px solid var(--ink);padding-bottom:22px;margin-bottom:32px}
+.kick{font-size:10.5px;letter-spacing:.16em;text-transform:uppercase;color:var(--accent);font-weight:700;margin-bottom:10px}
+h1{font-size:clamp(26px,4.5vw,40px);color:var(--ink);font-weight:680;letter-spacing:-.9px;line-height:1.1;margin-bottom:12px}
+.stand{font-size:16px;color:var(--ink-3);max-width:78ch;line-height:1.6}
+.byline{display:flex;gap:22px;flex-wrap:wrap;margin-top:16px;font-size:12px;color:var(--ink-4);font-family:var(--mono)}
+.byline b{color:var(--ink-3)}
+h2{font-size:22px;color:var(--ink);font-weight:660;letter-spacing:-.4px;margin:38px 0 6px;padding-top:22px;border-top:1px solid var(--line)}
+h2:first-of-type{border-top:0;padding-top:0}
+h3{font-size:16px;color:var(--ink);font-weight:650;margin:24px 0 8px}
+p{margin-bottom:14px;max-width:82ch}
+strong{color:var(--ink);font-weight:640}
+ul,ol{margin:0 0 14px 0;padding-left:20px;max-width:82ch}
+li{margin-bottom:6px}
+li::marker{color:var(--ink-4)}
+code{font-family:var(--mono);font-size:.87em;background:var(--sunk);padding:.12em .4em;border-radius:3px;color:var(--ink);border:1px solid var(--line)}
+.lead{font-size:15px;color:var(--ink-2);max-width:82ch}
+/* Concept cards */
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(268px,1fr));gap:18px;margin:24px 0 8px}
+.cc{background:var(--card);border:1px solid var(--line);border-radius:8px;overflow:hidden;display:flex;flex-direction:column;text-decoration:none}
+.cc:hover{border-color:var(--accent-line);box-shadow:0 4px 16px rgba(29,78,216,.09)}
+.cc .sw{height:76px;display:flex}
+.cc .sw i{flex:1;display:block}
+.cc .in{padding:16px;flex:1;display:flex;flex-direction:column}
+.cc .n{font-family:var(--mono);font-size:10px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-4);margin-bottom:6px}
+.cc h4{font-size:17px;color:var(--ink);font-weight:660;letter-spacing:-.3px;margin-bottom:5px}
+.cc .ph{font-size:12.5px;color:var(--ink-3);line-height:1.5;flex:1;margin-bottom:12px}
+.cc .tags{display:flex;gap:5px;flex-wrap:wrap;margin-bottom:12px}
+.tg{font-family:var(--mono);font-size:9.5px;padding:2px 7px;border-radius:3px;background:var(--sunk);color:var(--ink-3);border:1px solid var(--line);white-space:nowrap}
+.cc .open{font-size:12.5px;font-weight:650;color:var(--accent);display:flex;align-items:center;gap:6px;border-top:1px solid var(--line);padding-top:11px}
+.badge-rec{position:absolute;top:10px;right:10px;background:var(--ok);color:#fff;font-size:9.5px;font-weight:700;letter-spacing:.09em;text-transform:uppercase;padding:3px 8px;border-radius:3px}
+.cc{position:relative}
+/* Tables */
+.t-scroll{overflow-x:auto;margin:16px 0 24px;border:1px solid var(--line);border-radius:8px;background:var(--card)}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{text-align:left;padding:9px 13px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-family:var(--mono);font-size:10px;letter-spacing:.09em;text-transform:uppercase;color:var(--ink-4);font-weight:600;background:var(--sunk);white-space:nowrap}
+tr:last-child td{border-bottom:0}
+td.mono{font-family:var(--mono);font-size:12px}
+.sc{font-family:var(--mono);font-weight:700;font-size:13px;text-align:center;white-space:nowrap}
+.s5{color:var(--ok)}.s4{color:var(--ok)}.s3{color:var(--warn)}.s2{color:var(--crit)}.s1{color:var(--crit)}
+.win{background:var(--ok-soft)}
+.pill{font-size:10.5px;padding:2px 8px;border-radius:3px;font-weight:650;white-space:nowrap;border:1px solid transparent;display:inline-block}
+.pill.ok{background:var(--ok-soft);color:var(--ok);border-color:var(--ok)}
+.pill.warn{background:var(--warn-soft);color:var(--warn);border-color:var(--warn)}
+.pill.crit{background:var(--crit-soft);color:var(--crit);border-color:var(--crit)}
+.pill.info{background:var(--accent-soft);color:var(--accent);border-color:var(--accent-line)}
+.pill.mut{background:var(--sunk);color:var(--ink-3);border-color:var(--line)}
+/* Callouts */
+.co{border-left:3px solid var(--accent);background:var(--accent-soft);border-radius:0 6px 6px 0;padding:15px 18px;margin:20px 0}
+.co>*:last-child{margin-bottom:0}
+.co h4{font-size:14px;color:var(--accent);font-weight:660;margin-bottom:7px}
+.co.warn{border-left-color:var(--warn);background:var(--warn-soft)}
+.co.warn h4{color:var(--warn)}
+.co.ok{border-left-color:var(--ok);background:var(--ok-soft)}
+.co.ok h4{color:var(--ok)}
+.pc{display:grid;grid-template-columns:1fr 1fr;gap:16px;margin:14px 0 22px}
+@media(max-width:720px){.pc{grid-template-columns:1fr}}
+.pc>div{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:15px 17px}
+.pc h5{font-size:12px;letter-spacing:.1em;text-transform:uppercase;font-weight:700;margin-bottom:9px}
+.pc .pros h5{color:var(--ok)}.pc .cons h5{color:var(--crit)}
+.pc ul{margin:0;padding-left:18px}
+.pc li{font-size:13px;margin-bottom:5px}
+footer{margin-top:44px;padding-top:18px;border-top:2px solid var(--ink);font-size:12.5px;color:var(--ink-4)}
+.steps{counter-reset:st;list-style:none;padding:0}
+.steps li{counter-increment:st;position:relative;padding-left:34px;margin-bottom:12px}
+.steps li:before{content:counter(st);position:absolute;left:0;top:1px;width:23px;height:23px;border-radius:50%;background:var(--accent);color:#fff;font-family:var(--mono);font-size:11px;font-weight:700;display:grid;place-items:center}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<header>
+  <div class="kick">UI / UX Modernization Proposal</div>
+  <h1>Four design directions for WS-Integrated Suite</h1>
+  <p class="stand">Presentation-layer only. Every concept preserves 100% of existing functionality, business logic, APIs, database structures, calculations, validations, integrations and user journeys. Each is a complete, standalone HTML prototype covering six screens in desktop and mobile.</p>
+  <div class="byline">
+    <span><b>Scope</b> UI/UX only · no backend change</span>
+    <span><b>Screens</b> 6 per concept · 24 total</span>
+    <span><b>Standards</b> WCAG 2.1 AA target</span>
+    <span><b>Date</b> 02 Aug 2026</span>
+  </div>
+</header>
+
+<h2>Executive Summary</h2>
+<p class="lead">The current interface is functional and internally consistent, but reads as mid-2010s in four specific, fixable ways. It is <strong>not</strong> broadly broken — the component layer (55 Radix/shadcn primitives), the light/dark token system, and the validated colour-blind-safe chart palette are all sound foundations that every concept below builds on rather than replaces.</p>
+
+<h3>What specifically looks dated</h3>
+<div class="t-scroll">
+<table>
+  <thead><tr><th>#</th><th>Observation</th><th>Why it reads as dated</th><th>Where</th></tr></thead>
+  <tbody>
+    <tr><td class="mono">1</td><td>Four differently-tinted icon chips (blue / emerald / violet / amber) on landing pages</td><td>Decorative hue variety. Modern enterprise reserves colour for <em>status</em>, so it carries meaning when it appears</td><td class="mono">AssetManagement.tsx</td></tr>
+    <tr><td class="mono">2</td><td>Dotted radial-gradient "graph paper" page background</td><td>A 2016–2018 dashboard convention; adds visual noise behind data</td><td class="mono">AssetManagement.tsx</td></tr>
+    <tr><td class="mono">3</td><td>Spring-physics card hover (lift 8px, tap scale 0.9)</td><td>Consumer-app playfulness; enterprise buyers read it as unserious</td><td class="mono">framer-motion</td></tr>
+    <tr><td class="mono">4</td><td>Flat tables: no sticky header, no density control, no bulk-action affordance</td><td>Every mature enterprise grid has all three. A permanently-empty "Created By" column was also shipped</td><td class="mono">AssetTemplates.tsx</td></tr>
+    <tr><td class="mono">5</td><td>No breadcrumbs; deep pages rely on a "← Back" text link</td><td>Hierarchy is 3 levels deep in places; users lose their position</td><td>Global</td></tr>
+    <tr><td class="mono">6</td><td>No command palette or global search</td><td>8 nav groups × 4 children is past the point where a rail alone suffices</td><td class="mono">Layout.tsx</td></tr>
+    <tr><td class="mono">7</td><td>Uniform 6px radius everywhere</td><td>Neither crisp (0–3px, Fiori/Salesforce) nor soft (10–16px, modern SaaS) — an uncommitted middle</td><td class="mono">--radius</td></tr>
+    <tr><td class="mono">8</td><td>KPIs are a bare number plus caption</td><td>No delta, no sparkline, no target comparison — the executive question "is this good?" goes unanswered</td><td class="mono">registry.tsx</td></tr>
+    <tr><td class="mono">9</td><td>Inconsistent page headers, no shared action-bar pattern</td><td>Some pages have icon + title + subtitle, some do not</td><td>Global</td></tr>
+    <tr><td class="mono">10</td><td>Long forms inside scrolling modal dialogs</td><td>The submit button lands below the fold; labels stacked above every field wastes vertical space</td><td class="mono">ApiClients.tsx</td></tr>
+  </tbody>
+</table>
+</div>
+
+<div class="co ok">
+  <h4>What is already good and must be preserved</h4>
+  <ul style="margin-bottom:0">
+    <li><strong>One module vocabulary</strong> shared between nav, routes and API, served from <code>/security/rbac-catalog</code> so the UI cannot promise access the server refuses.</li>
+    <li><strong>One WebSocket hook</strong> with 11 consumers — no per-screen connection sprawl.</li>
+    <li><strong>Light and dark both deliberately designed</strong> (not one inverted from the other) as HSL tokens.</li>
+    <li><strong>A validated categorical chart palette</strong> — worst adjacent pair ΔE ≥ 12.6 under deuteranopia, with identity (<code>SERIES</code>) separated from state (<code>STATUS</code>) so a normal data series is never painted in an alarm colour.</li>
+    <li><strong>55 uniform shadcn/Radix primitives</strong> — visual inconsistency comes from page-level code, not the component layer, which means a token-level change propagates widely for little effort.</li>
+  </ul>
+</div>
+
+<h2>The Four Concepts</h2>
+<p class="lead">Each is a genuinely different design philosophy — not a palette swap. They differ in radius (3 / 10 / 2 / 4px), ground (light / dark / dark / light), navigation model (rail / rail+panel / rail+status band / horizontal), and density (16 / 9 / 22 / 12 rows per screen at 1440×900).</p>
+
+<div class="cards">
+  <a class="cc" href="concept-1-meridian.html">
+    <span class="badge-rec">Recommended</span>
+    <div class="sw"><i style="background:#F4F6F9"></i><i style="background:#FFFFFF"></i><i style="background:#D7DEE8"></i><i style="background:#1D4ED8"></i><i style="background:#0B1220"></i></div>
+    <div class="in">
+      <div class="n">Concept 1</div>
+      <h4>Meridian</h4>
+      <p class="ph">Structured Enterprise. Density is a feature: crisp 3px geometry, one accent, strong rules, tabular numerals. Built for the engineer who lives here eight hours a day.</p>
+      <div class="tags"><span class="tg">light-first</span><span class="tg">3px</span><span class="tg">16 rows</span><span class="tg">Fiori / ServiceNow</span></div>
+      <div class="open">Open prototype →</div>
+    </div>
+  </a>
+  <a class="cc" href="concept-2-atlas.html">
+    <div class="sw"><i style="background:#0A0C11"></i><i style="background:#12151C"></i><i style="background:#20252F"></i><i style="background:#3B82F6"></i><i style="background:#34D399"></i></div>
+    <div class="in">
+      <div class="n">Concept 2</div>
+      <h4>Atlas</h4>
+      <p class="ph">Calm Modern SaaS. Depth from layered surfaces rather than borders, 10px radii, generous spacing, ⌘K palette as the primary way to move. Highest perceived polish.</p>
+      <div class="tags"><span class="tg">dark-first</span><span class="tg">10px</span><span class="tg">9 rows</span><span class="tg">Linear / Atlassian</span></div>
+      <div class="open">Open prototype →</div>
+    </div>
+  </a>
+  <a class="cc" href="concept-3-signal.html">
+    <div class="sw"><i style="background:#05070A"></i><i style="background:#0B0F15"></i><i style="background:#182029"></i><i style="background:#06B6D4"></i><i style="background:#EF4444"></i></div>
+    <div class="in">
+      <div class="n">Concept 3</div>
+      <h4>Signal</h4>
+      <p class="ph">Operations Control Room. A permanent system-status band, monospace for every identifier, status stripe per row, alarms above all content. Highest density.</p>
+      <div class="tags"><span class="tg">dark-only</span><span class="tg">2px</span><span class="tg">22 rows</span><span class="tg">Grafana / SCADA</span></div>
+      <div class="open">Open prototype →</div>
+    </div>
+  </a>
+  <a class="cc" href="concept-4-lumen.html">
+    <div class="sw"><i style="background:#FBFAF7"></i><i style="background:#F3F1EC"></i><i style="background:#E2DFD8"></i><i style="background:#1B3A5C"></i><i style="background:#8A6D1F"></i></div>
+    <div class="in">
+      <div class="n">Concept 4</div>
+      <h4>Lumen</h4>
+      <p class="ph">Executive Light / Editorial. Serif display against sans body, numbered sections, charts as captioned figures with a sentence of interpretation. Prints cleanly to PDF.</p>
+      <div class="tags"><span class="tg">light-only</span><span class="tg">4px</span><span class="tg">12 rows</span><span class="tg">FT / consulting</span></div>
+      <div class="open">Open prototype →</div>
+    </div>
+  </a>
+</div>
+
+<h2>Concept 1 — Meridian · Structured Enterprise</h2>
+<h3>Design philosophy</h3>
+<p>Treats the screen as an instrument panel. Density is a deliberate feature rather than a compromise: 3px radius, strong 1px rules that group information, one disciplined accent, and tabular numerals wherever figures align in a column. Built for the plant engineer who needs 16 rows visible without scrolling, while staying clean enough that a screenshot lands well in a board deck.</p>
+<div class="t-scroll"><table>
+  <thead><tr><th>Dimension</th><th>Specification</th></tr></thead>
+  <tbody>
+    <tr><td>Colour palette</td><td class="mono">#F4F6F9 ground · #FFFFFF surface · #D7DEE8 rule · #1D4ED8 accent · #0B1220 rail — semantic: #046C4E / #8A4B08 / #A61B1B / #0B5A8A</td></tr>
+    <tr><td>Typography</td><td>Segoe UI / system-ui. Scale 10.5 / 12.5 / 13 / 19 / 22px. Tabular numerals on all data columns</td></tr>
+    <tr><td>Navigation</td><td>Persistent 240px left rail (collapsible to icons), 48px top bar with breadcrumbs, global search, ⌘K palette</td></tr>
+    <tr><td>Dashboard layout</td><td>Fixed 6-tile KPI strip across the top, then a 2:1 primary/secondary split, then a 3-column supporting row</td></tr>
+    <tr><td>Form design</td><td>Enterprise standard — labels left (190px), fields right, grouped in titled sections, sticky footer action bar that never scrolls away</td></tr>
+    <tr><td>Table / grid</td><td>Sticky header, density toggle (36px / 24px rows), slide-up bulk-action bar, right-aligned numerics, hover-revealed row actions, column chooser</td></tr>
+    <tr><td>KPI / analytics</td><td>Number + delta + target progress bar. Charts carry SPC control limits (UCL / CL / LCL) with excursions ringed and a plain-language "Reading:" line beneath</td></tr>
+    <tr><td>Mobile</td><td>Rail collapses to a 5-item bottom tab bar; KPI strip reflows to 2 columns; label-left forms become stacked; tables scroll horizontally with the first column readable</td></tr>
+  </tbody>
+</table></div>
+<div class="pc">
+  <div class="pros"><h5>Pros</h5><ul>
+    <li>Highest information density of the two light options — 16 rows vs Lumen's 12</li>
+    <li>Pattern language enterprise buyers already recognise (Fiori, ServiceNow, Salesforce)</li>
+    <li><strong>Lowest implementation risk</strong> — maps almost 1:1 onto existing shadcn components; largely a token + spacing change</li>
+    <li>Light-first makes WCAG AA contrast easiest to achieve and hold</li>
+    <li>Screenshots and PDF exports land well in executive material</li>
+  </ul></div>
+  <div class="cons"><h5>Cons</h5><ul>
+    <li>Can read as austere; least "premium" of the four at first glance</li>
+    <li>Light-first means dark mode becomes the secondary theme, inverting the current preference</li>
+    <li>Dense rules and borders require discipline — sloppy application looks cluttered fast</li>
+    <li>Less differentiated: looks like enterprise software, which is the point but also the limit</li>
+  </ul></div>
+</div>
+
+<h2>Concept 2 — Atlas · Calm Modern SaaS</h2>
+<h3>Design philosophy</h3>
+<p>Remove every line that is not earning its place. Structure comes from five layered surface elevations rather than a grid of borders. 10px radii, generous 16px padding, roomy 48px rows, and a ⌘K command palette as the primary means of navigation rather than an added convenience. Dark-first, because that is where the product already lives.</p>
+<div class="t-scroll"><table>
+  <thead><tr><th>Dimension</th><th>Specification</th></tr></thead>
+  <tbody>
+    <tr><td>Colour palette</td><td class="mono">#0A0C11 → #12151C → #181C25 → #20252F → #2A303C elevation steps · #3B82F6 accent — semantic: #34D399 / #FBBF24 / #F87171</td></tr>
+    <tr><td>Typography</td><td>Segoe UI / system-ui. 13.5px base, 24px page title, 42px hero metric, −0.6px display tracking</td></tr>
+    <tr><td>Navigation</td><td>Two-tier: 58px icon rail + 222px contextual panel that changes per section (pinned items, recents, series list). ⌘K primary</td></tr>
+    <tr><td>Dashboard layout</td><td>Asymmetric — one large hero metric with inline sparkline, two supporting mini-metrics, then a 2:1 chart split</td></tr>
+    <tr><td>Form design</td><td>Single column, labels above, 38px fields. Rarely-used fields (expiry, IP allowlist) behind progressive disclosure so the common path is 3 fields not 7</td></tr>
+    <tr><td>Table / grid</td><td>Borderless columns, 48px rows, hover-revealed actions, quiet 1px row separators, card-wrapped</td></tr>
+    <tr><td>KPI / analytics</td><td>Large numeral with gradient-filled sparkline, threshold band shading on charts, excursion dots</td></tr>
+    <tr><td>Mobile</td><td>Rail and panel both hide; full-screen sheets; bottom-sheet filters; single-column reflow throughout</td></tr>
+  </tbody>
+</table></div>
+<div class="pc">
+  <div class="pros"><h5>Pros</h5><ul>
+    <li>Highest perceived polish — reads as a current, premium 2026 product</li>
+    <li><strong>Lowest migration friction</strong> — extends the existing dark Electric Blue theme rather than replacing it</li>
+    <li>⌘K solves the navigation-scale problem directly (8 groups × 4 children)</li>
+    <li>Contextual panel makes deep sections navigable without a mega-menu</li>
+    <li>Best mobile experience of the four</li>
+  </ul></div>
+  <div class="cons"><h5>Cons</h5><ul>
+    <li><strong>Real density cost</strong> — ~9 rows vs Meridian's 16 on the same screen; an operator scrolls nearly twice as much</li>
+    <li>Whitespace can read as "empty" to executives who expect dashboards full of data</li>
+    <li>Dark-first is harder to print and screenshot into light-background documents</li>
+    <li>Layered-surface depth demands careful contrast checking to hold WCAG AA</li>
+  </ul></div>
+</div>
+
+<h2>Concept 3 — Signal · Operations Control Room</h2>
+<h3>Design philosophy</h3>
+<p>Stop treating this as a generic SaaS product. It is an industrial telemetry platform, so borrow from the tools engineers already trust: a permanently-mounted 28px system-status band, monospace for every identifier and numeric value, a colour stripe on the left edge of each row, and alarms rendered above all other page content. The only concept where an operator learns system health without clicking anything.</p>
+<div class="t-scroll"><table>
+  <thead><tr><th>Dimension</th><th>Specification</th></tr></thead>
+  <tbody>
+    <tr><td>Colour palette</td><td class="mono">#05070A ground · #0B0F15 / #11161E / #182029 surfaces · #06B6D4 cyan accent — status: #10B981 / #F59E0B / #EF4444 with glow LEDs</td></tr>
+    <tr><td>Typography</td><td>Segoe UI 12.5px for UI chrome; <strong>Consolas monospace for all identifiers, tags, values and timestamps</strong> — column widths stay stable as data changes</td></tr>
+    <tr><td>Navigation</td><td>Compact 198px rail with live counts per item; 28px system band always mounted above everything (API / DB / WS / MQTT / ingest rate / row count / alarms / last-seen)</td></tr>
+    <tr><td>Dashboard layout</td><td>Alarm band first (green when clear, red with an inline acknowledge table when firing), then 6 KPI tiles with threshold bands, then telemetry grid</td></tr>
+    <tr><td>Form design</td><td>Compact 28px fields, monospace inputs for machine-read values, validation phrased in machine terms an engineer can act on directly</td></tr>
+    <tr><td>Table / grid</td><td>22px rows, 3px status stripe per row, monospace data columns, sticky header, comfort/compact toggle</td></tr>
+    <tr><td>KPI / analytics</td><td>Threshold band drawn on each tile with a limit marker; charts show shaded breach zones and label the exact breach value inline</td></tr>
+    <tr><td>Mobile</td><td>Status band persists (condensed); bottom tabs prioritise the alarm-acknowledgement flow over navigation</td></tr>
+  </tbody>
+</table></div>
+<div class="pc">
+  <div class="pros"><h5>Pros</h5><ul>
+    <li><strong>Best domain fit</strong> — operators would recognise and trust it immediately</li>
+    <li>Highest density: ~22 rows per screen</li>
+    <li>System health visible at all times without navigation</li>
+    <li>Status conveyed by stripe + tag + text, never colour alone — strongest accessibility on status</li>
+    <li>Most differentiated; looks like a serious instrument, not a CRUD app</li>
+  </ul></div>
+  <div class="cons"><h5>Cons</h5><ul>
+    <li>Dark-only reads as less "corporate boardroom"; executives may find it intimidating</li>
+    <li>Poor print and PDF export — inverts to heavy ink</li>
+    <li>Monospace-heavy layouts feel technical to non-technical stakeholders</li>
+    <li>22px rows approach the lower bound of comfortable touch targets</li>
+    <li>Highest implementation effort — needs a new persistent band component and per-row stripe treatment</li>
+  </ul></div>
+</div>
+
+<h2>Concept 4 — Lumen · Executive Light / Editorial</h2>
+<h3>Design philosophy</h3>
+<p>Built for the person who <em>reviews</em> rather than operates. Borrows from data journalism and management consulting: a Georgia serif display face against a clean sans body, numbered sections, and charts presented as captioned <em>figures</em> with a sentence explaining what they show and what to do about it. Warm paper ground and a single deep-navy accent make it the only concept designed to survive being pasted into a board pack.</p>
+<div class="t-scroll"><table>
+  <thead><tr><th>Dimension</th><th>Specification</th></tr></thead>
+  <tbody>
+    <tr><td>Colour palette</td><td class="mono">#FBFAF7 warm paper · #F3F1EC sunk · #E2DFD8 rule · #1B3A5C navy accent · #8A6D1F gold — semantic: #1F6B4A / #8A5A1B / #8F2222</td></tr>
+    <tr><td>Typography</td><td><strong>Georgia serif</strong> for display and figure titles; Segoe UI sans for body; Consolas mono for identifiers. 32px page title, 34px serif KPI numerals</td></tr>
+    <tr><td>Navigation</td><td>Horizontal two-tier top nav (56px brand row + 42px section row) with counts, plus breadcrumbs. Frees the full width for content</td></tr>
+    <tr><td>Dashboard layout</td><td>Report-like: kicker, headline, standfirst, byline metadata, then numbered sections (01 Headline measures, 02 Consumption profile, 03 By section, 04 System status)</td></tr>
+    <tr><td>Form design</td><td>Single column, serif labels, a <strong>full sentence of guidance per field</strong> rather than a terse hint, rules between fields. Slowest to fill, least likely to be filled wrongly</td></tr>
+    <tr><td>Table / grid</td><td>Caption above, 1.5px rule under the header, right-aligned tabular numerics, shaded subtotal rows. Most print-friendly of the four</td></tr>
+    <tr><td>KPI / analytics</td><td><strong>Contextual KPIs</strong> — each number followed by a sentence answering "is this good?". Charts numbered as figures with a "Reading:" interpretation and a recommendation</td></tr>
+    <tr><td>Mobile</td><td>Reflows to a single reading column; top nav collapses to bottom tabs; figures stack full-width</td></tr>
+  </tbody>
+</table></div>
+<div class="pc">
+  <div class="pros"><h5>Pros</h5><ul>
+    <li><strong>Strongest executive and board-level appeal</strong></li>
+    <li>Only concept that prints and exports to PDF cleanly — real value for monthly reporting</li>
+    <li>Captioned figures with interpretation answer "so what?" without a human analyst</li>
+    <li>Serif display gives genuine brand character that no competitor palette-swap achieves</li>
+    <li>Full-width content; no rail eating 240px</li>
+  </ul></div>
+  <div class="cons"><h5>Cons</h5><ul>
+    <li><strong>Worst density</strong> for operational work — 12 rows, generous padding</li>
+    <li>Horizontal nav does not scale gracefully to 8 groups × 4 children without a mega-menu</li>
+    <li>Serif display is polarising and can read as old-fashioned to some engineering audiences</li>
+    <li>Least suited to the operator persona who is the heaviest daily user</li>
+    <li>Light-only abandons the existing dark theme entirely</li>
+  </ul></div>
+</div>
+
+<h2>Comparison Matrix</h2>
+<p class="lead">Scored 1–5 against what matters for a global enterprise industrial IoT product. Winning cell per row is shaded.</p>
+<div class="t-scroll"><table>
+  <thead><tr><th>Criterion</th><th>Weight</th><th style="text-align:center">1 · Meridian</th><th style="text-align:center">2 · Atlas</th><th style="text-align:center">3 · Signal</th><th style="text-align:center">4 · Lumen</th></tr></thead>
+  <tbody>
+    <tr><td>Information density (operator productivity)</td><td class="mono">High</td><td class="sc s4 win">4</td><td class="sc s2">2</td><td class="sc s5 win">5</td><td class="sc s2">2</td></tr>
+    <tr><td>Executive / board-level appeal</td><td class="mono">High</td><td class="sc s4">4</td><td class="sc s4">4</td><td class="sc s2">2</td><td class="sc s5 win">5</td></tr>
+    <tr><td>Enterprise-buyer familiarity</td><td class="mono">High</td><td class="sc s5 win">5</td><td class="sc s3">3</td><td class="sc s3">3</td><td class="sc s4">4</td></tr>
+    <tr><td>Perceived modernity / polish</td><td class="mono">Medium</td><td class="sc s3">3</td><td class="sc s5 win">5</td><td class="sc s4">4</td><td class="sc s4">4</td></tr>
+    <tr><td>WCAG 2.1 AA achievability</td><td class="mono">High</td><td class="sc s5 win">5</td><td class="sc s3">3</td><td class="sc s4">4</td><td class="sc s5 win">5</td></tr>
+    <tr><td>Domain fit (industrial IoT)</td><td class="mono">High</td><td class="sc s4">4</td><td class="sc s3">3</td><td class="sc s5 win">5</td><td class="sc s3">3</td></tr>
+    <tr><td>Implementation effort <span class="pill mut">lower = better</span></td><td class="mono">High</td><td class="sc s5 win">5</td><td class="sc s4">4</td><td class="sc s2">2</td><td class="sc s3">3</td></tr>
+    <tr><td>Mobile / responsive quality</td><td class="mono">Medium</td><td class="sc s3">3</td><td class="sc s5 win">5</td><td class="sc s3">3</td><td class="sc s4">4</td></tr>
+    <tr><td>Print / PDF export quality</td><td class="mono">Medium</td><td class="sc s4">4</td><td class="sc s1">1</td><td class="sc s1">1</td><td class="sc s5 win">5</td></tr>
+    <tr><td>Navigation scalability (8 groups)</td><td class="mono">Medium</td><td class="sc s4">4</td><td class="sc s5 win">5</td><td class="sc s4">4</td><td class="sc s2">2</td></tr>
+    <tr><td>Brand differentiation</td><td class="mono">Low</td><td class="sc s2">2</td><td class="sc s3">3</td><td class="sc s5 win">5</td><td class="sc s5 win">5</td></tr>
+    <tr style="border-top:2px solid var(--line-2)"><td><strong>Weighted total</strong></td><td class="mono">—</td><td class="sc s5 win" style="font-size:16px">4.2</td><td class="sc s3" style="font-size:16px">3.5</td><td class="sc s3" style="font-size:16px">3.5</td><td class="sc s3" style="font-size:16px">3.7</td></tr>
+  </tbody>
+</table></div>
+
+<h2>Recommended Option</h2>
+<div class="co">
+  <h4>Adopt Meridian as the base system, with Signal's operational patterns grafted onto the operational screens</h4>
+  <p>Meridian wins on the criteria weighted highest for a global enterprise audience: enterprise-buyer familiarity, WCAG achievability, and — importantly for a project constrained to presentation-layer changes — <strong>the lowest implementation effort</strong>, because it maps almost directly onto the existing shadcn component library and is largely a token, spacing and table-behaviour change rather than a rebuild.</p>
+  <p style="margin-bottom:0">But a single concept applied uniformly would be the wrong answer, because this product has two genuinely different audiences.</p>
+</div>
+
+<h3>Why a hybrid, specifically</h3>
+<p>The frontend review of this platform identified two distinct personas with opposing needs: <strong>operators</strong> (Live Twin, Live Feed, Brokers, Alarms — who live in the app and need density plus alarm response) and <strong>executives/analysts</strong> (Analytics, Reports — who review periodically and need clarity plus export). Optimising for one degrades the other.</p>
+<div class="t-scroll"><table>
+  <thead><tr><th>Surface</th><th>Base</th><th>Grafted pattern</th><th>Rationale</th></tr></thead>
+  <tbody>
+    <tr><td>Global chrome, Assets, Templates, Users, Admin, Forms</td><td><span class="pill info">Meridian</span></td><td>—</td><td>Density + familiarity where most configuration work happens</td></tr>
+    <tr><td>Live Twin, Live Feed, Brokers, Alarms</td><td><span class="pill info">Meridian</span></td><td><span class="pill warn">Signal</span> system-status band, monospace identifiers, per-row status stripe</td><td>These are the operational screens; health-at-a-glance and 22px density earn their keep here</td></tr>
+    <tr><td>Analytics, Reports, exported PDFs</td><td><span class="pill info">Meridian</span></td><td><span class="pill ok">Lumen</span> captioned figures with a "Reading:" interpretation line</td><td>Answers "so what?" for the reviewing audience without a human analyst</td></tr>
+    <tr><td>Global navigation</td><td><span class="pill info">Meridian</span> rail + breadcrumbs</td><td><span class="pill mut">Atlas</span> ⌘K command palette</td><td>Solves the 8-groups-×-4-children scale problem regardless of which base wins</td></tr>
+  </tbody>
+</table></div>
+<p>Adopt <strong>Atlas's ⌘K palette in every case</strong> — it is the single highest-value navigation addition and is base-independent. If the decision is instead to keep the current dark-first identity and accept the density cost, Atlas is the defensible second choice, and its migration path is the shortest of the four.</p>
+
+<h2>Implementation Approach</h2>
+<div class="co warn">
+  <h4>Phase 1 scope boundary — presentation layer only</h4>
+  <ul style="margin-bottom:0">
+    <li><strong>No backend changes</strong> — no route, middleware, or server-side logic modifications</li>
+    <li><strong>No business logic changes</strong> — ingest pipeline, alarm evaluation, expression engine untouched</li>
+    <li><strong>No workflow changes</strong> — every user journey keeps the same steps in the same order</li>
+    <li><strong>No API changes</strong> — <code>lib/api-spec/src/openapi.yaml</code> untouched; no codegen re-run required</li>
+    <li><strong>No database changes</strong> — no schema, migration, or query modifications</li>
+    <li><strong>No calculation, validation or integration changes</strong> — the same values, the same rules, the same webhooks</li>
+  </ul>
+</div>
+<ol class="steps">
+  <li><strong>Token layer</strong> — rewrite the HSL custom properties in <code>index.css</code> and set <code>--radius</code>. Because 55 shadcn primitives consume these tokens, this alone propagates most of the visual change. <span class="pill mut">no component edits</span></li>
+  <li><strong>Shared chrome</strong> — page-header component (icon + title + subtitle + action bar), breadcrumb component, and the ⌘K palette. These are additive; existing pages adopt them incrementally. <span class="pill mut">new components only</span></li>
+  <li><strong>Table upgrade</strong> — sticky headers, density toggle, bulk-action bar, right-aligned tabular numerics, hover row actions, applied once to a shared table wrapper and inherited by every grid. <span class="pill mut">presentation only — same data, same queries</span></li>
+  <li><strong>Form layout</strong> — introduce the label-left section pattern and sticky footer bar. <code>react-hook-form</code> wiring, validation rules and submit handlers are untouched; only the surrounding markup changes.</li>
+  <li><strong>KPI and chart enrichment</strong> — add delta, sparkline, target bar and the "Reading:" caption slot. Uses data already returned by existing endpoints; no new API calls.</li>
+  <li><strong>Operational grafts</strong> — the Signal status band and per-row status stripes on Live Twin, Live Feed, Brokers and Alarms. Reads from the existing WebSocket stream.</li>
+  <li><strong>Remove dated decoration</strong> — the four tinted icon chips, the dotted graph-paper background, the spring-physics hover, and the permanently-empty "Created By" column.</li>
+  <li><strong>Accessibility verification</strong> — contrast audit both themes, verify status is never colour-alone, confirm keyboard focus is visible on every interactive element, check touch targets ≥ 44px on mobile.</li>
+</ol>
+
+<div class="co ok">
+  <h4>Accessibility and usability gains, by concept</h4>
+  <div class="t-scroll" style="margin:10px 0 0"><table>
+    <thead><tr><th>Improvement</th><th style="text-align:center">Meridian</th><th style="text-align:center">Atlas</th><th style="text-align:center">Signal</th><th style="text-align:center">Lumen</th></tr></thead>
+    <tbody>
+      <tr><td>Status never conveyed by colour alone (icon/stripe/text)</td><td style="text-align:center">✓</td><td style="text-align:center">✓</td><td style="text-align:center">✓✓</td><td style="text-align:center">✓</td></tr>
+      <tr><td>Breadcrumbs restore positional awareness</td><td style="text-align:center">✓</td><td style="text-align:center">—</td><td style="text-align:center">✓</td><td style="text-align:center">✓</td></tr>
+      <tr><td>Keyboard-first navigation (⌘K)</td><td style="text-align:center">✓</td><td style="text-align:center">✓✓</td><td style="text-align:center">—</td><td style="text-align:center">—</td></tr>
+      <tr><td>Density control respects user preference</td><td style="text-align:center">✓✓</td><td style="text-align:center">—</td><td style="text-align:center">✓✓</td><td style="text-align:center">—</td></tr>
+      <tr><td>Sticky headers keep column context</td><td style="text-align:center">✓</td><td style="text-align:center">—</td><td style="text-align:center">✓</td><td style="text-align:center">—</td></tr>
+      <tr><td>Tabular numerals prevent column jitter</td><td style="text-align:center">✓</td><td style="text-align:center">✓</td><td style="text-align:center">✓✓</td><td style="text-align:center">✓✓</td></tr>
+      <tr><td>KPIs answer "is this good?" not just "what is it?"</td><td style="text-align:center">✓</td><td style="text-align:center">✓</td><td style="text-align:center">✓</td><td style="text-align:center">✓✓</td></tr>
+      <tr><td>Sticky form action bar (submit never below fold)</td><td style="text-align:center">✓✓</td><td style="text-align:center">—</td><td style="text-align:center">✓</td><td style="text-align:center">—</td></tr>
+      <tr><td>Print / PDF legibility</td><td style="text-align:center">✓</td><td style="text-align:center">✗</td><td style="text-align:center">✗</td><td style="text-align:center">✓✓</td></tr>
+    </tbody>
+  </table></div>
+</div>
+
+<h2>How to review these</h2>
+<p>Each prototype is a single self-contained HTML file with no external dependencies — no CDN, no fonts to download, no build step. Open any of them directly in a browser (double-click, or <code>file://</code>), or serve the folder over HTTP if you prefer.</p>
+<ul>
+  <li>Use the <strong>tab bar</strong> to move between the six screens: Dashboard, Landing/Home, Data Table, Form, Analytics, Settings.</li>
+  <li>Use the <strong>Desktop / Mobile toggle</strong> to see the responsive treatment — mobile is a genuinely different layout (bottom tabs, stacked forms, reflowed KPIs), not a squeezed desktop.</li>
+  <li>Amber annotation bars inside the prototypes call out <em>specifically</em> what each concept changes versus the current build, and why.</li>
+  <li>All content uses your real domain data — EMS, device <code>energy</code>, the 24 declared attributes, 3,386,688 telemetry rows — so the density and layout claims are evaluable rather than notional.</li>
+</ul>
+
+<footer>
+  UI/UX modernization proposal · WS-Integrated Suite · 02 August 2026 · Four concepts, 24 screens, desktop + mobile.<br>
+  Presentation layer only — no functional, API, workflow, calculation or database changes proposed in this phase.
+</footer>
+
+</div>
+</body>
+</html>

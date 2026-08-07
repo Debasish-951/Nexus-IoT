@@ -1,7 +1,7 @@
 // ── Dashboard builder types ──
 export interface Widget {
   id: string;
-  type: string;                 // registry key, e.g. "kpi", "line", "gauge"
+  type: string;                 // registry key, e.g. "card", "line", "gauge"
   x: number; y: number;         // grid units
   w: number; h: number;         // grid units
   config: Record<string, any>;  // title, assetId, tag, color, text, …

@@ -3,9 +3,10 @@
 Plain-language, step-by-step. Written for a single Linux VM (Ubuntu/RHEL) serving one
 site. Follow it in order — each step is verifiable before you move on.
 
-> **Why this exists:** the app currently runs on Replit, where Replit's own router
-> serves the web interface and forwards `/api` to the backend. On a plain VM that
-> router does not exist, so you provide it (step 6). Everything else is configuration.
+> **Why this exists:** the API server serves only `/api` — it has no static-file
+> handling at all. Something in front has to serve the built web interface and
+> forward `/api` to the backend, and on a plain VM that something is yours to set up
+> (step 6). Everything else here is configuration.
 
 ---
 
@@ -119,7 +120,7 @@ Two things matter here:
 
 ## Step 6 — Put a web server in front
 
-This is the piece that replaces Replit's router. Example nginx site:
+This is the piece that serves the SPA and routes `/api`. Example nginx site:
 
 ```nginx
 server {

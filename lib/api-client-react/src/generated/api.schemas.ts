@@ -77,7 +77,10 @@ export interface Attribute {
   quality?: string | null;
   expression?: string | null;
   timestamp?: string | null;
+  createdAt: string;
   updatedAt: string;
+  /** Display order among this asset's attributes (ascending). Not user-editable; assigned by the server on creation. */
+  sortOrder: number;
 }
 
 export type CreateAttributeBodyType =

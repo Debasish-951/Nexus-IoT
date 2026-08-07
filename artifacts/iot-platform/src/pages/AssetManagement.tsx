@@ -59,7 +59,7 @@ export default function AssetManagement() {
       </button>
       <div className="flex items-center gap-2 mb-1">
         <Boxes className="w-6 h-6 text-primary" />
-        <h1 className="text-2xl font-bold">Asset Management</h1>
+        <h1 className="text-2xl font-bold">Asset Hub</h1>
       </div>
       <p className="text-sm text-muted-foreground mb-6">Manage your assets and asset templates</p>
 

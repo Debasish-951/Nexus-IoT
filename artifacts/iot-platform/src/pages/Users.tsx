@@ -52,9 +52,21 @@ type ModuleAccess = boolean | GranularPerm;
 type ModuleDef = { key: string; label: string; type: "simple" | "granular" };
 
 interface RbacCatalog {
-  roles: { key: string; label: string; permissions: string[]; moduleDefaults: Record<string, ModuleAccess> }[];
+  roles: {
+    key: string; label: string; permissions: string[];
+    moduleDefaults: Record<string, ModuleAccess>;
+    /** Optional: absent from a server that predates grantable API scopes. */
+    apiScopeDefaults?: string[];
+  }[];
   modules: ModuleDef[];
   analyticsOptions: { id: string; label: string }[];
+  /**
+   * Optional for the same reason. This whole payload is fetched from
+   * /api/security/rbac-catalog and cached for 5 minutes, so the SPA can always be
+   * holding a response from an older server build — every field added here has to
+   * be treated as possibly missing, or the page white-screens.
+   */
+  apiScopeOptions?: { id: string; label: string; kind: "read" | "write" }[];
 }
 
 type UserAccessConfig = {
@@ -65,6 +77,8 @@ type UserAccessConfig = {
   allowedDashboards?: string[];
   restrictAnalytics?: boolean;
   allowedAnalytics?: string[];
+  /** API-client scopes this user may grant. undefined = inherit the role default. */
+  apiScopes?: string[];
 };
 
 /**
@@ -111,6 +125,18 @@ function effectiveModuleAccess(
   if (config.modules && mod.key in config.modules) return config.modules[mod.key];
   const roleDef = catalog.roles.find((r) => r.key === role);
   return roleDef?.moduleDefaults[mod.key] ?? (mod.type === "granular" ? { r: false, w: false, d: false } : false);
+}
+
+/**
+ * Scopes this user may grant on an API credential.
+ *
+ * Mirrors resolveAccess() on the server: an explicit per-user list wins, and
+ * absent means inherit the role default. Kept as one function so the editor can
+ * never show a ceiling the create route would reject.
+ */
+function effectiveApiScopes(role: string, config: UserAccessConfig, catalog: RbacCatalog): string[] {
+  if (config.apiScopes !== undefined) return config.apiScopes;
+  return catalog.roles.find((r) => r.key === role)?.apiScopeDefaults ?? [];
 }
 
 // ── Small circle atoms (unchanged) ────────────────────────────────────────────
@@ -241,7 +267,10 @@ function UserDetailPanel({
   dashboards: { id: string; name: string }[];
 }) {
   const hasOverrides = !!(config.modules && Object.keys(config.modules).length > 0);
-  const isRestricted = !!(config.restrictProjects || config.restrictDashboards || config.restrictAnalytics);
+  const isRestricted = !!(
+    config.restrictProjects || config.restrictDashboards || config.restrictAnalytics
+    || config.apiScopes !== undefined
+  );
 
   return (
     <div className="h-full flex flex-col">
@@ -330,6 +359,66 @@ function UserDetailPanel({
             </p>
           </div>
         </Section>
+
+        {/* API credential ceiling.
+            Separate from Module Permissions because it is not about what this
+            person can see — it is about what a key they mint is allowed to do,
+            which outlives their session.
+
+            Rendered only when the server actually sent the scope catalogue, so an
+            un-restarted API server degrades to "section missing" instead of a
+            crash. */}
+        {(catalog.apiScopeOptions?.length ?? 0) > 0 && (
+        <Section icon={<KeyRound className="w-4 h-4" />} title="API Clients — grantable scopes">
+          <p className="text-xs text-muted-foreground mb-3">
+            When this user creates an API endpoint, these are the scopes they may put on it.
+            Write-only is the safe default: it lets them commission a gateway without being
+            able to issue a key that reads the whole platform.
+          </p>
+          <div className="space-y-1">
+            {(catalog.apiScopeOptions ?? []).map((opt) => {
+              const granted = effectiveApiScopes(user.role, config, catalog);
+              const isOn = granted.includes("*") || granted.includes(opt.id);
+              const viaAll = granted.includes("*");
+              return (
+                <div
+                  key={opt.id}
+                  className={cn(
+                    "flex items-center justify-between px-3 py-2 rounded-md transition-colors",
+                    config.apiScopes !== undefined ? "bg-amber-50 border border-amber-200 dark:bg-amber-950/20 dark:border-amber-900/40" : "hover:bg-muted/20",
+                  )}
+                >
+                  <span className="text-sm text-foreground">
+                    {opt.label}
+                    {opt.kind === "write" && (
+                      <span className="ml-2 text-[10px] text-muted-foreground">ingest</span>
+                    )}
+                  </span>
+                  <SimpleCircle
+                    granted={isOn}
+                    canEdit={canEdit && !viaAll}
+                    overridden={config.apiScopes !== undefined}
+                    title={viaAll ? "Granted via All Scopes (*)" : canEdit ? (isOn ? `Revoke ${opt.label}` : `Grant ${opt.label}`) : ""}
+                    onClick={() => {
+                      const base = effectiveApiScopes(user.role, config, catalog).filter((s) => s !== "*");
+                      const next = isOn ? base.filter((s) => s !== opt.id) : [...base, opt.id];
+                      onUpdateConfig({ apiScopes: next });
+                    }}
+                  />
+                </div>
+              );
+            })}
+          </div>
+          <p className="flex items-start gap-1.5 mt-3 text-[11px] text-muted-foreground">
+            <Info className="w-3 h-3 mt-0.5 shrink-0" />
+            <span>
+              Granting none means this user cannot create API endpoints at all. Existing
+              credentials are unaffected — this governs what may be created from now on,
+              and it is checked by the API on every create.
+            </span>
+          </p>
+        </Section>
+        )}
 
         <ResourceSection
           icon={<FolderOpen className="w-4 h-4" />}

@@ -63,49 +63,66 @@
   --elevate-1: rgba(0,0,0,.03);
   --elevate-2: rgba(0,0,0,.08);
 
-  --background: 36 30% 97%;
-  --foreground: 30 25% 12%;
-  --border: 36 22% 86%;
-  --input: 36 22% 82%;
-  --ring: 30 90% 42%;
+  /* ── Light theme: "Electric Blue" ──────────────────────────────────────────
+     Cool slate neutrals (~215°) with a strong blue accent. Deliberately NOT an
+     inversion of the dark theme: the accent steps down to blue-700 (#1D4ED8)
+     because blue-500 on white fails text contrast, while the dark theme keeps
+     blue-500 where the ground is near-black. Same hue, different step.
 
-  --card: 0 0% 100%;
-  --card-foreground: 30 25% 12%;
-  --card-border: 36 22% 88%;
+     The accent is a cool hue precisely so amber and red are left free to mean
+     "warning" and "critical" and nothing else — under the old orange, the brand
+     colour and the warning colour were the same hue, so a real alarm had no
+     visual authority left. Status colours live in registry.tsx (PALETTE.status). */
+  --background: 216 38% 97%;         /* #F6F8FB */
+  --foreground: 222 47% 11%;         /* #0F172A */
+  --border: 214 32% 91%;             /* #E2E8F0 */
+  --input: 213 27% 84%;              /* #CBD5E1 */
+  --ring: 224 76% 48%;               /* #1D4ED8 */
+
+  --card: 0 0% 100%;                 /* #FFFFFF */
+  --card-foreground: 222 47% 11%;
+  --card-border: 215 35% 93%;        /* #E8EDF4 */
 
   --popover: 0 0% 100%;
-  --popover-foreground: 30 25% 12%;
-  --popover-border: 36 22% 86%;
+  --popover-foreground: 222 47% 11%;
+  --popover-border: 214 32% 91%;
 
-  --primary: 30 90% 42%;
+  --primary: 224 76% 48%;            /* #1D4ED8 — blue-700, 4.5:1 white-on-blue */
   --primary-foreground: 0 0% 100%;
 
-  --secondary: 36 30% 92%;
-  --secondary-foreground: 30 35% 20%;
+  --secondary: 216 38% 95%;          /* #EDF1F7 */
+  --secondary-foreground: 217 33% 17%;
 
-  --muted: 36 25% 94%;
-  --muted-foreground: 32 15% 42%;
+  --muted: 210 40% 96%;              /* #F1F5F9 */
+  --muted-foreground: 219 20% 40%;   /* #52607A */
 
-  --accent: 36 45% 90%;
-  --accent-foreground: 30 45% 22%;
+  --accent: 216 56% 93%;             /* #E3EBF7 */
+  --accent-foreground: 218 61% 22%;
 
-  --destructive: 0 72% 51%;
+  --destructive: 0 72% 51%;          /* #DC2626 */
   --destructive-foreground: 0 0% 100%;
 
-  --chart-1: 30 90% 45%;
-  --chart-2: 175 60% 38%;
-  --chart-3: 262 55% 58%;
-  --chart-4: 0 72% 51%;
-  --chart-5: 205 75% 45%;
+  /* Categorical chart series, in fixed order. Validated (OKLab ΔE) for
+     colour-blind separation against BOTH #FFFFFF and the dark card surface, so
+     one order serves both themes. Worst adjacent pair: ΔE 12.6 deuteranopia,
+     21.1 normal vision; all ≥3:1 contrast. Do not reorder or substitute by eye —
+     re-run the validator. Notably #DB2777 fails here (ΔE 6.9 vs chart-4). */
+  --chart-1: 192 91% 36%;            /* #0891B2 cyan   */
+  --chart-2: 258 90% 66%;            /* #8B5CF6 violet */
+  --chart-3: 85 85% 35%;             /* #65A30D lime   */
+  --chart-4: 330 81% 60%;            /* #EC4899 pink   */
+  --chart-5: 221 83% 53%;            /* #2563EB blue   */
 
-  --sidebar: 30 28% 13%;
-  --sidebar-foreground: 36 15% 78%;
-  --sidebar-border: 30 20% 20%;
-  --sidebar-primary: 32 92% 52%;
-  --sidebar-primary-foreground: 30 40% 12%;
-  --sidebar-accent: 30 25% 20%;
-  --sidebar-accent-foreground: 36 15% 90%;
-  --sidebar-ring: 32 92% 52%;
+  /* The sidebar stays dark in light mode — it was already this way, and a dark
+     rail against a light canvas keeps navigation clearly separate from content. */
+  --sidebar: 221 37% 10%;            /* #101623 */
+  --sidebar-foreground: 216 21% 72%;
+  --sidebar-border: 218 27% 16%;
+  --sidebar-primary: 217 91% 60%;    /* #3B82F6 — brighter step, on a dark rail */
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 219 31% 15%;
+  --sidebar-accent-foreground: 217 38% 92%;
+  --sidebar-ring: 217 91% 60%;
 
   --app-font-sans: 'Inter', sans-serif;
   --app-font-serif: Georgia, serif;
@@ -140,9 +157,11 @@
   --destructive-border: hsl(from hsl(var(--destructive)) h s calc(l + var(--opaque-button-border-intensity)) / alpha);
 }
 
-/* ── Dark theme: "Ember Grid" — Web Synergies orange on a deep, cool navy
-   ground with a cyan glow. Brand-safe but futuristic (replaces the old warm
-   brown-grey). Hues are cool (~222°) for surfaces; primary stays orange (~29°). */
+/* ── Dark theme: "Electric Blue" ───────────────────────────────────────────────
+   Near-black surfaces with a slight cool tint (~220°) and a strong blue accent
+   at blue-500. Denser and flatter than the old "Ember Grid": no orange, and the
+   surface steps are closer together so a dashboard full of cards reads as one
+   plane rather than a stack of panels. */
 .dark {
   --button-outline: rgba(255,255,255,.10);
   --badge-outline: rgba(255,255,255,.05);
@@ -150,57 +169,64 @@
   --elevate-1: rgba(255,255,255,.04);
   --elevate-2: rgba(255,255,255,.09);
 
-  --background: 223 47% 7%;
-  --foreground: 214 40% 94%;
-  --border: 222 39% 18%;
-  --input: 222 35% 24%;
-  --ring: 29 100% 56%;
+  --background: 223 26% 5%;          /* #0A0C11 */
+  --foreground: 216 38% 95%;         /* #EDF1F7 */
+  --border: 221 19% 17%;             /* #232833 */
+  --input: 219 19% 21%;              /* #2C3340 */
+  --ring: 217 91% 60%;               /* #3B82F6 */
 
-  --card: 222 43% 10%;
-  --card-foreground: 214 40% 94%;
-  --card-border: 222 39% 16%;
+  --card: 222 21% 9%;                /* #13161D */
+  --card-foreground: 216 38% 95%;
+  --card-border: 219 22% 15%;        /* #1E242F */
 
-  --popover: 222 43% 10%;
-  --popover-foreground: 214 40% 94%;
-  --popover-border: 222 39% 18%;
+  --popover: 220 21% 11%;            /* #171B23 — a step above card, so a popover
+                                        over a card still reads as in front */
+  --popover-foreground: 216 38% 95%;
+  --popover-border: 221 20% 19%;
 
-  --primary: 29 100% 56%;
-  --primary-foreground: 28 60% 10%;
+  --primary: 217 91% 60%;            /* #3B82F6 */
+  --primary-foreground: 0 0% 100%;   /* white, not near-black: the old orange was
+                                        light enough to need dark text; blue-500
+                                        is not */
 
-  --secondary: 222 30% 16%;
-  --secondary-foreground: 215 30% 82%;
+  --secondary: 220 22% 13%;          /* #1A1F29 */
+  --secondary-foreground: 215 24% 82%;
 
-  --muted: 222 30% 14%;
-  --muted-foreground: 216 20% 62%;
+  --muted: 220 21% 11%;              /* #171B23 */
+  --muted-foreground: 216 17% 67%;   /* #9EA9BA */
 
-  --accent: 222 32% 18%;
-  --accent-foreground: 215 35% 88%;
+  --accent: 219 22% 15%;             /* #1E242F */
+  --accent-foreground: 217 36% 90%;
 
-  --destructive: 354 82% 58%;
+  --destructive: 0 84% 60%;          /* #EF4444 */
   --destructive-foreground: 0 0% 100%;
 
-  --chart-1: 29 100% 58%;
-  --chart-2: 188 86% 53%;
-  --chart-3: 262 70% 68%;
-  --chart-4: 354 85% 62%;
-  --chart-5: 210 90% 60%;
+  /* Same validated categorical order as light — see the note in :root. */
+  --chart-1: 192 91% 36%;            /* #0891B2 cyan   */
+  --chart-2: 258 90% 66%;            /* #8B5CF6 violet */
+  --chart-3: 85 85% 35%;             /* #65A30D lime   */
+  --chart-4: 330 81% 60%;            /* #EC4899 pink   */
+  --chart-5: 221 83% 53%;            /* #2563EB blue   */
 
-  --sidebar: 223 50% 5%;
-  --sidebar-foreground: 215 25% 76%;
-  --sidebar-border: 222 40% 12%;
-  --sidebar-primary: 29 100% 56%;
-  --sidebar-primary-foreground: 28 60% 10%;
-  --sidebar-accent: 222 34% 13%;
-  --sidebar-accent-foreground: 215 30% 88%;
-  --sidebar-ring: 29 100% 56%;
+  --sidebar: 227 39% 5%;             /* #070910 — below background, so the rail
+                                        recedes and the canvas comes forward */
+  --sidebar-foreground: 216 17% 67%;
+  --sidebar-border: 220 22% 13%;
+  --sidebar-primary: 217 91% 60%;
+  --sidebar-primary-foreground: 0 0% 100%;
+  --sidebar-accent: 219 24% 11%;
+  --sidebar-accent-foreground: 217 36% 90%;
+  --sidebar-ring: 217 91% 60%;
 }
 
-/* Ambient glow behind the app in dark mode (the cool ground + cyan/orange
-   auras are what make Ember Grid read as futuristic rather than flat). */
+/* Ambient glow behind the app in dark mode. Kept, but re-hued: both auras are
+   now cool (blue + cyan) so nothing warm competes with an amber alarm. Weaker
+   than before, because "Electric Blue" is a flatter, more instrument-like look
+   than the glow-heavy theme it replaces. */
 .dark .app-shell {
   background-image:
-    radial-gradient(1000px 520px at 90% -10%, hsl(188 86% 53% / 0.08), transparent 60%),
-    radial-gradient(760px 420px at 0% 112%, hsl(29 100% 56% / 0.05), transparent 60%);
+    radial-gradient(1000px 520px at 90% -10%, hsl(217 91% 60% / 0.07), transparent 60%),
+    radial-gradient(760px 420px at 0% 112%, hsl(192 91% 42% / 0.05), transparent 60%);
   background-attachment: fixed;
 }
 
@@ -261,7 +287,8 @@
   .border.active-elevate-2:not(.no-active-interaction-elevate)::after { inset: -1px; }
 }
 
-/* Cool slate scrollbar for the left sidebar (Ember Grid) */
-.sidebar-scroll .scroll-thumb { background-color: #24304d !important; }
-.sidebar-scroll .scroll-thumb:hover { background-color: #33436b !important; }
+/* Sidebar scrollbar. Hardcoded because the thumb is injected by the scroll-area
+   primitive and never receives the theme tokens. */
+.sidebar-scroll .scroll-thumb { background-color: #232B3A !important; }
+.sidebar-scroll .scroll-thumb:hover { background-color: #33405A !important; }
 .sidebar-scroll [data-orientation="vertical"] { width: 10px; }

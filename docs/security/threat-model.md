@@ -8,7 +8,7 @@
 
 | Surface | Description | Exposure |
 |---------|-------------|---------|
-| REST API (`/api/*`) | All HTTP endpoints | Public (through Replit proxy) |
+| REST API (`/api/*`) | All HTTP endpoints | Public (through the reverse proxy) |
 | WebSocket (`/api/ws`) | Event stream | Public (no auth) |
 | Ingest endpoints | `POST /api/ingest/*` | Public (optional API key) |
 | Database | PostgreSQL | Internal only (not network-exposed) |
@@ -34,7 +34,7 @@
 **Likelihood:** High — fully exposed in the UI  
 **Impact:** Critical — admin profile allows full system control including user deletion, broker config changes  
 **Current mitigation:** None  
-**Recommendation:** Implement Replit Auth or Clerk SSO; tie roles to authenticated user identity
+**Recommendation:** Implement SSO (OIDC or SAML); tie roles to authenticated user identity
 
 ---
 

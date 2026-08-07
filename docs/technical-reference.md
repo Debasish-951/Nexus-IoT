@@ -158,9 +158,19 @@ cd lib/api-spec && pnpm exec orval --config ./orval.config.ts
 - 1 MQTT broker (connected)
 - 2 API clients: Daimler_Truck, NodeRED_Client
 
-## Workflows
-- `artifacts/api-server: API Server` — runs `pnpm --filter @workspace/api-server run dev`
-- `artifacts/iot-platform: web` — runs `pnpm --filter @workspace/iot-platform run dev`
+## Processes
+Two long-running processes, started separately (there is no watch on the API — re-run
+it after server-side edits):
+
+| Process | Command | Port |
+|---|---|---|
+| API server | `pnpm dev:api` (`pnpm --filter @workspace/api-server run dev`) | 8080 |
+| Web frontend | `pnpm dev:web` (`pnpm --filter @workspace/iot-platform run dev`) | 5173 |
+
+The Vite dev server proxies `/api` (including the `/api/ws` WebSocket) to port 8080,
+so both appear on one origin. In production a reverse proxy does that job and serves
+the built SPA from `artifacts/iot-platform/dist/public` — see
+[operations/vm-deployment-checklist.md](operations/vm-deployment-checklist.md).
 
 ### Payload Simulator (IngestSimulator.tsx)
 - **Mode switcher**: "Device Presets" tab (existing hardcoded Sensorgrow/RF-Dryer payloads) and **"Custom Asset" tab** (new).

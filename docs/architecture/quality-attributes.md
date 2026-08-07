@@ -8,7 +8,7 @@
 
 | Attribute | Target | Current State |
 |-----------|--------|--------------|
-| API uptime | 99.5% (single-node) | No health check endpoint autorecovery; relies on Replit workflow restart |
+| API uptime | 99.5% (single-node) | No health check endpoint autorecovery; relies on the systemd unit Restart=always |
 | MQTT reconnect | Automatic on broker disconnect | Implemented via `mqtt` package reconnect logic |
 | WebSocket reconnect | Client-side reconnect on close | `useWsEvents` reconnects on disconnect event |
 

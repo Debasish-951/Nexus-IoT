@@ -17,8 +17,8 @@ This document describes the platform's current security controls and their align
 | Access control | All frameworks | Partial | UI-layer RBAC; no server-side enforcement |
 | Authentication | All frameworks | No | No login system; profile switcher only |
 | Audit logging | IEC 62443, SOC 2 | Yes | `activity_logs` table with actor + timestamp |
-| Data encryption at rest | GDPR, ISO 27001 | Partial | Replit manages DB encryption; secrets not encrypted at app level |
-| Data encryption in transit | All frameworks | Yes | HTTPS/TLS via Replit proxy |
+| Data encryption at rest | GDPR, ISO 27001 | Partial | DB encryption is managed by the database host; secrets not encrypted at app level |
+| Data encryption in transit | All frameworks | Yes | HTTPS/TLS via the reverse proxy |
 | Session management | OWASP | No | No sessions; localStorage-based |
 | Input validation | OWASP | Partial | Zod on selected endpoints |
 | Vulnerability management | ISO 27001 | Partial | `minimumReleaseAge` supply-chain protection; no CVE scanning |
@@ -60,7 +60,7 @@ If this platform is used to process data about individuals (e.g., operator activ
 ## Recommended Compliance Actions
 
 **Immediate:**
-1. Implement proper authentication (Replit Auth or Clerk) — closes the largest compliance gap
+1. Implement proper authentication (SSO via OIDC or SAML) — closes the largest compliance gap
 2. Hash API client secrets — closes data confidentiality gap
 
 **30–90 Days:**

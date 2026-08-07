@@ -12,8 +12,14 @@ import { authorize } from "./middleware/authorize";
 
 const app: Express = express();
 
-// Behind Replit's proxy, `req.ip` and `secure` cookies only work correctly when
-// Express is told to trust the forwarding hop.
+// Behind a reverse proxy, `req.ip` and `secure` cookies only work correctly when
+// Express is told to trust the forwarding hop — it then reads the last hop of
+// `X-Forwarded-For` into `req.ip` and honours `X-Forwarded-Proto: https`.
+//
+// This is gated on NODE_ENV alone, so in production there MUST be a trusted proxy
+// in front. Without one, a client can set `X-Forwarded-For` freely and thereby
+// forge `req.ip` — which the per-IP login rate limits and the audit trail key on.
+// The proxy must overwrite that header, not append to it.
 if (authConfig.isProd) app.set("trust proxy", 1);
 // Do not advertise the framework.
 app.disable("x-powered-by");

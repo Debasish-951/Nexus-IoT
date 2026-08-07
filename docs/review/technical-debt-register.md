@@ -70,7 +70,7 @@
 **Impact:** Any user with browser access can assume the admin role; no user-level access control  
 **Description:** The platform uses a localStorage-based profile switcher. There is no login form, session management, or JWT validation.  
 **Recommended Fix:**
-- Implement Replit Auth (OpenID Connect) for human authentication
+- Implement SSO (OpenID Connect) for human authentication
 - Tie the `User` record's role to the authenticated identity
 - Remove the profile switcher; replace with identity-bound role display
 

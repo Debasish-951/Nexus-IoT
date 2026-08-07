@@ -20,4 +20,4 @@ illusion that "half" of things work.
 - Seed script: `lib/db/src/seed.ts` (idempotent, uses fixed UUIDs with ON CONFLICT DO NOTHING)
 - npm script: `pnpm --filter @workspace/db run seed`
 - README local setup step 5 explains this with a plain-language note
-- Affects any fresh clone — Replit has pre-seeded data so it's invisible there
+- Affects any fresh clone — an established dev database has pre-seeded data so it's invisible there

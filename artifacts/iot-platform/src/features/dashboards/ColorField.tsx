@@ -157,9 +157,13 @@ export function ColorField({ value, onChange, presets }: { value?: string; onCha
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <button className="flex items-center gap-2 w-full h-8 px-2 rounded-md border border-border bg-background text-sm hover:border-primary">
+        {/* min-w-0 lets this shrink below its text's natural width instead of
+            overflowing its box — a flex item's default min-width is auto (its
+            content size), so without it a narrow parent pushed the hex code
+            past the button's own border. */}
+        <button className="flex items-center gap-2 w-full min-w-0 h-8 px-2 rounded-md border border-border bg-background text-sm hover:border-primary">
           <span className="w-4 h-4 rounded-full border border-border shrink-0" style={{ background: color }} />
-          <span className="font-mono uppercase text-muted-foreground">{color}</span>
+          <span className="font-mono uppercase text-muted-foreground truncate">{color}</span>
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-64 p-3">

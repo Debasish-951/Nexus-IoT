@@ -14,7 +14,8 @@ import { useCurrentUser } from "@/contexts/UserContext";
 import NotificationBell from "@/components/NotificationBell";
 import UserProfileTopMenu from "@/components/UserProfileTopMenu";
 import BrokerStatusBar from "@/components/BrokerStatusBar";
-import ThemeToggle from "@/components/ThemeToggle";
+import AppearanceMenu from "@/components/AppearanceMenu";
+import { FEATURES, type FeatureKey } from "@/lib/features";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -24,6 +25,8 @@ interface NavChild {
   icon: React.ElementType;
   /** Module key from the Access Control matrix. Omit for always-visible items. */
   module?: string;
+  /** Hidden while this feature switch is off. See lib/features.ts. */
+  feature?: FeatureKey;
 }
 
 interface NavItem {
@@ -32,12 +35,14 @@ interface NavItem {
   icon: React.ElementType;
   module?: string;
   children?: NavChild[];
+  /** Hidden while this feature switch is off. See lib/features.ts. */
+  feature?: FeatureKey;
 }
 
 const navItems: NavItem[] = [
   { label: "Home", href: "/", icon: Home, module: "dashboard" },
   {
-    label: "Asset Management",
+    label: "Asset Hub",
     href: "/asset-management",
     icon: LayoutDashboard,
     module: "assets",
@@ -53,7 +58,7 @@ const navItems: NavItem[] = [
     // and Live Feed already show, so the group header only toggles — matching
     // every other pure grouping in this nav. The route still exists and is
     // still reachable directly; it is simply not advertised.
-    label: "Data Explorer",
+    label: "Data Insights",
     icon: BarChart2,
     children: [
       { label: "Visualization",   href: "/visualization",       icon: LayoutDashboard, module: "visualization" },
@@ -63,7 +68,7 @@ const navItems: NavItem[] = [
     ],
   },
   {
-    label: "AI Assistant",
+    label: "AI Advisor",
     icon: BrainCircuit,
     module: "explorer",
     children: [
@@ -74,7 +79,7 @@ const navItems: NavItem[] = [
     ],
   },
   {
-    label: "Alarm Management",
+    label: "Event Manager",
     icon: Bell,
     module: "alarms",
     children: [
@@ -84,22 +89,25 @@ const navItems: NavItem[] = [
     ],
   },
   {
-    label: "Broker Management",
+    label: "Integration Hub",
     icon: Router,
     module: "brokers",
     children: [
       { label: "Broker",            href: "/brokers",           icon: Wifi,     module: "brokers" },
-      // API Client sits with the brokers rather than under Admin Center: it is an
+      // API Client sits with the brokers rather than under Governance: it is an
       // ingest-integration concern (endpoints, scopes, traffic), not an
       // account-security one. Still gated by the `api_clients` module grant.
       { label: "API Client",        href: "/api-clients",       icon: KeyRound, module: "api_clients" },
       { label: "Destinations",      href: "/destinations",      icon: Send,     module: "brokers" },
-      { label: "Integration Hub",   href: "/integrations",      icon: Plug,     module: "brokers" },
+      // Was "Integration Hub", which now names the group above it — a child
+      // repeating its own parent's label reads as a broken menu. "Connections"
+      // is what the page actually is: every live inbound and outbound link.
+      { label: "Connections",       href: "/integrations",      icon: Plug,     module: "brokers" },
       { label: "Integration Guide", href: "/integration-guide", icon: Zap },
     ],
   },
   {
-    label: "Admin Center",
+    label: "Governance",
     icon: Shield,
     children: [
       { label: "User",                href: "/users",               icon: Users,  module: "users" },
@@ -116,25 +124,34 @@ const navItems: NavItem[] = [
       { label: "Reports",         href: "/reports",         icon: ClipboardList, module: "reports" },
     ],
   },
-  { label: "Activity Log",      href: "/activity-log", icon: Activity, module: "activity_log" },
-  { label: "Payload Simulator", href: "/simulator",    icon: Zap,      module: "brokers" },
+  { label: "Audit Log",         href: "/activity-log", icon: Activity, module: "activity_log" },
+  { label: "Payload Simulator", href: "/simulator",    icon: Zap,      module: "brokers", feature: "payloadSimulator" },
 ];
 
 /**
- * Hide nav entries the user cannot open.
+ * Hide nav entries the user cannot open, or that a feature switch has turned off.
  *
  * Module-level visibility control, driven by the same grants the API enforces —
  * a hidden item is not merely cosmetic, the route and the API both refuse it.
  * A group whose children are all hidden disappears entirely rather than
  * expanding into an empty list.
+ *
+ * Feature switches are checked first because they are absolute: an off feature is
+ * hidden from everyone, including an administrator, and its route is not
+ * registered either (see ROUTES in App.tsx).
  */
+function enabled(item: { feature?: FeatureKey }): boolean {
+  return !item.feature || FEATURES[item.feature];
+}
+
 function visibleNav(
   items: NavItem[],
   canModule: (key: string, level?: "read" | "write" | "delete") => boolean,
 ): NavItem[] {
   return items.reduce<NavItem[]>((acc, item) => {
+    if (!enabled(item)) return acc;
     if (item.children) {
-      const children = item.children.filter((c) => !c.module || canModule(c.module));
+      const children = item.children.filter((c) => enabled(c) && (!c.module || canModule(c.module)));
       if (children.length > 0) acc.push({ ...item, children });
       return acc;
     }
@@ -187,7 +204,7 @@ function NavGroup({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
         // Group with a landing page: the label navigates AND expands.
         //
         // It used to only navigate, with the children reachable solely via the
-        // small chevron. Asset Management is the only group in this shape, so it
+        // small chevron. Asset Hub is the only group in this shape, so it
         // was the only one that appeared to "lag": the click kicked off a route
         // change and page fetch while the submenu stayed shut, which reads as
         // slowness rather than as "that click did something else". Expanding on
@@ -320,7 +337,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <div className="flex-1" />
           <BrokerStatusBar />
           <div className="w-px h-5 bg-border" />
-          <ThemeToggle />
+          <AppearanceMenu />
           <NotificationBell />
           <div className="w-px h-5 bg-border" />
           <UserProfileTopMenu />

@@ -36,8 +36,8 @@ Note: Query strings are stripped from logged URLs for privacy.
 ```
 
 ### Log Access
-- Development: Replit workflow console (`artifacts/api-server: API Server` tab)
-- Production: Replit deployment logs panel
+- Development: the terminal running `pnpm dev:api`
+- Production: `journalctl -u <service-name> -f` (systemd)
 
 ### Logging Rules
 - **Never use `console.log`** in server code — always use `req.log` in route handlers and `logger` singleton elsewhere
@@ -126,7 +126,7 @@ const httpRequestDuration = new promClient.Histogram({
 
 ### Recommended
 1. Add a health check endpoint that external monitoring (UptimeRobot, Datadog) can poll
-2. Set up Replit deployment status notifications
+2. Set up service health/restart notifications from the process manager
 3. Create an alarm rule on a heartbeat metric to detect device silence
 
 ---

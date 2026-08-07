@@ -450,7 +450,7 @@ def run_forever(dry_run: bool = False) -> None:
 
 def main() -> int:
     """Command-line entry point."""
-    parser = argparse.ArgumentParser(description="Python version of the Node-RED Replit Data Flow.")
+    parser = argparse.ArgumentParser(description="Python version of the Node-RED energy data flow.")
     parser.add_argument("--once", action="store_true", help="Generate one message and try to send buffer once.")
     parser.add_argument("--dry-run", action="store_true", help="Print payload instead of posting to the API.")
     parser.add_argument("--clear-buffer", action="store_true", help="Clear the persistent local buffer and exit.")

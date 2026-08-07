@@ -52,7 +52,10 @@ const BASE_URL = window.location.origin;
  */
 function IngestEndpointPanel() {
   const { toast } = useToast();
-  const [expanded, setExpanded] = useState<string | null>(null);
+  /** Per-row single|batch choice. Only the shown URL changes, never the key. */
+  const [modes, setModes] = useState<Record<string, "single" | "batch">>({});
+  const setMode = (id: string, mode: "single" | "batch") =>
+    setModes((prev) => ({ ...prev, [id]: mode }));
 
   const { data: clients, isLoading } = useQuery<any[]>({
     queryKey: ["api-clients-endpoints"],
@@ -77,31 +80,26 @@ function IngestEndpointPanel() {
   });
 
   /**
-   * Group by owning project.
+   * Endpoints, project-first.
    *
-   * A project-scoped client is the shared team credential: the project head
-   * assigns people to the project, and everyone on it sees this one endpoint
-   * rather than each person carrying their own key. Unassigned (platform-wide)
-   * clients fall into a trailing bucket.
+   * The project is what people look for — a client's own name is bookkeeping, and
+   * when it happens to be a person's name it actively misleads about what the row
+   * is. So each row leads with the project, and the client name appears only to
+   * break a tie when one project has several endpoints.
+   *
+   * Sorted with project-scoped rows first (alphabetically), platform-wide last.
    */
-  const groupedByProject = (() => {
-    const byProject = new Map<string | null, any[]>();
-    for (const c of ingestClients) {
-      const key = c.projectName ?? null;
-      if (!byProject.has(key)) byProject.set(key, []);
-      byProject.get(key)!.push(c);
-    }
-    return [...byProject.entries()]
-      .map(([project, clients]) => ({ project, clients }))
-      .sort((a, b) => {
-        if (a.project === null) return 1;   // unassigned last
-        if (b.project === null) return -1;
-        return a.project.localeCompare(b.project);
-      });
-  })();
+  const projectCounts = ingestClients.reduce<Record<string, number>>((acc, c) => {
+    if (c.projectName) acc[c.projectName] = (acc[c.projectName] ?? 0) + 1;
+    return acc;
+  }, {});
 
-  // Headings only earn their space once projects are actually in use.
-  const showProjectHeadings = groupedByProject.some((g) => g.project !== null);
+  const sortedClients = [...ingestClients].sort((a, b) => {
+    if (!a.projectName && b.projectName) return 1;    // platform-wide last
+    if (a.projectName && !b.projectName) return -1;
+    const byProject = (a.projectName ?? "").localeCompare(b.projectName ?? "");
+    return byProject !== 0 ? byProject : (a.name ?? "").localeCompare(b.name ?? "");
+  });
 
   return (
     <div className="rounded-lg border border-blue-200 dark:border-blue-800/40 bg-blue-50/50 dark:bg-blue-950/20 p-4 space-y-3">
@@ -111,44 +109,17 @@ function IngestEndpointPanel() {
             <Info className="w-4 h-4" /> HTTP API Ingest Endpoints
           </p>
           <p className="text-xs text-blue-700 dark:text-blue-400 mt-0.5">
-            External systems (gateways, custom scripts, SCADA) push data to these endpoints with
-            HTTP POST and an <code className="bg-white/60 dark:bg-slate-900 px-1 rounded">ingest:write</code> API key.
+            One endpoint per project. Copy its URL into your gateway, send HTTP POST with the
+            project&apos;s <code className="bg-white/60 dark:bg-slate-900 px-1 rounded">ingest:write</code> key,
+            and telemetry starts flowing.
           </p>
         </div>
         <Link href="/api-clients">
           <Button size="sm" variant="outline" className="shrink-0">
-            <KeyRound className="w-3.5 h-3.5 mr-1.5" /> Manage clients
+            <KeyRound className="w-3.5 h-3.5 mr-1.5" /> Manage endpoints
           </Button>
         </Link>
       </div>
-
-      {/* Platform-wide endpoints — always shown.
-          These accept any key carrying `ingest:write`, so this is the address to hand
-          to a gateway or integrator. The per-client endpoints below are the same
-          pipeline with the clientId in the path, which is what buys per-integration
-          attribution; they are an addition, not a replacement. */}
-      <div className="space-y-1.5">
-        {[
-          { label: "Single payload", url: `${BASE_URL}/api/ingest/payload` },
-          { label: "Batch payloads", url: `${BASE_URL}/api/ingest/batch` },
-        ].map(({ label, url }) => (
-          <div key={url} className="flex items-center gap-2 bg-white dark:bg-slate-900 rounded border border-blue-200 dark:border-blue-800/30 px-2.5 py-1.5">
-            <span className="text-[11px] text-muted-foreground w-24 shrink-0">{label}</span>
-            <code className="text-xs font-mono text-primary flex-1 truncate">{url}</code>
-            <button onClick={() => copy(url)} title="Copy endpoint" className="text-muted-foreground hover:text-foreground shrink-0">
-              <Copy className="w-3.5 h-3.5" />
-            </button>
-          </div>
-        ))}
-        <div className="flex items-center gap-2 px-2.5">
-          <span className="text-[11px] text-muted-foreground w-24 shrink-0">Auth header</span>
-          <code className="text-[11px] font-mono text-foreground/70 flex-1 truncate">X-API-Key: &lt;client secret&gt;</code>
-        </div>
-      </div>
-
-      <p className="text-[11px] font-semibold uppercase tracking-wide text-blue-700/70 dark:text-blue-400/70">
-        Per-client endpoints
-      </p>
 
       {isLoading ? (
         <div className="space-y-2">
@@ -157,90 +128,113 @@ function IngestEndpointPanel() {
       ) : ingestClients.length === 0 ? (
         <div className="rounded border border-dashed border-blue-300 dark:border-blue-800/50 bg-white/60 dark:bg-slate-900/50 px-4 py-5 text-center">
           <KeyRound className="w-6 h-6 mx-auto mb-2 text-muted-foreground opacity-40" />
-          <p className="text-sm font-medium">No ingest-capable API clients yet</p>
+          <p className="text-sm font-medium">No ingest endpoints yet</p>
           <p className="text-xs text-muted-foreground mt-1 max-w-md mx-auto">
-            The endpoints above are live — they just need a key. Create a client with the{" "}
-            <code className="bg-muted px-1 rounded">ingest:write</code> scope to get its secret, plus
-            a dedicated endpoint whose traffic is attributed to that gateway, SCADA bridge, or project.
+            Create one for a project to get its URL and key. Traffic through it is
+            attributed to that project, so you can see which gateway sent what.
           </p>
           <Link href="/api-clients">
-            <Button size="sm" className="mt-3">Create an API Client</Button>
+            <Button size="sm" className="mt-3">Create API End Point</Button>
           </Link>
         </div>
       ) : (
-        <div className="space-y-3">
-          {groupedByProject.map(({ project, clients: group }) => (
-            <div key={project ?? "__unassigned"} className="space-y-2">
-              {/* Group header only when projects are actually in use — a single
-                  unassigned bucket would just be noise. */}
-              {showProjectHeadings && (
-                <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-blue-700/70 dark:text-blue-400/70">
-                  <FolderOpen className="w-3 h-3" />
-                  {project ?? "Not assigned to a project"}
-                </p>
-              )}
-              {group.map((c) => {
-            const single = `${BASE_URL}/api/ingest/k/${c.clientId}/payload`;
-            const batch  = `${BASE_URL}/api/ingest/k/${c.clientId}/batch`;
-            const open   = expanded === c.id;
+        <div className="space-y-2">
+          {sortedClients.map((c) => {
+            const suffix = (modes[c.id] ?? "single") === "batch" ? "batch" : "payload";
+            const url = `${BASE_URL}/api/ingest/k/${c.clientId}/${suffix}`;
+            // The client's own name is shown only when the project alone would be
+            // ambiguous — i.e. that project owns more than one endpoint.
+            const needsQualifier = !!c.projectName && (projectCounts[c.projectName] ?? 0) > 1;
             return (
               <div key={c.id} className="rounded border border-blue-200 dark:border-blue-800/30 bg-white dark:bg-slate-900 overflow-hidden">
-                <div className="flex flex-wrap items-center gap-2 px-3 py-2">
-                  <span className="text-xs font-medium truncate max-w-[180px]">{c.name}</span>
-                  <code className="text-[10px] font-mono text-muted-foreground">{c.clientId}</code>
+                {/* Identity + usage */}
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-1 px-3 pt-2">
+                  {c.projectName ? (
+                    <span className="flex items-center gap-1.5 text-xs font-semibold truncate max-w-[260px]">
+                      <FolderOpen className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400 shrink-0" />
+                      {c.projectName}
+                    </span>
+                  ) : (
+                    <span className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                      Platform-wide
+                    </span>
+                  )}
+                  {needsQualifier && (
+                    <span className="text-[11px] text-muted-foreground truncate max-w-[160px]">{c.name}</span>
+                  )}
                   <span className="ml-auto flex items-center gap-3 text-[11px] text-muted-foreground shrink-0">
-                    <span title="Total requests through this client">
+                    <span title="Total requests through this endpoint">
                       <strong className="tabular-nums text-foreground">{(c.totalRequests ?? 0).toLocaleString()}</strong> req
                     </span>
                     <span title="Last request seen">
                       {c.lastUsedAt ? formatDistanceToNow(new Date(c.lastUsedAt), { addSuffix: true }) : "never used"}
                     </span>
-                    <button onClick={() => setExpanded(open ? null : c.id)}
-                      className="text-muted-foreground hover:text-foreground">
-                      {open ? "Hide" : "Show"} endpoints
-                    </button>
                   </span>
                 </div>
 
-                {open && (
-                  <div className="border-t border-blue-200 dark:border-blue-800/30 px-3 py-2 space-y-1.5 bg-blue-50/40 dark:bg-blue-950/10">
-                    {[{ label: "Single payload", url: single }, { label: "Batch payloads", url: batch }].map(({ label, url }) => (
-                      <div key={url} className="flex items-center gap-2">
-                        <span className="text-[11px] text-muted-foreground w-24 shrink-0">{label}</span>
-                        <code className="text-[11px] font-mono text-primary flex-1 truncate">{url}</code>
-                        <button onClick={() => copy(url)} className="text-muted-foreground hover:text-foreground shrink-0">
-                          <Copy className="w-3.5 h-3.5" />
+                {/* The endpoint — one copy button that yields something that WORKS.
+                    Single vs batch is the same endpoint with a different suffix, so it is
+                    a toggle over one URL, not a second row.
+
+                    Copy includes the key when we have it, because a bare URL is not a
+                    usable thing to paste anywhere — it 401s until a header is configured
+                    separately. Two buttons for "URL" and "URL + key" only raised the
+                    question of which one you needed. Header users get the small
+                    secondary link. */}
+                <div className="px-3 pb-2 space-y-1.5">
+                  <div className="flex items-center gap-2">
+                    <div className="flex rounded border border-blue-200 dark:border-blue-800/40 overflow-hidden shrink-0">
+                      {([["single", "Single"], ["batch", "Batch"]] as const).map(([mode, label]) => (
+                        <button
+                          key={mode}
+                          onClick={() => setMode(c.id, mode)}
+                          className={cn(
+                            "px-2 py-1 text-[10px] font-medium transition-colors",
+                            (modes[c.id] ?? "single") === mode
+                              ? "bg-primary text-primary-foreground"
+                              : "text-muted-foreground hover:text-foreground",
+                          )}
+                        >
+                          {label}
                         </button>
-                      </div>
-                    ))}
-                    <div className="flex items-center gap-2 pt-1">
-                      <span className="text-[11px] text-muted-foreground w-24 shrink-0">Auth header</span>
-                      <code className="text-[11px] font-mono text-foreground/70 flex-1 truncate">
-                        X-API-Key: &lt;this client&apos;s secret&gt;
-                      </code>
+                      ))}
                     </div>
-                    {/* For gateways that expose a URL field and nothing else (Node-RED
-                        subflows, PLC HTTP blocks): the key rides in the query string, so
-                        no header has to be set. Copy-only — the secret is not rendered. */}
-                    {c.clientSecret && (
-                      <div className="flex items-center gap-2 border-t border-blue-200/60 dark:border-blue-800/20 pt-1.5">
-                        <span className="text-[11px] text-muted-foreground w-24 shrink-0">URL with key</span>
-                        <span className="text-[11px] text-muted-foreground/80 flex-1 truncate">
-                          …/payload?key=&lt;secret&gt; — for clients that cannot send headers
-                        </span>
-                        <button onClick={() => copy(`${single}?key=${c.clientSecret}`, "Endpoint with key copied")}
-                          title="Copy endpoint including the key" className="text-muted-foreground hover:text-foreground shrink-0">
-                          <Copy className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    )}
+                    {/* Masked on screen, real value on copy — enough to see the shape
+                        without putting a live key on a shared screen. */}
+                    <code className="text-xs font-mono text-primary flex-1 truncate" title={url}>
+                      {url}{c.clientSecret ? "?key=••••••••" : ""}
+                    </code>
+                    <Button size="sm" variant="outline" className="h-7 shrink-0"
+                      onClick={() => copy(
+                        c.clientSecret ? `${url}?key=${c.clientSecret}` : url,
+                        c.clientSecret ? "Endpoint copied — key included" : "Endpoint copied",
+                      )}>
+                      <Copy className="w-3.5 h-3.5 mr-1.5" /> Copy
+                    </Button>
                   </div>
-                )}
+
+                  {c.clientSecret ? (
+                    <p className="text-[11px] text-muted-foreground">
+                      Ready to paste into a gateway — the key is included, no header needed.{" "}
+                      <button
+                        onClick={() => copy(url, "URL copied without the key")}
+                        className="text-muted-foreground hover:text-foreground underline decoration-dotted"
+                        title="Copies the URL only. Send the key as X-API-Key instead."
+                      >
+                        Copy without key
+                      </button>{" "}
+                      to send it as <code className="font-mono text-foreground/80">X-API-Key</code> instead.
+                    </p>
+                  ) : (
+                    <p className="text-[11px] text-muted-foreground">
+                      Send with header{" "}
+                      <code className="font-mono text-foreground/80">X-API-Key: &lt;this endpoint&apos;s secret&gt;</code>
+                    </p>
+                  )}
+                </div>
               </div>
             );
-              })}
-            </div>
-          ))}
+          })}
         </div>
       )}
 

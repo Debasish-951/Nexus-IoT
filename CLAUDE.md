@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-Integrated Suite — industrial IoT data acquisition + analytics platform. Ingests sensor telemetry (HTTP/MQTT/Azure IoT), evaluates alarm rules in real time, serves a configurable React dashboard. pnpm monorepo, deploys on Replit.
+Integrated Suite — industrial IoT data acquisition + analytics platform. Ingests sensor telemetry (HTTP/MQTT/Azure IoT), evaluates alarm rules in real time, serves a configurable React dashboard. pnpm monorepo, self-hosted on a single Linux VM (nginx serves the built SPA and proxies `/api`; see `docs/operations/vm-deployment-checklist.md`).
 
 ## Commands
 
@@ -70,4 +70,4 @@ The MQTT subscriber (`services/mqtt.ts`) and the hourly retention pruner both st
 
 ## Docs
 
-`docs/` is comprehensive and kept current — consult it before large changes. `replit.md` has the most detailed per-table / per-route reference. ADRs in `docs/adr/` explain key choices (Express 5, Drizzle, OpenAPI codegen, frontend RBAC, cohosted WebSocket, pnpm monorepo).
+`docs/` is comprehensive and kept current — consult it before large changes. `docs/technical-reference.md` has the most detailed per-table / per-route reference. `docs/operations/vm-deployment-checklist.md` is the deployment guide. ADRs in `docs/adr/` explain key choices (Express 5, Drizzle, OpenAPI codegen, frontend RBAC, cohosted WebSocket, pnpm monorepo) — note that ADR-004 and ADR-007 are historical records written when the platform ran on a hosted preview environment, and describe behaviour that has since changed.

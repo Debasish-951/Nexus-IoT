@@ -41,7 +41,7 @@ const DOC_VERSIONS: DocVersion[] = [
     ],
     chapters: [
       { title: "User Manual", desc: "Dashboard, Assets, Attributes, Templates, Trends" },
-      { title: "Alarm Management", desc: "Rules (threshold, ROC, heartbeat, deviation), webhooks" },
+      { title: "Event Manager", desc: "Rules (threshold, ROC, heartbeat, deviation), webhooks" },
       { title: "Broker & MQTT", desc: "MQTT config, Azure IoT, mapping rules, destinations" },
       { title: "Security & RBAC", desc: "Users, API clients, scopes, IP allowlist, role matrix" },
       { title: "Visualization", desc: "Named dashboards, 11 widget types, live WS updates" },
@@ -85,7 +85,7 @@ const DOC_VERSIONS: DocVersion[] = [
     description: "Original release — complete user manual & technical reference covering every feature, API endpoint, database schema, and integration detail.",
     chapters: [
       { title: "User Manual", desc: "Dashboard, Assets, Attributes, Templates, Trends" },
-      { title: "Alarm Management", desc: "Rules (threshold, ROC, heartbeat, deviation), webhooks" },
+      { title: "Event Manager", desc: "Rules (threshold, ROC, heartbeat, deviation), webhooks" },
       { title: "Broker & MQTT", desc: "MQTT config, Azure IoT, mapping rules, destinations" },
       { title: "Security & RBAC", desc: "Users, API clients, scopes, IP allowlist, role matrix" },
       { title: "Visualization", desc: "Named dashboards, 11 widget types, live WS updates" },

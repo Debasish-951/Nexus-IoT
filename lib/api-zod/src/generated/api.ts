@@ -142,7 +142,13 @@ export const ListAssetAttributesResponseItem = zod.object({
   quality: zod.string().nullish(),
   expression: zod.string().nullish(),
   timestamp: zod.coerce.date().nullish(),
+  createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date(),
+  sortOrder: zod
+    .number()
+    .describe(
+      "Display order among this asset's attributes (ascending). Not user-editable; assigned by the server on creation.",
+    ),
 });
 export const ListAssetAttributesResponse = zod.array(
   ListAssetAttributesResponseItem,
@@ -213,7 +219,13 @@ export const UpdateAttributeResponse = zod.object({
   quality: zod.string().nullish(),
   expression: zod.string().nullish(),
   timestamp: zod.coerce.date().nullish(),
+  createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date(),
+  sortOrder: zod
+    .number()
+    .describe(
+      "Display order among this asset's attributes (ascending). Not user-editable; assigned by the server on creation.",
+    ),
 });
 
 /**

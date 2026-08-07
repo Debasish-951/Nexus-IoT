@@ -319,7 +319,6 @@ export default function AssetTemplates() {
                 <th className="text-left px-4 py-2.5 font-medium">Asset Type</th>
                 <th className="text-left px-4 py-2.5 font-medium">Assets Using</th>
                 <th className="text-left px-4 py-2.5 font-medium">Attributes</th>
-                <th className="text-left px-4 py-2.5 font-medium">Created By</th>
                 <th className="text-left px-4 py-2.5 font-medium">Last Updated</th>
                 <th className="px-4 py-2.5 w-10" />
               </tr>
@@ -327,10 +326,10 @@ export default function AssetTemplates() {
             <tbody>
               {!templates ? (
                 Array.from({ length: 5 }).map((_, i) => (
-                  <tr key={i} className="border-b border-border/50"><td colSpan={8} className="px-4 py-3"><Skeleton className="h-4 w-full" /></td></tr>
+                  <tr key={i} className="border-b border-border/50"><td colSpan={7} className="px-4 py-3"><Skeleton className="h-4 w-full" /></td></tr>
                 ))
               ) : templateList.length === 0 ? (
-                <tr><td colSpan={8} className="px-4 py-16 text-center text-muted-foreground">
+                <tr><td colSpan={7} className="px-4 py-16 text-center text-muted-foreground">
                   <LayoutTemplate className="w-8 h-8 mx-auto mb-2 opacity-20" />
                   <p className="text-sm">No templates {search ? "match your search" : "yet"}</p>
                   {!search && can("manage_templates") && (
@@ -350,7 +349,6 @@ export default function AssetTemplates() {
                     <td className="px-4 py-2.5 text-muted-foreground">{t.tags?.[0] ?? "—"}</td>
                     <td className="px-4 py-2.5 tabular-nums">{usageCount[t.id] ?? 0}</td>
                     <td className="px-4 py-2.5 tabular-nums">{t.attributeCount ?? (t.attributeDefinitions?.length ?? 0)}</td>
-                    <td className="px-4 py-2.5 text-muted-foreground">—</td>
                     <td className="px-4 py-2.5 text-xs text-muted-foreground">{t.updatedAt ? format(new Date(t.updatedAt), "MM/dd/yyyy") : "—"}</td>
                     <td className="px-4 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
                       {can("manage_templates") && (

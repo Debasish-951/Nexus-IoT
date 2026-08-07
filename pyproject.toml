@@ -1,7 +1,7 @@
 [project]
-name = "repl-nix-workspace"
+name = "integrated-suite-docs"
 version = "0.1.0"
-description = "Add your description here"
+description = "Documentation generation scripts for the Integrated Suite platform"
 requires-python = ">=3.11"
 dependencies = [
     "python-docx>=1.2.0",

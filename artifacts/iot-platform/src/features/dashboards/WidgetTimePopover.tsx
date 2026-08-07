@@ -106,6 +106,43 @@ export function WidgetTimePopover({ widget, updateConfig, dashTimeCfg, boundary 
     setOpen(false);
   }
 
+  /**
+   * "Allow override" switch.
+   *
+   * The old switch only wired the ON direction (`if (checked) handleFollowDashboard()`)
+   * — flipping it OFF called nothing, so the widget silently reverted to "following"
+   * the next time the popover reopened, since nothing had actually been persisted.
+   * That was the "the button doesn't work" bug.
+   *
+   * Semantics are also inverted from before, per request: ON now means override
+   * enabled (this widget is independent of the dashboard-wide range); OFF means it
+   * follows the dashboard. Turning override ON commits the range/aggregation
+   * fields exactly as currently shown — so nothing visibly changes at the moment
+   * of the flip — while marking the widget customised, the same `timeIsCustom`
+   * flag Apply sets. Turning it OFF is exactly the old "follow dashboard" action.
+   */
+  function handleToggleOverride(overrideOn: boolean) {
+    if (overrideOn) {
+      updateConfig(widget.id, {
+        rangeMinutes,
+        rangeHours: undefined,
+        customFrom: isCustom ? customFrom : undefined,
+        customTo: isCustom ? customTo : undefined,
+        granularity,
+        aggType,
+        interpolated,
+        refreshEnabled,
+        refreshInterval,
+        timeIsCustom: true,
+        allowOverride: undefined,
+      });
+      // Left open: the point of switching override on is usually to then change
+      // something below and hit Apply, not to immediately close the panel.
+    } else {
+      handleFollowDashboard();
+    }
+  }
+
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
@@ -132,25 +169,25 @@ export function WidgetTimePopover({ widget, updateConfig, dashTimeCfg, boundary 
           </span>
         </div>
 
-        {/* A single on/off control for "follow the dashboard vs. set my own" —
+        {/* A single on/off control for "set my own vs. follow the dashboard" —
             replaces the old buried text link, which read as an afterthought and
-            was easy to miss. Flipping it ON immediately reverts to the dashboard's
-            live range; flipping it OFF just means "I'm about to customise" — the
-            fields below are edited normally and Apply is still what commits them. */}
+            was easy to miss. ON = this widget is independent; OFF = it follows the
+            dashboard-wide range. Both directions commit immediately — see
+            handleToggleOverride for why the old version only worked one way. */}
         <div className="px-3 py-2 flex items-center justify-between border-b border-border">
-          <span className={cn("text-[11px] font-medium", !isCustomised ? "text-foreground" : "text-muted-foreground")}>
-            Follow dashboard range
+          <span className={cn("text-[11px] font-medium", isCustomised ? "text-foreground" : "text-muted-foreground")}>
+            Allow override
           </span>
           <Switch
-            checked={!isCustomised}
-            onCheckedChange={(checked) => { if (checked) handleFollowDashboard(); }}
+            checked={isCustomised}
+            onCheckedChange={handleToggleOverride}
             className="scale-90"
           />
         </div>
         <p className="px-3 pt-2 text-[10px] text-muted-foreground">
           {isCustomised
-            ? "Custom for this widget — the dashboard-wide range selector no longer affects it."
-            : "Following the dashboard's range. Change anything below and hit Apply to set one just for this widget."}
+            ? "Overridden for this widget — the dashboard-wide range selector no longer affects it. Change anything below and hit Apply."
+            : "Following the dashboard's range. Turn on Allow override to set one just for this widget."}
         </p>
 
         <div className="p-3 space-y-3">

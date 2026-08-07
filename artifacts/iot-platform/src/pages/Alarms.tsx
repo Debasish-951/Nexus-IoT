@@ -54,7 +54,7 @@ export default function Alarms() {
     <div className="p-6 space-y-4">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold flex items-center gap-2"><Bell className="w-5 h-5 text-destructive" />Alarm List</h1>
+          <h1 className="text-xl font-semibold flex items-center gap-2"><Bell className="w-5 h-5 text-primary" />Alarm List</h1>
           <p className="text-sm text-muted-foreground">{filtered.length} alarm(s)</p>
         </div>
       </div>

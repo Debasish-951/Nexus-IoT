@@ -23,15 +23,25 @@ An enterprise-grade industrial IoT data acquisition, monitoring, and analytics p
 
 ---
 
-## Quick start (Replit)
+## Quick start
 
-No local setup needed — Replit provisions the database and starts all services automatically.
+You need PostgreSQL 16, Node 20+ and pnpm. Full steps are in
+[Local development setup](#local-development-setup) below; the short version:
 
-1. Open the project in Replit.
-2. The API server and frontend start via configured workflows.
-3. Open the **web** preview pane — the UI is served at `/`.
-4. You land on the **login page** (`/login`). Enter any email + password — authentication is mocked (no auth backend), so any input signs you in.
-5. Switch roles with the profile switcher in the top bar; **Sign Out** returns you to the login page.
+```bash
+pnpm install
+cp .env.example .env          # set DATABASE_URL and SESSION_SECRET
+pnpm --filter @workspace/db run push
+pnpm --filter @workspace/db run seed    # required — the UI is unusable without it
+pnpm dev:api                  # terminal 1 → http://localhost:8080/api
+pnpm dev:web                  # terminal 2 → http://localhost:5173
+```
+
+Open `http://localhost:5173`. You land on the login page — sign in with a seeded
+account, then use the profile menu to sign out.
+
+> The API server's `dev` script is a one-shot build-and-start with **no watch**.
+> Re-run `pnpm dev:api` after any server-side edit.
 
 ---
 
@@ -97,22 +107,36 @@ This regenerates React Query hooks (`lib/api-client-react`) and Zod schemas (`li
 |----------|----------|---------|-------------|
 | `DATABASE_URL` | **Yes** | — | PostgreSQL connection string |
 | `SESSION_SECRET` | No | — | Signs HTTP sessions |
-| `PORT` | No | `8080` (API) / `5173` (UI) | Listening port; set automatically by Replit |
-| `BASE_PATH` | No | `/` | URL prefix for the frontend; set automatically by Replit |
+| `PORT` | No | `8080` (API) / `5173` (UI) | Listening port |
+| `BASE_PATH` | No | `/` | URL prefix for the frontend; set only if a reverse proxy serves it from a sub-path |
 
 See `.env.example` for an annotated template.
 
 ---
 
-## Deployment (Replit)
+## Deployment
 
-1. Set `DATABASE_URL` and `SESSION_SECRET` as **Replit secrets** (Settings → Secrets).
-2. Click **Publish** in the Replit workspace.
-3. Replit builds both artifacts and routes them through its global reverse proxy:
-   - API → `https://<domain>/api`
-   - UI  → `https://<domain>/`
+Self-hosted on a single Linux VM. Two pieces have to be in place, because the API
+server intentionally serves no static files:
 
-See [`docs/operations/runbook.md`](docs/operations/runbook.md) for detailed deployment, monitoring, and rollback procedures.
+1. **The API server** — build with `pnpm build`, then run `pnpm start`
+   (`node --enable-source-maps artifacts/api-server/dist/index.mjs`) under systemd.
+2. **A reverse proxy** — nginx serves the built SPA from
+   `artifacts/iot-platform/dist/public` with an `index.html` history fallback, and
+   forwards `/api` (including the `/api/ws` WebSocket upgrade) to port 8080. This is
+   also what terminates TLS and what makes the IP allowlist trustworthy — it must
+   **overwrite** `X-Forwarded-For`, not append to it.
+
+**[`docs/operations/vm-deployment-checklist.md`](docs/operations/vm-deployment-checklist.md)
+is the step-by-step guide** — env table, systemd unit, nginx site, ordered
+verification, and the things that commonly bite.
+
+> Run a **single** API server instance. Rate-limit counters, the WebSocket client
+> registry, the MQTT subscriber and the retention pruner are all in-process, so a
+> second instance would double-ingest every MQTT message.
+
+Note also that pulling changes no longer triggers anything automatically: run
+`pnpm install` yourself, and apply schema changes deliberately.
 
 ---
 

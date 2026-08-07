@@ -2,35 +2,17 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import tailwindcss from "@tailwindcss/vite";
 import path from "path";
-import runtimeErrorOverlay from "@replit/vite-plugin-runtime-error-modal";
 
-// On Replit, PORT and BASE_PATH are injected by the platform.
-// For local development, fall back to sensible defaults so the dev server
-// starts without needing any env configuration.
+// Both are overridable by the environment (a reverse proxy may want the app on a
+// sub-path), and both default so the dev server starts with no configuration.
 const port = Number(process.env.PORT ?? "5173");
 const basePath = process.env.BASE_PATH ?? "/";
-
-const isReplit = process.env.REPL_ID !== undefined;
-const isDev = process.env.NODE_ENV !== "production";
 
 export default defineConfig({
   base: basePath,
   plugins: [
     react(),
     tailwindcss(),
-    runtimeErrorOverlay(),
-    ...(isDev && isReplit
-      ? [
-          await import("@replit/vite-plugin-cartographer").then((m) =>
-            m.cartographer({
-              root: path.resolve(import.meta.dirname, ".."),
-            }),
-          ),
-          await import("@replit/vite-plugin-dev-banner").then((m) =>
-            m.devBanner(),
-          ),
-        ]
-      : []),
   ],
   resolve: {
     alias: {
@@ -52,19 +34,23 @@ export default defineConfig({
     fs: {
       strict: true,
     },
-    // When running locally (not on Replit), proxy /api to the backend dev server
-    // so the frontend and API can run on separate ports without CORS issues.
-    ...(isReplit
-      ? {}
-      : {
-          proxy: {
-            "/api": {
-              target: "http://localhost:8080",
-              changeOrigin: true,
-              ws: true,
-            },
-          },
-        }),
+    // Proxy /api to the API server so the SPA and the API appear on one origin
+    // during development — relative `fetch("/api/…")` calls work with no CORS,
+    // and `ws: true` carries the /api/ws WebSocket upgrade through as well.
+    //
+    // In production a reverse proxy does this job instead: it serves the built
+    // SPA from dist/public and forwards /api to the API server. See
+    // docs/operations/vm-deployment-checklist.md.
+    //
+    // The 8080 target matches the default in artifacts/api-server/src/index.ts —
+    // change one and you must change the other.
+    proxy: {
+      "/api": {
+        target: "http://localhost:8080",
+        changeOrigin: true,
+        ws: true,
+      },
+    },
   },
   preview: {
     port,

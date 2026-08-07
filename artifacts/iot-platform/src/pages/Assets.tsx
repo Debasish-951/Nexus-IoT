@@ -1,4 +1,4 @@
-import { useState, useMemo, useCallback, useEffect } from "react";
+import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import { useLocation } from "wouter";
 import { useListAssets, useDeleteAsset, getListAssetsQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -8,7 +8,8 @@ import { Label } from "@/components/ui/label";
 import { Card } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
-import { Blocks, ArrowLeft } from "lucide-react";
+import type { ImperativePanelHandle } from "react-resizable-panels";
+import { Blocks, ArrowLeft, ChevronLeft, ChevronRight } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { Asset } from "./assetShared";
@@ -35,6 +36,18 @@ export default function Assets() {
   const [wizardParent, setWizardParent] = useState("");
   const [expanded, setExpanded] = useState<Set<string>>(new Set());  // empty = all collapsed (default)
   const [selectedId, setSelectedId] = useState<string | null>(null);
+
+  // Collapsible hierarchy pane — same mechanism as Visualization's tree panel:
+  // driven through the panel's own imperative handle rather than unmounting it,
+  // so its width (and any drag-resize) is restored on expand instead of
+  // snapping back to the default.
+  const treePanelRef = useRef<ImperativePanelHandle>(null);
+  const [treeCollapsed, setTreeCollapsed] = useState(false);
+  function toggleTree() {
+    const panel = treePanelRef.current;
+    if (!panel) return;
+    if (panel.isCollapsed()) panel.expand(); else panel.collapse();
+  }
 
   // Group children by parent once (memoized) — supports large/deep trees.
   const childrenByParent = useMemo(() => {
@@ -149,32 +162,67 @@ export default function Assets() {
       <Card className="flex-1 min-h-0 overflow-hidden shadow-sm">
         <AssetTreeProvider value={ctx}>
           <ResizablePanelGroup direction="horizontal" className="h-full">
-            <ResizablePanel defaultSize={28} minSize={18} maxSize={45}>
-              <div className="flex flex-col h-full border-r border-border">
-                <TreeToolbar
-                  query={search} setQuery={setSearch}
-                  onExpandAll={expandAll} onCollapseAll={collapseAll}
-                  onAdd={() => { setWizardParent(""); setWizardOpen(true); }}
-                  canManage={canManage}
-                />
-                {/* independent scroll for the hierarchy */}
-                <div className="flex-1 overflow-auto">
-                  <AssetTree loading={!assets} />
+            <ResizablePanel
+              ref={treePanelRef}
+              defaultSize={14} minSize={11} maxSize={22}
+              collapsible collapsedSize={0}
+              onCollapse={() => setTreeCollapsed(true)}
+              onExpand={() => setTreeCollapsed(false)}
+            >
+              {/* The scroll container is nested so the collapse tab below stays pinned
+                  to the pane edge instead of scrolling away with the tree. */}
+              <div className="relative h-full">
+                <div className="flex flex-col h-full border-r border-border">
+                  <TreeToolbar
+                    query={search} setQuery={setSearch}
+                    onExpandAll={expandAll} onCollapseAll={collapseAll}
+                    onAdd={() => { setWizardParent(""); setWizardOpen(true); }}
+                    canManage={canManage}
+                  />
+                  {/* independent scroll for the hierarchy */}
+                  <div className="flex-1 overflow-auto">
+                    <AssetTree loading={!assets} />
+                  </div>
+                  <div className="px-3 py-1.5 border-t border-border text-[11px] text-muted-foreground shrink-0">{allAssets.length} asset{allAssets.length !== 1 ? "s" : ""}</div>
                 </div>
-                <div className="px-3 py-1.5 border-t border-border text-[11px] text-muted-foreground shrink-0">{allAssets.length} asset{allAssets.length !== 1 ? "s" : ""}</div>
+                {/* Hidden while collapsed: at zero width this would sit on top of the
+                    expand tab in the pane next door. */}
+                {!treeCollapsed && (
+                  <button
+                    onClick={toggleTree}
+                    title="Hide the hierarchy panel"
+                    aria-label="Hide the hierarchy panel"
+                    className="absolute right-0 top-1/2 -translate-y-1/2 z-20 flex h-7 w-4 items-center justify-center rounded-l border border-r-0 border-border bg-card text-muted-foreground shadow-sm hover:bg-muted hover:text-foreground"
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" />
+                  </button>
+                )}
               </div>
             </ResizablePanel>
             <ResizableHandle withHandle />
-            <ResizablePanel defaultSize={72}>
+            <ResizablePanel defaultSize={86}>
               {/* Full asset details inline — no separate page. */}
-              <div className="h-full overflow-auto">
-                {selectedAsset ? (
-                  <AssetDetails assetId={selectedAsset.id} embedded />
-                ) : (
-                  <div className="flex flex-col items-center justify-center h-full text-muted-foreground p-8 text-center">
-                    <MousePointerClick className="w-10 h-10 mb-3 opacity-20" />
-                    <p className="text-sm">Select an asset from the tree to view its full details.</p>
-                  </div>
+              <div className="relative h-full">
+                <div className="h-full overflow-auto">
+                  {selectedAsset ? (
+                    <AssetDetails assetId={selectedAsset.id} embedded />
+                  ) : (
+                    <div className="flex flex-col items-center justify-center h-full text-muted-foreground p-8 text-center">
+                      <MousePointerClick className="w-10 h-10 mb-3 opacity-20" />
+                      <p className="text-sm">Select an asset from the tree to view its full details.</p>
+                    </div>
+                  )}
+                </div>
+                {/* Only reachable route back once the pane has no width of its own. */}
+                {treeCollapsed && (
+                  <button
+                    onClick={toggleTree}
+                    title="Show the hierarchy panel"
+                    aria-label="Show the hierarchy panel"
+                    className="absolute left-0 top-1/2 -translate-y-1/2 z-20 flex h-7 w-4 items-center justify-center rounded-r border border-l-0 border-border bg-card text-muted-foreground shadow-sm hover:bg-muted hover:text-foreground"
+                  >
+                    <ChevronRight className="h-3.5 w-3.5" />
+                  </button>
                 )}
               </div>
             </ResizablePanel>

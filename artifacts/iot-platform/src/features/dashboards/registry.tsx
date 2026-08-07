@@ -1,20 +1,38 @@
 import { memo } from "react";
 import {
-  Activity, ShieldCheck, Gauge as GaugeIcon, BadgeCheck, Percent, Timer, Clock, Zap,
+  Activity, Gauge as GaugeIcon, Timer, Zap,
   Boxes, Bell, LineChart as LineIcon, BarChart3, AreaChart as AreaIcon, PieChart as PieIcon,
   ScatterChart, Grid3x3, Table as TableIcon, Type, Thermometer, Battery, CircleDot,
-  Droplet, TrafficCone, ListOrdered, Image as ImageIcon, ToggleLeft,
+  Droplet, TrafficCone, ListOrdered, Image as ImageIcon, ToggleLeft, CreditCard,
+  TrendingUp, Wind, Move, Waves, AlertTriangle, Cpu, Package,
 } from "lucide-react";
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell,
   RadialBarChart, RadialBar, XAxis, YAxis, Tooltip, Legend, ScatterChart as RScatterChart, Scatter, ReferenceLine, CartesianGrid,
 } from "recharts";
+import { cn } from "@/lib/utils";
 import type { Widget } from "./types";
 import { useSeriesSet, useAttributeMeta, aggregate, type SeriesSpec } from "./useWidgetData";
 import type { TimeCfg } from "./timeRange";
+import { SERIES, STATUS } from "@/lib/chartColors";
 
-export const PALETTE = { primary: "#2563EB", success: "#22C55E", warning: "#F59E0B", critical: "#EF4444", neutral: "#64748B" };
-const COLORS = [PALETTE.primary, PALETTE.success, PALETTE.warning, PALETTE.critical, "#a855f7", "#06b6d4"];
+/**
+ * Widget colours. Status colours come from the shared STATUS set; `primary` is the
+ * theme accent, used as a widget's default single-series colour.
+ *
+ * The series list and the status list are deliberately separate — see
+ * src/lib/chartColors.ts for why.
+ */
+export const PALETTE = {
+  primary: "#3B82F6",
+  success: STATUS.ok,
+  warning: STATUS.warning,
+  critical: STATUS.critical,
+  neutral: STATUS.neutral,
+};
+
+/** Re-exported so the widget config panel can offer the same order. */
+export const SERIES_COLORS = SERIES;
 
 /**
  * Shared <Tooltip> look for every chart type.
@@ -54,20 +72,40 @@ export interface WidgetDef {
   defaults?: Record<string, any>;
 }
 
+/**
+ * Icon choices offered per-metric on the Card widget (see WidgetConfigPanel's
+ * metric rows). Deliberately a small curated set, hand-picked per metric — not
+ * inferred from the attribute's name/unit, which would silently guess wrong for
+ * anything the heuristic didn't anticipate.
+ */
+export const CARD_ICONS: Record<string, React.ElementType> = {
+  activity: Activity, gauge: GaugeIcon, thermometer: Thermometer, zap: Zap,
+  droplet: Droplet, battery: Battery, timer: Timer, trendingUp: TrendingUp,
+  wind: Wind, move: Move, waves: Waves, alert: AlertTriangle, cpu: Cpu,
+  package: Package, bell: Bell, boxes: Boxes,
+};
+export const CARD_ICON_KEYS = Object.keys(CARD_ICONS);
+
+/**
+ * Widget types that group N independently-bound metrics into one grid, each
+ * rendered as its own tile — a Card's label+value, or one of the Industrial
+ * marks (a gauge, a thermometer, a traffic light, …). One config shape
+ * (`config.metrics: []` + shared layout knobs) and one series-building /
+ * migration path serve all of them; only the per-tile "mark" differs.
+ */
+export const GROUPED_TYPES = ["card", "gauge", "thermometer", "tank", "progress", "status", "traffic", "battery"] as const;
+
 // ── Catalog (Phase 1 core set + full list of names) ──
 export const WIDGET_CATEGORIES: { name: string; items: WidgetDef[] }[] = [
-  { name: "KPI", items: [
-    { type: "kpi",        label: "Custom KPI",        icon: Activity,    category: "KPI", w: 3, h: 3, defaults: { unit: "", color: PALETTE.primary } },
-    { type: "health",     label: "Health Score",      icon: ShieldCheck, category: "KPI", w: 3, h: 3, defaults: { unit: "%", color: PALETTE.success, value: 92 } },
-    { type: "availability", label: "Availability",    icon: BadgeCheck,  category: "KPI", w: 3, h: 3, defaults: { unit: "%", color: PALETTE.success, value: 98 } },
-    { type: "oee",        label: "OEE",               icon: Percent,     category: "KPI", w: 3, h: 3, defaults: { unit: "%", color: PALETTE.primary, value: 84 } },
-    { type: "downtime",   label: "Downtime",          icon: Clock,       category: "KPI", w: 3, h: 3, defaults: { unit: "h", color: PALETTE.warning, value: 3.2 } },
-    { type: "runtime",    label: "Runtime",           icon: Timer,       category: "KPI", w: 3, h: 3, defaults: { unit: "h", color: PALETTE.primary, value: 128 } },
-    { type: "energy",     label: "Energy",            icon: Zap,         category: "KPI", w: 3, h: 3, defaults: { unit: "kWh", color: PALETTE.primary, value: 245 } },
-    { type: "alarmcount", label: "Alarm Count",       icon: Bell,        category: "KPI", w: 3, h: 3, defaults: { color: PALETTE.critical, value: 0 } },
-    { type: "assetcount", label: "Asset Count",       icon: Boxes,       category: "KPI", w: 3, h: 3, defaults: { color: PALETTE.neutral, value: 0 } },
-  ]},
   { name: "Charts", items: [
+    // A single generic Card, not nine near-identical single-value widgets (Custom
+    // KPI, Health Score, OEE, …) that all rendered the same label+value tile. One
+    // metric bound = the old single-KPI look; add more to group several readings
+    // into one grid, like a "Recent Sensor Data" tile.
+    { type: "card",  label: "Card",        icon: CreditCard, category: "Charts", w: 4, h: 3, defaults: {
+      metrics: [{}], columns: 2, gridGap: 8, textOrientation: "vertical", unitPlacement: "suffix",
+      showFullText: false, radius: 10, titleFontSize: 13, valueFontSize: 20,
+    } },
     { type: "line",  label: "Line Chart",  icon: LineIcon,  category: "Charts", w: 6, h: 5, defaults: { color: PALETTE.primary } },
     { type: "area",  label: "Area Chart",  icon: AreaIcon,  category: "Charts", w: 6, h: 5, defaults: { color: PALETTE.primary } },
     { type: "bar",   label: "Bar Chart",   icon: BarChart3, category: "Charts", w: 6, h: 5, defaults: { color: PALETTE.primary } },
@@ -79,13 +117,35 @@ export const WIDGET_CATEGORIES: { name: string; items: WidgetDef[] }[] = [
     { type: "heatmap", label: "Heatmap",   icon: Grid3x3,   category: "Charts", w: 6, h: 5 },
   ]},
   { name: "Industrial", items: [
-    { type: "gauge",     label: "Gauge",           icon: GaugeIcon,   category: "Industrial", w: 3, h: 4, defaults: { value: 62, max: 100, color: PALETTE.primary } },
-    { type: "thermometer", label: "Thermometer",   icon: Thermometer, category: "Industrial", w: 2, h: 5, defaults: { value: 48, max: 120, color: PALETTE.critical } },
-    { type: "tank",      label: "Tank Level",      icon: Droplet,     category: "Industrial", w: 2, h: 5, defaults: { value: 70, color: PALETTE.primary } },
-    { type: "progress",  label: "Progress Bar",    icon: CircleDot,   category: "Industrial", w: 4, h: 2, defaults: { value: 65, color: PALETTE.success } },
-    { type: "status",    label: "Status Indicator",icon: CircleDot,   category: "Industrial", w: 3, h: 2, defaults: { state: "ok" } },
-    { type: "traffic",   label: "Traffic Light",   icon: TrafficCone, category: "Industrial", w: 2, h: 4, defaults: { state: "ok" } },
-    { type: "battery",   label: "Battery",         icon: Battery,     category: "Industrial", w: 3, h: 2, defaults: { value: 80, color: PALETTE.success } },
+    // Same grouping model as Card (config.metrics + shared layout) — one gauge
+    // bound = the old single-value look; add more to compare several readings
+    // in one grid of dials/bars/lights instead of one widget each.
+    { type: "gauge",     label: "Gauge",           icon: GaugeIcon,   category: "Industrial", w: 4, h: 5, defaults: {
+      metrics: [{ max: 100, color: PALETTE.primary }], columns: 1, gridGap: 8, unitPlacement: "suffix",
+      showFullText: false, radius: 10, titleFontSize: 13, valueFontSize: 18,
+    } },
+    { type: "thermometer", label: "Thermometer",   icon: Thermometer, category: "Industrial", w: 3, h: 6, defaults: {
+      metrics: [{ max: 120, color: PALETTE.critical }], columns: 1, gridGap: 8, unitPlacement: "suffix",
+      showFullText: false, radius: 10, titleFontSize: 13, valueFontSize: 14,
+    } },
+    { type: "tank",      label: "Tank Level",      icon: Droplet,     category: "Industrial", w: 3, h: 6, defaults: {
+      metrics: [{ max: 100, color: PALETTE.primary }], columns: 1, gridGap: 8, unitPlacement: "suffix",
+      showFullText: false, radius: 10, titleFontSize: 13, valueFontSize: 14,
+    } },
+    { type: "progress",  label: "Progress Bar",    icon: CircleDot,   category: "Industrial", w: 4, h: 3, defaults: {
+      metrics: [{ color: PALETTE.success }], columns: 1, gridGap: 8, unitPlacement: "suffix",
+      showFullText: false, radius: 10, titleFontSize: 13, valueFontSize: 13,
+    } },
+    { type: "status",    label: "Status Indicator",icon: CircleDot,   category: "Industrial", w: 3, h: 3, defaults: {
+      metrics: [{ state: "ok" }], columns: 1, gridGap: 8, showFullText: false, radius: 10, titleFontSize: 13, valueFontSize: 13,
+    } },
+    { type: "traffic",   label: "Traffic Light",   icon: TrafficCone, category: "Industrial", w: 2, h: 5, defaults: {
+      metrics: [{ state: "ok" }], columns: 1, gridGap: 8, showFullText: false, radius: 10, titleFontSize: 13, valueFontSize: 13,
+    } },
+    { type: "battery",   label: "Battery",         icon: Battery,     category: "Industrial", w: 4, h: 3, defaults: {
+      metrics: [{ max: 100, color: PALETTE.success }], columns: 1, gridGap: 8, unitPlacement: "suffix",
+      showFullText: false, radius: 10, titleFontSize: 13, valueFontSize: 13,
+    } },
   ]},
   { name: "Tables", items: [
     { type: "table",   label: "Data Grid",       icon: TableIcon,  category: "Tables", w: 6, h: 5 },
@@ -103,6 +163,65 @@ export const WIDGET_CATEGORIES: { name: string; items: WidgetDef[] }[] = [
 const BY_TYPE: Record<string, WidgetDef> = {};
 for (const c of WIDGET_CATEGORIES) for (const it of c.items) BY_TYPE[it.type] = it;
 export function widgetDef(type: string): WidgetDef | undefined { return BY_TYPE[type]; }
+
+// ── Legacy KPI types → Card ──
+// The old single-value widgets (Custom KPI, Health Score, Availability, OEE,
+// Downtime, Runtime, Energy, Alarm Count, Asset Count) are gone from the
+// library, folded into the general Card widget above. Dashboards saved before
+// this change still name one of these types in localStorage, so every widget
+// is upgraded in place the first time it's loaded (see AssetVizPanel) rather
+// than silently rendering broken.
+export const LEGACY_KPI_TYPES = [
+  "kpi", "health", "availability", "oee", "downtime", "runtime", "energy", "alarmcount", "assetcount",
+] as const;
+const LEGACY_ICON: Record<string, string> = {
+  kpi: "activity", health: "gauge", availability: "gauge", oee: "gauge",
+  downtime: "timer", runtime: "timer", energy: "zap", alarmcount: "alert", assetcount: "package",
+};
+export function migrateLegacyWidget(w: Widget): Widget {
+  const c = w.config ?? {};
+
+  // Case 1: an old KPI-only type — the type itself is gone, folded into Card.
+  if ((LEGACY_KPI_TYPES as readonly string[]).includes(w.type)) {
+    return {
+      ...w,
+      type: "card",
+      config: {
+        metrics: [{
+          assetId: c.assetId, tag: c.tag, label: c.label, unit: c.unit,
+          color: c.color, icon: LEGACY_ICON[w.type] ?? "activity",
+          // The old types shipped a hardcoded demo number (e.g. Health Score → 92)
+          // shown only while unbound — carried over so an unbound migrated widget
+          // still looks the way it did, instead of collapsing to a bare "0.0".
+          defaultValue: c.value,
+        }],
+        columns: 1, gridGap: 8, textOrientation: "vertical", unitPlacement: "suffix",
+        showFullText: false, radius: 10, titleFontSize: 13, valueFontSize: 26,
+      },
+    };
+  }
+
+  // Case 2: an Industrial type (Gauge, Thermometer, Tank, Progress, Status,
+  // Traffic, Battery) still exists, but its config used to hold ONE flat
+  // value/max/state directly rather than a `metrics` array — upgrade the shape
+  // in place so a dashboard saved before grouping still shows its binding.
+  const isGrouped = (GROUPED_TYPES as readonly string[]).includes(w.type) && w.type !== "card";
+  if (isGrouped && !Array.isArray(c.metrics)) {
+    return {
+      ...w,
+      config: {
+        metrics: [{
+          assetId: c.assetId, tag: c.tag, label: c.label, unit: c.unit, color: c.color,
+          max: c.max, critical: c.critical, warn: c.warn, state: c.state, defaultValue: c.value,
+        }],
+        columns: 1, gridGap: 8, unitPlacement: "suffix",
+        showFullText: false, radius: 10, titleFontSize: 13, valueFontSize: 16,
+      },
+    };
+  }
+
+  return w;
+}
 
 // Deterministic-ish demo series (Phase 1 — real telemetry wiring is Phase 2).
 function demoSeries(n = 24, seed = 1) {
@@ -122,6 +241,19 @@ function fmt(v: number | null, c: Record<string, any>): string {
   if (v == null) return "—";
   const dec = c.decimals != null ? Number(c.decimals) : (Math.abs(v) < 10 ? 1 : 0);
   return v.toFixed(dec);
+}
+
+// Black or white, whichever reads on a given fill — so a Card tile's user-picked
+// background never buries its own label/value/icon. Perceived-luminance (ITU-R
+// BT.601) rather than a straight RGB average, since that's what "looks light or
+// dark to a person" actually tracks.
+function contrastText(hex?: string): string | undefined {
+  if (!hex) return undefined;
+  const h = hex.replace("#", "");
+  if (h.length !== 6) return undefined;
+  const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+  const luma = (r * 299 + g * 587 + b * 114) / 1000;
+  return luma >= 150 ? "#111827" : "#ffffff";
 }
 
 // ── Renderer ──
@@ -176,6 +308,18 @@ export const WidgetView = memo(function WidgetView({ widget, refreshNonce, dashT
         seriesSrc[`s${i}`] = { assetId: c.assetId, tag: tg };
       });
     }
+  } else if ((GROUPED_TYPES as readonly string[]).includes(t)) {
+    // Each metric is its own independent binding (own asset, own attribute) —
+    // same idea as overlay series above, but these are the widget's ONLY
+    // content rather than extras layered on a primary series. Shared by Card
+    // and every Industrial type (Gauge, Thermometer, …) — one grouping model.
+    const metrics: { assetId?: string; tag?: string }[] = Array.isArray(c.metrics) ? c.metrics : [];
+    metrics.forEach((m, i) => {
+      if (!m.tag) return;
+      const key = `m${i}`;
+      seriesList.push({ key, assetId: m.assetId, tag: m.tag });
+      seriesSrc[key] = { assetId: m.assetId, tag: m.tag, color: (m as any).color, label: (m as any).label, unit: (m as any).unit };
+    });
   } else if (c.tag) {
     seriesList.push({ key: "s0", assetId: c.assetId, tag: c.tag });
     seriesSrc.s0 = { assetId: c.assetId, tag: c.tag, color: c.color, label: c.label, unit: c.unit };
@@ -274,18 +418,72 @@ export const WidgetView = memo(function WidgetView({ widget, refreshNonce, dashT
     return <div className="h-full w-full flex items-center justify-center text-muted-foreground text-xs">No data in selected range</div>;
   }
 
-  if (["kpi", "health", "availability", "oee", "downtime", "runtime", "energy", "alarmcount", "assetcount"].includes(t)) {
-    const value = bound ? aggVal : (c.value ?? 0);
-    const color = statusColor(value, c);
+  if (t === "card") {
+    const metrics: Record<string, any>[] = Array.isArray(c.metrics) ? c.metrics : [];
+    const columns = Math.max(1, Number(c.columns) || 1);
+    const gap = Number(c.gridGap) || 0;
+    const orientation = c.textOrientation === "horizontal" ? "horizontal" : "vertical";
+    const unitPlacement = c.unitPlacement === "prefix" ? "prefix" : "suffix";
+    const showFullText = !!c.showFullText;
+    const radius = Number(c.radius) || 0;
+    const titleFs = Number(c.titleFontSize) || 13;
+    const valueFs = Number(c.valueFontSize) || 20;
+    // Last non-null value for one metric's series key — same "last" semantics as
+    // aggVal above, just resolved per-metric instead of for a single primary series.
+    const lastOf = (key: string): number | null => {
+      for (let i = rows.length - 1; i >= 0; i--) { const v = rows[i]?.[key]; if (v != null) return v as number; }
+      return null;
+    };
+
+    if (metrics.length === 0) {
+      return <div className="h-full w-full flex items-center justify-center text-muted-foreground text-xs">Add a metric in the Edit Widget panel to get started.</div>;
+    }
+
     return (
-      <div className="h-full w-full flex flex-col justify-center px-1">
-        {/* The series name, NOT the title — the widget header already carries the
-            title, and printing it in both places put the same text on one widget
-            twice. A KPI has no legend, so this caption is where its attribute name
-            belongs. */}
-        <p className="text-xs text-muted-foreground truncate">{seriesMeta[firstKey ?? ""]?.label || widgetDef(t)?.label || "KPI"}{c.tag && !bound ? " (no data)" : ""}</p>
-        <p className="text-3xl font-bold tabular-nums" style={{ color }}>{typeof value === "number" ? fmt(value, c) : value}<span className="text-sm text-muted-foreground ml-1">{seriesMeta[firstKey ?? ""]?.unit ?? c.unit ?? ""}</span></p>
-        {c.subtitle && <p className="text-[11px] text-muted-foreground truncate">{c.subtitle}</p>}
+      <div className="h-full w-full overflow-auto p-1.5">
+        <div className="grid" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0,1fr))`, gap }}>
+          {metrics.map((m, i) => {
+            const key = `m${i}`;
+            const src = seriesSrc[key];
+            const metricBound = !!(m.assetId && m.tag);
+            const val = metricBound ? lastOf(key) : null;
+            const label = displayName(src) || m.label || `Metric ${i + 1}`;
+            const unit = displayUnit(src) ?? m.unit ?? "";
+            const Icon: React.ElementType = CARD_ICONS[m.icon as string] ?? Activity;
+            const customIcon = String(m.customIcon ?? "").trim();
+            const color = m.color || PALETTE.primary;
+            const shown = val != null ? fmt(val, m) : (m.defaultValue != null ? fmt(Number(m.defaultValue), m) : (metricBound ? "—" : "0.0"));
+            // A filled tile switches everything on it to black-or-white so the
+            // user's own accent color (meant to read on the neutral default
+            // tile) never fights the fill for contrast — but that's a default,
+            // not a lock: an explicit Text Color in the edit panel wins over
+            // the auto-computed one.
+            const bg: string | undefined = m.bgColor || undefined;
+            const onFill = bg ? (m.textColor || contrastText(bg)) : undefined;
+            const iconColor = onFill ?? color;
+            const unitStyle = { fontSize: titleFs, color: onFill } as const;
+            const valueEl = (
+              <p className="font-bold tabular-nums" style={{ fontSize: valueFs, color: onFill ?? color }}>
+                {unit && unitPlacement === "prefix" && <span className={cn(!onFill && "text-muted-foreground", "mr-1")} style={unitStyle}>{unit}</span>}
+                {shown}
+                {unit && unitPlacement === "suffix" && <span className={cn(!onFill && "text-muted-foreground", "ml-1")} style={unitStyle}>{unit}</span>}
+              </p>
+            );
+            return (
+              <div key={i} className={cn("flex border border-border p-2", !bg && "bg-muted/40", orientation === "horizontal" ? "flex-row items-center gap-2" : "flex-col gap-1")} style={{ borderRadius: radius, background: bg }}>
+                {/* A pasted emoji overrides the preset icon — see the Icon field's
+                    note in the widget's edit panel. */}
+                {customIcon
+                  ? <span className="shrink-0 leading-none" style={{ fontSize: 18, color: onFill }}>{customIcon}</span>
+                  : <Icon className="w-5 h-5 shrink-0" style={{ color: iconColor }} />}
+                <div className={cn("min-w-0 flex-1", orientation === "horizontal" && "text-right")}>
+                  <p className={cn(!onFill && "text-muted-foreground", !showFullText && "truncate")} style={{ fontSize: titleFs, color: onFill }}>{label}</p>
+                  {valueEl}
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
     );
   }
@@ -301,7 +499,7 @@ export const WidgetView = memo(function WidgetView({ widget, refreshNonce, dashT
           {spcLines}
           {seriesTags.map((tg, i) => {
             const meta = seriesMeta[tg];
-            const col = meta?.color ?? (seriesTags.length > 1 ? COLORS[i % COLORS.length] : baseColor);
+            const col = meta?.color ?? (seriesTags.length > 1 ? SERIES_COLORS[i % SERIES_COLORS.length] : baseColor);
             const name = meta?.label || String(tg).split(".").pop();
             return <Series key={tg} type="monotone" dataKey={tg} name={name} stroke={col} fill={col} fillOpacity={0.15} strokeWidth={1.8} dot={false} isAnimationActive={false} connectNulls={interpolated} />;
           })}
@@ -320,7 +518,7 @@ export const WidgetView = memo(function WidgetView({ widget, refreshNonce, dashT
           {spcLines}
           {seriesTags.map((tg, i) => {
             const meta = seriesMeta[tg];
-            const fill = meta?.color ?? (seriesTags.length > 1 ? COLORS[i % COLORS.length] : baseColor);
+            const fill = meta?.color ?? (seriesTags.length > 1 ? SERIES_COLORS[i % SERIES_COLORS.length] : baseColor);
             const name = meta?.label || String(tg).split(".").pop();
             return <Bar key={tg} dataKey={tg} name={name} stackId={stackId} fill={fill} isAnimationActive={false} />;
           })}
@@ -335,7 +533,7 @@ export const WidgetView = memo(function WidgetView({ widget, refreshNonce, dashT
         <LineChart data={chartData} margin={{ top: 4, right: 4, left: 4, bottom: 4 }}>
           <Tooltip {...TOOLTIP_PROPS} />
           {seriesTags.map((tg, i) => (
-            <Line key={tg} type="monotone" dataKey={tg} stroke={seriesTags.length > 1 ? COLORS[i % COLORS.length] : baseColor} strokeWidth={1.5} dot={false} isAnimationActive={false} connectNulls={interpolated} />
+            <Line key={tg} type="monotone" dataKey={tg} stroke={seriesTags.length > 1 ? SERIES_COLORS[i % SERIES_COLORS.length] : baseColor} strokeWidth={1.5} dot={false} isAnimationActive={false} connectNulls={interpolated} />
           ))}
         </LineChart>
       </ResponsiveContainer>
@@ -346,43 +544,137 @@ export const WidgetView = memo(function WidgetView({ widget, refreshNonce, dashT
       <ResponsiveContainer width="100%" height="100%">
         <PieChart>
           <Pie data={demoPie} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius="80%" innerRadius={t === "donut" ? "55%" : 0} isAnimationActive={false}>
-            {demoPie.map((_, i) => <Cell key={i} fill={COLORS[i % COLORS.length]} />)}
+            {demoPie.map((_, i) => <Cell key={i} fill={SERIES_COLORS[i % SERIES_COLORS.length]} />)}
           </Pie><Tooltip {...TOOLTIP_PROPS} />
         </PieChart>
       </ResponsiveContainer>
     );
   }
-  if (t === "gauge") {
-    const val = (bound ? aggVal : c.value) ?? 0, max = c.max ?? 100;
-    const color = statusColor(val, c);
+  if (["gauge", "thermometer", "tank", "progress", "battery", "status", "traffic"].includes(t)) {
+    const metrics: Record<string, any>[] = Array.isArray(c.metrics) ? c.metrics : [];
+    const columns = Math.max(1, Number(c.columns) || 1);
+    const gap = Number(c.gridGap) || 0;
+    const unitPlacement = c.unitPlacement === "prefix" ? "prefix" : "suffix";
+    const showFullText = !!c.showFullText;
+    const radius = Number(c.radius) || 0;
+    const titleFs = Number(c.titleFontSize) || 13;
+    const valueFs = Number(c.valueFontSize) || 16;
+    const isStateType = t === "status" || t === "traffic";
+    const lastOf = (key: string): number | null => {
+      for (let i = rows.length - 1; i >= 0; i--) { const v = rows[i]?.[key]; if (v != null) return v as number; }
+      return null;
+    };
+
+    if (metrics.length === 0) {
+      return <div className="h-full w-full flex items-center justify-center text-muted-foreground text-xs">Add a metric in the Edit Widget panel to get started.</div>;
+    }
+
     return (
-      <div className="h-full flex flex-col items-center justify-center">
-        <ResponsiveContainer width="100%" height="75%">
-          <RadialBarChart innerRadius="70%" outerRadius="100%" data={[{ v: val, fill: color }]} startAngle={210} endAngle={-30}>
-            <RadialBar dataKey="v" cornerRadius={6} background isAnimationActive={false} />
-          </RadialBarChart>
-        </ResponsiveContainer>
-        <p className="text-xl font-bold -mt-6" style={{ color }}>{fmt(val, c)}<span className="text-xs text-muted-foreground">/{max}</span></p>
-      </div>
-    );
-  }
-  if (t === "thermometer" || t === "tank" || t === "battery" || t === "progress") {
-    const val = (bound ? aggVal : c.value) ?? 0, max = c.max ?? 100, pct = Math.max(0, Math.min(100, (val / max) * 100));
-    const color = statusColor(val, c);
-    const vertical = t === "thermometer" || t === "tank";
-    return (
-      <div className="h-full w-full flex flex-col items-center justify-center gap-2 p-2">
-        <div className={vertical ? "relative w-6 flex-1 rounded-full bg-muted overflow-hidden" : "relative w-full h-3 rounded-full bg-muted overflow-hidden"}>
-          <div className={vertical ? "absolute bottom-0 w-full" : "absolute left-0 top-0 h-full"} style={{ [vertical ? "height" : "width"]: `${pct}%`, background: color }} />
+      <div className="h-full w-full overflow-auto p-1.5">
+        <div className="grid" style={{ gridTemplateColumns: `repeat(${columns}, minmax(0,1fr))`, gap }}>
+          {metrics.map((m, i) => {
+            const key = `m${i}`;
+            const src = seriesSrc[key];
+            const metricBound = !!(m.assetId && m.tag);
+            const val = metricBound ? lastOf(key) : null;
+            const label = displayName(src) || m.label || `Metric ${i + 1}`;
+            const unit = displayUnit(src) ?? m.unit ?? "";
+            const Icon: React.ElementType = CARD_ICONS[m.icon as string] ?? Activity;
+            const customIcon = String(m.customIcon ?? "").trim();
+            const bg: string | undefined = m.bgColor || undefined;
+            const onFill = bg ? (m.textColor || contrastText(bg)) : undefined;
+
+            // status/traffic have no numeric value at all — just a state,
+            // bound or picked manually per tile (same as before grouping).
+            const state: string = m.state ?? "ok";
+            const stateColor = state === "ok" ? PALETTE.success : state === "warn" ? PALETTE.warning : PALETTE.critical;
+
+            const resolved = val ?? (m.defaultValue != null ? Number(m.defaultValue) : (isStateType ? null : 0));
+            const color = onFill ?? statusColor(resolved, m);
+            const max = Number(m.max) || 100;
+            const pct = resolved != null ? Math.max(0, Math.min(100, (resolved / max) * 100)) : 0;
+            const valueText = resolved != null ? fmt(resolved, m) : "—";
+            const unitSuffix = t === "progress" || t === "battery" ? "%" : (unit ? (unitPlacement === "prefix" ? "" : ` ${unit}`) : "");
+            const unitPrefix = unit && unitPlacement === "prefix" && t !== "progress" && t !== "battery" ? `${unit} ` : "";
+
+            let mark: React.ReactNode;
+            if (t === "gauge") {
+              mark = (
+                <div className="w-full h-full flex flex-col items-center justify-center">
+                  <ResponsiveContainer width="100%" height="70%">
+                    <RadialBarChart innerRadius="70%" outerRadius="100%" data={[{ v: pct, fill: color }]} startAngle={210} endAngle={-30}>
+                      <RadialBar dataKey="v" cornerRadius={6} background isAnimationActive={false} />
+                    </RadialBarChart>
+                  </ResponsiveContainer>
+                  <p className="font-bold -mt-3 tabular-nums" style={{ fontSize: valueFs, color }}>{unitPrefix}{valueText}{unitSuffix}</p>
+                </div>
+              );
+            } else if (t === "thermometer" || t === "tank") {
+              mark = (
+                <div className="w-full h-full flex flex-col items-center justify-center gap-1.5 py-1">
+                  <div className="relative w-5 flex-1 rounded-full bg-muted overflow-hidden">
+                    <div className="absolute bottom-0 w-full" style={{ height: `${pct}%`, background: color }} />
+                  </div>
+                  <p className="font-semibold tabular-nums" style={{ fontSize: valueFs, color }}>{unitPrefix}{valueText}{unitSuffix}</p>
+                </div>
+              );
+            } else if (t === "battery" || t === "progress") {
+              mark = (
+                <div className="w-full flex flex-col items-center justify-center gap-1.5">
+                  <div className="relative w-full h-3 rounded-full bg-muted overflow-hidden">
+                    <div className="absolute left-0 top-0 h-full" style={{ width: `${pct}%`, background: color }} />
+                  </div>
+                  <p className="font-semibold tabular-nums" style={{ fontSize: valueFs, color }}>{valueText}{unitSuffix}</p>
+                </div>
+              );
+            } else if (t === "status") {
+              mark = (
+                <div className="flex items-center gap-2">
+                  <span className="w-4 h-4 rounded-full shrink-0" style={{ background: stateColor }} />
+                  <span className="capitalize" style={{ fontSize: valueFs, color: onFill }}>{state}</span>
+                </div>
+              );
+            } else { // traffic
+              mark = (
+                <div className="flex flex-col items-center gap-1.5">
+                  {["critical", "warn", "ok"].map((s) => (
+                    <span key={s} className="w-3.5 h-3.5 rounded-full shrink-0"
+                      style={{ background: s === state ? stateColor : "hsl(var(--muted))", opacity: s === state ? 1 : 0.35 }} />
+                  ))}
+                </div>
+              );
+            }
+
+            // The mark needs real pixel space to draw into — a RadialBarChart's
+            // ResponsiveContainer (and the thermometer/tank fill bar) resolve
+            // their percentage height against the nearest ANCESTOR with a
+            // definite height. A CSS Grid row sized purely by content has no
+            // such ancestor, so without this the chart/bar silently collapsed
+            // to zero height — leaving only the icon+label+number visible,
+            // which is exactly what made a Gauge look like a plain Card.
+            const tileMinH = t === "gauge" ? 150 : t === "thermometer" || t === "tank" ? 170 : t === "traffic" ? 120 : 80;
+
+            return (
+              <div key={i} className={cn("flex flex-col items-stretch gap-1 border border-border p-2", !bg && "bg-muted/40")} style={{ borderRadius: radius, background: bg, minHeight: tileMinH }}>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  {/* A pasted emoji overrides the preset icon — see the Icon field's
+                      note in the widget's edit panel. */}
+                  {customIcon
+                    ? <span className="shrink-0 leading-none" style={{ fontSize: 13, color: onFill }}>{customIcon}</span>
+                    : <Icon className="w-3.5 h-3.5 shrink-0" style={{ color: onFill ?? color }} />}
+                  <span className={cn("min-w-0 flex-1", !onFill && "text-muted-foreground", !showFullText && "truncate")} style={{ fontSize: titleFs, color: onFill }}>{label}</span>
+                </div>
+                {/* A fixed (not min-) height here, not just on the tile above —
+                    ResponsiveContainer needs its OWN ancestor's height to be
+                    unambiguous, and an auto-height flex item sized only by a
+                    minHeight on a grandparent doesn't reliably give it that. */}
+                <div className="flex items-center justify-center" style={{ height: tileMinH - 28 }}>{mark}</div>
+              </div>
+            );
+          })}
         </div>
-        <p className="text-sm font-semibold" style={{ color }}>{fmt(val, c)}{t === "battery" || t === "progress" ? "%" : ""}</p>
       </div>
     );
-  }
-  if (t === "status" || t === "traffic") {
-    const state = c.state ?? "ok";
-    const col = state === "ok" ? PALETTE.success : state === "warn" ? PALETTE.warning : PALETTE.critical;
-    return <div className="h-full flex items-center justify-center gap-2"><span className="w-4 h-4 rounded-full" style={{ background: col }} /><span className="text-sm capitalize">{state}</span></div>;
   }
   if (t === "table" || t === "alarms" || t === "events") {
     const colName = firstKey ? (seriesMeta[firstKey]?.label ?? "Value") : "Value";
