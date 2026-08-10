@@ -1,0 +1,20 @@
+{
+  "$comment": [
+    "Advisories consciously accepted, read by scripts/audit-ci.mjs.",
+    "",
+    "Every entry MUST carry an expiry date. A permanent exception is how a known",
+    "vulnerability becomes permanent; an expiring one forces the decision to be",
+    "made again once a fix may exist. An expired entry stops suppressing and the",
+    "build goes red, which is the intended behaviour, not a bug.",
+    "",
+    "'reason' must say why the advisory is not reachable HERE — not that it is",
+    "inconvenient to fix. If the honest reason is 'no time', that is a risk",
+    "acceptance and belongs in the risk register, not in a build config.",
+    "",
+    "Match on 'ghsa' (preferred), 'id', or 'module' (broadest — avoid).",
+    "",
+    "The list is currently empty: as of the last audit the workspace has zero",
+    "known advisories, so nothing needs accepting."
+  ],
+  "allow": []
+}

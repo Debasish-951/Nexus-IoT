@@ -1,5 +1,5 @@
-import { useCallback, useMemo, useState } from "react";
-import { newId } from "./useDashboards";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useVizNodes, useVizNodeActions, migrateLocalDashboards, type VizNode as StoredNode } from "./vizStore";
 
 // The Visualization section owns its OWN hierarchy, independent of the asset
 // hierarchy in Asset Management. Nodes here are purely organisational containers
@@ -7,35 +7,36 @@ import { newId } from "./useDashboards";
 // line → machine, by team, by report, anything). Nothing is mirrored from
 // /api/assets. Each widget inside a node's dashboard binds to a real asset +
 // metric on its own, so data still comes from live telemetry.
+//
+// The tree now lives on the server (see vizStore.ts). It used to live in this
+// browser's localStorage, which is why a dashboard could not be shared, did not
+// survive a cache clear, and silently stopped saving at the storage quota. The
+// hook's shape is unchanged so its callers did not have to be rewritten.
 export interface VizNode {
   id: string;
   name: string;
   parentId: string | null;
 }
 
-const HKEY = "wsviz:hierarchy";
-const wkey = (nodeId: string) => `wsviz:widgets:${nodeId}`;
-
-function readNodes(): VizNode[] {
-  try {
-    const raw = localStorage.getItem(HKEY);
-    const parsed = raw ? JSON.parse(raw) : [];
-    if (!Array.isArray(parsed)) return [];
-    return parsed.filter((n): n is VizNode => !!n && typeof n.id === "string" && typeof n.name === "string");
-  } catch { return []; }
-}
-
-function writeNodes(nodes: VizNode[]) {
-  try { localStorage.setItem(HKEY, JSON.stringify(nodes)); } catch { /* quota */ }
-}
-
 export function useVizHierarchy() {
-  const [nodes, setNodes] = useState<VizNode[]>(() => readNodes());
+  const { nodes: stored, loading, failed } = useVizNodes();
+  const { createNode, renameNode: renameOnServer, deleteNode: deleteOnServer } = useVizNodeActions();
 
-  const persist = useCallback((next: VizNode[]) => {
-    setNodes(next);
-    writeNodes(next);
+  // Anything this browser still holds is pushed up once, on first mount, then
+  // never again. `ran` guards against React's development double-invoke firing
+  // two concurrent imports.
+  const ran = useRef(false);
+  const [migrationError, setMigrationError] = useState<Error | null>(null);
+  useEffect(() => {
+    if (ran.current) return;
+    ran.current = true;
+    migrateLocalDashboards().catch((e: Error) => setMigrationError(e));
   }, []);
+
+  const nodes: VizNode[] = useMemo(
+    () => stored.map((n: StoredNode) => ({ id: n.id, name: n.name, parentId: n.parentId })),
+    [stored],
+  );
 
   // parentId -> children, with "root" holding the top level (shape the shared
   // asset-tree components expect).
@@ -53,7 +54,7 @@ export function useVizHierarchy() {
     const ids = new Set<string>([rootId]);
     const stack = [rootId];
     while (stack.length) {
-      const id = stack.pop()!;
+      const id = stack.pop() as string;
       for (const n of nodes) {
         if (n.parentId === id && !ids.has(n.id)) { ids.add(n.id); stack.push(n.id); }
       }
@@ -61,25 +62,34 @@ export function useVizHierarchy() {
     return ids;
   }, [nodes]);
 
-  const addNode = useCallback((name: string, parentId: string | null): string => {
-    const node: VizNode = { id: newId("vn"), name: name.trim() || "Untitled", parentId };
-    persist([...readNodes(), node]);
-    return node.id;
-  }, [persist]);
+  // Still returns the new id synchronously — callers select the node they just
+  // created — which is why the id is minted client-side rather than by the
+  // database.
+  const addNode = useCallback(
+    (name: string, parentId: string | null): string => createNode(name, parentId),
+    [createNode],
+  );
 
-  const renameNode = useCallback((id: string, name: string) => {
-    persist(readNodes().map((n) => (n.id === id ? { ...n, name: name.trim() || n.name } : n)));
-  }, [persist]);
+  const renameNode = useCallback(
+    (id: string, name: string) => renameOnServer(id, name),
+    [renameOnServer],
+  );
 
   // Deleting a node removes its whole subtree along with each node's dashboard.
+  // The subtree is computed here so callers still get the id set back; the
+  // server recomputes it rather than trusting the list, so a stale client cannot
+  // delete more than it can see.
   const deleteNode = useCallback((id: string) => {
     const doomed = subtreeIds(id);
-    persist(readNodes().filter((n) => !doomed.has(n.id)));
-    for (const nid of doomed) {
-      try { localStorage.removeItem(wkey(nid)); } catch { /* ignore */ }
-    }
+    deleteOnServer(id, doomed);
     return doomed;
-  }, [persist, subtreeIds]);
+  }, [deleteOnServer, subtreeIds]);
 
-  return { nodes, childrenByParent, subtreeIds, addNode, renameNode, deleteNode };
+  return {
+    nodes, childrenByParent, subtreeIds, addNode, renameNode, deleteNode,
+    loading,
+    /** The tree could not be loaded — distinct from "there are no nodes yet". */
+    failed,
+    migrationError,
+  };
 }

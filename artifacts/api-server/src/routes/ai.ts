@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import { correlationIdOf } from "../lib/errors";
 import { eq, and, or, ilike, sql, desc, gte, inArray } from "drizzle-orm";
 import {
   db,
@@ -453,8 +454,12 @@ router.post("/ai/chat", async (req, res): Promise<void> => {
           try {
             result = await tool.fn(args);
             toolTrace.push({ tool: name, args });
-          } catch (err: any) {
-            result = { error: err?.message ?? "tool execution failed" };
+          } catch (err) {
+            // The model sees this string and may repeat it verbatim to the user,
+            // so it must be as safe as a response body. A database error here
+            // would otherwise reach the chat window through the model.
+            logger.warn({ err, tool: name, correlationId: correlationIdOf(req) }, "AI tool call failed");
+            result = { error: "that lookup failed" };
           }
         }
         messages.push({
@@ -472,9 +477,17 @@ router.post("/ai/chat", async (req, res): Promise<void> => {
     ]);
     const finalMsg = finalData?.choices?.[0]?.message?.content ?? "I couldn't complete that within the step limit.";
     res.json({ answer: finalMsg, steps: toolTrace, model: GROQ_MODEL, truncated: true });
-  } catch (err: any) {
-    logger.error({ err: err?.message }, "AI chat failed");
-    res.status(502).json({ error: err?.message ?? "AI request failed" });
+  } catch (err) {
+    // The upstream failure can name the provider host, the model, and in some
+    // client libraries echo request headers back in the message. None of that
+    // belongs in a response — the full error goes to the log with the id the
+    // user is shown.
+    logger.error({ err, correlationId: correlationIdOf(req) }, "AI chat failed");
+    res.status(502).json({
+      error: "The assistant is unavailable right now. Please try again shortly.",
+      code: "assistant_unavailable",
+      correlationId: correlationIdOf(req),
+    });
   }
 });
 

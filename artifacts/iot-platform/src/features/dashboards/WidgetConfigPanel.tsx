@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useListAssets } from "@workspace/api-client-react";
-import { WIDGET_CATEGORIES, PALETTE, SERIES_COLORS, widgetDef, CARD_ICONS, CARD_ICON_KEYS, GROUPED_TYPES } from "./registry";
+import { WIDGET_CATEGORIES, PALETTE, SERIES_COLORS, widgetDef, CARD_ICONS, CARD_ICON_KEYS, GROUPED_TYPES, MULTI_SERIES_TYPES, GAUGE_STYLES } from "./registry";
 import { useMetricChoices } from "./useWidgetData";
 import { ColorField } from "./ColorField";
 import { AssetPickerDialog } from "./AssetPickerDialog";
@@ -15,9 +15,15 @@ import { AttributeSelect } from "./AttributeSelect";
 // to the grouped `metrics` model (same as Card) — their editor lives in the
 // GROUPED_TYPES block below, not here. Status/Traffic were never bindable —
 // they pick a state, still per-metric now instead of once for the whole widget.
-const BINDABLE = new Set(["line", "area", "bar", "stackbar", "table", "alarms", "events"]);
-const MULTI_SERIES = new Set(["line", "area", "bar", "stackbar"]);
-const SPC_TYPES = new Set(["line", "area", "bar", "stackbar"]);
+// Sourced from the registry rather than restated, so a chart type added to the
+// catalogue cannot end up rendering correctly while offering no way to bind data
+// to it — which is what a second hand-maintained copy of this list invites.
+const BINDABLE = new Set([...MULTI_SERIES_TYPES, "table", "alarms", "events"]);
+const MULTI_SERIES = new Set(MULTI_SERIES_TYPES);
+// Control limits are drawn against a vertical value axis, so they are offered
+// only where one exists. Horizontal Bar has its value axis on the bottom, and
+// Radar/Radial have no cartesian axes at all — a UCL line means nothing there.
+const SPC_TYPES = new Set(["line", "area", "bar", "stackbar", "step", "stackarea", "combo"]);
 const GROUPED_SET = new Set<string>(GROUPED_TYPES);
 // Within GROUPED_TYPES, these two have no numeric value — a per-tile state pick
 // instead of a Data Source/Attribute binding.
@@ -422,6 +428,19 @@ export function WidgetConfigPanel({
                     <label className="flex items-center gap-1.5"><input type="radio" checked={(draft.textOrientation ?? "vertical") === "vertical"} onChange={() => set({ textOrientation: "vertical" })} /> Vertical</label>
                     <label className="flex items-center gap-1.5"><input type="radio" checked={draft.textOrientation === "horizontal"} onChange={() => set({ textOrientation: "horizontal" })} /> Horizontal</label>
                   </div>
+                </Field>
+              )}
+              {type === "gauge" && (
+                <Field label="Gauge Style">
+                  <select value={draft.gaugeStyle ?? "arc"} onChange={(e) => set({ gaugeStyle: e.target.value })} className={selCls}>
+                    {GAUGE_STYLES.map((g) => <option key={g.value} value={g.value}>{g.label}</option>)}
+                  </select>
+                  {draft.gaugeStyle === "zone" && (
+                    <p className="text-[11px] text-muted-foreground mt-1">
+                      Bands come from each metric's Warn and Critical values below. With
+                      neither set, the dial draws a single plain track.
+                    </p>
+                  )}
                 </Field>
               )}
               {!STATE_TYPES.has(type) && (

@@ -1,4 +1,7 @@
 import { Router, type IRouter, type Request } from "express";
+import { z } from "zod";
+import { validate } from "../middleware/validate";
+import { SecurityEventsQuery } from "../schemas/common";
 import { and, count, desc, eq, gt, gte, inArray, isNull, sql } from "drizzle-orm";
 import { db, securityEventsTable, sessionsTable, usersTable, LOGIN_EVENT_TYPES } from "@workspace/db";
 import { rbacCatalog } from "../lib/rbac";
@@ -37,23 +40,21 @@ function parseWindow(value: unknown): Date | undefined {
 }
 
 async function queryEvents(req: Request, restrictTo?: readonly string[]) {
-  const limit = Math.min(Number(req.query.limit ?? 100) || 100, 500);
-  const offset = Math.max(Number(req.query.offset ?? 0) || 0, 0);
+  // Every field below is already type-checked, bounded and range-checked by
+  // `validate({ query: SecurityEventsQuery })` on the routes, so the repeated
+  // `typeof x === "string"` guards that used to be here are gone: an absent
+  // field is `undefined` and anything present is known-good.
+  const q = req.query as z.infer<typeof SecurityEventsQuery>;
+  const { limit = 100, offset = 0 } = q;
 
-  const typeFilter = typeof req.query.eventType === "string" && req.query.eventType
-    ? [req.query.eventType]
-    : restrictTo;
-
-  const since = parseWindow(req.query.days);
+  const typeFilter = q.eventType ? [q.eventType] : restrictTo;
+  const since = q.days ? new Date(Date.now() - q.days * 86_400_000) : undefined;
 
   const conditions = [
     ...(typeFilter ? [inArray(securityEventsTable.eventType, [...typeFilter])] : []),
-    ...(typeof req.query.outcome === "string" && req.query.outcome
-      ? [eq(securityEventsTable.outcome, req.query.outcome)] : []),
-    ...(typeof req.query.userId === "string" && req.query.userId
-      ? [eq(securityEventsTable.userId, req.query.userId)] : []),
-    ...(typeof req.query.username === "string" && req.query.username
-      ? [eq(securityEventsTable.username, req.query.username)] : []),
+    ...(q.outcome  ? [eq(securityEventsTable.outcome, q.outcome)]   : []),
+    ...(q.userId   ? [eq(securityEventsTable.userId, q.userId)]     : []),
+    ...(q.username ? [eq(securityEventsTable.username, q.username)] : []),
     ...(since ? [gte(securityEventsTable.createdAt, since)] : []),
   ];
   const where = conditions.length > 0 ? and(...conditions) : undefined;
@@ -67,7 +68,7 @@ async function queryEvents(req: Request, restrictTo?: readonly string[]) {
   return { entries, total, limit, offset };
 }
 
-router.get("/security/events", async (req, res): Promise<void> => {
+router.get("/security/events", validate({ query: SecurityEventsQuery }), async (req, res): Promise<void> => {
   res.json(await queryEvents(req));
 });
 
@@ -75,7 +76,7 @@ router.get("/security/events", async (req, res): Promise<void> => {
  * Login history is the same table filtered to the authentication event types —
  * see the schema comment on security_events for why these are not two tables.
  */
-router.get("/security/login-history", async (req, res): Promise<void> => {
+router.get("/security/login-history", validate({ query: SecurityEventsQuery }), async (req, res): Promise<void> => {
   res.json(await queryEvents(req, LOGIN_EVENT_TYPES));
 });
 

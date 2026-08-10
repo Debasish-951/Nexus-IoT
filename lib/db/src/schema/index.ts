@@ -15,4 +15,6 @@ export * from "./activity_logs";
 export * from "./broker_events";
 export * from "./data_retention";
 export * from "./viz_dashboards";
+export * from "./viz_nodes";
 export * from "./seen_devices";
+export * from "./uploads";

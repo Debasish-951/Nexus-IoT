@@ -34,8 +34,18 @@ import type {
   CreateAttributeBody,
   CreateBrokerBody,
   CreateUserBody,
+  DashboardAlarmTrend,
+  DashboardAttention,
+  DashboardHealthIndex,
+  DashboardIngestSeries,
+  DashboardLiveMetrics,
   DashboardSummary,
   GetBrokerHistoryParams,
+  GetDashboardAlarmTrendParams,
+  GetDashboardAttentionParams,
+  GetDashboardHealthIndexParams,
+  GetDashboardIngestSeriesParams,
+  GetDashboardLiveMetricsParams,
   GetRecentTelemetryParams,
   GetTelemetryParams,
   HealthStatus,
@@ -3751,6 +3761,520 @@ export function useGetAlarmStats<
   request?: SecondParameter<typeof customFetch>;
 }): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getGetAlarmStatsQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * Merges open alarms, assets whose newest telemetry is older than staleMinutes, device ids with no matching asset, and API keys nearing expiry into one ranked list.
+
+ * @summary Ranked queue of everything needing a human
+ */
+export const getGetDashboardAttentionUrl = (
+  params?: GetDashboardAttentionParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/dashboard/attention?${stringifiedParams}`
+    : `/api/dashboard/attention`;
+};
+
+export const getDashboardAttention = async (
+  params?: GetDashboardAttentionParams,
+  options?: RequestInit,
+): Promise<DashboardAttention> => {
+  return customFetch<DashboardAttention>(getGetDashboardAttentionUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetDashboardAttentionQueryKey = (
+  params?: GetDashboardAttentionParams,
+) => {
+  return [`/api/dashboard/attention`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetDashboardAttentionQueryOptions = <
+  TData = Awaited<ReturnType<typeof getDashboardAttention>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetDashboardAttentionParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getDashboardAttention>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetDashboardAttentionQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getDashboardAttention>>
+  > = ({ signal }) =>
+    getDashboardAttention(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getDashboardAttention>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetDashboardAttentionQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getDashboardAttention>>
+>;
+export type GetDashboardAttentionQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Ranked queue of everything needing a human
+ */
+
+export function useGetDashboardAttention<
+  TData = Awaited<ReturnType<typeof getDashboardAttention>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetDashboardAttentionParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getDashboardAttention>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetDashboardAttentionQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Composite health score, rolled up the asset hierarchy
+ */
+export const getGetDashboardHealthIndexUrl = (
+  params?: GetDashboardHealthIndexParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/dashboard/health-index?${stringifiedParams}`
+    : `/api/dashboard/health-index`;
+};
+
+export const getDashboardHealthIndex = async (
+  params?: GetDashboardHealthIndexParams,
+  options?: RequestInit,
+): Promise<DashboardHealthIndex> => {
+  return customFetch<DashboardHealthIndex>(
+    getGetDashboardHealthIndexUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetDashboardHealthIndexQueryKey = (
+  params?: GetDashboardHealthIndexParams,
+) => {
+  return [`/api/dashboard/health-index`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetDashboardHealthIndexQueryOptions = <
+  TData = Awaited<ReturnType<typeof getDashboardHealthIndex>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetDashboardHealthIndexParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getDashboardHealthIndex>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetDashboardHealthIndexQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getDashboardHealthIndex>>
+  > = ({ signal }) =>
+    getDashboardHealthIndex(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getDashboardHealthIndex>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetDashboardHealthIndexQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getDashboardHealthIndex>>
+>;
+export type GetDashboardHealthIndexQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Composite health score, rolled up the asset hierarchy
+ */
+
+export function useGetDashboardHealthIndex<
+  TData = Awaited<ReturnType<typeof getDashboardHealthIndex>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetDashboardHealthIndexParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getDashboardHealthIndex>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetDashboardHealthIndexQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Daily alarm counts, MTTA/MTTR and worst-performing assets
+ */
+export const getGetDashboardAlarmTrendUrl = (
+  params?: GetDashboardAlarmTrendParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/dashboard/alarm-trend?${stringifiedParams}`
+    : `/api/dashboard/alarm-trend`;
+};
+
+export const getDashboardAlarmTrend = async (
+  params?: GetDashboardAlarmTrendParams,
+  options?: RequestInit,
+): Promise<DashboardAlarmTrend> => {
+  return customFetch<DashboardAlarmTrend>(
+    getGetDashboardAlarmTrendUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetDashboardAlarmTrendQueryKey = (
+  params?: GetDashboardAlarmTrendParams,
+) => {
+  return [`/api/dashboard/alarm-trend`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetDashboardAlarmTrendQueryOptions = <
+  TData = Awaited<ReturnType<typeof getDashboardAlarmTrend>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetDashboardAlarmTrendParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getDashboardAlarmTrend>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetDashboardAlarmTrendQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getDashboardAlarmTrend>>
+  > = ({ signal }) =>
+    getDashboardAlarmTrend(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getDashboardAlarmTrend>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetDashboardAlarmTrendQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getDashboardAlarmTrend>>
+>;
+export type GetDashboardAlarmTrendQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Daily alarm counts, MTTA/MTTR and worst-performing assets
+ */
+
+export function useGetDashboardAlarmTrend<
+  TData = Awaited<ReturnType<typeof getDashboardAlarmTrend>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetDashboardAlarmTrendParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getDashboardAlarmTrend>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetDashboardAlarmTrendQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Per-minute ingest throughput and per-device connectivity
+ */
+export const getGetDashboardIngestSeriesUrl = (
+  params?: GetDashboardIngestSeriesParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/dashboard/ingest-series?${stringifiedParams}`
+    : `/api/dashboard/ingest-series`;
+};
+
+export const getDashboardIngestSeries = async (
+  params?: GetDashboardIngestSeriesParams,
+  options?: RequestInit,
+): Promise<DashboardIngestSeries> => {
+  return customFetch<DashboardIngestSeries>(
+    getGetDashboardIngestSeriesUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetDashboardIngestSeriesQueryKey = (
+  params?: GetDashboardIngestSeriesParams,
+) => {
+  return [`/api/dashboard/ingest-series`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetDashboardIngestSeriesQueryOptions = <
+  TData = Awaited<ReturnType<typeof getDashboardIngestSeries>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetDashboardIngestSeriesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getDashboardIngestSeries>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetDashboardIngestSeriesQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getDashboardIngestSeries>>
+  > = ({ signal }) =>
+    getDashboardIngestSeries(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getDashboardIngestSeries>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetDashboardIngestSeriesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getDashboardIngestSeries>>
+>;
+export type GetDashboardIngestSeriesQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Per-minute ingest throughput and per-device connectivity
+ */
+
+export function useGetDashboardIngestSeries<
+  TData = Awaited<ReturnType<typeof getDashboardIngestSeries>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetDashboardIngestSeriesParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getDashboardIngestSeries>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetDashboardIngestSeriesQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Live metric tiles with thresholds and recent series
+ */
+export const getGetDashboardLiveMetricsUrl = (
+  params?: GetDashboardLiveMetricsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/dashboard/live-metrics?${stringifiedParams}`
+    : `/api/dashboard/live-metrics`;
+};
+
+export const getDashboardLiveMetrics = async (
+  params?: GetDashboardLiveMetricsParams,
+  options?: RequestInit,
+): Promise<DashboardLiveMetrics> => {
+  return customFetch<DashboardLiveMetrics>(
+    getGetDashboardLiveMetricsUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetDashboardLiveMetricsQueryKey = (
+  params?: GetDashboardLiveMetricsParams,
+) => {
+  return [`/api/dashboard/live-metrics`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetDashboardLiveMetricsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getDashboardLiveMetrics>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetDashboardLiveMetricsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getDashboardLiveMetrics>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetDashboardLiveMetricsQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getDashboardLiveMetrics>>
+  > = ({ signal }) =>
+    getDashboardLiveMetrics(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getDashboardLiveMetrics>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetDashboardLiveMetricsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getDashboardLiveMetrics>>
+>;
+export type GetDashboardLiveMetricsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Live metric tiles with thresholds and recent series
+ */
+
+export function useGetDashboardLiveMetrics<
+  TData = Awaited<ReturnType<typeof getDashboardLiveMetrics>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetDashboardLiveMetricsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getDashboardLiveMetrics>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetDashboardLiveMetricsQueryOptions(params, options);
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;

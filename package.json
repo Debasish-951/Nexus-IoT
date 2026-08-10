@@ -10,7 +10,10 @@
     "start": "node --enable-source-maps artifacts/api-server/dist/index.mjs",
     "build": "pnpm run typecheck && pnpm -r --if-present run build",
     "typecheck:libs": "tsc --build",
-    "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck"
+    "typecheck": "pnpm run typecheck:libs && pnpm -r --filter \"./artifacts/**\" --filter \"./scripts\" --if-present run typecheck",
+    "scan-secrets": "node scripts/scan-secrets.mjs",
+    "audit": "node scripts/audit-ci.mjs --level high",
+    "audit:report": "node scripts/audit-ci.mjs --report"
   },
   "private": true,
   "devDependencies": {

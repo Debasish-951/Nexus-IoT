@@ -1,0 +1,136 @@
+name: CI
+
+# There was no CI in this repository before this file. Everything below already
+# existed as a command someone was expected to remember to run; the value here is
+# that it now runs on every change, on a machine that has no local state.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A second push to the same PR cancels the first — no value in finishing a run
+# for a commit nobody will merge.
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege: this workflow only reads the repository. Anything needing more
+# should be a separate workflow with its own narrow grant, so a compromised
+# action in the build cannot also write to the repo.
+permissions:
+  contents: read
+
+env:
+  # Keeps builds off the "console transport in production" guard rails and makes
+  # NODE_ENV explicit rather than implied.
+  NODE_ENV: development
+
+jobs:
+  build:
+    name: Typecheck & build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+        with:
+          # Must match the packageManager field / local pnpm. A different pnpm
+          # can resolve a different tree from the same lockfile.
+          version: 10.26.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      # --frozen-lockfile is the supply-chain control that matters most here.
+      # It fails if pnpm-lock.yaml does not match the manifests, so CI can never
+      # silently resolve a version that nobody reviewed — which is what makes the
+      # caret ranges in package.json safe.
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      # Not covered by the root typecheck script — see the note in CLAUDE.md.
+      - name: Typecheck artifacts
+        run: |
+          pnpm --filter @workspace/api-server run typecheck
+          pnpm --filter @workspace/iot-platform run typecheck
+
+      - name: Build
+        run: |
+          pnpm --filter @workspace/api-server run build
+          pnpm --filter @workspace/iot-platform run build
+
+  supply-chain:
+    name: Dependency & secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Runs independently of the build: a vulnerability report is still wanted
+    # when the build is broken for an unrelated reason.
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          # Full history so the secret scan can look at what is actually
+          # committed, not just the tip.
+          fetch-depth: 0
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.26.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      # Fails the build on high/critical. Moderate and low are reported but do
+      # not block — see scripts/audit-ci.mjs for why an all-or-nothing gate gets
+      # deleted rather than fixed.
+      - name: Dependency audit
+        run: node scripts/audit-ci.mjs --level high
+
+      - name: Committed secret scan
+        run: node scripts/scan-secrets.mjs
+
+      # Catches the case this repository actually hit: a lockfile edited by hand,
+      # or a manifest change committed without the matching lockfile update.
+      - name: Lockfile is in sync
+        run: |
+          git diff --exit-code pnpm-lock.yaml || {
+            echo "::error::pnpm-lock.yaml changed during install — commit the updated lockfile."
+            exit 1
+          }
+
+      # Install scripts are the most direct supply-chain execution path: a
+      # compromised transitive package runs code on this runner and on every
+      # developer machine. pnpm blocks them by default and the workspace lists
+      # the allowed few in `onlyBuiltDependencies`; this asserts that list has
+      # not quietly grown.
+      - name: Install-script allowlist unchanged
+        run: |
+          EXPECTED="@swc/core core-js esbuild msw unrs-resolver"
+          ACTUAL=$(node -e "
+            const fs=require('fs');
+            const y=fs.readFileSync('pnpm-workspace.yaml','utf8');
+            const m=y.match(/onlyBuiltDependencies:\n((?:\s+-\s+.*\n)+)/);
+            if(!m){console.log('');process.exit(0)}
+            console.log(m[1].split('\n').map(s=>s.replace(/^\s*-\s*/,'').replace(/['\"]/g,'').trim()).filter(Boolean).sort().join(' '));
+          ")
+          if [ "$ACTUAL" != "$EXPECTED" ]; then
+            echo "::error::onlyBuiltDependencies changed. Expected [$EXPECTED], found [$ACTUAL]."
+            echo "Every entry here can execute arbitrary code at install time. Review deliberately, then update this check."
+            exit 1
+          fi
+          echo "install-script allowlist unchanged: $ACTUAL"

@@ -1,8 +1,9 @@
 import { Request, Response, NextFunction } from "express";
-import { eq, sql } from "drizzle-orm";
+import { eq, or, sql } from "drizzle-orm";
 import { db, apiClientsTable } from "@workspace/db";
 import { logger } from "../lib/logger";
 import { authConfig } from "../lib/auth-config";
+import { hashToken } from "../lib/tokens";
 
 declare global {
   namespace Express {
@@ -44,18 +45,43 @@ function isRateLimited(clientId: string, maxRpm: number): boolean {
 }
 
 /**
+ * Match a presented secret against a stored credential.
+ *
+ * Hash first, plaintext second: everything issued now stores only
+ * SHA-256(secret), so read access to the database no longer yields a working
+ * key. The plaintext arm exists solely for credentials issued before that
+ * change and disappears once
+ * `pnpm --filter @workspace/db run hash-api-secrets` has run — it nulls the
+ * legacy column, and a null never matches.
+ *
+ * Unsalted SHA-256 is correct here rather than the scrypt used for passwords:
+ * the secret is a randomUUID, so there is no low-entropy input to protect, and
+ * the lookup must be a deterministic indexed equality.
+ */
+function secretMatches(secret: string) {
+  return or(
+    eq(apiClientsTable.clientSecretHash, hashToken(secret)),
+    eq(apiClientsTable.clientSecret, secret),
+  );
+}
+
+/**
  * Where a client secret may travel, in order of preference.
  *
- * A header is the right place for a credential. But plenty of field gateways —
- * Node-RED subflows, PLC HTTP blocks, SCADA bridges — expose a URL field and
- * nothing else, and their operators cannot edit the posting code. Refusing those
- * leaves only one alternative: anonymous ingest. A key in the query string is
- * weaker than a header but far stronger than no key at all, and it keeps every
- * other control (scope, expiry, revocation, per-client attribution, rate limit).
+ * A header is the right place for a credential, and is the only place accepted
+ * by default.
  *
- * The query string is deliberately stripped from the request log in app.ts, so a
- * key sent this way is not written to disk. It can still appear in a reverse
- * proxy's access log, so prefer the header where the client allows it.
+ * The query string (`?key=…`) is OFF unless `API_KEY_ALLOW_QUERY_PARAM=true`.
+ * This application's own log strips query strings (see the pino serializer in
+ * app.ts), but nginx's default `access_log` writes the full request line — so a
+ * key sent that way ends up in cleartext on disk, in log rotation, and in
+ * backups. That is a credential leak the application cannot prevent on its own,
+ * which is why it is no longer on by default.
+ *
+ * It stays available because some field gateways expose only a URL field and
+ * their operators cannot change the posting code; for those, a key in the query
+ * string still beats anonymous ingest, and keeps scope, expiry, revocation,
+ * per-client attribution and rate limiting.
  */
 function readSecret(req: Request): string | null {
   const authHeader = req.headers["authorization"] as string | undefined;
@@ -67,9 +93,30 @@ function readSecret(req: Request): string | null {
   for (const param of ["key", "apiKey", "api_key"]) {
     const v = req.query?.[param];
     const raw = Array.isArray(v) ? v[0] : v;
-    if (typeof raw === "string" && raw.trim()) return raw.trim();
+    if (typeof raw === "string" && raw.trim()) {
+      if (!authConfig.allowApiKeyInQuery) {
+        // Logged rather than silently ignored: without this, a gateway that
+        // worked yesterday starts returning 401 and nothing says why.
+        warnQueryKeyRejected();
+        return null;
+      }
+      return raw.trim();
+    }
   }
   return null;
+}
+
+let lastQueryKeyWarning = 0;
+function warnQueryKeyRejected(): void {
+  const now = Date.now();
+  if (now - lastQueryKeyWarning < 60_000) return;
+  lastQueryKeyWarning = now;
+  logger.warn(
+    "An API key was sent in the query string and ignored. Send it as " +
+    "'X-API-Key: <secret>' or 'Authorization: Bearer <secret>'. If a device cannot " +
+    "set headers, set API_KEY_ALLOW_QUERY_PARAM=true — and strip the parameter in nginx, " +
+    "or the key is written to the access log in cleartext.",
+  );
 }
 
 /**
@@ -91,7 +138,7 @@ export async function attachApiClient(req: Request, _res: Response, next: NextFu
     const [client] = await db
       .select()
       .from(apiClientsTable)
-      .where(eq(apiClientsTable.clientSecret, secret));
+      .where(secretMatches(secret));
 
     // Only a usable credential counts. An expired or revoked key must fall
     // through to `authorize`'s 401 rather than being treated as authenticated.
@@ -112,7 +159,7 @@ export function apiKeyAuth(requiredScope?: string) {
     if (!secret) {
       res.status(401).json({
         error: "Authentication required",
-        hint: "Provide  Authorization: Bearer <clientSecret>,  X-API-Key: <clientSecret>,  or  ?key=<clientSecret>  on the URL when the client cannot set headers",
+        hint: "Provide  Authorization: Bearer <clientSecret>  or  X-API-Key: <clientSecret>. A key in the query string is ignored unless API_KEY_ALLOW_QUERY_PARAM=true.",
       });
       return;
     }
@@ -121,7 +168,7 @@ export function apiKeyAuth(requiredScope?: string) {
     const client = req.apiClient ?? (await db
       .select()
       .from(apiClientsTable)
-      .where(eq(apiClientsTable.clientSecret, secret)))[0];
+      .where(secretMatches(secret)))[0];
 
     if (!client) {
       res.status(401).json({ error: "Invalid API credentials" });
@@ -226,7 +273,7 @@ export function optionalApiKeyAuth(requiredScope?: string) {
     const client = req.apiClient ?? (await db
       .select()
       .from(apiClientsTable)
-      .where(eq(apiClientsTable.clientSecret, secret)))[0];
+      .where(secretMatches(secret)))[0];
 
     if (!client || client.status !== "active") { next(); return; }
     if (client.expiresAt && new Date() > client.expiresAt) { next(); return; }

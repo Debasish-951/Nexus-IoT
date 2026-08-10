@@ -16,6 +16,8 @@ import brokerHistoryRouter from "./broker_history";
 import exportRouter from "./export";
 import systemRouter from "./system";
 import vizDashboardsRouter from "./viz_dashboards";
+import vizNodesRouter from "./viz_nodes";
+import uploadsRouter from "./uploads";
 import aiRouter from "./ai";
 import authRouter from "./auth";
 import securityRouter from "./security";
@@ -41,6 +43,8 @@ router.use(brokerHistoryRouter);
 router.use(exportRouter);
 router.use(systemRouter);
 router.use(vizDashboardsRouter);
+router.use(vizNodesRouter);
+router.use(uploadsRouter);
 router.use(aiRouter);
 
 export default router;

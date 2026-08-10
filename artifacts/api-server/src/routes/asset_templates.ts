@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import { respondInvalid } from "../lib/respond";
 import { eq, sql } from "drizzle-orm";
 import { db, assetTemplatesTable } from "@workspace/db";
 import {
@@ -21,7 +22,7 @@ router.get("/asset-templates", async (req, res): Promise<void> => {
 
 router.post("/asset-templates", async (req, res): Promise<void> => {
   const parsed = CreateAssetTemplateBody.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  if (!parsed.success) { respondInvalid(req, res, parsed.error); return; }
 
   // deviceId is not in the generated body schema — read it raw (same pattern as attributeDefinitions in PUT).
   const rawDeviceId = (req.body as any)?.deviceId;
@@ -37,7 +38,7 @@ router.post("/asset-templates", async (req, res): Promise<void> => {
 
 router.get("/asset-templates/:id", async (req, res): Promise<void> => {
   const params = GetAssetTemplateParams.safeParse(req.params);
-  if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
+  if (!params.success) { respondInvalid(req, res, params.error); return; }
 
   const [template] = await db
     .select()
@@ -50,10 +51,10 @@ router.get("/asset-templates/:id", async (req, res): Promise<void> => {
 
 router.put("/asset-templates/:id", async (req, res): Promise<void> => {
   const params = UpdateAssetTemplateParams.safeParse(req.params);
-  if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
+  if (!params.success) { respondInvalid(req, res, params.error); return; }
 
   const parsed = UpdateAssetTemplateBody.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  if (!parsed.success) { respondInvalid(req, res, parsed.error); return; }
 
   // attributeDefinitions comes through as raw JSON (not in Zod schema — accept directly from body)
   const attributeDefinitions = (req.body as any)?.attributeDefinitions;
@@ -90,7 +91,7 @@ router.put("/asset-templates/:id", async (req, res): Promise<void> => {
 
 router.delete("/asset-templates/:id", async (req, res): Promise<void> => {
   const params = DeleteAssetTemplateParams.safeParse(req.params);
-  if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
+  if (!params.success) { respondInvalid(req, res, params.error); return; }
 
   const [template] = await db
     .delete(assetTemplatesTable)

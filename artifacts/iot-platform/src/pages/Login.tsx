@@ -175,7 +175,12 @@ export default function Login() {
       // The response carries identity AND the effective permission set, so the
       // app renders correctly on the very first paint with no extra round trip.
       applySession(await res.json());
-      navigate("/");
+      // Return them to whatever they were trying to reach, which for a project
+      // workspace carries the /p/<projectId> prefix. Only same-origin relative
+      // paths are honoured — an open redirect is the classic way this parameter
+      // gets abused, so anything not starting with a single "/" is discarded.
+      const next = new URLSearchParams(window.location.search).get("next");
+      navigate(next && /^\/(?!\/)/.test(next) ? next : "/");
     } catch {
       setError("Network error — is the API server running?");
     } finally {

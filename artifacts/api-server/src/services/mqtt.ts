@@ -1,3 +1,4 @@
+import { decryptSecret } from "../lib/secret-box";
 /**
  * MQTT Subscriber Service
  * Reads MQTT brokers from the database, subscribes to their configured topics,
@@ -22,7 +23,12 @@ export async function startMqttSubscribers(): Promise<void> {
     try {
       const options: mqtt.IClientOptions = { clientId: broker.mqttClientId ?? `iot-platform-${broker.id.slice(0, 8)}` };
       if (broker.mqttUsername) options.username = broker.mqttUsername;
-      if (broker.mqttPassword) options.password = broker.mqttPassword;
+      // Decrypted at the moment of connection and not held anywhere else.
+      if (broker.mqttPassword) {
+        const password = decryptSecret(broker.mqttPassword, "brokers.mqttPassword");
+        if (password) options.password = password;
+        else console.error(`[MQTT] Password for ${broker.name} could not be decrypted - connecting without it`);
+      }
       options.reconnectPeriod = 5000;
       options.connectTimeout = 10000;
 

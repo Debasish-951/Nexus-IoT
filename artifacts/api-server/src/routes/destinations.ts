@@ -2,58 +2,123 @@ import { Router, type IRouter } from "express";
 import { eq, sql } from "drizzle-orm";
 import { db, destinationsTable } from "@workspace/db";
 import { logActivity } from "./activity_log";
+import { z } from "zod";
+import { checkOutboundUrl, assertSafeOutboundUrl, UnsafeUrlError } from "../lib/outbound-url";
+import { validate } from "../middleware/validate";
+import { logger } from "../lib/logger";
+import { correlationIdOf } from "../lib/errors";
+import { CreateDestinationBody, UpdateDestinationBody, IdParams } from "../schemas/common";
+import { encryptSecret, decryptSecret } from "../lib/secret-box";
+
+/**
+ * Credential columns on this table, and the AAD context each is bound to.
+ *
+ * The context is part of the ciphertext's authentication, so a value lifted from
+ * one column cannot be pasted into another and still decrypt.
+ */
+const SECRET_FIELDS = ["token", "secretKey", "basicPass"] as const;
+const ctx = (field: string) => `destinations.${field}`;
+
+/**
+ * Strip credentials from anything returned to a client.
+ *
+ * This route used to `res.json(rows)` straight from `db.select()`, which sent
+ * every destination's bearer token, HMAC signing key and basic-auth password to
+ * any user who could open the Destinations page — including roles with read-only
+ * access. The credentials were write-only by intent and readable by accident.
+ *
+ * The response now reports only WHETHER each credential is set, which is all the
+ * UI needs to render "configured / not configured". A credential that has to be
+ * changed is re-entered, never read back.
+ */
+function toClient(row: typeof destinationsTable.$inferSelect) {
+  const { token: _t, secretKey: _s, basicPass: _b, ...safe } = row;
+  return {
+    ...safe,
+    hasToken: !!row.token,
+    hasSecretKey: !!row.secretKey,
+    hasBasicPass: !!row.basicPass,
+  };
+}
+
+/** Decrypt the credentials for a row that is about to be USED, never returned. */
+function withPlaintext(row: typeof destinationsTable.$inferSelect) {
+  return {
+    ...row,
+    token: decryptSecret(row.token, ctx("token")),
+    secretKey: decryptSecret(row.secretKey, ctx("secretKey")),
+    basicPass: decryptSecret(row.basicPass, ctx("basicPass")),
+  };
+}
 
 const router: IRouter = Router();
 
 router.get("/destinations", async (req, res): Promise<void> => {
   const rows = await db.select().from(destinationsTable).orderBy(destinationsTable.name);
-  res.json(rows);
+  res.json(rows.map(toClient));
 });
 
-router.post("/destinations", async (req, res): Promise<void> => {
-  const body = req.body as Record<string, unknown>;
-  if (!body.name || !body.endpoint) {
-    res.status(400).json({ error: "name and endpoint are required" }); return;
-  }
+router.post("/destinations", validate({ body: CreateDestinationBody }), async (req, res): Promise<void> => {
+  // Types, lengths, the URL scheme and the auth-type allow-list are all settled
+  // by the schema. The `String(...)` coercions that used to be here were doing
+  // the opposite of validation: `String({})` is "[object Object]", so a wrong
+  // type became a plausible-looking row rather than a 400.
+  const body = req.body as z.infer<typeof CreateDestinationBody>;
+
+  // Syntax is not the same question as reachability: this checks WHERE the
+  // server would be sending the request — see lib/outbound-url.ts.
+  const check = checkOutboundUrl(body.endpoint);
+  if (!check.ok) { res.status(400).json({ error: check.error, code: "unsafe_url" }); return; }
+
   const [row] = await db.insert(destinationsTable).values({
-    name: String(body.name),
-    description: body.description ? String(body.description) : null,
-    endpoint: String(body.endpoint),
-    authType: (body.authType as string) ?? "bearer",
-    token: body.token ? String(body.token) : null,
-    secretKey: body.secretKey ? String(body.secretKey) : null,
-    apiKeyHeader: body.apiKeyHeader ? String(body.apiKeyHeader) : "X-API-Key",
-    basicUser: body.basicUser ? String(body.basicUser) : null,
-    basicPass: body.basicPass ? String(body.basicPass) : null,
-    eventTypes: Array.isArray(body.eventTypes) ? (body.eventTypes as string[]) : ["alarm"],
-    enabled: typeof body.enabled === "boolean" ? body.enabled : true,
+    name: body.name,
+    description: body.description ?? null,
+    endpoint: body.endpoint,
+    authType: body.authType,
+    // Encrypted at rest. See lib/secret-box.ts — these must stay reversible
+    // because the server presents them to the third party on every send.
+    token: encryptSecret(body.token, ctx("token")),
+    secretKey: encryptSecret(body.secretKey, ctx("secretKey")),
+    apiKeyHeader: body.apiKeyHeader,
+    basicUser: body.basicUser ?? null,
+    basicPass: encryptSecret(body.basicPass, ctx("basicPass")),
+    eventTypes: body.eventTypes,
+    enabled: body.enabled,
   }).returning();
   void logActivity("destination.created", "destination", row.id, row.name, null, req);
-  res.status(201).json(row);
+  res.status(201).json(toClient(row));
 });
 
-router.put("/destinations/:id", async (req, res): Promise<void> => {
-  const { id } = req.params;
-  const body = req.body as Record<string, unknown>;
+router.put("/destinations/:id", validate({ params: IdParams, body: UpdateDestinationBody }), async (req, res): Promise<void> => {
+  const { id } = req.params as z.infer<typeof IdParams>;
+  const body = req.body as z.infer<typeof UpdateDestinationBody>;
   const updateData: Record<string, unknown> = {};
   if (body.name !== undefined)        updateData.name = body.name;
   if (body.description !== undefined) updateData.description = body.description || null;
-  if (body.endpoint !== undefined)    updateData.endpoint = body.endpoint;
+  if (body.endpoint !== undefined) {
+    const check = checkOutboundUrl(body.endpoint);
+    if (!check.ok) { res.status(400).json({ error: check.error, code: "unsafe_url" }); return; }
+    updateData.endpoint = body.endpoint;
+  }
   if (body.authType !== undefined)    updateData.authType = body.authType;
-  if (body.token !== undefined)       updateData.token = body.token || null;
-  if (body.secretKey !== undefined)   updateData.secretKey = body.secretKey || null;
+  // An omitted credential leaves the stored one alone; an explicit empty string
+  // clears it. That distinction is what lets the UI edit a destination's name
+  // without having to re-type its token — the form cannot read the token back,
+  // so it must be able to leave it untouched.
+  if (body.token !== undefined)       updateData.token = body.token ? encryptSecret(body.token, ctx("token")) : null;
+  if (body.secretKey !== undefined)   updateData.secretKey = body.secretKey ? encryptSecret(body.secretKey, ctx("secretKey")) : null;
   if (body.apiKeyHeader !== undefined) updateData.apiKeyHeader = body.apiKeyHeader;
   if (body.basicUser !== undefined)   updateData.basicUser = body.basicUser || null;
-  if (body.basicPass !== undefined)   updateData.basicPass = body.basicPass || null;
+  if (body.basicPass !== undefined)   updateData.basicPass = body.basicPass ? encryptSecret(body.basicPass, ctx("basicPass")) : null;
   if (body.eventTypes !== undefined)  updateData.eventTypes = body.eventTypes;
-  if (body.enabled !== undefined)     updateData.enabled = Boolean(body.enabled);
+  if (body.enabled !== undefined)     updateData.enabled = body.enabled;
   const [row] = await db.update(destinationsTable).set(updateData).where(eq(destinationsTable.id, id)).returning();
   if (!row) { res.status(404).json({ error: "Not found" }); return; }
-  res.json(row);
+  res.json(toClient(row));
 });
 
-router.delete("/destinations/:id", async (req, res): Promise<void> => {
-  const { id } = req.params;
+router.delete("/destinations/:id", validate({ params: IdParams }), async (req, res): Promise<void> => {
+  const { id } = req.params as z.infer<typeof IdParams>;
   const [row] = await db.delete(destinationsTable).where(eq(destinationsTable.id, id)).returning();
   if (!row) { res.status(404).json({ error: "Not found" }); return; }
   void logActivity("destination.deleted", "destination", row.id, row.name, null, req);
@@ -63,8 +128,18 @@ router.delete("/destinations/:id", async (req, res): Promise<void> => {
 // Test-fire to a destination
 router.post("/destinations/:id/test", async (req, res): Promise<void> => {
   const { id } = req.params;
-  const [dest] = await db.select().from(destinationsTable).where(eq(destinationsTable.id, id)).limit(1);
-  if (!dest) { res.status(404).json({ error: "Not found" }); return; }
+  const [row] = await db.select().from(destinationsTable).where(eq(destinationsTable.id, id)).limit(1);
+  if (!row) { res.status(404).json({ error: "Not found" }); return; }
+  // Decrypted here and used immediately. `dest` never reaches a response.
+  const dest = withPlaintext(row);
+  try {
+    // Re-checked at call time so a destination stored before this guard
+    // existed cannot be used to probe the internal network either.
+    assertSafeOutboundUrl(dest.endpoint);
+  } catch (err) {
+    res.status(400).json({ success: false, error: (err as UnsafeUrlError).message, code: "unsafe_url" });
+    return;
+  }
   try {
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (dest.authType === "bearer" && dest.token)     headers["Authorization"] = `Bearer ${dest.token}`;
@@ -76,8 +151,17 @@ router.post("/destinations/:id/test", async (req, res): Promise<void> => {
       signal: AbortSignal.timeout(6000),
     });
     res.json({ success: resp.ok, statusCode: resp.status });
-  } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+  } catch (err) {
+    // A fetch failure carries the resolved host and the OS error
+    // (`ECONNREFUSED 10.0.0.5:8080`). Useful in the log, a network map in a
+    // response — so the caller is told only that the send failed.
+    logger.warn({ destinationId: id, err }, "destination test-fire failed");
+    res.status(502).json({
+      success: false,
+      error: "The destination could not be reached.",
+      code: "destination_unreachable",
+      correlationId: correlationIdOf(req),
+    });
   }
 });
 
@@ -85,8 +169,20 @@ router.post("/destinations/:id/test", async (req, res): Promise<void> => {
 export async function forwardToDestinations(eventType: "alarm" | "telemetry", payload: Record<string, unknown>): Promise<void> {
   const destinations = await db.select().from(destinationsTable)
     .where(eq(destinationsTable.enabled, true));
-  for (const dest of destinations) {
-    if (!(dest.eventTypes ?? []).includes(eventType)) continue;
+  for (const stored of destinations) {
+    if (!(stored.eventTypes ?? []).includes(eventType)) continue;
+    // Decrypted per send, at the moment the header is built, and never held
+    // beyond this iteration.
+    const dest = withPlaintext(stored);
+    // Checked per send, not just on save: a row edited directly in the
+    // database must not become an outbound request to a private address.
+    // The reason is written to `lastError`, so it shows on the Destinations
+    // page instead of the destination just appearing to never fire.
+    const safe = checkOutboundUrl(dest.endpoint);
+    if (!safe.ok) {
+      void db.update(destinationsTable).set({ lastError: safe.error }).where(eq(destinationsTable.id, dest.id));
+      continue;
+    }
     const headers: Record<string, string> = { "Content-Type": "application/json" };
     if (dest.authType === "bearer" && dest.token)     headers["Authorization"] = `Bearer ${dest.token}`;
     if (dest.authType === "api_key" && dest.token)    headers[dest.apiKeyHeader ?? "X-API-Key"] = dest.token;

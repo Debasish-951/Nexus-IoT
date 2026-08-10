@@ -250,3 +250,71 @@ This is the most common first-post failure after a move.
 - Watch `journalctl -u nexus-api` for restarts.
 - Keep an eye on the request counts in Broker Management; they are your simplest
   "is data still flowing" indicator.
+
+## Security response headers for the SPA (nginx)
+
+The API sets its own security headers on every `/api` response. The **app shell**
+— the HTML, JS and CSS nginx serves — sets none, because nothing in this
+repository serves them. That is the one place a Content-Security-Policy has to
+live, and without it the application has no defence-in-depth against injected
+script beyond React's own escaping.
+
+Add to the `server` block that serves the SPA:
+
+```nginx
+# Content-Security-Policy is the important one. The production bundle contains
+# ZERO inline <script> tags (verified against the built index.html), so the
+# strict form works — no 'unsafe-inline' for scripts is required.
+add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'" always;
+
+add_header X-Content-Type-Options    "nosniff" always;
+add_header Referrer-Policy           "strict-origin-when-cross-origin" always;
+add_header Permissions-Policy        "geolocation=(), microphone=(), camera=()" always;
+add_header Strict-Transport-Security "max-age=31536000; includeSubDomains" always;
+
+# `frame-ancestors 'none'` in the CSP supersedes X-Frame-Options in modern
+# browsers; keep both only if you must support very old ones.
+add_header X-Frame-Options "DENY" always;
+```
+
+**This needs one pass with the browser console open before you rely on it.** A
+CSP that breaks the UI is worse than none, because it gets removed wholesale
+instead of adjusted. Two directives are the likely candidates:
+
+- **`style-src 'unsafe-inline'`** is present deliberately. React and Recharts set
+  inline `style` attributes for layout, so removing it breaks rendering. This is
+  the standard compromise and is far less dangerous than the script equivalent.
+- **`img-src`** allows `self`, `data:` and `blob:` only. The Media Library also
+  accepts *external* image URLs — if you use that feature, those images will be
+  blocked until you either widen this to `img-src *` (weakens it meaningfully,
+  since it re-enables tracking-pixel style exfiltration) or proxy external media
+  through the API. Prefer the proxy.
+- **`connect-src 'self'`** must cover the WebSocket at `/api/ws`. It does when
+  the socket is same-origin, which it is in this deployment. If you ever move the
+  API to a different host, this needs that origin added explicitly.
+
+Verify with:
+
+```bash
+curl -sI https://your-host/ | grep -i "content-security-policy\|x-content-type"
+```
+
+### Database connection is not encrypted
+
+`DATABASE_URL` has no `sslmode`, so the connection to PostgreSQL is plaintext.
+That is acceptable **only** while the database is on the same host over the
+loopback interface, which is the reference deployment. The moment Postgres moves
+to another machine — a managed service, a separate VM, a container on another
+node — that connection carries credentials and every row in cleartext across the
+network.
+
+Before moving the database off-host:
+
+```
+DATABASE_URL=postgresql://user:pass@db-host:5432/integrated_suite?sslmode=verify-full&sslrootcert=/etc/ssl/certs/db-ca.pem
+```
+
+`verify-full` rather than `require`: `require` encrypts but does not verify the
+server's identity, so it stops passive sniffing and not an active
+man-in-the-middle — which is the threat that matters once the traffic leaves the
+host.

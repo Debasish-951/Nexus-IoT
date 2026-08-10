@@ -1,0 +1,96 @@
+name: Scheduled dependency audit
+
+# Separate from CI on purpose.
+#
+# CI answers "did THIS change introduce a vulnerability?". This answers "has the
+# world changed under code that has not?" — which is how most vulnerabilities
+# actually arrive. A repository with no commits for three months still
+# accumulates advisories, and nothing in a push-triggered pipeline will ever say
+# so.
+
+on:
+  schedule:
+    # Mondays, 07:00 UTC — a finding lands at the start of the week rather than
+    # in a Friday-evening notification nobody acts on.
+    - cron: "0 7 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write   # only to raise the report below
+
+jobs:
+  audit:
+    name: Audit installed dependencies
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.26.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install (frozen lockfile)
+        run: pnpm install --frozen-lockfile
+
+      # --report never fails: the point of this run is the summary, and a red X
+      # on a scheduled job is noise people learn to ignore. The issue below is
+      # the actual signal.
+      - name: Audit report
+        id: audit
+        run: |
+          {
+            echo "## Dependency audit"
+            echo
+            echo '```'
+            node scripts/audit-ci.mjs --level high --report 2>&1 || true
+            echo '```'
+          } > report.md
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+
+          # Exit status of the real gate, captured without failing the job.
+          if node scripts/audit-ci.mjs --level high >/dev/null 2>&1; then
+            echo "blocking=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "blocking=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Deliberately only for advisories that WOULD fail the build. Opening an
+      # issue for every low-severity dev-dependency finding trains everyone to
+      # close them unread, and then the one that matters gets closed unread too.
+      - name: Raise an issue for blocking advisories
+        if: steps.audit.outputs.blocking == 'true'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const body = fs.readFileSync('report.md', 'utf8');
+            const title = 'Dependency audit: high or critical advisory found';
+
+            // Reuse the open issue rather than filing a new one every Monday.
+            const existing = await github.rest.issues.listForRepo({
+              owner: context.repo.owner, repo: context.repo.repo,
+              state: 'open', labels: 'dependencies',
+            });
+            const match = existing.data.find(i => i.title === title);
+
+            if (match) {
+              await github.rest.issues.createComment({
+                owner: context.repo.owner, repo: context.repo.repo,
+                issue_number: match.number,
+                body: `Still present as of ${new Date().toISOString().slice(0,10)}.\n\n${body}`,
+              });
+            } else {
+              await github.rest.issues.create({
+                owner: context.repo.owner, repo: context.repo.repo,
+                title, body, labels: ['dependencies', 'security'],
+              });
+            }

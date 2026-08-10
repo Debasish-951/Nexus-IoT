@@ -20,7 +20,7 @@ import {
   sendEmail, renderPasswordResetEmail, renderPasswordChangedEmail,
   renderAccountLockedEmail, renderActivationEmail,
 } from "../lib/email";
-import { ipRateLimit, resetRateLimit } from "../middleware/rateLimit";
+import { rateLimit, resetLimiter, recordAuthFailure } from "../middleware/rateLimit";
 import { logActivity } from "./activity_log";
 
 const router: IRouter = Router();
@@ -90,11 +90,36 @@ async function findUserByIdentifier(identifier: string): Promise<User | undefine
 
 // ── POST /auth/login ─────────────────────────────────────────────────────────
 
-const loginLimiter = ipRateLimit({
-  name: "login",
-  max: authConfig.rateLimit.login.max,
-  windowMs: authConfig.rateLimit.login.windowMs,
+/**
+ * Login is limited on four dimensions at once.
+ *
+ * `account` is the one that matters against a distributed attack. Per-IP limits
+ * are defeated by renting more IPs — cheap, and the entire point of a botnet.
+ * The target USERNAME cannot be rotated, because guessing a specific account's
+ * password means sending that account's name every time. So an attacker with a
+ * million addresses still gets `AUTH_RL_ACCOUNT_MAX` attempts per window against
+ * any one account, and the durable database-backed lockout fires first.
+ *
+ * The counters are cleared on a successful sign-in (see resetLimiter below), so
+ * a user who mistypes twice and then gets it right starts fresh.
+ */
+const loginLimiter = rateLimit({
+  name: "auth:login",
+  limits: {
+    ip: authConfig.rateLimit.login,
+    subnet: {
+      max: authConfig.rateLimit.login.max * authConfig.rateLimit.subnetMultiplier,
+      windowMs: authConfig.rateLimit.login.windowMs,
+    },
+    account: authConfig.rateLimit.account,
+  },
+  accountFrom: (req) => {
+    const b = req.body as Record<string, unknown> | undefined;
+    const v = b?.username ?? b?.identifier ?? b?.email;
+    return typeof v === "string" ? v : null;
+  },
   eventType: "login.rate_limited",
+  message: "Too many sign-in attempts. Please wait and try again.",
 });
 
 router.post("/auth/login", loginLimiter, async (req, res): Promise<void> => {
@@ -120,6 +145,10 @@ router.post("/auth/login", loginLimiter, async (req, res): Promise<void> => {
   if (!user) {
     // Equalise timing against the "user exists, wrong password" branch.
     await dummyVerify();
+    // Counted towards spray detection. Guesses at accounts that do not exist are
+    // the strongest signal of all — a real user does not invent usernames, so a
+    // burst of them is enumeration in progress.
+    recordAuthFailure(req);
     await logSecurityEvent({ type: "login.failure", outcome: "failure", username: identifier, reason: "unknown_user", req });
     res.status(401).json(GENERIC);
     return;
@@ -196,6 +225,13 @@ router.post("/auth/login", loginLimiter, async (req, res): Promise<void> => {
   }
 
   // ── Success ────────────────────────────────────────────────────────────────
+  //
+  // Clear the rate-limit counters as well as the database failure count. What is
+  // being limited is failed guessing; someone who mistypes twice and then signs
+  // in correctly has demonstrated they hold the credential and should not spend
+  // the rest of the window one attempt from a lockout.
+  resetLimiter("auth:login", req, identifier);
+
   const [refreshed] = await db
     .update(usersTable)
     .set({
@@ -210,7 +246,6 @@ router.post("/auth/login", loginLimiter, async (req, res): Promise<void> => {
   const created = await createSession(user.id, req, { rememberMe });
   setSessionCookies(res, created);
 
-  resetRateLimit("login", clientIp(req));
   recordSecurityEvent({
     type: "login.success", userId: user.id, username: user.username,
     detail: { sessionId: created.session.id, rememberMe }, req,
@@ -226,6 +261,11 @@ router.post("/auth/login", loginLimiter, async (req, res): Promise<void> => {
  * each other into losing a count.
  */
 async function registerFailedLogin(user: User, req: Request): Promise<void> {
+  // Feeds the system-wide failure velocity that spray detection watches. A
+  // distributed attack keeps every per-key counter under its ceiling by design;
+  // the aggregate is the one thing it cannot hold down.
+  recordAuthFailure(req);
+
   const { threshold, durationMs } = authConfig.lockout;
   const attempts = user.failedLoginAttempts + 1;
   const shouldLock = threshold > 0 && attempts >= threshold;
@@ -293,11 +333,59 @@ router.get("/auth/password-policy", (_req, res): void => {
 
 // ── Activation ───────────────────────────────────────────────────────────────
 
-const tokenLimiter = ipRateLimit({
-  name: "token",
-  max: authConfig.rateLimit.token.max,
-  windowMs: authConfig.rateLimit.token.windowMs,
+/**
+ * Activation and password-reset tokens.
+ *
+ * There is no account dimension here and that is not an oversight: the token IS
+ * the identifier, and an attacker guessing tokens supplies a different one every
+ * time, so a per-token counter would never see the same key twice. Source-based
+ * limiting is the only dimension with any purchase — backed by the tokens being
+ * 256-bit random values, single-use, and stored only as a hash.
+ */
+const tokenLimiter = rateLimit({
+  name: "auth:token",
+  limits: {
+    ip: authConfig.rateLimit.token,
+    subnet: {
+      max: authConfig.rateLimit.token.max * authConfig.rateLimit.subnetMultiplier,
+      windowMs: authConfig.rateLimit.token.windowMs,
+    },
+  },
+  eventType: "ratelimit.tripped",
+  message: "Too many attempts. Please request a new link and try again.",
 });
+
+/**
+ * One-time codes (MFA/OTP).
+ *
+ * Defined here, ready to mount, but NOT currently attached to a route: the users
+ * table carries `mfaEnabled`/`mfaSecret` and no verification endpoint exists yet.
+ * Mount it as the first middleware on that route when it is built — a 6-digit
+ * code is only 10^6 possibilities, so an unlimited verify endpoint is guessable
+ * by volume alone regardless of how good the secret is.
+ *
+ * The account dimension is the important one and is set as low as the code
+ * length demands: rotating IPs must not buy more guesses against one account.
+ */
+export const otpLimiter = rateLimit({
+  name: "auth:otp",
+  limits: {
+    account: authConfig.rateLimit.otp,
+    ip: authConfig.rateLimit.otp,
+    subnet: {
+      max: authConfig.rateLimit.otp.max * authConfig.rateLimit.subnetMultiplier,
+      windowMs: authConfig.rateLimit.otp.windowMs,
+    },
+  },
+  accountFrom: (req) => {
+    const b = req.body as Record<string, unknown> | undefined;
+    const v = b?.username ?? b?.identifier ?? b?.email ?? b?.userId;
+    return typeof v === "string" ? v : null;
+  },
+  eventType: "ratelimit.tripped",
+  message: "Too many verification attempts. Please wait and try again.",
+});
+
 
 const TOKEN_ERRORS: Record<string, { status: number; message: string }> = {
   token_invalid:  { status: 404, message: "This link is not valid. It may have been mistyped or already replaced by a newer one." },
@@ -384,10 +472,30 @@ router.post("/auth/activate", tokenLimiter, async (req, res): Promise<void> => {
 
 // ── Password reset ───────────────────────────────────────────────────────────
 
-const forgotLimiter = ipRateLimit({
-  name: "forgot",
-  max: authConfig.rateLimit.forgot.max,
-  windowMs: authConfig.rateLimit.forgot.windowMs,
+/**
+ * Password reset is limited per account as well as per source, for a reason
+ * specific to this endpoint: every accepted request sends an EMAIL. Without an
+ * account dimension, a distributed caller can have the system mail one victim
+ * thousands of reset links — harassment, and a fast route onto a mail provider's
+ * blocklist, using nothing but our own sending reputation.
+ */
+const forgotLimiter = rateLimit({
+  name: "auth:forgot",
+  limits: {
+    ip: authConfig.rateLimit.forgot,
+    subnet: {
+      max: authConfig.rateLimit.forgot.max * authConfig.rateLimit.subnetMultiplier,
+      windowMs: authConfig.rateLimit.forgot.windowMs,
+    },
+    account: authConfig.rateLimit.forgot,
+  },
+  accountFrom: (req) => {
+    const b = req.body as Record<string, unknown> | undefined;
+    const v = b?.identifier ?? b?.email ?? b?.username;
+    return typeof v === "string" ? v : null;
+  },
+  eventType: "ratelimit.tripped",
+  message: "Too many password reset requests. Please wait and try again.",
 });
 
 /**

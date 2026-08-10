@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import { respondInvalid } from "../lib/respond";
 import { eq, and, desc, gte, lte } from "drizzle-orm";
 import { db, alarmsTable, alarmHistoryTable } from "@workspace/db";
 import {
@@ -16,7 +17,7 @@ const router: IRouter = Router();
 router.get("/alarms", async (req, res): Promise<void> => {
   const query = ListAlarmsQueryParams.safeParse(req.query);
   if (!query.success) {
-    res.status(400).json({ error: query.error.message });
+    respondInvalid(req, res, query.error);
     return;
   }
 
@@ -40,7 +41,7 @@ router.get("/alarms", async (req, res): Promise<void> => {
 router.post("/alarms/:id/acknowledge", async (req, res): Promise<void> => {
   const params = AcknowledgeAlarmParams.safeParse(req.params);
   if (!params.success) {
-    res.status(400).json({ error: params.error.message });
+    respondInvalid(req, res, params.error);
     return;
   }
 
@@ -116,7 +117,7 @@ router.post("/alarms/history/:id/acknowledge", async (req, res): Promise<void> =
 router.get("/alarms/history", async (req, res): Promise<void> => {
   const query = ListAlarmHistoryQueryParams.safeParse(req.query);
   if (!query.success) {
-    res.status(400).json({ error: query.error.message });
+    respondInvalid(req, res, query.error);
     return;
   }
 

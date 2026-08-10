@@ -14,6 +14,8 @@ import {
 import { apiPost, usePasswordPolicy, validatePasswordAgainst } from "@/lib/auth-api";
 import { PasswordChecklist, PasswordStrengthMeter } from "@/components/PasswordFields";
 
+const APP_BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+
 export default function UserProfileTopMenu() {
   const { currentUser, logout } = useCurrentUser();
   const [, navigate] = useLocation();
@@ -43,7 +45,12 @@ export default function UserProfileTopMenu() {
   async function handleSignOut() {
     setOpen(false);
     await logout();
-    navigate("/login");
+    // `~` escapes the router base. This menu renders inside the project
+    // workspace, whose router is based at /p/<projectId>, so a plain
+    // navigate("/login") would sign the user out and then send them to
+    // /p/<projectId>/login — a 404. APP_BASE is re-applied so a subpath
+    // deployment still reaches its own login page.
+    navigate(`~${APP_BASE}/login`);
   }
 
   return (

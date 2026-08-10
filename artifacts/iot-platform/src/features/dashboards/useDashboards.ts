@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import type { Dashboard, ExplorerState, Folder, Widget } from "./types";
+// Bare `fetch` cannot mutate this API: the CSRF guard rejects a
+// cookie-authenticated POST/PUT/DELETE that arrives without an `x-csrf-token`
+// header, and apiFetch is what attaches it. Every write below used raw fetch
+// and then swallowed the result with `.catch(() => null)`, so creating,
+// renaming, saving and deleting a dashboard all failed silently.
+import { apiFetch } from "@/lib/auth-api";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const LS_KEY = "viz_explorer_state";
@@ -29,7 +35,7 @@ export function useDashboards() {
 
   const refresh = useCallback(async () => {
     setLoading(true);
-    const rows = await fetch(`${BASE}/api/viz-dashboards`).then((r) => (r.ok ? r.json() : [])).catch(() => []);
+    const rows = await apiFetch(`${BASE}/api/viz-dashboards`).then((r) => (r.ok ? r.json() : [])).catch(() => []);
     setDashboards((Array.isArray(rows) ? rows : []).map((d: any) => ({
       id: d.id, name: d.name, roleAccess: d.roleAccess,
       widgets: Array.isArray(d.widgets) ? d.widgets : [],
@@ -42,7 +48,7 @@ export function useDashboards() {
 
   // ── Dashboard CRUD (server) ──
   const createDashboard = useCallback(async (name: string, folderId: string | null, widgets: Widget[] = []) => {
-    const res = await fetch(`${BASE}/api/viz-dashboards`, {
+    const res = await apiFetch(`${BASE}/api/viz-dashboards`, {
       method: "POST", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name, widgets, roleAccess: ["admin", "engineer", "operator", "viewer"] }),
     }).catch(() => null);
@@ -54,7 +60,7 @@ export function useDashboards() {
   }, [refresh]);
 
   const saveDashboard = useCallback(async (d: Dashboard) => {
-    await fetch(`${BASE}/api/viz-dashboards/${d.id}`, {
+    await apiFetch(`${BASE}/api/viz-dashboards/${d.id}`, {
       method: "PUT", headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ name: d.name, widgets: d.widgets, roleAccess: d.roleAccess ?? ["admin", "engineer", "operator", "viewer"] }),
     }).catch(() => null);
@@ -67,7 +73,7 @@ export function useDashboards() {
   }, [createDashboard, explorer.assignments]);
 
   const deleteDashboard = useCallback(async (id: string) => {
-    await fetch(`${BASE}/api/viz-dashboards/${id}`, { method: "DELETE" }).catch(() => null);
+    await apiFetch(`${BASE}/api/viz-dashboards/${id}`, { method: "DELETE" }).catch(() => null);
     setExplorer((s) => {
       const assignments = { ...s.assignments }; delete assignments[id];
       const n = { ...s, assignments, favorites: s.favorites.filter((x) => x !== id), recent: s.recent.filter((x) => x !== id) };
@@ -77,7 +83,7 @@ export function useDashboards() {
   }, [refresh]);
 
   const renameDashboard = useCallback(async (id: string, name: string) => {
-    await fetch(`${BASE}/api/viz-dashboards/${id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }).catch(() => null);
+    await apiFetch(`${BASE}/api/viz-dashboards/${id}`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name }) }).catch(() => null);
     await refresh();
   }, [refresh]);
 

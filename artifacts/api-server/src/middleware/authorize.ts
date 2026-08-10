@@ -150,6 +150,24 @@ const ROUTE_RULES: Rule[] = [
   { path: "/api-clients/:id/:action",  methods: ["POST"],  permission: "manage_api_clients", module: "api_clients" },
 
   // ── Visualization ──────────────────────────────────────────────────────────
+  // Visualization hierarchy + each node's dashboard. `/viz-nodes/import` must
+  // precede `/viz-nodes/:id` or "import" is read as a node id — and it is a POST
+  // to a collection, so it needs write, not the :id rule's level.
+  { path: "/viz-nodes/import",    methods: ["POST"],   module: "visualization", level: "write" },
+  { path: "/viz-nodes",           methods: READ,       module: "visualization", level: "read" },
+  { path: "/viz-nodes",           methods: ["POST"],   module: "visualization", level: "write" },
+  { path: "/viz-nodes/:id",       methods: ["PUT"],    module: "visualization", level: "write" },
+  { path: "/viz-nodes/:id",       methods: ["DELETE"], module: "visualization", level: "delete" },
+
+  // ── Uploads ────────────────────────────────────────────────────────────────
+  // `/uploads/:id/content` precedes the collection rules so the download is not
+  // read as an id. Delete is a separate level from write: being able to add a
+  // file is not the same right as being able to remove someone else's.
+  { path: "/uploads/:id/content", methods: READ,       module: "visualization", level: "read" },
+  { path: "/uploads",             methods: READ,       module: "visualization", level: "read" },
+  { path: "/uploads",             methods: ["POST"],   module: "visualization", level: "write" },
+  { path: "/uploads/:id",         methods: ["DELETE"], module: "visualization", level: "delete" },
+
   { path: "/viz-dashboards",      methods: READ,       module: "visualization", level: "read" },
   { path: "/viz-dashboards",      methods: ["POST"],   module: "visualization", level: "write" },
   { path: "/viz-dashboards/:id",  methods: ["PUT", "PATCH"], module: "visualization", level: "write" },
@@ -271,10 +289,10 @@ export function authorize(req: Request, res: Response, next: NextFunction): void
             : "Authentication required",
       code: reason === "no_session" ? "authentication_required" : reason,
       ...(machineRoute && {
-        hint: `Send the client secret as  X-API-Key: <clientSecret>,  Authorization: Bearer <clientSecret>,  or  ?key=<clientSecret>  appended to this URL. ${
+        hint: `Send the client secret as  X-API-Key: <clientSecret>  or  Authorization: Bearer <clientSecret>. ${
           req.path.startsWith("/ingest") ? "The key must carry the ingest:write scope." : ""
         }`.trim(),
-        docs: "Broker Management → API Client → reveal the secret for the client you are posting as.",
+        docs: "Integration Hub → API Client. Secrets are shown once, when created or rotated — if you no longer have it, use Rotate Secret.",
       }),
     });
     return;

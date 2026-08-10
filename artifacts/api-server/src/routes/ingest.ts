@@ -1,19 +1,41 @@
 import { Router, type IRouter, type Request, type Response, type NextFunction } from "express";
+import { respondInvalid } from "../lib/respond";
 import { eq, desc, and, gte, lte, count, sql } from "drizzle-orm";
 import {
   db, telemetryTable, assetsTable, attributesTable,
   alarmRulesTable, alarmsTable, alarmHistoryTable,
 } from "@workspace/db";
 import { GetTelemetryParams, GetTelemetryQueryParams } from "@workspace/api-zod";
-import { Parser } from "expr-eval";
+import { Parser } from "expr-eval-fork";
 import { broadcast } from "../lib/ws-broadcast";
 import { apiKeyAuth } from "../middleware/apiKeyAuth";
 import { recordDevice, listSeenDevices, removeSeenDevice, pruneUnusedDevices } from "../lib/seen-devices";
+import { assertSafeOutboundUrl } from "../lib/outbound-url";
+import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 
 // ── Safe expression parser ────────────────────────────────────────────────────
+//
+// `expr-eval-fork`, not `expr-eval`. The original was last published in June
+// 2022 and carries two HIGH advisories with NO fix available:
+//
+//   GHSA-jc85-fpwf-qm7x  CWE-94   arbitrary code execution via a crafted
+//                                 variables object passed to evaluate()
+//   GHSA-8gw3-rxh4-v6jx  CWE-1321 prototype pollution
+//
+// Both are reachable here. `vars` below is keyed by ATTRIBUTE NAME and the
+// expression itself is user-authored, so anyone who can create a runtime
+// attribute could reach the evaluator — turning "may edit assets" into code
+// execution on the API host. The fork is the resolution named in the advisory
+// and is actively maintained.
+//
+// `allowMemberAccess: false` is the important addition, and the reason the fork
+// exists: without it an expression can walk `constructor.constructor(...)` to
+// reach the Function constructor. Nothing in a numeric sensor expression needs
+// member access, so removing it costs nothing and closes the escape.
 const exprParser = new Parser({
+  allowMemberAccess: false,
   operators: { add: true, concatenate: false, conditional: true, divide: true,
     factorial: false, multiply: true, power: true, remainder: true, subtract: true,
     logical: true, comparison: true, in: false, assignment: false },
@@ -291,15 +313,42 @@ function evalOp(value: number, op: string, threshold: number): boolean {
 }
 
 // ── Webhook delivery ──────────────────────────────────────────────────────────
+/**
+ * Fire an alarm webhook.
+ *
+ * Still non-blocking — ingest must not stall behind someone's slow endpoint —
+ * but no longer SILENT. Every failure used to be swallowed whole, so a webhook
+ * with a typo in its URL failed forever and nobody was told; the rule looked
+ * configured and simply never delivered. Failures now reach the log with the
+ * rule and the status, which is what makes them diagnosable.
+ *
+ * The URL is re-checked at call time, not only when the rule was saved: a rule
+ * written before this guard existed, or edited straight in the database, must
+ * not get a free pass to the metadata endpoint.
+ */
 async function fireWebhook(url: string, payload: Record<string, unknown>): Promise<void> {
   try {
-    await fetch(url, {
+    assertSafeOutboundUrl(url);
+  } catch (err) {
+    logger.warn({ url, err: (err as Error).message }, "Alarm webhook blocked: unsafe target");
+    return;
+  }
+
+  try {
+    const res = await fetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
       signal: AbortSignal.timeout(5000),
     });
-  } catch { /* non-blocking — webhook failures are silently ignored */ }
+    if (!res.ok) {
+      logger.warn({ url, status: res.status }, "Alarm webhook rejected by the receiver");
+    }
+  } catch (err) {
+    // A timeout, DNS failure or connection refusal. Logged, never rethrown —
+    // the caller is fire-and-forget by design.
+    logger.warn({ url, err: (err as Error).message }, "Alarm webhook delivery failed");
+  }
 }
 
 // ── Alarm rule evaluation (threshold + rate-of-change) ────────────────────────
@@ -900,9 +949,9 @@ router.get("/telemetry/:assetId/metrics", async (req, res): Promise<void> => {
 
 router.get("/telemetry/:assetId", async (req, res): Promise<void> => {
   const params = GetTelemetryParams.safeParse(req.params);
-  if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
+  if (!params.success) { respondInvalid(req, res, params.error); return; }
   const query = GetTelemetryQueryParams.safeParse(req.query);
-  if (!query.success) { res.status(400).json({ error: query.error.message }); return; }
+  if (!query.success) { respondInvalid(req, res, query.error); return; }
   const conditions = [eq(telemetryTable.assetId, params.data.assetId)];
   if (query.data.metric) conditions.push(eq(telemetryTable.metric, query.data.metric));
   if (query.data.from) conditions.push(gte(telemetryTable.timestamp, query.data.from as unknown as Date));

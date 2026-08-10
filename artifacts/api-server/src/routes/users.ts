@@ -1,4 +1,5 @@
-import { Router, type IRouter, type Request } from "express";
+import { Router, type IRouter, type Request, type Response } from "express";
+import { respondInvalid } from "../lib/respond";
 import { eq, sql, and, isNull, gt, desc } from "drizzle-orm";
 import { db, usersTable, authTokensTable, type User } from "@workspace/db";
 import {
@@ -9,7 +10,10 @@ import {
   DeleteUserParams,
 } from "@workspace/api-zod";
 import { logActivity } from "./activity_log";
-import { isRole, resolveAccess, sanitiseAccessOverrides, ROLES } from "../lib/rbac";
+import {
+  isRole, resolveAccess, sanitiseAccessOverrides, ROLES,
+  canActOnRole, canGrantRole, SELF_ROLE_CHANGE_MESSAGE,
+} from "../lib/rbac";
 import { getPasswordPolicy, generateTemporaryPassword, hashPassword } from "../lib/password";
 import { issueAuthToken, revokeAuthTokens, buildActivationUrl, buildResetUrl } from "../lib/tokens";
 import { revokeAllUserSessions } from "../lib/sessions";
@@ -50,6 +54,39 @@ async function pendingInvitationMap(userIds: string[]): Promise<Map<string, Date
   return new Map(rows.map((r) => [r.userId, r.expiresAt]));
 }
 
+
+/**
+ * Object-level guard for user administration.
+ *
+ * `manage_users` says the caller may use this console at all. It says nothing
+ * about WHICH users, and that is the gap this closes: without it a customer
+ * admin could edit, promote or delete an admin, or mint a new super admin.
+ *
+ * Returns true when the request has been answered and the caller must stop.
+ */
+function refuseIfOutranked(req: Request, res: Response, target: User): boolean {
+  const actorRole = req.principal?.user.role;
+  if (canActOnRole(actorRole, target.role)) return false;
+
+  // Deliberately the same 403 whether the target outranks the caller or does not
+  // exist at their level — enumerating who the admins are is itself useful to an
+  // attacker. The real reason is recorded in the security log.
+  recordSecurityEvent({
+    type: "authz.denied",
+    outcome: "failure",
+    reason: "outranked_target",
+    userId: req.principal?.user.id ?? null,
+    username: req.principal?.user.username ?? null,
+    detail: { targetUserId: target.id, targetRole: target.role, actorRole },
+    req,
+  });
+  res.status(403).json({
+    error: "You do not have permission to manage this account.",
+    code: "insufficient_rank",
+  });
+  return true;
+}
+
 function actorId(req: Request): string | null {
   return req.principal?.user.id ?? null;
 }
@@ -82,7 +119,7 @@ router.get("/users", async (_req, res): Promise<void> => {
 
 router.get("/users/:id", async (req, res): Promise<void> => {
   const params = GetUserParams.safeParse(req.params);
-  if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
+  if (!params.success) { respondInvalid(req, res, params.error); return; }
 
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, params.data.id));
   if (!user) { res.status(404).json({ error: "User not found" }); return; }
@@ -108,7 +145,7 @@ router.get("/users/:id", async (req, res): Promise<void> => {
  */
 router.post("/users", async (req, res): Promise<void> => {
   const parsed = CreateUserBody.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  if (!parsed.success) { respondInvalid(req, res, parsed.error); return; }
 
   const username = parsed.data.username.trim();
   const email = parsed.data.email.trim().toLowerCase();
@@ -117,6 +154,21 @@ router.post("/users", async (req, res): Promise<void> => {
 
   if (!isRole(role)) {
     res.status(400).json({ error: `Unknown role "${role}"`, code: "invalid_role", allowed: ROLES });
+    return;
+  }
+  // Without this, `manage_users` was enough to create a super admin — the role
+  // list was checked for EXISTENCE and never for whether the caller may hand it
+  // out. A customer admin could bootstrap themselves a platform-wide account.
+  if (!canGrantRole(req.principal?.user.role, role)) {
+    recordSecurityEvent({
+      type: "authz.denied", outcome: "failure", reason: "role_escalation_attempt",
+      userId: req.principal?.user.id ?? null, username: req.principal?.user.username ?? null,
+      detail: { attemptedRole: role, actorRole: req.principal?.user.role }, req,
+    });
+    res.status(403).json({
+      error: "You cannot create a user with a role equal to or above your own.",
+      code: "role_above_actor",
+    });
     return;
   }
   if (!/^[a-zA-Z0-9._-]{3,64}$/.test(username)) {
@@ -190,13 +242,14 @@ router.post("/users", async (req, res): Promise<void> => {
 
 router.put("/users/:id", async (req, res): Promise<void> => {
   const params = UpdateUserParams.safeParse(req.params);
-  if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
+  if (!params.success) { respondInvalid(req, res, params.error); return; }
 
   const parsed = UpdateUserBody.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  if (!parsed.success) { respondInvalid(req, res, parsed.error); return; }
 
   const [existing] = await db.select().from(usersTable).where(eq(usersTable.id, params.data.id));
   if (!existing) { res.status(404).json({ error: "User not found" }); return; }
+  if (refuseIfOutranked(req, res, existing)) return;
 
   const updateData: Record<string, unknown> = {};
   if (parsed.data.email !== undefined) updateData.email = parsed.data.email.trim().toLowerCase();
@@ -205,6 +258,24 @@ router.put("/users/:id", async (req, res): Promise<void> => {
   if (parsed.data.role !== undefined) {
     if (!isRole(parsed.data.role)) {
       res.status(400).json({ error: `Unknown role "${parsed.data.role}"`, code: "invalid_role", allowed: ROLES });
+      return;
+    }
+    // Self-promotion. Rank alone never catches this: the comparison is against
+    // the role you already hold, so it always succeeds against yourself.
+    if (existing.id === req.principal?.user.id && parsed.data.role !== existing.role) {
+      res.status(403).json({ error: SELF_ROLE_CHANGE_MESSAGE, code: "self_role_change" });
+      return;
+    }
+    if (!canGrantRole(req.principal?.user.role, parsed.data.role)) {
+      recordSecurityEvent({
+        type: "authz.denied", outcome: "failure", reason: "role_escalation_attempt",
+        userId: req.principal?.user.id ?? null, username: req.principal?.user.username ?? null,
+        detail: { targetUserId: existing.id, attemptedRole: parsed.data.role, actorRole: req.principal?.user.role }, req,
+      });
+      res.status(403).json({
+        error: "You cannot assign a role equal to or above your own.",
+        code: "role_above_actor",
+      });
       return;
     }
     // Demoting the last admin would leave nobody able to manage users.
@@ -292,6 +363,19 @@ router.get("/users/:id/access", async (req, res): Promise<void> => {
 router.put("/users/:id/access", async (req, res): Promise<void> => {
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.params.id));
   if (!user) { res.status(404).json({ error: "User not found" }); return; }
+  if (refuseIfOutranked(req, res, user)) return;
+
+  // Overrides can GRANT as well as remove — `resolveAccess` replaces the role
+  // default rather than intersecting with it. Editing your own overrides was
+  // therefore a way to award yourself permissions your role does not carry,
+  // which is the same escalation as changing your role, one level down.
+  if (user.id === req.principal?.user.id) {
+    res.status(403).json({
+      error: "You cannot change your own permissions. Ask another administrator to make this change.",
+      code: "self_access_change",
+    });
+    return;
+  }
 
   const overrides = sanitiseAccessOverrides((req.body as Record<string, unknown>)?.overrides ?? req.body);
 
@@ -332,6 +416,7 @@ router.put("/users/:id/access", async (req, res): Promise<void> => {
 router.post("/users/:id/resend-invitation", async (req, res): Promise<void> => {
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.params.id));
   if (!user) { res.status(404).json({ error: "User not found" }); return; }
+  if (refuseIfOutranked(req, res, user)) return;
   if (user.status !== "invited") {
     res.status(409).json({
       error: "This account is already activated. Send a password reset instead.",
@@ -367,6 +452,7 @@ router.post("/users/:id/resend-invitation", async (req, res): Promise<void> => {
 router.post("/users/:id/revoke-invitation", async (req, res): Promise<void> => {
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.params.id));
   if (!user) { res.status(404).json({ error: "User not found" }); return; }
+  if (refuseIfOutranked(req, res, user)) return;
 
   await revokeAuthTokens(user.id, "activation");
   recordSecurityEvent({
@@ -388,6 +474,7 @@ router.post("/users/:id/revoke-invitation", async (req, res): Promise<void> => {
 router.post("/users/:id/send-password-reset", async (req, res): Promise<void> => {
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.params.id));
   if (!user) { res.status(404).json({ error: "User not found" }); return; }
+  if (refuseIfOutranked(req, res, user)) return;
   if (user.status === "invited") {
     res.status(409).json({
       error: "This user has not activated their account. Resend the invitation instead.",
@@ -435,6 +522,7 @@ router.post("/users/:id/send-password-reset", async (req, res): Promise<void> =>
 router.post("/users/:id/temporary-password", async (req, res): Promise<void> => {
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.params.id));
   if (!user) { res.status(404).json({ error: "User not found" }); return; }
+  if (refuseIfOutranked(req, res, user)) return;
 
   const requested = Number((req.body as Record<string, unknown>)?.expiresInMinutes ?? 15);
   const minutes = Number.isFinite(requested)
@@ -494,6 +582,7 @@ router.post("/users/:id/unlock", async (req, res): Promise<void> => {
     .where(eq(usersTable.id, req.params.id))
     .returning();
   if (!user) { res.status(404).json({ error: "User not found" }); return; }
+  if (refuseIfOutranked(req, res, user)) return;
 
   await logSecurityEvent({
     type: "account.unlocked", userId: user.id, username: user.username,
@@ -512,6 +601,7 @@ router.post("/users/:id/require-password-change", async (req, res): Promise<void
     .where(eq(usersTable.id, req.params.id))
     .returning();
   if (!user) { res.status(404).json({ error: "User not found" }); return; }
+  if (refuseIfOutranked(req, res, user)) return;
 
   void logActivity("user.password_change_required", "user", user.id, user.fullName, null, req);
   res.json(sanitizeUser(user));
@@ -521,7 +611,7 @@ router.post("/users/:id/require-password-change", async (req, res): Promise<void
 
 router.delete("/users/:id", async (req, res): Promise<void> => {
   const params = DeleteUserParams.safeParse(req.params);
-  if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
+  if (!params.success) { respondInvalid(req, res, params.error); return; }
 
   if (params.data.id === req.principal?.user.id) {
     res.status(409).json({ error: "You cannot delete your own account.", code: "self_delete" });
@@ -530,6 +620,7 @@ router.delete("/users/:id", async (req, res): Promise<void> => {
 
   const [target] = await db.select().from(usersTable).where(eq(usersTable.id, params.data.id));
   if (!target) { res.status(404).json({ error: "User not found" }); return; }
+  if (refuseIfOutranked(req, res, target)) return;
 
   if (["admin", "super_admin"].includes(target.role) && await isLastActiveAdmin(target.id)) {
     res.status(409).json({

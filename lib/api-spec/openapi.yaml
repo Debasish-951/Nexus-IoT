@@ -879,6 +879,116 @@ paths:
               schema:
                 $ref: "#/components/schemas/AlarmStats"
 
+  # ─── Home dashboard (banded overview) ──────────────────────────────────────
+  # Backs the Home page. The three endpoints above still back the original
+  # Dashboard, which is unchanged.
+  /dashboard/attention:
+    get:
+      operationId: getDashboardAttention
+      tags: [dashboard]
+      summary: Ranked queue of everything needing a human
+      description: >
+        Merges open alarms, assets whose newest telemetry is older than
+        staleMinutes, device ids with no matching asset, and API keys nearing
+        expiry into one ranked list.
+      parameters:
+        - name: staleMinutes
+          in: query
+          schema: { type: integer, default: 60, minimum: 1, maximum: 10080 }
+        - name: keyExpiryDays
+          in: query
+          schema: { type: integer, default: 14, minimum: 1, maximum: 365 }
+        - name: limit
+          in: query
+          schema: { type: integer, default: 25, minimum: 1, maximum: 100 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardAttention"
+
+  /dashboard/health-index:
+    get:
+      operationId: getDashboardHealthIndex
+      tags: [dashboard]
+      summary: Composite health score, rolled up the asset hierarchy
+      parameters:
+        - name: staleMinutes
+          in: query
+          schema: { type: integer, default: 60, minimum: 1, maximum: 10080 }
+        - name: days
+          in: query
+          schema: { type: integer, default: 7, minimum: 1, maximum: 90 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardHealthIndex"
+
+  /dashboard/alarm-trend:
+    get:
+      operationId: getDashboardAlarmTrend
+      tags: [dashboard]
+      summary: Daily alarm counts, MTTA/MTTR and worst-performing assets
+      parameters:
+        - name: days
+          in: query
+          schema: { type: integer, default: 30, minimum: 1, maximum: 90 }
+        - name: topAssets
+          in: query
+          schema: { type: integer, default: 5, minimum: 1, maximum: 20 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardAlarmTrend"
+
+  /dashboard/ingest-series:
+    get:
+      operationId: getDashboardIngestSeries
+      tags: [dashboard]
+      summary: Per-minute ingest throughput and per-device connectivity
+      parameters:
+        - name: hours
+          in: query
+          schema: { type: integer, default: 6, minimum: 1, maximum: 48 }
+        - name: devices
+          in: query
+          schema: { type: integer, default: 8, minimum: 1, maximum: 40 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardIngestSeries"
+
+  /dashboard/live-metrics:
+    get:
+      operationId: getDashboardLiveMetrics
+      tags: [dashboard]
+      summary: Live metric tiles with thresholds and recent series
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, default: 6, minimum: 1, maximum: 12 }
+        - name: points
+          in: query
+          schema: { type: integer, default: 40, minimum: 2, maximum: 200 }
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardLiveMetrics"
+
 components:
   schemas:
     HealthStatus:
@@ -1744,6 +1854,261 @@ components:
         info:
           type: integer
       required: [critical, high, medium, low, info]
+
+    # ─── Home dashboard ──────────────────────────────────────────────────────
+    AttentionItem:
+      type: object
+      properties:
+        kind:
+          type: string
+          enum: [alarm, stale, unbound_device, api_key]
+        key: { type: string }
+        severity:
+          type: string
+          enum: [critical, high, medium, low, info]
+        title: { type: string }
+        detail: { type: string }
+        assetId: { type: string, nullable: true }
+        assetName: { type: string, nullable: true }
+        since: { type: string, nullable: true }
+        ageSeconds: { type: integer, nullable: true }
+        action:
+          type: object
+          properties:
+            label: { type: string }
+            href: { type: string }
+          required: [label, href]
+      required: [kind, key, severity, title, detail, action]
+
+    DashboardAttention:
+      type: object
+      properties:
+        items:
+          type: array
+          items: { $ref: "#/components/schemas/AttentionItem" }
+        counts:
+          type: object
+          properties:
+            total: { type: integer }
+            alarm: { type: integer }
+            stale: { type: integer }
+            unboundDevice: { type: integer }
+            apiKey: { type: integer }
+            bySeverity: { $ref: "#/components/schemas/AlarmStats" }
+          required: [total, alarm, stale, unboundDevice, apiKey, bySeverity]
+        inProgress:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              name: { type: string }
+              assetId: { type: string, nullable: true }
+              assetName: { type: string, nullable: true }
+              severity: { type: string }
+              triggeredAt: { type: string, nullable: true }
+              acknowledgedAt: { type: string, nullable: true }
+            required: [id, name, severity]
+        clearedToday:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              name: { type: string }
+              assetName: { type: string, nullable: true }
+              severity: { type: string }
+              clearedAt: { type: string, nullable: true }
+              openSeconds: { type: integer, nullable: true }
+            required: [id, name, severity]
+        staleMinutes: { type: integer }
+      required: [items, counts, inProgress, clearedToday, staleMinutes]
+
+    HealthNode:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        score: { type: integer }
+        ownScore: { type: integer }
+        assetCount: { type: integer }
+        children:
+          type: array
+          items: { $ref: "#/components/schemas/HealthNode" }
+      required: [id, name, score, ownScore, assetCount, children]
+
+    DashboardHealthIndex:
+      type: object
+      properties:
+        overall: { type: integer }
+        # Null until something persists a daily snapshot. There is no stored
+        # score history, so a week-on-week delta cannot be computed and is not
+        # invented.
+        previous: { type: integer, nullable: true }
+        factors:
+          type: object
+          properties:
+            alarmBurden: { type: number }
+            staleness: { type: number }
+            downtime: { type: number }
+          required: [alarmBurden, staleness, downtime]
+        assetCount: { type: integer }
+        worst:
+          type: array
+          items:
+            type: object
+            properties:
+              id: { type: string }
+              name: { type: string }
+              score: { type: integer }
+            required: [id, name, score]
+        tree:
+          type: array
+          items: { $ref: "#/components/schemas/HealthNode" }
+        window:
+          type: object
+          properties:
+            days: { type: integer }
+            staleMinutes: { type: integer }
+          required: [days, staleMinutes]
+      required: [overall, previous, factors, assetCount, worst, tree, window]
+
+    DashboardAlarmTrend:
+      type: object
+      properties:
+        series:
+          type: array
+          items:
+            type: object
+            properties:
+              date: { type: string }
+              critical: { type: integer }
+              high: { type: integer }
+              medium: { type: integer }
+              low: { type: integer }
+              info: { type: integer }
+              total: { type: integer }
+            required: [date, critical, high, medium, low, info, total]
+        totals: { type: integer }
+        changePct: { type: integer, nullable: true }
+        peak:
+          type: object
+          nullable: true
+          properties:
+            date: { type: string }
+            total: { type: integer }
+          required: [date, total]
+        mttaSeconds: { type: number, nullable: true }
+        mttrSeconds: { type: number, nullable: true }
+        acknowledgedCount: { type: integer }
+        clearedCount: { type: integer }
+        worstPerformers:
+          type: array
+          items:
+            type: object
+            properties:
+              assetId: { type: string }
+              assetName: { type: string }
+              alarms: { type: integer }
+              openSeconds: { type: number }
+            required: [assetId, assetName, alarms, openSeconds]
+        rules:
+          type: object
+          properties:
+            total: { type: integer }
+            enabled: { type: integer }
+            # Enabled rules with no history in the window — usually watching a
+            # metric no asset sends. Nothing errors; the rule just never fires.
+            neverFired: { type: integer }
+          required: [total, enabled, neverFired]
+        alarmsLastHour: { type: integer }
+        window:
+          type: object
+          properties:
+            days: { type: integer }
+            since: { type: string }
+          required: [days, since]
+      required:
+        [series, totals, changePct, peak, mttaSeconds, mttrSeconds,
+         acknowledgedCount, clearedCount, worstPerformers, rules,
+         alarmsLastHour, window]
+
+    DashboardIngestSeries:
+      type: object
+      properties:
+        series:
+          type: array
+          items:
+            type: object
+            properties:
+              minute: { type: string }
+              count: { type: integer }
+            required: [minute, count]
+        peakPerMinute: { type: integer }
+        totalPoints: { type: integer }
+        currentPerMinute: { type: integer }
+        lastIngestionAt: { type: string, nullable: true }
+        # Counts keyed by telemetry.quality over the newest 1,000 readings.
+        # Open-ended because `quality` is free text on the payload.
+        quality:
+          type: object
+          additionalProperties: { type: integer }
+        hours:
+          type: array
+          items: { type: string }
+        devices:
+          type: array
+          items:
+            type: object
+            properties:
+              deviceId: { type: string }
+              bound: { type: boolean }
+              total: { type: integer }
+              buckets:
+                type: array
+                items: { type: integer }
+            required: [deviceId, bound, total, buckets]
+        window:
+          type: object
+          properties:
+            hours: { type: integer }
+          required: [hours]
+      required:
+        [series, peakPerMinute, totalPoints, currentPerMinute, lastIngestionAt,
+         quality, hours, devices, window]
+
+    LiveMetricTile:
+      type: object
+      properties:
+        assetId: { type: string }
+        assetName: { type: string }
+        metric: { type: string }
+        current: { type: number, nullable: true }
+        min: { type: number, nullable: true }
+        max: { type: number, nullable: true }
+        lastAt: { type: string, nullable: true }
+        series:
+          type: array
+          items:
+            type: object
+            properties:
+              t: { type: string }
+              v: { type: number }
+            required: [t, v]
+        threshold: { type: number, nullable: true }
+        operator: { type: string, nullable: true }
+        ruleName: { type: string, nullable: true }
+        severity: { type: string, nullable: true }
+        inAlarm: { type: boolean }
+      required: [assetId, assetName, metric, series, inAlarm]
+
+    DashboardLiveMetrics:
+      type: object
+      properties:
+        tiles:
+          type: array
+          items: { $ref: "#/components/schemas/LiveMetricTile" }
+      required: [tiles]
 
     BrokerEvent:
       type: object

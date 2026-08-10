@@ -19,10 +19,14 @@ import { widgetDef, migrateLegacyWidget } from "./registry";
 import type { Widget } from "./types";
 import { useWsEvents } from "@/hooks/useWsEvents";
 import { newId } from "./useDashboards";
+import { useVizNodes, useVizNodeActions } from "./vizStore";
 import { RANGES, REFRESH_INTERVALS, type TimeCfg } from "./timeRange";
 import { STALE_AFTER_MS } from "@/pages/assetShared";
 
-const wkey = (nodeId: string) => `wsviz:widgets:${nodeId}`;
+// The dashboard-wide range and refresh settings stay browser-local on purpose:
+// they are how one person is currently looking at a shared dashboard, not part
+// of the dashboard itself. The widgets — the actual work — now live on the
+// server (see vizStore.ts).
 const dashCfgKey = (nodeId: string) => `wsviz:dash-range:${nodeId}`;
 const dashRefreshKey = (nodeId: string) => `wsviz:dash-refresh:${nodeId}`;
 const CLIPBOARD_KEY = "wsviz:widget-clipboard";
@@ -122,6 +126,21 @@ export function AssetVizPanel({ nodeId, nodeName, reloadKey, futuristic, toolbar
   const [widgetRefreshTick, setWidgetRefreshTick] = useState<Record<string, number>>({});
   const [widgetClipboard, setWidgetClipboard] = useState<Widget | null>(() => readClipboard());
 
+  // Server-backed dashboard storage.
+  const { nodes: vizNodes } = useVizNodes();
+  const { saveWidgets } = useVizNodeActions();
+  // A failed save must stay visible on the button, not just in a toast that has
+  // already faded — it is cleared on the next success.
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const saveErrorRef = useRef<string | null>(null);
+
+  // Unsaved edits pending. Mirrored into a ref so the loader below can check it
+  // without taking it as a dependency (which would re-run the loader, and reset
+  // the canvas, on every keystroke).
+  const dirty = JSON.stringify(customWidgets) !== savedSnapshot;
+  const dirtyRef = useRef(false);
+  dirtyRef.current = dirty;
+
   function refreshAll() { setGlobalRefreshTick((t) => t + 1); }
   useEffect(() => {
     if (!dashRefreshEnabled) return;
@@ -152,26 +171,39 @@ export function AssetVizPanel({ nodeId, nodeName, reloadKey, futuristic, toolbar
     },
   });
 
-  // Persist widgets per node (localStorage).
+  // Load this node's dashboard from the server.
+  //
+  // Keyed on the node's own `updatedAt` rather than the row identity, so a
+  // background refetch that returns the same content does not stomp on edits in
+  // progress — only a genuine change (or switching node) reloads the canvas.
+  const serverNode = nodeId ? vizNodes.find((n) => n.id === nodeId) : undefined;
+  const serverStamp = serverNode ? `${serverNode.id}:${(serverNode as any).updatedAt ?? ""}` : "";
+  const loadedNodeRef = useRef<string | null>(null);
   useEffect(() => {
-    if (!nodeId) { setCustomWidgets([]); setSavedSnapshot("[]"); return; }
-    let loaded: Widget[] = [];
-    try {
-      const raw = localStorage.getItem(wkey(nodeId));
-      // Upgrades any pre-existing Custom KPI / Health Score / OEE / … widget to
-      // the general Card widget on load, so a dashboard saved before that
-      // consolidation still renders instead of quietly breaking.
-      loaded = raw ? (JSON.parse(raw) as Widget[]).map(migrateLegacyWidget) : [];
-    } catch { loaded = []; }
+    if (!nodeId) { setCustomWidgets([]); setSavedSnapshot("[]"); loadedNodeRef.current = null; return; }
+    // Now that saving is explicit, a refetch arriving while the user has unsaved
+    // work would throw that work away. Staying on the same node with edits
+    // pending means keeping them; switching node still loads, because those
+    // edits were abandoned by leaving.
+    if (dirtyRef.current && loadedNodeRef.current === nodeId) return;
+    loadedNodeRef.current = nodeId;
+    // Upgrades any pre-existing Custom KPI / Health Score / OEE / … widget to
+    // the general Card widget on load, so a dashboard saved before that
+    // consolidation still renders instead of quietly breaking.
+    const loaded: Widget[] = Array.isArray(serverNode?.widgets)
+      ? (serverNode.widgets as Widget[]).map(migrateLegacyWidget)
+      : [];
     setCustomWidgets(loaded);
     setSavedSnapshot(JSON.stringify(loaded));
     setSelectedWidgetId(null);
     setShowLibrary(false);
-  }, [nodeId, reloadKey]);
-  useEffect(() => {
-    if (!nodeId) return;
-    try { localStorage.setItem(wkey(nodeId), JSON.stringify(customWidgets)); } catch { /* ignore quota */ }
-  }, [nodeId, customWidgets]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodeId, serverStamp, reloadKey]);
+
+  // Saving is EXPLICIT. Nothing is written until the user presses Save
+  // (`saveNow` below) — adding, moving, resizing, configuring or deleting a
+  // widget only changes local state and marks the dashboard dirty. There is
+  // deliberately no autosave: an edit is not a decision to keep it.
 
   // Persist the dashboard-wide range per node, same pattern as the widgets above.
   useEffect(() => {
@@ -208,15 +240,23 @@ export function AssetVizPanel({ nodeId, nodeName, reloadKey, futuristic, toolbar
   // ── Toolbar actions ──
   function saveNow() {
     if (!nodeId) return;
-    try {
-      const snapshot = JSON.stringify(customWidgets);
-      localStorage.setItem(wkey(nodeId), snapshot);
-      toast({ title: "Saved", description: `${customWidgets.length} widget(s) stored for ${nodeName ?? "this node"}.` });
-      setSavedSnapshot(snapshot);
-      setShowLibrary(false);
-      setSelectedWidgetId(null);
-    }
-    catch { toast({ title: "Save failed", variant: "destructive" }); }
+    const snapshot = JSON.stringify(customWidgets);
+    saveWidgets(nodeId, customWidgets)
+      .then(() => {
+        toast({ title: "Saved", description: `${customWidgets.length} widget(s) stored for ${nodeName ?? "this node"}.` });
+        setSavedSnapshot(snapshot);
+        setShowLibrary(false);
+        setSelectedWidgetId(null);
+        saveErrorRef.current = null;
+        setSaveError(null);
+      })
+      .catch((e: Error) => {
+        // The dashboard stays dirty and on screen — nothing is discarded, so the
+        // user can fix the connection and press Save again.
+        saveErrorRef.current = e.message;
+        setSaveError(e.message);
+        toast({ title: "Save failed", description: e.message || "Could not reach the server.", variant: "destructive" });
+      });
   }
 
   // Sets the dashboard-wide range itself — nothing is written into any widget's
@@ -338,7 +378,6 @@ export function AssetVizPanel({ nodeId, nodeName, reloadKey, futuristic, toolbar
 
   const editWidget = customWidgets.find((w) => w.id === editWidgetId) ?? null;
   const draftWidget = customWidgets.find((w) => w.id === draftWidgetId) ?? null;
-  const dirty = JSON.stringify(customWidgets) !== savedSnapshot;
   const isDashCustom = dashTimeCfg?.rangeMinutes === -1;
   // An inverted range is accepted by the API but yields an empty chart with nothing
   // on screen to explain why, so block it at the source.
@@ -456,12 +495,12 @@ export function AssetVizPanel({ nodeId, nodeName, reloadKey, futuristic, toolbar
             diffs the full widget list against the last saved snapshot. */}
         <Button
           size="sm"
-          variant={dirty ? "default" : "outline"}
-          disabled={!dirty}
+          variant={saveError ? "destructive" : dirty ? "default" : "outline"}
+          disabled={!dirty && !saveError}
           onClick={saveNow}
-          title={dirty ? "Save widgets" : "All changes saved"}
+          title={saveError ? `Not saved: ${saveError}` : dirty ? "Save widgets" : "All changes saved"}
         >
-          <Save className="w-4 h-4 mr-1" /> {dirty ? "Save" : "Saved"}
+          <Save className="w-4 h-4 mr-1" /> {saveError ? "Not saved" : dirty ? "Save" : "Saved"}
         </Button>
         <Button
           size="sm"

@@ -1048,3 +1048,307 @@ export const GetAlarmStatsResponse = zod.object({
   low: zod.number(),
   info: zod.number(),
 });
+
+/**
+ * Merges open alarms, assets whose newest telemetry is older than staleMinutes, device ids with no matching asset, and API keys nearing expiry into one ranked list.
+
+ * @summary Ranked queue of everything needing a human
+ */
+export const getDashboardAttentionQueryStaleMinutesDefault = 60;
+export const getDashboardAttentionQueryStaleMinutesMax = 10080;
+
+export const getDashboardAttentionQueryKeyExpiryDaysDefault = 14;
+export const getDashboardAttentionQueryKeyExpiryDaysMax = 365;
+
+export const getDashboardAttentionQueryLimitDefault = 25;
+export const getDashboardAttentionQueryLimitMax = 100;
+
+export const GetDashboardAttentionQueryParams = zod.object({
+  staleMinutes: zod.coerce
+    .number()
+    .min(1)
+    .max(getDashboardAttentionQueryStaleMinutesMax)
+    .default(getDashboardAttentionQueryStaleMinutesDefault),
+  keyExpiryDays: zod.coerce
+    .number()
+    .min(1)
+    .max(getDashboardAttentionQueryKeyExpiryDaysMax)
+    .default(getDashboardAttentionQueryKeyExpiryDaysDefault),
+  limit: zod.coerce
+    .number()
+    .min(1)
+    .max(getDashboardAttentionQueryLimitMax)
+    .default(getDashboardAttentionQueryLimitDefault),
+});
+
+export const GetDashboardAttentionResponse = zod.object({
+  items: zod.array(
+    zod.object({
+      kind: zod.enum(["alarm", "stale", "unbound_device", "api_key"]),
+      key: zod.string(),
+      severity: zod.enum(["critical", "high", "medium", "low", "info"]),
+      title: zod.string(),
+      detail: zod.string(),
+      assetId: zod.string().nullish(),
+      assetName: zod.string().nullish(),
+      since: zod.string().nullish(),
+      ageSeconds: zod.number().nullish(),
+      action: zod.object({
+        label: zod.string(),
+        href: zod.string(),
+      }),
+    }),
+  ),
+  counts: zod.object({
+    total: zod.number(),
+    alarm: zod.number(),
+    stale: zod.number(),
+    unboundDevice: zod.number(),
+    apiKey: zod.number(),
+    bySeverity: zod.object({
+      critical: zod.number(),
+      high: zod.number(),
+      medium: zod.number(),
+      low: zod.number(),
+      info: zod.number(),
+    }),
+  }),
+  inProgress: zod.array(
+    zod.object({
+      id: zod.string(),
+      name: zod.string(),
+      assetId: zod.string().nullish(),
+      assetName: zod.string().nullish(),
+      severity: zod.string(),
+      triggeredAt: zod.string().nullish(),
+      acknowledgedAt: zod.string().nullish(),
+    }),
+  ),
+  clearedToday: zod.array(
+    zod.object({
+      id: zod.string(),
+      name: zod.string(),
+      assetName: zod.string().nullish(),
+      severity: zod.string(),
+      clearedAt: zod.string().nullish(),
+      openSeconds: zod.number().nullish(),
+    }),
+  ),
+  staleMinutes: zod.number(),
+});
+
+/**
+ * @summary Composite health score, rolled up the asset hierarchy
+ */
+export const getDashboardHealthIndexQueryStaleMinutesDefault = 60;
+export const getDashboardHealthIndexQueryStaleMinutesMax = 10080;
+
+export const getDashboardHealthIndexQueryDaysDefault = 7;
+export const getDashboardHealthIndexQueryDaysMax = 90;
+
+export const GetDashboardHealthIndexQueryParams = zod.object({
+  staleMinutes: zod.coerce
+    .number()
+    .min(1)
+    .max(getDashboardHealthIndexQueryStaleMinutesMax)
+    .default(getDashboardHealthIndexQueryStaleMinutesDefault),
+  days: zod.coerce
+    .number()
+    .min(1)
+    .max(getDashboardHealthIndexQueryDaysMax)
+    .default(getDashboardHealthIndexQueryDaysDefault),
+});
+
+export const GetDashboardHealthIndexResponse = zod.object({
+  overall: zod.number(),
+  previous: zod.number().nullable(),
+  factors: zod.object({
+    alarmBurden: zod.number(),
+    staleness: zod.number(),
+    downtime: zod.number(),
+  }),
+  assetCount: zod.number(),
+  worst: zod.array(
+    zod.object({
+      id: zod.string(),
+      name: zod.string(),
+      score: zod.number(),
+    }),
+  ),
+  tree: zod.array(
+    zod.object({
+      id: zod.string(),
+      name: zod.string(),
+      score: zod.number(),
+      ownScore: zod.number(),
+      assetCount: zod.number(),
+      children: zod.array(zod.unknown()),
+    }),
+  ),
+  window: zod.object({
+    days: zod.number(),
+    staleMinutes: zod.number(),
+  }),
+});
+
+/**
+ * @summary Daily alarm counts, MTTA/MTTR and worst-performing assets
+ */
+export const getDashboardAlarmTrendQueryDaysDefault = 30;
+export const getDashboardAlarmTrendQueryDaysMax = 90;
+
+export const getDashboardAlarmTrendQueryTopAssetsDefault = 5;
+export const getDashboardAlarmTrendQueryTopAssetsMax = 20;
+
+export const GetDashboardAlarmTrendQueryParams = zod.object({
+  days: zod.coerce
+    .number()
+    .min(1)
+    .max(getDashboardAlarmTrendQueryDaysMax)
+    .default(getDashboardAlarmTrendQueryDaysDefault),
+  topAssets: zod.coerce
+    .number()
+    .min(1)
+    .max(getDashboardAlarmTrendQueryTopAssetsMax)
+    .default(getDashboardAlarmTrendQueryTopAssetsDefault),
+});
+
+export const GetDashboardAlarmTrendResponse = zod.object({
+  series: zod.array(
+    zod.object({
+      date: zod.string(),
+      critical: zod.number(),
+      high: zod.number(),
+      medium: zod.number(),
+      low: zod.number(),
+      info: zod.number(),
+      total: zod.number(),
+    }),
+  ),
+  totals: zod.number(),
+  changePct: zod.number().nullable(),
+  peak: zod
+    .object({
+      date: zod.string(),
+      total: zod.number(),
+    })
+    .nullable(),
+  mttaSeconds: zod.number().nullable(),
+  mttrSeconds: zod.number().nullable(),
+  acknowledgedCount: zod.number(),
+  clearedCount: zod.number(),
+  worstPerformers: zod.array(
+    zod.object({
+      assetId: zod.string(),
+      assetName: zod.string(),
+      alarms: zod.number(),
+      openSeconds: zod.number(),
+    }),
+  ),
+  rules: zod.object({
+    total: zod.number(),
+    enabled: zod.number(),
+    neverFired: zod.number(),
+  }),
+  alarmsLastHour: zod.number(),
+  window: zod.object({
+    days: zod.number(),
+    since: zod.string(),
+  }),
+});
+
+/**
+ * @summary Per-minute ingest throughput and per-device connectivity
+ */
+export const getDashboardIngestSeriesQueryHoursDefault = 6;
+export const getDashboardIngestSeriesQueryHoursMax = 48;
+
+export const getDashboardIngestSeriesQueryDevicesDefault = 8;
+export const getDashboardIngestSeriesQueryDevicesMax = 40;
+
+export const GetDashboardIngestSeriesQueryParams = zod.object({
+  hours: zod.coerce
+    .number()
+    .min(1)
+    .max(getDashboardIngestSeriesQueryHoursMax)
+    .default(getDashboardIngestSeriesQueryHoursDefault),
+  devices: zod.coerce
+    .number()
+    .min(1)
+    .max(getDashboardIngestSeriesQueryDevicesMax)
+    .default(getDashboardIngestSeriesQueryDevicesDefault),
+});
+
+export const GetDashboardIngestSeriesResponse = zod.object({
+  series: zod.array(
+    zod.object({
+      minute: zod.string(),
+      count: zod.number(),
+    }),
+  ),
+  peakPerMinute: zod.number(),
+  totalPoints: zod.number(),
+  currentPerMinute: zod.number(),
+  lastIngestionAt: zod.string().nullable(),
+  quality: zod.record(zod.string(), zod.number()),
+  hours: zod.array(zod.string()),
+  devices: zod.array(
+    zod.object({
+      deviceId: zod.string(),
+      bound: zod.boolean(),
+      total: zod.number(),
+      buckets: zod.array(zod.number()),
+    }),
+  ),
+  window: zod.object({
+    hours: zod.number(),
+  }),
+});
+
+/**
+ * @summary Live metric tiles with thresholds and recent series
+ */
+export const getDashboardLiveMetricsQueryLimitDefault = 6;
+export const getDashboardLiveMetricsQueryLimitMax = 12;
+
+export const getDashboardLiveMetricsQueryPointsDefault = 40;
+export const getDashboardLiveMetricsQueryPointsMin = 2;
+export const getDashboardLiveMetricsQueryPointsMax = 200;
+
+export const GetDashboardLiveMetricsQueryParams = zod.object({
+  limit: zod.coerce
+    .number()
+    .min(1)
+    .max(getDashboardLiveMetricsQueryLimitMax)
+    .default(getDashboardLiveMetricsQueryLimitDefault),
+  points: zod.coerce
+    .number()
+    .min(getDashboardLiveMetricsQueryPointsMin)
+    .max(getDashboardLiveMetricsQueryPointsMax)
+    .default(getDashboardLiveMetricsQueryPointsDefault),
+});
+
+export const GetDashboardLiveMetricsResponse = zod.object({
+  tiles: zod.array(
+    zod.object({
+      assetId: zod.string(),
+      assetName: zod.string(),
+      metric: zod.string(),
+      current: zod.number().nullish(),
+      min: zod.number().nullish(),
+      max: zod.number().nullish(),
+      lastAt: zod.string().nullish(),
+      series: zod.array(
+        zod.object({
+          t: zod.string(),
+          v: zod.number(),
+        }),
+      ),
+      threshold: zod.number().nullish(),
+      operator: zod.string().nullish(),
+      ruleName: zod.string().nullish(),
+      severity: zod.string().nullish(),
+      inAlarm: zod.boolean(),
+    }),
+  ),
+});

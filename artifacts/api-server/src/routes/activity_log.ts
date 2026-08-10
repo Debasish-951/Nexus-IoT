@@ -1,4 +1,7 @@
 import { Router, type IRouter } from "express";
+import { z } from "zod";
+import { validate } from "../middleware/validate";
+import { ActivityLogQuery } from "../schemas/common";
 import { desc, eq, and, count } from "drizzle-orm";
 import { db, activityLogsTable } from "@workspace/db";
 import type { Request } from "express";
@@ -36,11 +39,8 @@ export async function logActivity(
   }
 }
 
-router.get("/activity-log", async (req, res): Promise<void> => {
-  const limit = Math.min(Number(req.query.limit ?? 100), 500);
-  const offset = Number(req.query.offset ?? 0);
-  const category = req.query.category as string | undefined;
-  const actorName = req.query.actorName as string | undefined;
+router.get("/activity-log", validate({ query: ActivityLogQuery }), async (req, res): Promise<void> => {
+  const { limit = 100, offset = 0, category, actorName } = req.query as z.infer<typeof ActivityLogQuery>;
 
   const conditions = [
     ...(category ? [eq(activityLogsTable.category, category)] : []),

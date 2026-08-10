@@ -5,10 +5,12 @@ import {
   ScatterChart, Grid3x3, Table as TableIcon, Type, Thermometer, Battery, CircleDot,
   Droplet, TrafficCone, ListOrdered, Image as ImageIcon, ToggleLeft, CreditCard,
   TrendingUp, Wind, Move, Waves, AlertTriangle, Cpu, Package,
+  Radar as RadarIcon, Disc3, Rows3, Waypoints, Layers, ChartNoAxesCombined,
 } from "lucide-react";
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell,
   RadialBarChart, RadialBar, XAxis, YAxis, Tooltip, Legend, ScatterChart as RScatterChart, Scatter, ReferenceLine, CartesianGrid,
+  ComposedChart, RadarChart, Radar, PolarGrid, PolarAngleAxis, PolarRadiusAxis,
 } from "recharts";
 import { cn } from "@/lib/utils";
 import type { Widget } from "./types";
@@ -95,6 +97,21 @@ export const CARD_ICON_KEYS = Object.keys(CARD_ICONS);
  */
 export const GROUPED_TYPES = ["card", "gauge", "thermometer", "tank", "progress", "status", "traffic", "battery"] as const;
 
+/**
+ * Chart types that bind through "one primary metric + N overlay series".
+ *
+ * Exported because the config panel gates its Data Source / Overlays / control-
+ * limit editors on the same list. Keeping one list rather than a copy per file
+ * is what stops a newly added chart type from rendering fine but offering no way
+ * to bind anything to it.
+ */
+export const MULTI_SERIES_TYPES = [
+  "line", "area", "bar", "stackbar", "hbar", "step", "stackarea", "combo", "radar", "radial",
+  // Pie and Donut collapse each series to its current value rather than plotting
+  // history, but they bind the same way — one series per slice.
+  "pie", "donut",
+];
+
 // ── Catalog (Phase 1 core set + full list of names) ──
 export const WIDGET_CATEGORIES: { name: string; items: WidgetDef[] }[] = [
   { name: "Charts", items: [
@@ -110,6 +127,16 @@ export const WIDGET_CATEGORIES: { name: string; items: WidgetDef[] }[] = [
     { type: "area",  label: "Area Chart",  icon: AreaIcon,  category: "Charts", w: 6, h: 5, defaults: { color: PALETTE.primary } },
     { type: "bar",   label: "Bar Chart",   icon: BarChart3, category: "Charts", w: 6, h: 5, defaults: { color: PALETTE.primary } },
     { type: "stackbar", label: "Stacked Bar", icon: BarChart3, category: "Charts", w: 6, h: 5, defaults: { color: PALETTE.primary } },
+    // Every type below binds through the same primary-metric + overlays model as
+    // Line/Area/Bar, so they need no config of their own — only a mark. That is
+    // what makes them cheap to offer: a user can switch an existing chart to any
+    // of them from the Widget Type dropdown without rebinding anything.
+    { type: "hbar",  label: "Horizontal Bar", icon: Rows3,    category: "Charts", w: 6, h: 5, defaults: { color: PALETTE.primary } },
+    { type: "step",  label: "Step Line",   icon: Waypoints, category: "Charts", w: 6, h: 5, defaults: { color: PALETTE.primary } },
+    { type: "stackarea", label: "Stacked Area", icon: Layers, category: "Charts", w: 6, h: 5, defaults: { color: PALETTE.primary } },
+    { type: "combo", label: "Bar + Line",  icon: ChartNoAxesCombined, category: "Charts", w: 6, h: 5, defaults: { color: PALETTE.primary } },
+    { type: "radar", label: "Radar Chart", icon: RadarIcon, category: "Charts", w: 5, h: 5, defaults: { color: PALETTE.primary } },
+    { type: "radial", label: "Radial Bar", icon: Disc3,     category: "Charts", w: 4, h: 5, defaults: { color: PALETTE.primary } },
     { type: "sparkline", label: "Sparkline", icon: LineIcon,  category: "Charts", w: 3, h: 2, defaults: { color: PALETTE.primary } },
     { type: "pie",   label: "Pie Chart",   icon: PieIcon,   category: "Charts", w: 4, h: 5 },
     { type: "donut", label: "Donut Chart", icon: PieIcon,   category: "Charts", w: 4, h: 5 },
@@ -223,6 +250,68 @@ export function migrateLegacyWidget(w: Widget): Widget {
   return w;
 }
 
+/**
+ * Gauge dial styles offered on the Gauge widget.
+ *
+ * `arc` is the original and stays the default, so every dashboard saved before
+ * these existed renders exactly as it did.
+ */
+export const GAUGE_STYLES = [
+  { value: "arc",    label: "Arc (default)" },
+  { value: "donut",  label: "Donut" },
+  { value: "needle", label: "Needle" },
+  { value: "zone",   label: "Zone" },
+] as const;
+
+/**
+ * Needle-and-track dial, drawn as plain SVG.
+ *
+ * Recharts has no needle mark, and the RadialBarChart used by the `arc` style
+ * cannot show one — hence the hand-rolled arc maths rather than another chart
+ * component. Angles run 180°→0° (a left-to-right semicircle), which is what a
+ * panel instrument looks like and what makes the needle position readable
+ * without reading the number.
+ *
+ * `zones` paints threshold bands instead of a single track, so the dial itself
+ * says whether the reading is acceptable — the same warn/critical numbers that
+ * already colour the value text, made visible on the scale.
+ */
+function GaugeDial({ pct, color, zones }: {
+  pct: number;
+  color: string;
+  zones?: { from: number; to: number; color: string }[];
+}) {
+  const W = 100, H = 58, CX = 50, CY = 52, R = 40, THICK = 9;
+  const polar = (p: number, r: number) => {
+    const a = Math.PI * (1 - Math.max(0, Math.min(100, p)) / 100);
+    return [CX + r * Math.cos(a), CY - r * Math.sin(a)];
+  };
+  const arcPath = (from: number, to: number, r: number) => {
+    const [x1, y1] = polar(from, r);
+    const [x2, y2] = polar(to, r);
+    // Never crosses 180° of sweep — a semicircle split into bands — so
+    // large-arc-flag is always 0.
+    return `M ${x1} ${y1} A ${r} ${r} 0 0 1 ${x2} ${y2}`;
+  };
+  const bands = zones?.length ? zones : [{ from: 0, to: 100, color: "hsl(var(--muted))" }];
+  const [nx, ny] = polar(pct, R - 3);
+
+  return (
+    <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-full" preserveAspectRatio="xMidYMid meet">
+      {bands.map((b, i) => (
+        <path key={i} d={arcPath(b.from, b.to, R)} fill="none" stroke={b.color} strokeWidth={THICK} strokeLinecap="butt" />
+      ))}
+      {/* Progress overlay only when there are no zones: with bands painted, a
+          filled overlay would hide the very scale it is being read against. */}
+      {!zones?.length && pct > 0 && (
+        <path d={arcPath(0, pct, R)} fill="none" stroke={color} strokeWidth={THICK} strokeLinecap="round" />
+      )}
+      <line x1={CX} y1={CY} x2={nx} y2={ny} stroke="hsl(var(--foreground))" strokeWidth={2} strokeLinecap="round" />
+      <circle cx={CX} cy={CY} r={3.5} fill="hsl(var(--foreground))" />
+    </svg>
+  );
+}
+
 // Deterministic-ish demo series (Phase 1 — real telemetry wiring is Phase 2).
 function demoSeries(n = 24, seed = 1) {
   return Array.from({ length: n }, (_, i) => ({ t: i, v: +(50 + 30 * Math.sin(i / 3 + seed) + (i % 5) * 3).toFixed(1) }));
@@ -278,7 +367,7 @@ export const WidgetView = memo(function WidgetView({ widget, refreshNonce, dashT
   // back to the legacy `tags` array for widgets saved before overlays existed.
   // Single-value / table widgets use just the primary series.
   const isScatter = t === "scatter";
-  const isMultiSeriesChart = ["line", "area", "bar", "stackbar"].includes(t);
+  const isMultiSeriesChart = MULTI_SERIES_TYPES.includes(t);
   const seriesList: SeriesSpec[] = [];
   // What each series was bound to, kept separate from its display name — the name
   // can only be resolved after the attribute-name lookup a few lines down.
@@ -413,7 +502,7 @@ export const WidgetView = memo(function WidgetView({ widget, refreshNonce, dashT
 
   // Bound to an asset+tag but no rows in range → show a real "no data" note instead
   // of misleading demo data. Only unbound (builder preview) widgets use demo data.
-  const CHART_TYPES = ["line", "area", "bar", "stackbar", "sparkline", "scatter", "heatmap", "table"];
+  const CHART_TYPES = [...MULTI_SERIES_TYPES, "sparkline", "scatter", "heatmap", "table"];
   if (wantsData && !bound && CHART_TYPES.includes(t)) {
     return <div className="h-full w-full flex items-center justify-center text-muted-foreground text-xs">No data in selected range</div>;
   }
@@ -487,9 +576,31 @@ export const WidgetView = memo(function WidgetView({ widget, refreshNonce, dashT
       </div>
     );
   }
-  if (t === "line" || t === "area") {
-    const Chart: any = t === "area" ? AreaChart : LineChart;
-    const Series: any = t === "area" ? Area : Line;
+  // Colour for series i, honouring an explicit per-series pick first. Shared by
+  // every chart mark below so a series keeps its colour when the user switches
+  // the widget between chart types.
+  const colorAt = (tg: string, i: number, baseColor: string) =>
+    seriesMeta[tg]?.color ?? (seriesTags.length > 1 ? SERIES_COLORS[i % SERIES_COLORS.length] : baseColor);
+  const nameAt = (tg: string) => seriesMeta[tg]?.label || String(tg).split(".").pop();
+
+  if (t === "line" || t === "area" || t === "step" || t === "stackarea") {
+    // Step Line is a Line with a stepped interpolation, and Stacked Area is an
+    // Area with a shared stackId — the axes, legend, control limits and series
+    // binding are identical, so they ride the existing branch rather than
+    // duplicating forty lines each.
+    const isArea = t === "area" || t === "stackarea";
+    const Chart: any = isArea ? AreaChart : LineChart;
+    const Series: any = isArea ? Area : Line;
+    // "stepAfter": the value holds until the next sample, which is how a
+    // setpoint, a duty state, or any sampled-and-held signal actually behaves —
+    // the straight interpolation of a plain line chart implies a ramp that never
+    // happened.
+    const curve = t === "step" ? "stepAfter" : "monotone";
+    // A stacked area reads as cumulative, so its fill has to be opaque enough to
+    // separate the bands; overlaid areas stay translucent so a series behind
+    // another is still visible.
+    const stackId = t === "stackarea" ? "s" : undefined;
+    const fillOpacity = t === "stackarea" ? 0.55 : 0.15;
     const baseColor = c.color ?? PALETTE.primary;
     return (
       <ResponsiveContainer width="100%" height="100%">
@@ -498,10 +609,8 @@ export const WidgetView = memo(function WidgetView({ widget, refreshNonce, dashT
           {legendEl}
           {spcLines}
           {seriesTags.map((tg, i) => {
-            const meta = seriesMeta[tg];
-            const col = meta?.color ?? (seriesTags.length > 1 ? SERIES_COLORS[i % SERIES_COLORS.length] : baseColor);
-            const name = meta?.label || String(tg).split(".").pop();
-            return <Series key={tg} type="monotone" dataKey={tg} name={name} stroke={col} fill={col} fillOpacity={0.15} strokeWidth={1.8} dot={false} isAnimationActive={false} connectNulls={interpolated} />;
+            const col = colorAt(tg, i, baseColor);
+            return <Series key={tg} type={curve} dataKey={tg} name={nameAt(tg)} stackId={stackId} stroke={col} fill={col} fillOpacity={fillOpacity} strokeWidth={1.8} dot={false} isAnimationActive={false} connectNulls={interpolated} />;
           })}
         </Chart>
       </ResponsiveContainer>
@@ -526,6 +635,94 @@ export const WidgetView = memo(function WidgetView({ widget, refreshNonce, dashT
       </ResponsiveContainer>
     );
   }
+  if (t === "hbar") {
+    // Categories run down the left edge instead of along the bottom. The point is
+    // long labels: an asset name on a vertical axis has the full row width to
+    // itself, where on an x-axis it would be rotated or truncated.
+    const baseColor = c.color ?? PALETTE.primary;
+    return (
+      <ResponsiveContainer width="100%" height="100%">
+        <BarChart layout="vertical" data={bound ? rows : demoSeries(8)} margin={{ top: 6, right: 12, left: 4, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.5} horizontal={false} />
+          <XAxis type="number" tick={{ fontSize: 9 }} />
+          {/* Wider than the default: this axis carries the category text. */}
+          <YAxis type="category" dataKey="t" tick={{ fontSize: 9 }} width={64} />
+          <Tooltip {...TOOLTIP_PROPS} />
+          {legendEl}
+          {seriesTags.map((tg, i) => (
+            <Bar key={tg} dataKey={tg} name={nameAt(tg)} fill={colorAt(tg, i, baseColor)} isAnimationActive={false} />
+          ))}
+        </BarChart>
+      </ResponsiveContainer>
+    );
+  }
+  if (t === "combo") {
+    // First series as bars, the rest as lines — the conventional "measured
+    // quantity vs. a rate or a target riding on top of it" pairing (production
+    // count with efficiency, consumption with ambient temperature). With a single
+    // series bound it is simply a bar chart, which is a reasonable thing for it
+    // to be until a second series is added.
+    const baseColor = c.color ?? PALETTE.primary;
+    return (
+      <ResponsiveContainer width="100%" height="100%">
+        <ComposedChart data={bound ? rows : demoSeries(12)} margin={{ top: 6, right: 8, left: chartMarginLeft, bottom: 0 }}>
+          <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" opacity={0.5} vertical={false} />
+          <XAxis dataKey="t" tick={{ fontSize: 9 }} /><YAxis tick={{ fontSize: 9 }} {...yAxisProps} /><Tooltip {...TOOLTIP_PROPS} />
+          {legendEl}
+          {spcLines}
+          {seriesTags.map((tg, i) => {
+            const col = colorAt(tg, i, baseColor);
+            return i === 0
+              ? <Bar key={tg} dataKey={tg} name={nameAt(tg)} fill={col} isAnimationActive={false} />
+              : <Line key={tg} type="monotone" dataKey={tg} name={nameAt(tg)} stroke={col} strokeWidth={2} dot={false} isAnimationActive={false} connectNulls={interpolated} />;
+          })}
+        </ComposedChart>
+      </ResponsiveContainer>
+    );
+  }
+  if (t === "radar") {
+    // Compares several series across the same axes at a glance — the shape, not
+    // the individual numbers, is the message. Suits a fixed small set of
+    // categories (a shift, a line, a machine's inspection points).
+    const baseColor = c.color ?? PALETTE.primary;
+    return (
+      <ResponsiveContainer width="100%" height="100%">
+        <RadarChart data={bound ? rows : demoSeries(6)} margin={{ top: 8, right: 8, left: 8, bottom: 8 }}>
+          <PolarGrid stroke="hsl(var(--border))" />
+          <PolarAngleAxis dataKey="t" tick={{ fontSize: 9 }} />
+          <PolarRadiusAxis tick={{ fontSize: 8 }} />
+          <Tooltip {...TOOLTIP_PROPS} />
+          {legendEl}
+          {seriesTags.map((tg, i) => {
+            const col = colorAt(tg, i, baseColor);
+            return <Radar key={tg} dataKey={tg} name={nameAt(tg)} stroke={col} fill={col} fillOpacity={0.3} isAnimationActive={false} />;
+          })}
+        </RadarChart>
+      </ResponsiveContainer>
+    );
+  }
+  if (t === "radial") {
+    // One concentric ring per series, each showing that series' CURRENT value —
+    // not its history. So unlike every other chart here it collapses each series
+    // to a single number, the same "last non-null reading" the Card widget shows.
+    const baseColor = c.color ?? PALETTE.primary;
+    const lastOf = (key: string): number | null => {
+      for (let i = rows.length - 1; i >= 0; i--) { const v = rows[i]?.[key]; if (v != null) return v as number; }
+      return null;
+    };
+    const ringData = bound
+      ? seriesTags.map((tg, i) => ({ name: nameAt(tg) ?? tg, value: lastOf(tg) ?? 0, fill: colorAt(tg, i, baseColor) }))
+      : demoPie.map((d, i) => ({ name: d.name, value: d.value, fill: SERIES_COLORS[i % SERIES_COLORS.length] }));
+    return (
+      <ResponsiveContainer width="100%" height="100%">
+        <RadialBarChart data={ringData} innerRadius="25%" outerRadius="95%" startAngle={90} endAngle={-270}>
+          <RadialBar background dataKey="value" cornerRadius={4} isAnimationActive={false} />
+          <Tooltip {...TOOLTIP_PROPS} />
+          <Legend verticalAlign="bottom" height={20} iconSize={10} wrapperStyle={{ fontSize: 10 }} />
+        </RadialBarChart>
+      </ResponsiveContainer>
+    );
+  }
   if (t === "sparkline") {
     const baseColor = c.color ?? PALETTE.primary;
     return (
@@ -540,12 +737,41 @@ export const WidgetView = memo(function WidgetView({ widget, refreshNonce, dashT
     );
   }
   if (t === "pie" || t === "donut") {
+    // One slice per bound series, sized by that series' CURRENT value — the same
+    // "last non-null reading" the Card and Radial Bar widgets use.
+    //
+    // These two used to render a hardcoded four-slice sample no matter what was
+    // configured, and the config panel offered no binding at all, so they could
+    // never show real data. They now bind through the standard primary-metric +
+    // overlays model like every other chart.
+    //
+    // A proportional chart only means something when the parts belong to one
+    // whole, so this is for compositions — energy split across three lines,
+    // downtime by cause — not for unrelated readings.
+    const baseColor = c.color ?? PALETTE.primary;
+    const lastOf = (key: string): number | null => {
+      for (let i = rows.length - 1; i >= 0; i--) { const v = rows[i]?.[key]; if (v != null) return v as number; }
+      return null;
+    };
+    const slices = bound
+      ? seriesTags
+          .map((tg, i) => ({ name: nameAt(tg) ?? tg, value: lastOf(tg), fill: colorAt(tg, i, baseColor) }))
+          // A negative share cannot be drawn as part of a whole, and a null one
+          // is not a zero — both are dropped rather than rendered misleadingly.
+          .filter((s): s is { name: string; value: number; fill: string } => s.value != null && s.value > 0)
+      : demoPie.map((d, i) => ({ name: d.name, value: d.value, fill: SERIES_COLORS[i % SERIES_COLORS.length] }));
+
+    if (bound && slices.length === 0) {
+      return <div className="h-full w-full flex items-center justify-center text-muted-foreground text-xs">No positive values to chart</div>;
+    }
     return (
       <ResponsiveContainer width="100%" height="100%">
         <PieChart>
-          <Pie data={demoPie} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius="80%" innerRadius={t === "donut" ? "55%" : 0} isAnimationActive={false}>
-            {demoPie.map((_, i) => <Cell key={i} fill={SERIES_COLORS[i % SERIES_COLORS.length]} />)}
-          </Pie><Tooltip {...TOOLTIP_PROPS} />
+          <Pie data={slices} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius="80%" innerRadius={t === "donut" ? "55%" : 0} isAnimationActive={false}>
+            {slices.map((s, i) => <Cell key={i} fill={s.fill} />)}
+          </Pie>
+          <Tooltip {...TOOLTIP_PROPS} />
+          {bound && <Legend verticalAlign="bottom" height={20} iconSize={10} wrapperStyle={{ fontSize: 10 }} />}
         </PieChart>
       </ResponsiveContainer>
     );
@@ -599,16 +825,59 @@ export const WidgetView = memo(function WidgetView({ widget, refreshNonce, dashT
 
             let mark: React.ReactNode;
             if (t === "gauge") {
-              mark = (
-                <div className="w-full h-full flex flex-col items-center justify-center">
-                  <ResponsiveContainer width="100%" height="70%">
-                    <RadialBarChart innerRadius="70%" outerRadius="100%" data={[{ v: pct, fill: color }]} startAngle={210} endAngle={-30}>
-                      <RadialBar dataKey="v" cornerRadius={6} background isAnimationActive={false} />
-                    </RadialBarChart>
-                  </ResponsiveContainer>
-                  <p className="font-bold -mt-3 tabular-nums" style={{ fontSize: valueFs, color }}>{unitPrefix}{valueText}{unitSuffix}</p>
-                </div>
-              );
+              // Style is a widget-level choice (all tiles in one Gauge widget
+              // look alike); thresholds stay per-metric, since two gauges in the
+              // same widget can legitimately have different warn/critical points.
+              const style = String(c.gaugeStyle ?? "arc");
+              // Thresholds are absolute values; the dial works in percent of max.
+              const asPct = (v: any) => {
+                const n = Number(v);
+                return v == null || v === "" || isNaN(n) ? null : Math.max(0, Math.min(100, (n / max) * 100));
+              };
+              if (style === "needle" || style === "zone") {
+                const warnAt = asPct(m.warn);
+                const critAt = asPct(m.critical);
+                // Bands are built in ascending order and clipped to each other so
+                // an out-of-order pair (critical below warn) cannot paint a
+                // zero-width or reversed arc.
+                let zones: { from: number; to: number; color: string }[] | undefined;
+                if (style === "zone" && (warnAt != null || critAt != null)) {
+                  const w = warnAt ?? critAt ?? 100;
+                  const cr = Math.max(critAt ?? 100, w);
+                  zones = [
+                    { from: 0, to: w, color: PALETTE.success },
+                    { from: w, to: cr, color: PALETTE.warning },
+                    { from: cr, to: 100, color: PALETTE.critical },
+                  ].filter((z) => z.to > z.from);
+                }
+                mark = (
+                  <div className="w-full h-full flex flex-col items-center justify-center gap-0.5">
+                    <div className="w-full flex-1 min-h-0"><GaugeDial pct={pct} color={color} zones={zones} /></div>
+                    <p className="font-bold tabular-nums shrink-0" style={{ fontSize: valueFs, color }}>{unitPrefix}{valueText}{unitSuffix}</p>
+                  </div>
+                );
+              } else {
+                // arc (default, unchanged) and donut differ only in sweep: the
+                // arc leaves a gap at the bottom, the donut closes the ring.
+                const [startAngle, endAngle] = style === "donut" ? [90, -270] : [210, -30];
+                mark = (
+                  <div className="relative w-full h-full flex flex-col items-center justify-center">
+                    <ResponsiveContainer width="100%" height={style === "donut" ? "100%" : "70%"}>
+                      <RadialBarChart innerRadius="70%" outerRadius="100%" data={[{ v: pct, fill: color }]} startAngle={startAngle} endAngle={endAngle}>
+                        <RadialBar dataKey="v" cornerRadius={6} background isAnimationActive={false} />
+                      </RadialBarChart>
+                    </ResponsiveContainer>
+                    {/* A closed ring has no bottom gap to sit the number in, so
+                        it goes in the middle instead of under the arc. */}
+                    <p
+                      className={cn("font-bold tabular-nums", style === "donut" ? "absolute inset-0 flex items-center justify-center" : "-mt-3")}
+                      style={{ fontSize: valueFs, color }}
+                    >
+                      {unitPrefix}{valueText}{unitSuffix}
+                    </p>
+                  </div>
+                );
+              }
             } else if (t === "thermometer" || t === "tank") {
               mark = (
                 <div className="w-full h-full flex flex-col items-center justify-center gap-1.5 py-1">

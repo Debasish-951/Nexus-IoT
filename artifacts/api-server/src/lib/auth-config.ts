@@ -40,6 +40,36 @@ export const authConfig = {
   /** Narrower escape hatch: keep authorisation on, but let unauthenticated reads through. */
   sessionRequired: bool("AUTH_SESSION_REQUIRED", true),
 
+  /**
+   * Allow alarm webhooks and data destinations to target loopback, link-local
+   * and private-network addresses.
+   *
+   * Off by default because those URLs are user-supplied and the SERVER makes the
+   * request — which otherwise lets a signed-in user reach the management
+   * network, services on localhost, or a cloud metadata endpoint they could not
+   * reach from their own browser (see lib/outbound-url.ts).
+   *
+   * Turn it on for an on-premise deployment that legitimately posts to a host on
+   * its own network, e.g. a plant historian.
+   */
+  allowPrivateWebhookTargets: bool("ALLOW_PRIVATE_WEBHOOK_TARGETS", false),
+
+  /**
+   * Accept an API client secret in the query string (`?key=…`).
+   *
+   * OFF by default. The application's own log strips query strings (see the pino
+   * serializer in app.ts), but nginx's default `access_log` records the full
+   * request line — so a key sent this way is written to disk in cleartext on the
+   * proxy, survives in log rotation and backups, and is visible to anyone with
+   * log access.
+   *
+   * It exists because some field gateways (Node-RED subflows, PLC HTTP blocks,
+   * SCADA bridges) expose only a URL field, and refusing them leaves no way to
+   * authenticate at all. Turn it on where such a device is in use, and configure
+   * nginx to strip the parameter — see docs/operations/vm-deployment-checklist.md.
+   */
+  allowApiKeyInQuery: bool("API_KEY_ALLOW_QUERY_PARAM", false),
+
   /** Origin used to build activation/reset links in outbound email. */
   publicUrl: (process.env.AUTH_PUBLIC_URL ?? "http://localhost:5173").replace(/\/+$/, ""),
   /** Browser origins allowed to make credentialed requests. */
@@ -89,10 +119,70 @@ export const authConfig = {
     rateLimitRpm: num("INGEST_RATE_LIMIT_RPM", 1200),
   },
 
+  /**
+   * Reverse-proxy hops to trust when deriving the client IP.
+   *
+   * Must equal the number of proxies actually in front of this process. Too low
+   * behind nginx and every user shares one rate-limit bucket; too high and the
+   * client can forge the address the limits key on. See lib/client-ip.ts.
+   */
+  trustProxy: num("TRUST_PROXY", isProd ? 1 : 0),
+
   rateLimit: {
+    // Credential endpoints. Low ceilings: a human types a password a handful of
+    // times, so anything above this is a script.
     login: { max: num("AUTH_RL_LOGIN_MAX", 10), windowMs: num("AUTH_RL_LOGIN_WINDOW_MINUTES", 5) * 60_000 },
     forgot: { max: num("AUTH_RL_FORGOT_MAX", 5), windowMs: num("AUTH_RL_FORGOT_WINDOW_MINUTES", 60) * 60_000 },
     token: { max: num("AUTH_RL_TOKEN_MAX", 20), windowMs: num("AUTH_RL_TOKEN_WINDOW_MINUTES", 15) * 60_000 },
+    /**
+     * One-time codes. Stricter than a password: a 6-digit code has a millionth
+     * chance per guess, so an attacker only needs volume. Applied per account,
+     * which is what makes rotating IPs useless against it.
+     */
+    otp: { max: num("AUTH_RL_OTP_MAX", 5), windowMs: num("AUTH_RL_OTP_WINDOW_MINUTES", 10) * 60_000 },
+    /**
+     * Per-ACCOUNT ceiling for credential attempts, independent of source IP.
+     * The dimension a distributed attack cannot rotate — the target username is
+     * fixed by definition. Set above the lockout threshold so account lockout
+     * (which is durable, in the database) remains the first control to fire.
+     */
+    account: { max: num("AUTH_RL_ACCOUNT_MAX", 12), windowMs: num("AUTH_RL_ACCOUNT_WINDOW_MINUTES", 15) * 60_000 },
+
+    /**
+     * Ordinary authenticated API traffic, keyed per user (falling back to IP).
+     * Sized for a busy dashboard — the UI polls several endpoints and opens a
+     * WebSocket — not for a scripted crawl of every asset.
+     */
+    api: { max: num("API_RL_MAX", 600), windowMs: num("API_RL_WINDOW_SECONDS", 60) * 1_000 },
+    /**
+     * Coarse pre-authentication ceiling, applied before any database work. This
+     * is what stops an unauthenticated flood turning into thousands of session
+     * lookups; it sits well above real usage and is a flood guard, not a policy.
+     */
+    flood: { max: num("API_RL_FLOOD_MAX", 1200), windowMs: num("API_RL_FLOOD_WINDOW_SECONDS", 60) * 1_000 },
+    /** Cost multiplier for endpoints that generate a full export. */
+    exportCost: num("API_RL_EXPORT_COST", 20),
+
+    /**
+     * Subnet ceilings are this multiple of the per-IP ceiling: shared enough to
+     * let a NATed office through, tight enough that renting a /24 does not
+     * multiply an attacker's budget by 256.
+     */
+    subnetMultiplier: num("API_RL_SUBNET_MULTIPLIER", 6),
+
+    /**
+     * Aggregate authentication-failure velocity across ALL accounts and IPs.
+     * A distributed spray stays under every individual ceiling by design; the
+     * total is the one signal it cannot suppress. Crossing `max` failures in
+     * `windowMs` divides the auth ceilings by `divisor` for `tightenMs`.
+     * 0 disables.
+     */
+    spray: {
+      max: num("AUTH_RL_SPRAY_MAX", 100),
+      windowMs: num("AUTH_RL_SPRAY_WINDOW_MINUTES", 10) * 60_000,
+      tightenMs: num("AUTH_RL_SPRAY_TIGHTEN_MINUTES", 30) * 60_000,
+      divisor: Math.max(2, num("AUTH_RL_SPRAY_DIVISOR", 4)),
+    },
   },
 
   password: {

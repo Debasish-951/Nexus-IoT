@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import { respondInvalid } from "../lib/respond";
 import { eq, sql } from "drizzle-orm";
 import { db, attributesTable, assetsTable } from "@workspace/db";
 import {
@@ -15,7 +16,7 @@ const router: IRouter = Router();
 router.get("/assets/:id/attributes", async (req, res): Promise<void> => {
   const params = ListAssetAttributesParams.safeParse(req.params);
   if (!params.success) {
-    res.status(400).json({ error: params.error.message });
+    respondInvalid(req, res, params.error);
     return;
   }
 
@@ -34,13 +35,13 @@ router.get("/assets/:id/attributes", async (req, res): Promise<void> => {
 router.post("/assets/:id/attributes", async (req, res): Promise<void> => {
   const params = CreateAssetAttributeParams.safeParse(req.params);
   if (!params.success) {
-    res.status(400).json({ error: params.error.message });
+    respondInvalid(req, res, params.error);
     return;
   }
 
   const parsed = CreateAssetAttributeBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    respondInvalid(req, res, parsed.error);
     return;
   }
 
@@ -76,13 +77,13 @@ router.post("/assets/:id/attributes", async (req, res): Promise<void> => {
 router.put("/attributes/:id", async (req, res): Promise<void> => {
   const params = UpdateAttributeParams.safeParse(req.params);
   if (!params.success) {
-    res.status(400).json({ error: params.error.message });
+    respondInvalid(req, res, params.error);
     return;
   }
 
   const parsed = UpdateAttributeBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    respondInvalid(req, res, parsed.error);
     return;
   }
 
@@ -116,7 +117,7 @@ router.put("/attributes/:id", async (req, res): Promise<void> => {
 router.delete("/attributes/:id", async (req, res): Promise<void> => {
   const params = DeleteAttributeParams.safeParse(req.params);
   if (!params.success) {
-    res.status(400).json({ error: params.error.message });
+    respondInvalid(req, res, params.error);
     return;
   }
 

@@ -877,9 +877,17 @@ export default function ApiClients() {
 
                     {/* Bearer token */}
                     <td className="px-4 py-3">
+                      {/* Only credentials issued before secrets were hashed can
+                          still be revealed. Everything since stores a hash, so
+                          the plaintext exists exactly once — in the response to
+                          the request that created or rotated it. */}
                       {client.clientSecret
                         ? <SecretField secret={client.clientSecret as string} />
-                        : <span className="text-xs text-muted-foreground italic">hidden</span>}
+                        : (
+                          <span className="text-xs text-muted-foreground italic" title="Secrets are stored hashed and cannot be shown again. Use Rotate Secret to issue a new one.">
+                            not retrievable
+                          </span>
+                        )}
                     </td>
 
                     {/* Scopes */}

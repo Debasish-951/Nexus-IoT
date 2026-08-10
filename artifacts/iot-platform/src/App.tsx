@@ -1,5 +1,7 @@
-import { Switch, Route, Router as WouterRouter } from "wouter";
+import { useEffect, lazy, Suspense } from "react";
+import { Switch, Route, Router as WouterRouter, useLocation } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { Loader2 } from "lucide-react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as SonnerToaster } from "sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
@@ -11,37 +13,65 @@ import NotFound from "@/pages/not-found";
 import Login from "@/pages/Login";
 import Activate from "@/pages/Activate";
 import ResetPassword from "@/pages/ResetPassword";
-import Dashboard from "@/pages/Dashboard";
-import Assets from "@/pages/Assets";
-import AssetDetails from "@/pages/AssetDetails";
-import AssetManagement from "@/pages/AssetManagement";
-import HierarchyGenerator from "@/pages/HierarchyGenerator";
-import AssetTemplates from "@/pages/AssetTemplates";
-import AssetTemplateDetails from "@/pages/AssetTemplateDetails";
-import Alarms from "@/pages/Alarms";
-import AlarmHistory from "@/pages/AlarmHistory";
-import AlarmRules from "@/pages/AlarmRules";
-import Users from "@/pages/Users";
-import SecurityCenter from "@/pages/SecurityCenter";
-import Brokers from "@/pages/Brokers";
-import ApiClients from "@/pages/ApiClients";
-import Settings from "@/pages/Settings";
-import MediaLibrary from "@/pages/MediaLibrary";
-import NotificationGroups from "@/pages/NotificationGroups";
-import IngestSimulator from "@/pages/IngestSimulator";
-import Destinations from "@/pages/Destinations";
-import DataExplorerHome from "@/pages/DataExplorerHome";
-import IntegrationGuide from "@/pages/NodeRedDocs";
-import IntegrationHub from "@/pages/IntegrationHub";
-import ActivityLog from "@/pages/ActivityLog";
-import DataManagement from "@/pages/DataManagement";
-import Reports from "@/pages/Reports";
-import Visualization from "@/pages/Visualization";
-import LiveTwin from "@/pages/LiveTwin";
-import DashboardTemplates from "@/pages/DashboardTemplates";
-import LiveFeed from "@/pages/LiveFeed";
-import AICopilot from "@/pages/AICopilot";
+import Home from "@/pages/Home";
 import { FEATURES, type FeatureKey } from "@/lib/features";
+
+/**
+ * Route-level code splitting.
+ *
+ * The whole app used to ship as one ~2.7MB chunk, so a plant-floor terminal
+ * downloaded the AI Copilot, the payload simulator, html2canvas and every chart
+ * type before it could paint the login screen. Each page below is now its own
+ * chunk, fetched when its route is first opened.
+ *
+ * Home, the auth screens and NotFound stay eager on purpose: they are the
+ * first thing rendered after sign-in or the thing rendered when nothing else
+ * matches, so lazy-loading them would only add a spinner to the critical path.
+ *
+ * `Home` picks between the banded Overview and the original Dashboard from a
+ * per-browser preference — both pages are live, neither replaces the other.
+ */
+const AICopilot = lazy(() => import("@/pages/AICopilot"));
+const ActivityLog = lazy(() => import("@/pages/ActivityLog"));
+const AlarmHistory = lazy(() => import("@/pages/AlarmHistory"));
+const AlarmRules = lazy(() => import("@/pages/AlarmRules"));
+const Alarms = lazy(() => import("@/pages/Alarms"));
+const ApiClients = lazy(() => import("@/pages/ApiClients"));
+const AssetDetails = lazy(() => import("@/pages/AssetDetails"));
+const AssetManagement = lazy(() => import("@/pages/AssetManagement"));
+const AssetTemplateDetails = lazy(() => import("@/pages/AssetTemplateDetails"));
+const AssetTemplates = lazy(() => import("@/pages/AssetTemplates"));
+const Assets = lazy(() => import("@/pages/Assets"));
+const Brokers = lazy(() => import("@/pages/Brokers"));
+const DashboardTemplates = lazy(() => import("@/pages/DashboardTemplates"));
+const DataExplorerHome = lazy(() => import("@/pages/DataExplorerHome"));
+const DataManagement = lazy(() => import("@/pages/DataManagement"));
+const Destinations = lazy(() => import("@/pages/Destinations"));
+const HierarchyGenerator = lazy(() => import("@/pages/HierarchyGenerator"));
+const IngestSimulator = lazy(() => import("@/pages/IngestSimulator"));
+const IntegrationGuide = lazy(() => import("@/pages/NodeRedDocs"));
+const IntegrationHub = lazy(() => import("@/pages/IntegrationHub"));
+const LiveFeed = lazy(() => import("@/pages/LiveFeed"));
+const LiveTwin = lazy(() => import("@/pages/LiveTwin"));
+const MediaLibrary = lazy(() => import("@/pages/MediaLibrary"));
+const NotificationGroups = lazy(() => import("@/pages/NotificationGroups"));
+const Reports = lazy(() => import("@/pages/Reports"));
+const SecurityCenter = lazy(() => import("@/pages/SecurityCenter"));
+const Settings = lazy(() => import("@/pages/Settings"));
+const Users = lazy(() => import("@/pages/Users"));
+const Visualization = lazy(() => import("@/pages/Visualization"));
+
+import { ProjectProvider, useProject, LAST_PROJECT_KEY } from "@/contexts/ProjectContext";
+import { Button } from "@/components/ui/button";
+import { opaqueLocationHook } from "@/lib/opaqueLocation";
+import { encodePath } from "@/lib/routeSlugs";
+
+/**
+ * The deployment's own base path (`/` in dev, a subpath behind nginx if
+ * configured). Needed wherever a link has to escape the nested project router
+ * with `~`, because `~` drops EVERY base — including this one.
+ */
+const APP_BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -76,7 +106,7 @@ const ROUTES: {
   module?: string;
   feature?: FeatureKey;
 }[] = [
-  { path: "/",                     component: Dashboard,            module: "dashboard" },
+  { path: "/",                     component: Home,                 module: "dashboard" },
   { path: "/asset-management",     component: AssetManagement,      module: "assets" },
   { path: "/hierarchy-generator",  component: HierarchyGenerator,   module: "assets", feature: "hierarchyGenerator" },
   { path: "/assets",               component: Assets,               module: "assets" },
@@ -109,6 +139,187 @@ const ROUTES: {
   { path: "/settings",             component: Settings },
 ];
 
+/**
+ * Rewrites an arriving readable URL into its opaque form.
+ *
+ * Readable paths stay valid forever — an old bookmark, a link in a support
+ * ticket, or a URL typed from the docs must still open the right page. But once
+ * it has opened, leaving `/p/<id>/alarm-rules` in the address bar would defeat
+ * the point, so it is replaced (not pushed — the readable form should not
+ * become a back-button step).
+ *
+ * Query and fragment are carried over explicitly: history.replaceState is given
+ * a whole URL, so anything omitted here is dropped.
+ */
+function OpaqueUrlNormaliser() {
+  const [location, navigate] = useLocation();
+
+  useEffect(() => {
+    if (!FEATURES.opaqueRoutes) return;
+    const shown = window.location.pathname;
+    if (encodePath(shown) === shown) return;
+    navigate(location + window.location.search + window.location.hash, { replace: true });
+  }, [location, navigate]);
+
+  return null;
+}
+
+/** The signed-in application: sidebar plus the route table above. */
+function WorkspaceShell() {
+  return (
+    <Layout>
+      <OpaqueUrlNormaliser />
+      {/* Every page below the Dashboard is a lazy chunk, so the first visit to a
+          route needs somewhere to wait. The boundary sits INSIDE Layout on
+          purpose: the sidebar and top bar stay on screen while the page loads,
+          rather than the whole shell blinking out and back. */}
+      <Suspense fallback={<PageSpinner />}>
+        <Switch>
+          {ROUTES
+            .filter(({ feature }) => !feature || FEATURES[feature])
+            .map(({ path, component: Component, module }) => (
+            <Route key={path} path={path}>
+              <Protected module={module}>
+                <Component />
+              </Protected>
+            </Route>
+          ))}
+          <Route component={NotFound} />
+        </Switch>
+      </Suspense>
+    </Layout>
+  );
+}
+
+/**
+ * Waiting state for a lazy page chunk. Sized to the content area, not the
+ * viewport — the shell around it is already on screen.
+ */
+function PageSpinner() {
+  return (
+    <div className="flex h-full min-h-[50vh] w-full items-center justify-center">
+      <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+    </div>
+  );
+}
+
+function Splash({ label }: { label: string }) {
+  return (
+    <div className="flex min-h-screen w-full items-center justify-center">
+      <div className="flex items-center gap-3 text-muted-foreground">
+        <Loader2 className="h-5 w-5 animate-spin" />
+        <span className="text-sm">{label}</span>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * A project workspace: everything under `/p/<projectId>/…`.
+ *
+ * The nested <Router base> is what keeps this from being a rewrite of every
+ * page. Inside it wouter reports and accepts paths RELATIVE to the prefix, so a
+ * page that already says `navigate("/assets")` or `<Link href="/alarms">` keeps
+ * working untouched and simply resolves inside the open project. The route
+ * table above needs no project-aware duplicates either.
+ *
+ * <Protected> sits OUTSIDE the nested router deliberately: it redirects to
+ * /login, which is an app-root route. Inside the nested router that target would
+ * be rewritten to /p/<id>/login and 404.
+ */
+function ProjectWorkspace({ projectId }: { projectId: string }) {
+  return (
+    <Protected>
+      <ProjectProvider projectId={projectId}>
+        <WouterRouter base={`/p/${projectId}`}>
+          <ProjectGate />
+        </WouterRouter>
+      </ProjectProvider>
+    </Protected>
+  );
+}
+
+/**
+ * Refuses to render a project the user cannot open.
+ *
+ * A link to a deleted project — or to one the recipient is not assigned to,
+ * which is the normal outcome of pasting a link to a colleague — must say so.
+ * Silently swapping in a different project would be worse than an error: the
+ * page would look right while showing another plant's data.
+ */
+function ProjectGate() {
+  const { currentProject, projects, loaded, canListProjects } = useProject();
+  const [, navigate] = useLocation();
+
+  if (!loaded) return <Splash label="Opening project…" />;
+
+  // The project list is unreadable for this user (no `assets` grant), so there
+  // is nothing to check the prefix against. Render the app rather than refuse
+  // it — the API still enforces what each page may load.
+  if (!canListProjects) return <WorkspaceShell />;
+
+  if (!currentProject) {
+    return (
+      <div className="flex min-h-screen w-full items-center justify-center p-6">
+        <div className="max-w-md text-center">
+          <h1 className="text-xl font-semibold">Project unavailable</h1>
+          <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+            This project does not exist, or it has not been assigned to your
+            account. Ask an administrator if you need access to it.
+          </p>
+          {projects.length > 0 && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="mt-6"
+              // `~` escapes the project base, so this leaves the dead prefix
+              // instead of appending to it. APP_BASE goes back on by hand.
+              onClick={() => navigate(`~${APP_BASE}/p/${projects[0].id}`)}
+            >
+              Open {projects[0].name}
+            </Button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  return <WorkspaceShell />;
+}
+
+/**
+ * Entry point for any signed-in URL with no `/p/<id>` prefix.
+ *
+ * Two jobs. It keeps every pre-existing link working — `/alarm-rules` from an
+ * old bookmark, an email, or the docs resolves to the last project the user had
+ * open, rather than 404ing. And it is the landing step after login.
+ *
+ * An installation with no projects yet renders unscoped, so a brand-new
+ * deployment is still usable: you cannot pick a project before creating the
+ * first asset, and a redirect loop would be the only alternative.
+ */
+function ProjectEntry() {
+  const { projects, loaded, canListProjects } = useProject();
+  const [location, navigate] = useLocation();
+
+  useEffect(() => {
+    if (!loaded || projects.length === 0) return;
+    const remembered = window.localStorage.getItem(LAST_PROJECT_KEY);
+    const target = projects.find((p) => p.id === remembered) ?? projects[0];
+    // Carry the whole address across, so a deep link keeps its query and hash.
+    const suffix = location === "/" ? "" : location;
+    navigate(`/p/${target.id}${suffix}${window.location.search}${window.location.hash}`, {
+      replace: true,
+    });
+  }, [loaded, projects, location, navigate]);
+
+  if (!loaded) return <Splash label="Loading projects…" />;
+  // No projects to scope to — a fresh installation, or a user who cannot read
+  // the asset list. Either way the app runs unprefixed rather than blocking.
+  if (!canListProjects || projects.length === 0) return <WorkspaceShell />;
+  return <Splash label="Opening project…" />;
+}
+
 function AppRouter() {
   return (
     <Switch>
@@ -118,22 +329,16 @@ function AppRouter() {
       <Route path="/activate" component={Activate} />
       <Route path="/reset-password" component={ResetPassword} />
 
+      {/* Project-scoped: /p/<projectId>/<anything>, and the bare prefix. */}
+      <Route path="/p/:projectId/*?">
+        {(params) => <ProjectWorkspace projectId={params.projectId as string} />}
+      </Route>
+
       <Route>
         <Protected>
-          <Layout>
-            <Switch>
-              {ROUTES
-                .filter(({ feature }) => !feature || FEATURES[feature])
-                .map(({ path, component: Component, module }) => (
-                <Route key={path} path={path}>
-                  <Protected module={module}>
-                    <Component />
-                  </Protected>
-                </Route>
-              ))}
-              <Route component={NotFound} />
-            </Switch>
-          </Layout>
+          <ProjectProvider projectId={null}>
+            <ProjectEntry />
+          </ProjectProvider>
         </Protected>
       </Route>
     </Switch>
@@ -145,7 +350,15 @@ function App() {
     <QueryClientProvider client={queryClient}>
       <UserProvider>
         <TooltipProvider>
-          <WouterRouter base={import.meta.env.BASE_URL.replace(/\/$/, "")}>
+          {/* `hook` is what puts opaque tokens in the address bar. It is set
+              once here and inherited by the nested per-project router, since
+              wouter resolves options as `props[k] ?? parent[k]`. Omitted when
+              the switch is off, which falls back to wouter's own browser hook
+              and readable URLs. */}
+          <WouterRouter
+            base={APP_BASE}
+            hook={FEATURES.opaqueRoutes ? opaqueLocationHook : undefined}
+          >
             <AppRouter />
           </WouterRouter>
           <AlarmToastListener />

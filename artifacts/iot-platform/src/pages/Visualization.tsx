@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef } from "react";
+import { useState, useMemo, useRef, useCallback } from "react";
 import { useLocation } from "wouter";
 import { Card } from "@/components/ui/card";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
@@ -7,17 +7,20 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useToast } from "@/hooks/use-toast";
-import { ArrowLeft, LayoutDashboard, FolderPlus, ChevronLeft, ChevronRight } from "lucide-react";
+import { ArrowLeft, LayoutDashboard, FolderPlus, ChevronLeft, ChevronRight, Search } from "lucide-react";
 import type { ImperativePanelHandle } from "react-resizable-panels";
 import { AssetVizPanel } from "@/features/dashboards/AssetVizPanel";
 import { AssetTreeProvider, type DashboardActions } from "@/components/asset-tree/AssetTreeContext";
 import { AssetTree } from "@/components/asset-tree/AssetTree";
 import { newId } from "@/features/dashboards/useDashboards";
 import { useVizHierarchy, type VizNode } from "@/features/dashboards/vizHierarchy";
+import { useVizNodes, useVizNodeActions } from "@/features/dashboards/vizStore";
 import type { Asset } from "@/pages/assetShared";
+import { validateName, LIMITS } from "@/lib/validation";
 
-// ── Per-node dashboard storage helpers (localStorage) ──
-const WKEY = (id: string) => `wsviz:widgets:${id}`;
+// Dashboards themselves now live on the server (see features/dashboards/vizStore.ts).
+// What stays here is genuinely local: the copy/paste clipboard, this person's
+// bookmarks, and the template list.
 const DASH_CLIP = "wsviz:dashboard-clipboard";
 const BOOKMARKS_KEY = "wsviz:bookmarks";
 const TEMPLATES_KEY = "viz_templates";
@@ -25,8 +28,6 @@ interface DashTemplate { id: string; name: string; widgets: any[]; }
 function readTemplates(): DashTemplate[] {
   try { const r = localStorage.getItem(TEMPLATES_KEY); return r ? JSON.parse(r) : []; } catch { return []; }
 }
-function readWidgets(id: string): any[] { try { const r = localStorage.getItem(WKEY(id)); return r ? JSON.parse(r) : []; } catch { return []; } }
-function writeWidgets(id: string, widgets: any[]) { try { localStorage.setItem(WKEY(id), JSON.stringify(widgets)); } catch { /* quota */ } }
 function withFreshIds(widgets: any[]): any[] { return widgets.map((w) => ({ ...w, id: newId("w") })); }
 function downloadJson(data: unknown, filename: string) {
   const blob = new Blob([JSON.stringify(data, null, 2)], { type: "application/json" });
@@ -44,8 +45,33 @@ export default function Visualization() {
   const { toast } = useToast();
 
   const viz = useVizHierarchy();
+
+  // Dashboards come from the same server-backed cache the hierarchy does, so a
+  // read here is synchronous against already-loaded data — which is what lets
+  // the right-click actions below keep their original shape.
+  const { nodes: vizRows } = useVizNodes();
+  const { saveWidgets } = useVizNodeActions();
+  const readWidgets = useCallback(
+    (id: string): any[] => {
+      const w = vizRows.find((n) => n.id === id)?.widgets;
+      return Array.isArray(w) ? w : [];
+    },
+    [vizRows],
+  );
+  // Fire-and-report, not fire-and-forget: a clone or import that fails to reach
+  // the server has to say so, or the user believes work was saved that was not.
+  const writeWidgets = useCallback(
+    (id: string, widgets: any[]) => {
+      saveWidgets(id, widgets).catch((e: Error) => {
+        toast({ title: "Could not save dashboard", description: e.message || "The server rejected the change.", variant: "destructive" });
+      });
+    },
+    [saveWidgets, toast],
+  );
+
   const [selId, setSelId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set()); // empty = all collapsed
+  const [search, setSearch] = useState("");
   const [bookmarks, setBookmarks] = useState<Set<string>>(() => {
     try { const r = localStorage.getItem(BOOKMARKS_KEY); return new Set(r ? JSON.parse(r) : []); } catch { return new Set(); }
   });
@@ -72,8 +98,10 @@ export default function Visualization() {
   const [createOpen, setCreateOpen] = useState(false);
   const [createParent, setCreateParent] = useState<string | null>(null);
   const [createName, setCreateName] = useState("");
+  const [createIssue, setCreateIssue] = useState<string | null>(null);
   const [renameNode, setRenameNode] = useState<VizNode | null>(null);
   const [renameValue, setRenameValue] = useState("");
+  const [renameIssue, setRenameIssue] = useState<string | null>(null);
 
   const allParentIds = useMemo(
     () => Object.keys(viz.childrenByParent).filter((k) => k !== "root"),
@@ -97,11 +125,45 @@ export default function Visualization() {
     return out;
   }, [viz.childrenByParent]);
 
+  // Search: a match keeps its whole ancestor chain visible, otherwise a dashboard
+  // nested three levels down would have nothing left to render it under. Same
+  // rule the Asset Hub tree uses.
+  //
+  // `!vis.has(p)` both stops the walk once an ancestor is already accounted for
+  // and makes it terminate — parentId carries no foreign key, so a cycle in the
+  // data is possible and would otherwise hang the page.
+  const visibleIds = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return null;
+    const byId = new Map(viz.nodes.map((n) => [n.id, n]));
+    const vis = new Set<string>();
+    for (const n of viz.nodes) {
+      if (!n.name.toLowerCase().includes(q)) continue;
+      vis.add(n.id);
+      let p = n.parentId ?? null;
+      while (p && !vis.has(p)) { vis.add(p); p = byId.get(p)?.parentId ?? null; }
+    }
+    return vis;
+  }, [viz.nodes, search]);
+  const filtering = visibleIds !== null;
+  // While filtering, every surviving branch is open — a match hidden inside a
+  // collapsed parent is a match the user cannot see.
+  const isExpanded = useCallback(
+    (id: string) => (filtering ? true : expanded.has(id)),
+    [filtering, expanded],
+  );
+
   // ── Node CRUD ──
-  function openCreate(parentId: string | null) { setCreateParent(parentId); setCreateName(""); setCreateOpen(true); }
+  function openCreate(parentId: string | null) {
+    setCreateParent(parentId); setCreateName(""); setCreateIssue(null); setCreateOpen(true);
+  }
   function submitCreate() {
+    // Mirrors the server rule. Without this the only feedback for a name the
+    // API will reject is the button doing nothing, because the old guard was
+    // `if (!name) return` — silent for every reason other than empty.
+    const issue = validateName(createName);
+    if (issue) { setCreateIssue(issue); return; }
     const name = createName.trim();
-    if (!name) return;
     const id = viz.addNode(name, createParent);
     if (createParent) setExpanded((p) => new Set(p).add(createParent));
     setSelId(id);
@@ -111,11 +173,13 @@ export default function Visualization() {
   function openRename(a: Asset) {
     const node = viz.nodes.find((n) => n.id === a.id);
     if (!node) return;
-    setRenameNode(node); setRenameValue(node.name);
+    setRenameNode(node); setRenameValue(node.name); setRenameIssue(null);
   }
   function submitRename() {
-    if (!renameNode || !renameValue.trim()) return;
-    viz.renameNode(renameNode.id, renameValue);
+    if (!renameNode) return;
+    const issue = validateName(renameValue);
+    if (issue) { setRenameIssue(issue); return; }
+    viz.renameNode(renameNode.id, renameValue.trim());
     setRenameNode(null);
     toast({ title: "Renamed" });
   }
@@ -175,7 +239,10 @@ export default function Visualization() {
     },
     remove: (a) => {
       if (!confirm(`Delete the dashboard for "${a.name}"? All of its widgets will be removed.`)) return;
-      try { localStorage.removeItem(WKEY(a.id)); } catch { /* ignore */ }
+      // Clears the node's dashboard; the node itself stays. An empty widget list
+      // IS the delete, so it goes through the same save path and reports the same
+      // failures as any other write.
+      writeWidgets(a.id, []);
       if (selId === a.id) bumpReload();
       toast({ title: "Dashboard deleted", description: `"${a.name}" dashboard cleared.` });
     },
@@ -222,11 +289,23 @@ export default function Visualization() {
   };
 
   const treeControls = (
-    <div className="border-b border-border">
-      <div className="flex items-center justify-end gap-2 px-3 py-2">
-        <Button size="sm" className="h-7 px-2 text-xs whitespace-nowrap" onClick={() => openCreate(null)} title="Create a top-level dashboard">
+    <div className="border-b border-border shrink-0">
+      {/* Wraps rather than squeezing: this pane can be dragged down to ~11% of the
+          window, where the search field would otherwise be crushed to its icon. */}
+      <div className="flex flex-wrap items-center gap-1.5 px-3 py-2">
+        <Button size="sm" className="h-7 px-2 text-xs whitespace-nowrap shrink-0" onClick={() => openCreate(null)} title="Create a top-level dashboard">
           <FolderPlus className="w-3.5 h-3.5 mr-1" /> Create Dashboard
         </Button>
+        <div className="relative flex-1 min-w-[110px]">
+          <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search dashboards…"
+            aria-label="Search dashboards"
+            className="pl-7 h-7 text-xs"
+          />
+        </div>
       </div>
       <div className="flex items-center gap-3 px-3 pb-2 text-xs">
         <button onClick={expandAll} className="text-muted-foreground hover:text-foreground">Expand all</button>
@@ -241,9 +320,9 @@ export default function Visualization() {
     childrenByParent,
     selectedId: selId,
     setSelectedId: setSelId,
-    isExpanded: (id: string) => expanded.has(id),
+    isExpanded,
     toggle: (id: string) => setExpanded((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; }),
-    visibleIds: null,
+    visibleIds,
     canManage: true,
     onAddChild: (parentId: string) => openCreate(parentId),
     onAddRoot: () => openCreate(null),
@@ -283,11 +362,26 @@ export default function Visualization() {
             {/* The scroll container is nested so the collapse tab below stays pinned
                 to the pane edge instead of scrolling away with the tree. */}
             <div className="relative h-full">
-              <div className="h-full border-r border-border overflow-auto">
+              {/* The controls sit OUTSIDE the scroll box. Inside it they added their
+                  own height on top of the tree's `h-full` empty state, so the pane
+                  overflowed by exactly the toolbar height and showed a scrollbar
+                  even with nothing to scroll. */}
+              <div className="h-full flex flex-col border-r border-border">
                 {treeControls}
-                <AssetTreeProvider value={assetTreeCtx}>
-                  <AssetTree emptyMessage='No nodes yet — click "New" to start building your hierarchy.' />
-                </AssetTreeProvider>
+                <div className="flex-1 min-h-0 overflow-auto">
+                  {/* AssetTree's own empty state keys off the unfiltered roots, so a
+                      search that matches nothing would render a blank pane. */}
+                  {filtering && visibleIds!.size === 0 ? (
+                    <div className="flex flex-col items-center justify-center h-full text-muted-foreground p-6 text-center">
+                      <Search className="w-8 h-8 mb-2 opacity-20" />
+                      <p className="text-sm">No dashboards match “{search.trim()}”.</p>
+                    </div>
+                  ) : (
+                    <AssetTreeProvider value={assetTreeCtx}>
+                      <AssetTree emptyMessage='No dashboards yet — click "Create Dashboard" to start building your hierarchy.' />
+                    </AssetTreeProvider>
+                  )}
+                </div>
               </div>
               {/* Hidden while collapsed: at zero width this would sit on top of the
                   expand tab in the pane next door. */}
@@ -344,9 +438,12 @@ export default function Visualization() {
           </DialogHeader>
           <div className="space-y-1.5 py-1">
             <Label className="text-sm">Name <span className="text-destructive">*</span></Label>
-            <Input value={createName} onChange={(e) => setCreateName(e.target.value)} autoFocus
+            <Input value={createName} maxLength={LIMITS.name} autoFocus
+              onChange={(e) => { setCreateName(e.target.value); if (createIssue) setCreateIssue(null); }}
+              aria-invalid={!!createIssue}
               placeholder="e.g. Plant 1, Line A, Compressor Room"
               onKeyDown={(e) => { if (e.key === "Enter") submitCreate(); }} />
+            {createIssue && <p className="text-xs text-destructive">{createIssue}</p>}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateOpen(false)}>Cancel</Button>
@@ -361,8 +458,11 @@ export default function Visualization() {
           <DialogHeader><DialogTitle>Rename Node</DialogTitle></DialogHeader>
           <div className="space-y-1.5 py-1">
             <Label className="text-sm">Name</Label>
-            <Input value={renameValue} onChange={(e) => setRenameValue(e.target.value)} autoFocus
+            <Input value={renameValue} maxLength={LIMITS.name} autoFocus
+              onChange={(e) => { setRenameValue(e.target.value); if (renameIssue) setRenameIssue(null); }}
+              aria-invalid={!!renameIssue}
               onKeyDown={(e) => { if (e.key === "Enter") submitRename(); }} />
+            {renameIssue && <p className="text-xs text-destructive">{renameIssue}</p>}
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setRenameNode(null)}>Cancel</Button>

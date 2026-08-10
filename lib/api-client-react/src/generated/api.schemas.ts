@@ -618,6 +618,220 @@ export interface AlarmStats {
   info: number;
 }
 
+export type AttentionItemKind =
+  (typeof AttentionItemKind)[keyof typeof AttentionItemKind];
+
+export const AttentionItemKind = {
+  alarm: "alarm",
+  stale: "stale",
+  unbound_device: "unbound_device",
+  api_key: "api_key",
+} as const;
+
+export type AttentionItemSeverity =
+  (typeof AttentionItemSeverity)[keyof typeof AttentionItemSeverity];
+
+export const AttentionItemSeverity = {
+  critical: "critical",
+  high: "high",
+  medium: "medium",
+  low: "low",
+  info: "info",
+} as const;
+
+export type AttentionItemAction = {
+  label: string;
+  href: string;
+};
+
+export interface AttentionItem {
+  kind: AttentionItemKind;
+  key: string;
+  severity: AttentionItemSeverity;
+  title: string;
+  detail: string;
+  assetId?: string | null;
+  assetName?: string | null;
+  since?: string | null;
+  ageSeconds?: number | null;
+  action: AttentionItemAction;
+}
+
+export type DashboardAttentionCounts = {
+  total: number;
+  alarm: number;
+  stale: number;
+  unboundDevice: number;
+  apiKey: number;
+  bySeverity: AlarmStats;
+};
+
+export type DashboardAttentionInProgressItem = {
+  id: string;
+  name: string;
+  assetId?: string | null;
+  assetName?: string | null;
+  severity: string;
+  triggeredAt?: string | null;
+  acknowledgedAt?: string | null;
+};
+
+export type DashboardAttentionClearedTodayItem = {
+  id: string;
+  name: string;
+  assetName?: string | null;
+  severity: string;
+  clearedAt?: string | null;
+  openSeconds?: number | null;
+};
+
+export interface DashboardAttention {
+  items: AttentionItem[];
+  counts: DashboardAttentionCounts;
+  inProgress: DashboardAttentionInProgressItem[];
+  clearedToday: DashboardAttentionClearedTodayItem[];
+  staleMinutes: number;
+}
+
+export interface HealthNode {
+  id: string;
+  name: string;
+  score: number;
+  ownScore: number;
+  assetCount: number;
+  children: HealthNode[];
+}
+
+export type DashboardHealthIndexFactors = {
+  alarmBurden: number;
+  staleness: number;
+  downtime: number;
+};
+
+export type DashboardHealthIndexWorstItem = {
+  id: string;
+  name: string;
+  score: number;
+};
+
+export type DashboardHealthIndexWindow = {
+  days: number;
+  staleMinutes: number;
+};
+
+export interface DashboardHealthIndex {
+  overall: number;
+  previous: number | null;
+  factors: DashboardHealthIndexFactors;
+  assetCount: number;
+  worst: DashboardHealthIndexWorstItem[];
+  tree: HealthNode[];
+  window: DashboardHealthIndexWindow;
+}
+
+export type DashboardAlarmTrendSeriesItem = {
+  date: string;
+  critical: number;
+  high: number;
+  medium: number;
+  low: number;
+  info: number;
+  total: number;
+};
+
+export type DashboardAlarmTrendPeak = {
+  date: string;
+  total: number;
+} | null;
+
+export type DashboardAlarmTrendWorstPerformersItem = {
+  assetId: string;
+  assetName: string;
+  alarms: number;
+  openSeconds: number;
+};
+
+export type DashboardAlarmTrendRules = {
+  total: number;
+  enabled: number;
+  neverFired: number;
+};
+
+export type DashboardAlarmTrendWindow = {
+  days: number;
+  since: string;
+};
+
+export interface DashboardAlarmTrend {
+  series: DashboardAlarmTrendSeriesItem[];
+  totals: number;
+  changePct: number | null;
+  peak: DashboardAlarmTrendPeak;
+  mttaSeconds: number | null;
+  mttrSeconds: number | null;
+  acknowledgedCount: number;
+  clearedCount: number;
+  worstPerformers: DashboardAlarmTrendWorstPerformersItem[];
+  rules: DashboardAlarmTrendRules;
+  alarmsLastHour: number;
+  window: DashboardAlarmTrendWindow;
+}
+
+export type DashboardIngestSeriesSeriesItem = {
+  minute: string;
+  count: number;
+};
+
+export type DashboardIngestSeriesQuality = { [key: string]: number };
+
+export type DashboardIngestSeriesDevicesItem = {
+  deviceId: string;
+  bound: boolean;
+  total: number;
+  buckets: number[];
+};
+
+export type DashboardIngestSeriesWindow = {
+  hours: number;
+};
+
+export interface DashboardIngestSeries {
+  series: DashboardIngestSeriesSeriesItem[];
+  peakPerMinute: number;
+  totalPoints: number;
+  currentPerMinute: number;
+  lastIngestionAt: string | null;
+  quality: DashboardIngestSeriesQuality;
+  hours: string[];
+  devices: DashboardIngestSeriesDevicesItem[];
+  window: DashboardIngestSeriesWindow;
+}
+
+export type LiveMetricTileSeriesItem = {
+  t: string;
+  v: number;
+};
+
+export interface LiveMetricTile {
+  assetId: string;
+  assetName: string;
+  metric: string;
+  current?: number | null;
+  min?: number | null;
+  max?: number | null;
+  lastAt?: string | null;
+  series: LiveMetricTileSeriesItem[];
+  threshold?: number | null;
+  operator?: string | null;
+  ruleName?: string | null;
+  severity?: string | null;
+  inAlarm: boolean;
+}
+
+export interface DashboardLiveMetrics {
+  tiles: LiveMetricTile[];
+}
+
 export type BrokerEventStatus =
   (typeof BrokerEventStatus)[keyof typeof BrokerEventStatus];
 
@@ -694,4 +908,74 @@ export type GetBrokerHistoryParams = {
 
 export type GetRecentTelemetryParams = {
   limit?: number;
+};
+
+export type GetDashboardAttentionParams = {
+  /**
+   * @minimum 1
+   * @maximum 10080
+   */
+  staleMinutes?: number;
+  /**
+   * @minimum 1
+   * @maximum 365
+   */
+  keyExpiryDays?: number;
+  /**
+   * @minimum 1
+   * @maximum 100
+   */
+  limit?: number;
+};
+
+export type GetDashboardHealthIndexParams = {
+  /**
+   * @minimum 1
+   * @maximum 10080
+   */
+  staleMinutes?: number;
+  /**
+   * @minimum 1
+   * @maximum 90
+   */
+  days?: number;
+};
+
+export type GetDashboardAlarmTrendParams = {
+  /**
+   * @minimum 1
+   * @maximum 90
+   */
+  days?: number;
+  /**
+   * @minimum 1
+   * @maximum 20
+   */
+  topAssets?: number;
+};
+
+export type GetDashboardIngestSeriesParams = {
+  /**
+   * @minimum 1
+   * @maximum 48
+   */
+  hours?: number;
+  /**
+   * @minimum 1
+   * @maximum 40
+   */
+  devices?: number;
+};
+
+export type GetDashboardLiveMetricsParams = {
+  /**
+   * @minimum 1
+   * @maximum 12
+   */
+  limit?: number;
+  /**
+   * @minimum 2
+   * @maximum 200
+   */
+  points?: number;
 };

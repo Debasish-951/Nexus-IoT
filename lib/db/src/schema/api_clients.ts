@@ -7,7 +7,26 @@ export const apiClientsTable = pgTable("api_clients", {
   name: text("name").notNull(),
   description: text("description"),
   clientId: text("client_id").notNull().unique(),
+  /**
+   * LEGACY plaintext secret. Retained only so credentials issued before hashing
+   * keep authenticating; nothing writes it any more. Run
+   * `pnpm --filter @workspace/db run hash-api-secrets` to convert existing rows,
+   * after which every value here is null and the column can be dropped.
+   */
   clientSecret: text("client_secret"),
+  /**
+   * SHA-256 of the secret, hex — the only form stored for anything issued now.
+   *
+   * Unsalted SHA-256 is the right primitive here and NOT the scrypt used for
+   * passwords: the input is a randomUUID (122 bits of entropy), so there is
+   * nothing to brute-force, and the lookup has to be a deterministic indexed
+   * equality. Same reasoning as session tokens — see api-server lib/tokens.ts.
+   *
+   * The consequence is that a secret cannot be shown again after it is issued.
+   * That is the point: read access to this table no longer yields working ingest
+   * credentials.
+   */
+  clientSecretHash: text("client_secret_hash"),
   /**
    * Optional owning project — a root-level asset (one with no parent).
    *

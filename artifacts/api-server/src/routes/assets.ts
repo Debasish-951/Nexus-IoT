@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import { respondInvalid } from "../lib/respond";
 import { eq, isNull, sql, and, or, inArray } from "drizzle-orm";
 import { db, assetsTable, attributesTable, assetTemplatesTable, telemetryTable, alarmsTable } from "@workspace/db";
 import { logActivity } from "./activity_log";
@@ -29,7 +30,7 @@ async function nextSortOrderFor(assetId: string): Promise<number> {
 
 router.get("/assets", async (req, res): Promise<void> => {
   const query = ListAssetsQueryParams.safeParse(req.query);
-  if (!query.success) { res.status(400).json({ error: query.error.message }); return; }
+  if (!query.success) { respondInvalid(req, res, query.error); return; }
 
   let conditions: ReturnType<typeof eq>[] = [];
   if (query.data.parentId !== undefined) {
@@ -47,7 +48,7 @@ router.get("/assets", async (req, res): Promise<void> => {
 
 router.post("/assets", async (req, res): Promise<void> => {
   const parsed = CreateAssetBody.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  if (!parsed.success) { respondInvalid(req, res, parsed.error); return; }
 
   // Device ID is optional per asset. Any asset MAY own a device id (machines,
   // gateways, etc.); grouping assets leave it blank. If provided it must map to a
@@ -74,12 +75,18 @@ router.post("/assets", async (req, res): Promise<void> => {
         tags:        parsed.data.tags ?? [],
       })
       .returning();
-  } catch (err: any) {
+  } catch (err) {
     // Several assets MAY share a device id (section templates off one payload), so a
     // duplicate is no longer an error here — anything that lands in this catch is a
     // genuine failure.
-    res.status(400).json({ error: String(err?.message ?? "") || "Failed to create asset" });
-    return;
+    //
+    // Rethrown rather than answered here. This previously returned the driver's
+    // own message, which for a constraint violation reads
+    // `duplicate key value violates unique constraint "assets_identifier_unique"`
+    // — the table, the column, and the existence of the index, handed to the
+    // caller. The shared handler maps Postgres codes to domain wording and puts
+    // the specifics in the log instead.
+    throw err;
   }
 
   if (asset.parentId) {
@@ -95,7 +102,7 @@ router.post("/assets", async (req, res): Promise<void> => {
 
 router.get("/assets/:id", async (req, res): Promise<void> => {
   const params = GetAssetParams.safeParse(req.params);
-  if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
+  if (!params.success) { respondInvalid(req, res, params.error); return; }
 
   const [asset] = await db.select().from(assetsTable).where(eq(assetsTable.id, params.data.id));
   if (!asset) { res.status(404).json({ error: "Asset not found" }); return; }
@@ -104,10 +111,10 @@ router.get("/assets/:id", async (req, res): Promise<void> => {
 
 router.put("/assets/:id", async (req, res): Promise<void> => {
   const params = UpdateAssetParams.safeParse(req.params);
-  if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
+  if (!params.success) { respondInvalid(req, res, params.error); return; }
 
   const parsed = UpdateAssetBody.safeParse(req.body);
-  if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
+  if (!parsed.success) { respondInvalid(req, res, parsed.error); return; }
 
   const updateData: Record<string, unknown> = {};
   if (parsed.data.name        !== undefined) updateData.name        = parsed.data.name;
@@ -129,9 +136,8 @@ router.put("/assets/:id", async (req, res): Promise<void> => {
   let asset;
   try {
     [asset] = await db.update(assetsTable).set(updateData).where(eq(assetsTable.id, params.data.id)).returning();
-  } catch (err: any) {
-    res.status(400).json({ error: err?.message ?? "Update failed" });
-    return;
+  } catch (err) {
+    throw err;   // same reasoning as create: never hand the driver's text to a client
   }
 
   if (!asset) { res.status(404).json({ error: "Asset not found" }); return; }
@@ -169,7 +175,7 @@ router.post("/assets/:id/maintenance", async (req, res): Promise<void> => {
 
 router.delete("/assets/:id", async (req, res): Promise<void> => {
   const params = DeleteAssetParams.safeParse(req.params);
-  if (!params.success) { res.status(400).json({ error: params.error.message }); return; }
+  if (!params.success) { respondInvalid(req, res, params.error); return; }
 
   const rootId = params.data.id;
 

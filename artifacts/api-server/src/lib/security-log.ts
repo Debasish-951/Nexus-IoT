@@ -2,6 +2,7 @@ import type { Request } from "express";
 import { db, securityEventsTable } from "@workspace/db";
 import { logger } from "./logger";
 import { broadcast } from "./ws-broadcast";
+import { clientAddress } from "./client-ip";
 
 /**
  * Security event recorder.
@@ -20,7 +21,10 @@ export type SecurityEventType =
   | "account.locked" | "account.unlocked" | "account.status_changed"
   | "user.invited" | "user.activated" | "invitation.resent"
   | "password_reset.requested" | "password_reset.completed" | "password.changed"
-  | "authz.denied" | "csrf.failed" | "email.failed" | "access.updated";
+  | "authz.denied" | "csrf.failed" | "email.failed" | "access.updated"
+  // `event_type` is a text column and the Security Center falls back to showing
+  // the raw name, so adding a type needs no migration and no frontend change.
+  | "ratelimit.tripped" | "auth.spray_detected" | "input.rejected";
 
 export interface SecurityEventInput {
   type: SecurityEventType;
@@ -35,16 +39,17 @@ export interface SecurityEventInput {
 /**
  * Client IP.
  *
- * `x-forwarded-for` is spoofable unless Express is behind a trusted proxy with
- * `trust proxy` set (app.ts does this in production). Treated as best-effort
- * forensic context, never as an authorisation input.
+ * This used to read `x-forwarded-for` directly, which meant the value recorded
+ * here — and, more seriously, the value the per-IP login limiter keyed on — was
+ * whatever the caller chose to send. Resolution now goes through
+ * `clientAddress`, which uses only what Express will vouch for under the
+ * configured `trust proxy` setting. See lib/client-ip.ts for the deployment
+ * requirement that creates.
  */
 export function clientIp(req?: Request): string | null {
   if (!req) return null;
-  const fwd = req.headers["x-forwarded-for"];
-  const first = Array.isArray(fwd) ? fwd[0] : fwd;
-  if (typeof first === "string" && first.trim()) return first.split(",")[0].trim().slice(0, 64);
-  return (req.ip ?? req.socket?.remoteAddress ?? null)?.slice(0, 64) ?? null;
+  const ip = clientAddress(req);
+  return ip === "unknown" ? null : ip;
 }
 
 export function userAgent(req?: Request): string | null {

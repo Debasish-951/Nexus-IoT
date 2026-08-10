@@ -37,5 +37,58 @@ onlyBuiltDependencies:
   - unrs-resolver
 
 overrides:
+  # ── Supply-chain remediation ────────────────────────────────────────────────
+  #
+  # Forces patched versions of TRANSITIVE dependencies whose direct parents have
+  # not yet released an update.
+  #
+  # Consolidated by hand: `pnpm audit --fix` emitted 49 overlapping entries (five
+  # separate `dompurify` ranges alone) and contradicted the existing esbuild pin,
+  # which would not have installed.
+  #
+  # EVERY range is bounded to the current major. An unbounded `>=` is not a
+  # security fix, it is an unreviewed major upgrade: the first attempt at this
+  # file used `vite: '>=7.3.5'` and silently resolved vite 8.2.1, when the
+  # advisory only required 7.3.5. Bounding keeps the change to the smallest one
+  # that closes the advisory. For 0.x packages the MINOR is the breaking unit,
+  # so esbuild is bounded there instead.
+  #
+  # `nanoid` and `picomatch` exist at several majors in this tree, so each major
+  # is floored separately in one compound range rather than crossing majors.
+  #
+  # Review at each dependency bump: an override that outlives its reason silently
+  # holds back a package its parent has since moved past.
+
+  # Pre-existing loader alias, not security related.
   '@esbuild-kit/esm-loader': npm:tsx@^4.21.0
-  esbuild: 0.27.3
+
+  '@babel/core': '>=7.29.6 <8'
+  body-parser: '>=2.3.0 <3'
+  brace-expansion: '>=2.1.4 <3'
+  dompurify: '>=3.4.13 <4'
+  esbuild: '>=0.28.1 <0.29'
+  fast-uri: '>=3.1.5 <4'
+  ip-address: '>=10.3.1 <11'
+  js-yaml: '>=4.3.1 <5'
+  linkify-it: '>=5.0.2 <6'
+  lodash: '>=4.18.0 <5'
+  markdown-it: '>=14.2.0 <15'
+  # NOTE: there is deliberately NO nanoid override.
+  #
+  # The vulnerable nanoid came in under postcss 8.5.8. postcss 8.5.23+ already
+  # declares `nanoid: ^3.3.17`, so the postcss floor below fixes it transitively
+  # and the parent stays in charge of its own dependency.
+  #
+  # Two attempts at overriding it directly both broke the frontend build with
+  # ERR_REQUIRE_ESM: a pnpm override REPLACES the requested spec rather than
+  # intersecting it, so forcing nanoid 5 or 6 handed postcss's CommonJS
+  # `require()` an ESM-only package. The lesson is worth keeping — prefer raising
+  # the PARENT to a version that already depends on a patched child, and reach
+  # for an override on the child only when no such parent release exists.
+  path-to-regexp: '>=8.4.0 <9'
+  picomatch: '>=4.0.4 <5'
+  postcss: '>=8.5.23 <9'
+  qs: '>=6.15.2 <7'
+  vite: '>=7.3.5 <8'
+  ws: '>=8.21.0 <9'
+  yaml: '>=2.8.3 <3'

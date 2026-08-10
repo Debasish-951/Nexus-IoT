@@ -16,6 +16,8 @@ import ForcePasswordChange from "@/pages/ForcePasswordChange";
  * rules independently, so bypassing this only produces a page full of 403s.
  */
 
+const APP_BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+
 function Splash({ label }: { label: string }) {
   return (
     <div className="flex min-h-[60vh] w-full items-center justify-center">
@@ -68,9 +70,19 @@ export function Protected({
 
   useEffect(() => {
     if (loading || currentUser) return;
-    // Preserve where they were headed so login can return them there.
-    const next = location !== "/" ? `?next=${encodeURIComponent(location)}` : "";
-    navigate(`/login${next}`, { replace: true });
+    // Read the address from `window`, not from the router.
+    //
+    // Inside a project workspace the router is nested under /p/<projectId> and
+    // reports paths relative to it, so the router's own `location` for the
+    // alarms page is "/alarms", not "/p/<id>/alarms". Redirecting on that would
+    // send the user back to the wrong place after signing in, and a plain
+    // navigate("/login") would resolve to /p/<id>/login and 404. The `~` prefix
+    // escapes every base; APP_BASE is re-added so a subpath deployment still
+    // lands on its own login page.
+    const path = window.location.pathname.slice(APP_BASE.length) || "/";
+    const full = path + window.location.search;
+    const next = path !== "/" ? `?next=${encodeURIComponent(full)}` : "";
+    navigate(`~${APP_BASE}/login${next}`, { replace: true });
   }, [loading, currentUser, location, navigate]);
 
   // Never redirect while the session probe is in flight — a hard refresh would

@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import { respondInvalid } from "../lib/respond";
 import { eq } from "drizzle-orm";
 import { db, brokersTable } from "@workspace/db";
 import {
@@ -9,6 +10,23 @@ import {
 } from "@workspace/api-zod";
 import { logActivity } from "./activity_log";
 
+/**
+ * Strip the MQTT password from anything returned to a client.
+ *
+ * `GET /brokers` returned the raw row, so every broker's MQTT password was
+ * visible to any user who could list brokers. Note this route never SETS the
+ * password — it is configured out of band — which is why the leak went unnoticed:
+ * nothing in this file put it there, so nothing in this file looked responsible
+ * for taking it out.
+ *
+ * The response keeps `hasMqttPassword` so the UI can still show whether
+ * authentication is configured.
+ */
+function toClient(row: typeof brokersTable.$inferSelect) {
+  const { mqttPassword: _p, ...safe } = row;
+  return { ...safe, hasMqttPassword: !!row.mqttPassword };
+}
+
 const router: IRouter = Router();
 
 router.get("/brokers", async (req, res): Promise<void> => {
@@ -17,13 +35,13 @@ router.get("/brokers", async (req, res): Promise<void> => {
     .from(brokersTable)
     .orderBy(brokersTable.name);
 
-  res.json(brokers);
+  res.json(brokers.map(toClient));
 });
 
 router.post("/brokers", async (req, res): Promise<void> => {
   const parsed = CreateBrokerBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    respondInvalid(req, res, parsed.error);
     return;
   }
 
@@ -39,19 +57,19 @@ router.post("/brokers", async (req, res): Promise<void> => {
     .returning();
 
   void logActivity("broker.created", "broker", broker.id, broker.name, `type=${broker.type}`, req);
-  res.status(201).json(broker);
+  res.status(201).json(toClient(broker));
 });
 
 router.put("/brokers/:id", async (req, res): Promise<void> => {
   const params = UpdateBrokerParams.safeParse(req.params);
   if (!params.success) {
-    res.status(400).json({ error: params.error.message });
+    respondInvalid(req, res, params.error);
     return;
   }
 
   const parsed = UpdateBrokerBody.safeParse(req.body);
   if (!parsed.success) {
-    res.status(400).json({ error: parsed.error.message });
+    respondInvalid(req, res, parsed.error);
     return;
   }
 
@@ -71,13 +89,13 @@ router.put("/brokers/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  res.json(broker);
+  res.json(toClient(broker));
 });
 
 router.delete("/brokers/:id", async (req, res): Promise<void> => {
   const params = DeleteBrokerParams.safeParse(req.params);
   if (!params.success) {
-    res.status(400).json({ error: params.error.message });
+    respondInvalid(req, res, params.error);
     return;
   }
 

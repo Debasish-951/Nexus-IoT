@@ -1,4 +1,7 @@
 import { Router, type IRouter } from "express";
+import { z } from "zod";
+import { validate } from "../middleware/validate";
+import { AggregateQuery, RetentionBody, UpdateRetentionBody, IdParams } from "../schemas/common";
 import { eq, and, gte, lte, sql, isNull, or, lt } from "drizzle-orm";
 import { db, pool, assetsTable, telemetryTable, alarmsTable, dataRetentionTable } from "@workspace/db";
 import { logger } from "../lib/logger";
@@ -63,9 +66,8 @@ router.get("/system/storage", async (_req, res): Promise<void> => {
 
 // ── Aggregation endpoint ──────────────────────────────────────────────────────
 // GET /api/system/aggregate?assetId=&metric=&bucket=5m|15m|30m|1h|6h|12h|1d|1w&from=&to=&limit=
-router.get("/system/aggregate", async (req, res): Promise<void> => {
-  const { assetId, metric, from, to, limit } = req.query as Record<string, string | undefined>;
-  const bucket = (req.query.bucket as string | undefined) ?? "1h";
+router.get("/system/aggregate", validate({ query: AggregateQuery }), async (req, res): Promise<void> => {
+  const { assetId, metric, from, to, limit, bucket } = req.query as unknown as z.infer<typeof AggregateQuery>;
 
   // Map bucket names to seconds — used for epoch-floor bucketing (avoids INTERVAL parameterization)
   const bucketSeconds: Record<string, number> = {
@@ -73,8 +75,10 @@ router.get("/system/aggregate", async (req, res): Promise<void> => {
     "1h": 3600, "6h": 21600, "12h": 43200,
     "1d": 86400, "1w": 604800,
   };
+  // `bucket` is an enum, so this lookup can no longer miss or reach the
+  // prototype chain; the fallback is kept only to satisfy the index signature.
   const stepSec  = bucketSeconds[bucket] ?? 3600;
-  const maxLimit = Math.min(Number(limit ?? 1000), 10000);
+  const maxLimit = limit ?? 1000;
 
   // Build WHERE clause as a raw SQL string to avoid Drizzle prepared-statement
   // type-inference issues with EXTRACT/FLOOR arithmetic.
@@ -84,8 +88,8 @@ router.get("/system/aggregate", async (req, res): Promise<void> => {
 
   if (assetId) { params.push(assetId);           filters.push(`asset_id = $${params.length}`); }
   if (metric)  { params.push(metric);             filters.push(`metric = $${params.length}`); }
-  if (from)    { params.push(new Date(from));     filters.push(`"timestamp" >= $${params.length}`); }
-  if (to)      { params.push(new Date(to));       filters.push(`"timestamp" <= $${params.length}`); }
+  if (from)    { params.push(from);               filters.push(`"timestamp" >= $${params.length}`); }
+  if (to)      { params.push(to);                 filters.push(`"timestamp" <= $${params.length}`); }
   params.push(maxLimit);
   const limitParam = params.length;
 
@@ -127,32 +131,28 @@ router.get("/system/retention", async (_req, res): Promise<void> => {
   res.json(policies);
 });
 
-router.post("/system/retention", async (req, res): Promise<void> => {
-  const body = req.body as Record<string, unknown>;
-  if (!body.name || !body.retentionDays) {
-    res.status(400).json({ error: "name and retentionDays are required" });
-    return;
-  }
+router.post("/system/retention", validate({ body: RetentionBody }), async (req, res): Promise<void> => {
+  const body = req.body as z.infer<typeof RetentionBody>;
 
   const [policy] = await db.insert(dataRetentionTable).values({
-    name:          String(body.name),
-    assetId:       body.assetId as string | null ?? null,
-    metric:        body.metric as string | null ?? null,
-    retentionDays: Number(body.retentionDays),
+    name:          body.name,
+    assetId:       body.assetId ?? null,
+    metric:        body.metric ?? null,
+    retentionDays: body.retentionDays,
     enabled:       body.enabled !== false,
   }).returning();
 
   res.status(201).json(policy);
 });
 
-router.put("/system/retention/:id", async (req, res): Promise<void> => {
-  const { id } = req.params;
-  const body = req.body as Record<string, unknown>;
+router.put("/system/retention/:id", validate({ params: IdParams, body: UpdateRetentionBody }), async (req, res): Promise<void> => {
+  const { id } = req.params as unknown as z.infer<typeof IdParams>;
+  const body = req.body as z.infer<typeof UpdateRetentionBody>;
 
   const update: Record<string, unknown> = {};
-  if (body.name          !== undefined) update.name          = String(body.name);
-  if (body.retentionDays !== undefined) update.retentionDays = Number(body.retentionDays);
-  if (body.enabled       !== undefined) update.enabled       = Boolean(body.enabled);
+  if (body.name          !== undefined) update.name          = body.name;
+  if (body.retentionDays !== undefined) update.retentionDays = body.retentionDays;
+  if (body.enabled       !== undefined) update.enabled       = body.enabled;
   if (body.metric        !== undefined) update.metric        = body.metric ?? null;
   if (body.assetId       !== undefined) update.assetId       = body.assetId ?? null;
 

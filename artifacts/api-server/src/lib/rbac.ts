@@ -419,3 +419,72 @@ export function sanitiseAccessOverrides(input: unknown): UserAccessOverrides {
 
   return out;
 }
+
+// ── Role hierarchy ───────────────────────────────────────────────────────────
+//
+// The permission matrix answers "may this role manage users?". It does NOT
+// answer "may this user manage THAT user?", and until this section existed the
+// second question was never asked — so anyone holding `manage_users` could
+// assign any role in the list, including one above their own.
+//
+// Concretely: `customer_admin` carries `manage_users`, so a customer admin could
+// POST a new `super_admin`, or PUT their own record with `role: "super_admin"`.
+// The existing guards around this code are all AVAILABILITY guards — do not
+// demote the last admin, do not delete yourself — and none of them look at
+// whether the actor outranks the target.
+//
+// Rank makes that question answerable.
+
+const ROLE_RANK: Record<Role, number> = {
+  super_admin: 100,
+  admin: 80,
+  customer_admin: 60,
+  engineer: 40,
+  operator: 20,
+  viewer: 10,
+};
+
+export function roleRank(role: string | null | undefined): number {
+  const r = normaliseRole(role);
+  return ROLE_RANK[r] ?? 0;
+}
+
+/**
+ * May `actor` administer a user holding `targetRole`?
+ *
+ * Strictly-greater rank, with one exception: a super admin may act on another
+ * super admin. Without that exception the top tier becomes unmanageable — nobody
+ * could ever disable a compromised super-admin account, which is a worse
+ * position than the one this rule exists to prevent.
+ */
+export function canActOnRole(actorRole: string | null | undefined, targetRole: string | null | undefined): boolean {
+  const actor = roleRank(actorRole);
+  if (actor >= ROLE_RANK.super_admin) return true;
+  return actor > roleRank(targetRole);
+}
+
+/**
+ * May `actor` grant `roleToGrant`?
+ *
+ * Same rule, applied to the role being handed out rather than the user being
+ * edited. Both checks are needed and neither implies the other: promoting an
+ * `operator` to `admin` passes the target check for a customer admin (an
+ * operator is below them) and must still fail on the role being granted.
+ */
+export function canGrantRole(actorRole: string | null | undefined, roleToGrant: string | null | undefined): boolean {
+  const actor = roleRank(actorRole);
+  if (actor >= ROLE_RANK.super_admin) return true;
+  return actor > roleRank(roleToGrant);
+}
+
+/**
+ * Nobody edits their own role — not even a super admin.
+ *
+ * Rank alone does not cover self-promotion, because the comparison is against
+ * the role you already hold and always succeeds for the top tier. Requiring a
+ * second person to change a role turns a single compromised session into
+ * something that cannot silently become permanent, and costs a super admin one
+ * conversation in the rare case they genuinely need to change their own.
+ */
+export const SELF_ROLE_CHANGE_MESSAGE =
+  "You cannot change your own role. Ask another administrator to make this change.";

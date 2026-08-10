@@ -10,6 +10,7 @@ import {
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { useWsEvents } from "@/hooks/useWsEvents";
+import { ViewSwitch } from "@/features/home/ViewSwitch";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -244,6 +245,9 @@ export default function Dashboard() {
           <p className="text-sm text-muted-foreground">Overview of Plant Health</p>
         </div>
         <div className="flex items-center gap-3">
+          {/* The way back to the banded Overview. This page is otherwise
+              unchanged — the switch is the only addition. */}
+          <ViewSwitch />
           <div className="relative">
             <Search className="w-4 h-4 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <Input

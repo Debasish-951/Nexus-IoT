@@ -39,6 +39,22 @@ export const FEATURES = {
    * meantime; nothing else depends on the generator.
    */
   hierarchyGenerator: envOn(import.meta.env.VITE_ENABLE_HIERARCHY_GENERATOR),
+
+  /**
+   * Opaque address-bar tokens (lib/routeSlugs.ts).
+   *
+   * ON by default, unlike everything else here — this one was asked for, and
+   * the switch exists so it can be turned off without a code change if the
+   * unreadable URLs get in the way of support or debugging:
+   *
+   *   VITE_READABLE_URLS=true pnpm --filter @workspace/iot-platform build
+   *
+   * Turning it off is safe at any time: readable paths are always accepted, so
+   * links minted while it was on keep resolving either way.
+   *
+   * Not an access control. See the header of lib/routeSlugs.ts.
+   */
+  opaqueRoutes: !envOn(import.meta.env.VITE_READABLE_URLS),
 } as const;
 
 export type FeatureKey = keyof typeof FEATURES;

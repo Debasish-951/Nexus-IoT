@@ -5,23 +5,31 @@ import {
   alarmsTable, alarmHistoryTable, brokersTable,
 } from "@workspace/db";
 import { apiKeyAuth } from "../middleware/apiKeyAuth";
+import { csvCell, safeFilename } from "../lib/validation";
+import { validate } from "../middleware/validate";
+import { z } from "zod";
+import {
+  ExportQuery, TelemetryExportQuery, AlarmExportQuery, AlarmHistoryExportQuery,
+} from "../schemas/common";
 
 const router: IRouter = Router();
 
 // ── CSV helper ────────────────────────────────────────────────────────────────
+//
+// Cells go through `csvCell`, which does RFC 4180 quoting AND neutralises
+// spreadsheet formulas. The previous version quoted correctly but did not do the
+// second part, so a value beginning `=`, `+`, `-` or `@` was written to the file
+// as-is and executed as a formula when the export was opened. Asset names,
+// metric names and alarm descriptions are all user-supplied and all end up in
+// these columns, which made the export a delivery mechanism for code running in
+// the recipient's spreadsheet — outside this application entirely.
 function toCSV(rows: Record<string, unknown>[]): string {
   if (rows.length === 0) return "";
   const headers = Object.keys(rows[0]);
-  const escape = (v: unknown) => {
-    if (v === null || v === undefined) return "";
-    const s = String(v);
-    return s.includes(",") || s.includes('"') || s.includes("\n")
-      ? `"${s.replace(/"/g, '""')}"` : s;
-  };
   return [
-    headers.join(","),
-    ...rows.map((row) => headers.map((h) => escape(row[h])).join(",")),
-  ].join("\n");
+    headers.map(csvCell).join(","),
+    ...rows.map((row) => headers.map((h) => csvCell(row[h])).join(",")),
+  ].join("\r\n"); // RFC 4180 line ending; Excel is happier and Unix tools do not care
 }
 
 function sendResult(
@@ -32,8 +40,13 @@ function sendResult(
   meta?: Record<string, unknown>
 ) {
   if (format === "csv") {
-    res.setHeader("Content-Type", "text/csv");
-    res.setHeader("Content-Disposition", `attachment; filename="${filename}.csv"`);
+    res.setHeader("Content-Type", "text/csv; charset=utf-8");
+    // Every current caller passes a literal, so this is not a live hole — it is
+    // closed because the function's signature accepts any string and the next
+    // caller may well pass an asset name. A quote or CR/LF here would terminate
+    // the header and let the rest inject headers of its own; `../` would be a
+    // path-traversal hint to whatever writes the download.
+    res.setHeader("Content-Disposition", `attachment; filename="${safeFilename(filename)}.csv"`);
     res.send(toCSV(data));
   } else {
     res.json({ count: data.length, ...(meta ?? {}), data, exportedAt: new Date().toISOString() });
@@ -144,8 +157,8 @@ router.get("/export/schema", (_req, res) => {
 });
 
 // ── Assets export ─────────────────────────────────────────────────────────────
-router.get("/export/assets", apiKeyAuth("read:assets"), async (req, res): Promise<void> => {
-  const { format } = req.query as Record<string, string | undefined>;
+router.get("/export/assets", apiKeyAuth("read:assets"), validate({ query: ExportQuery }), async (req, res): Promise<void> => {
+  const { format } = req.query as z.infer<typeof ExportQuery>;
   const assets = await db.select().from(assetsTable).orderBy(assetsTable.name);
   const attrs  = await db.select().from(attributesTable);
 
@@ -190,15 +203,16 @@ router.get("/export/assets", apiKeyAuth("read:assets"), async (req, res): Promis
 });
 
 // ── Telemetry export ──────────────────────────────────────────────────────────
-router.get("/export/telemetry", apiKeyAuth("read:telemetry"), async (req, res): Promise<void> => {
-  const { assetId, metric, from, to, limit, format } = req.query as Record<string, string | undefined>;
-  const maxLimit = Math.min(Number(limit ?? 500), 5000);
+router.get("/export/telemetry", apiKeyAuth("read:telemetry"), validate({ query: TelemetryExportQuery }), async (req, res): Promise<void> => {
+  const { assetId, metric, from, to, limit, format } = req.query as z.infer<typeof TelemetryExportQuery>;
+  // Already bounded and coerced by the schema; no NaN can reach the query.
+  const maxLimit = limit ?? 500;
 
   const conditions = [];
   if (assetId) conditions.push(eq(telemetryTable.assetId, assetId));
   if (metric)  conditions.push(eq(telemetryTable.metric, metric));
-  if (from)    conditions.push(gte(telemetryTable.timestamp, new Date(from) as unknown as Date));
-  if (to)      conditions.push(lte(telemetryTable.timestamp, new Date(to) as unknown as Date));
+  if (from)    conditions.push(gte(telemetryTable.timestamp, from));
+  if (to)      conditions.push(lte(telemetryTable.timestamp, to));
 
   const rows = await db
     .select()
@@ -217,8 +231,8 @@ router.get("/export/telemetry", apiKeyAuth("read:telemetry"), async (req, res): 
 });
 
 // ── Alarms export ─────────────────────────────────────────────────────────────
-router.get("/export/alarms", apiKeyAuth("read:alarms"), async (req, res): Promise<void> => {
-  const { status, severity, format } = req.query as Record<string, string | undefined>;
+router.get("/export/alarms", apiKeyAuth("read:alarms"), validate({ query: AlarmExportQuery }), async (req, res): Promise<void> => {
+  const { status, severity, format } = req.query as z.infer<typeof AlarmExportQuery>;
 
   const conditions = [];
   if (status)   conditions.push(eq(alarmsTable.status, status));
@@ -245,14 +259,14 @@ router.get("/export/alarms", apiKeyAuth("read:alarms"), async (req, res): Promis
 });
 
 // ── Alarm history export ──────────────────────────────────────────────────────
-router.get("/export/alarm-history", apiKeyAuth("read:alarm-history"), async (req, res): Promise<void> => {
-  const { assetId, from, to, limit, format } = req.query as Record<string, string | undefined>;
-  const maxLimit = Math.min(Number(limit ?? 200), 5000);
+router.get("/export/alarm-history", apiKeyAuth("read:alarm-history"), validate({ query: AlarmHistoryExportQuery }), async (req, res): Promise<void> => {
+  const { assetId, from, to, limit, format } = req.query as z.infer<typeof AlarmHistoryExportQuery>;
+  const maxLimit = limit ?? 200;
 
   const conditions = [];
   if (assetId) conditions.push(eq(alarmHistoryTable.assetId, assetId));
-  if (from)    conditions.push(gte(alarmHistoryTable.triggeredAt, new Date(from) as unknown as Date));
-  if (to)      conditions.push(lte(alarmHistoryTable.triggeredAt, new Date(to) as unknown as Date));
+  if (from)    conditions.push(gte(alarmHistoryTable.triggeredAt, from));
+  if (to)      conditions.push(lte(alarmHistoryTable.triggeredAt, to));
 
   const rows = await db
     .select()
