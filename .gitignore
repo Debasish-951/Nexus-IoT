@@ -63,3 +63,9 @@ PdM_telemetry.csv
 sensor_data.csv
 energy_buffer.json
 energy_buffer.json.tmp
+
+# Database dumps and backups. They contain personal data and password hashes,
+# and must never be committed. See docs/operations/backup-restore.md.
+*.sql
+*.dump
+*.dump.gpg

@@ -4,11 +4,14 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   BrainCircuit, Send, User, Sparkles, Activity, AlertTriangle,
   Lightbulb, MessageSquare, Loader2, Wrench,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { apiFetch } from "@/lib/auth-api";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -51,6 +54,12 @@ const QUICK_ACTIONS = [
   },
 ] as const;
 
+// A datetime-local input takes local wall-clock time ("YYYY-MM-DDTHH:mm"), not ISO.
+function toLocalInputValue(d: Date): string {
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
 const EXAMPLES = [
   "Why is the Fan's health dropping?",
   "Show assets with high vibration",
@@ -62,7 +71,19 @@ export default function AICopilot() {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  // Prefilled so the sidebar shortcuts, which send immediately, always have a range.
+  const [rangeFrom, setRangeFrom] = useState(() => toLocalInputValue(new Date(Date.now() - 24 * 3600_000)));
+  const [rangeTo, setRangeTo] = useState(() => toLocalInputValue(new Date()));
   const scrollRef = useRef<HTMLDivElement>(null);
+
+  const fromDate = new Date(rangeFrom);
+  const toDate = new Date(rangeTo);
+  const rangeError =
+    !rangeFrom || !rangeTo || Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime())
+      ? "Set both a start and an end time."
+      : fromDate >= toDate
+        ? "\"From\" must be earlier than \"To\"."
+        : null;
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const search = useSearch();
   const lastAction = useRef<string | null>(null);
@@ -85,7 +106,7 @@ export default function AICopilot() {
 
   async function send(question: string) {
     const q = question.trim();
-    if (!q || loading) return;
+    if (!q || loading || rangeError) return;
 
     const history = messages.map((m) => ({ role: m.role, content: m.content }));
     const next: Msg[] = [...messages, { role: "user", content: q }];
@@ -94,10 +115,14 @@ export default function AICopilot() {
     setLoading(true);
 
     try {
-      const res = await fetch(`${BASE}/api/ai/chat`, {
+      const res = await apiFetch(`${BASE}/api/ai/chat`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: q, history }),
+        body: JSON.stringify({
+          question: q,
+          history,
+          range: { from: fromDate.toISOString(), to: toDate.toISOString() },
+          timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+        }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -141,7 +166,7 @@ export default function AICopilot() {
           <button
             key={a.key}
             onClick={() => handleQuickAction(a.prompt)}
-            disabled={loading}
+            disabled={loading || (!!a.prompt && !!rangeError)}
             className="text-left p-3 rounded-lg border bg-card hover:bg-accent hover:border-primary/40 transition-colors disabled:opacity-50"
           >
             <div className="flex items-center gap-2 text-sm font-medium">
@@ -168,7 +193,7 @@ export default function AICopilot() {
                     <button
                       key={ex}
                       onClick={() => send(ex)}
-                      disabled={loading}
+                      disabled={loading || !!rangeError}
                       className="text-xs px-3 py-1.5 rounded-full border bg-card hover:bg-accent transition-colors disabled:opacity-50"
                     >
                       {ex}
@@ -234,6 +259,31 @@ export default function AICopilot() {
 
         {/* Input */}
         <div className="border-t p-3">
+          <div className="flex flex-wrap items-end gap-2 mb-2">
+            <div className="space-y-1">
+              <Label htmlFor="ai-range-from" className="text-[11px] text-muted-foreground">From</Label>
+              <Input
+                id="ai-range-from"
+                type="datetime-local"
+                value={rangeFrom}
+                onChange={(e) => setRangeFrom(e.target.value)}
+                disabled={loading}
+                className="h-8 w-48 text-xs"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="ai-range-to" className="text-[11px] text-muted-foreground">To</Label>
+              <Input
+                id="ai-range-to"
+                type="datetime-local"
+                value={rangeTo}
+                onChange={(e) => setRangeTo(e.target.value)}
+                disabled={loading}
+                className="h-8 w-48 text-xs"
+              />
+            </div>
+            {rangeError && <p className="text-[11px] text-destructive pb-2">{rangeError}</p>}
+          </div>
           <div className="flex gap-2 items-end">
             <Textarea
               ref={inputRef}
@@ -250,7 +300,7 @@ export default function AICopilot() {
               className="resize-none min-h-[40px] max-h-32"
               disabled={loading}
             />
-            <Button onClick={() => send(input)} disabled={loading || !input.trim()} size="icon" className="shrink-0">
+            <Button onClick={() => send(input)} disabled={loading || !input.trim() || !!rangeError} size="icon" className="shrink-0">
               <Send className="w-4 h-4" />
             </Button>
           </div>

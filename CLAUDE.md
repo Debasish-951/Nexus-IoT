@@ -32,6 +32,14 @@ No test runner is configured — `typecheck` is the gate. To typecheck one packa
 
 Note: `api-server`'s `dev` does a full esbuild rebuild + start (no watch) — re-run it after server-side edits.
 
+**Root `typecheck` can silently no-op.** When the repo path contains parentheses (e.g. an OneDrive path like `...WebSynergies(S) Pte Ltd...`), pnpm's `--filter "./artifacts/**"` fails to resolve, so `pnpm run typecheck` prints `No projects matched the filters` and exits 0 having only run `tsc --build` over `lib/` — a green result is not evidence `artifacts/*` compiles. If you see that message, typecheck each artifact directly instead:
+
+```bash
+pnpm --filter @workspace/api-server run typecheck
+pnpm --filter @workspace/iot-platform run typecheck
+pnpm --filter @workspace/mockup-sandbox run typecheck
+```
+
 ## Why seed is mandatory
 
 The role switcher loads users from the DB on startup. With an empty DB `currentUser` stays `null`, so the RBAC `RoleGuard` hides every create/edit/delete control — the app looks half-broken. `seed` creates 3 users (admin/jsmith-engineer/mwilson-operator) + a sample asset hierarchy with fixed UUIDs (Fan = `bbbb0002-...0001`, Plant 1 = `bbbb0001-...0001`).
@@ -68,6 +76,10 @@ docs/                    extensive architecture/api/security/ops docs (treated a
 `normalise(body)` → `processNormalised(n)`: writes telemetry, updates dynamic attributes, evaluates runtime expressions (`expr-eval`, variables auto-populated from numeric attrs on the asset), evaluates alarm rules (threshold + rate-of-change), fires webhooks (fire-and-forget `fetch` with `AbortSignal.timeout(5000)`). Telemetry is attributed by matching payload `deviceId` to an asset's `identifier` (exact, case-sensitive). Assets in maintenance mode suppress alarm evaluation.
 
 The MQTT subscriber (`services/mqtt.ts`) and the hourly retention pruner both start non-blocking in `src/index.ts`.
+
+## Visualization owns its own hierarchy
+
+`Visualization.tsx` does **not** mirror the asset tree. It has its own user-created hierarchy stored in `localStorage` (`wsviz:hierarchy`, via `features/dashboards/vizHierarchy.ts` / `useVizHierarchy()`) — assets created in Asset Management don't appear there, and users freely create/rename/delete viz nodes. Each viz node keeps one dashboard at `wsviz:widgets:<nodeId>`. The link to real assets survives only per-widget: `WidgetConfigPanel` has an asset dropdown plus a metric dropdown (`useMetricChoices(assetId)`) unioning live telemetry tags with asset attributes. Don't reintroduce asset→viz tree mirroring — the shared `AssetTree`/`TreeNode` components are also used by `Assets.tsx` for the real hierarchy, so changes to those components affect both screens.
 
 ## Docs
 

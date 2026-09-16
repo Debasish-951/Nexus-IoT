@@ -84,6 +84,10 @@ const ROUTE_RULES: Rule[] = [
   { path: "/ingest/register-device",     methods: ["POST"], module: "brokers", allowApiKey: true },
   // Per-client endpoints: /api/ingest/k/<clientId>/{payload,batch,validate}
   { path: "/ingest/k/:clientId/:action", methods: ["POST"], module: "brokers", allowApiKey: true },
+  // Copy-and-paste endpoints: /api/ingest/e/<token>/{payload,batch,validate}.
+  // The token IS the credential; `attachApiClient` resolves it and refuses any
+  // client that is not ingest-scoped, so this path cannot carry a super-key.
+  { path: "/ingest/e/:token/:action", methods: ["POST"], module: "brokers", allowApiKey: true },
   // Export endpoints enforce their own scopes via apiKeyAuth; a signed-in human
   // with the matching module grant may also call them.
   { path: "/export/:resource", methods: READ, module: "explorer", level: "read", allowApiKey: true },
@@ -277,21 +281,64 @@ export function authorize(req: Request, res: Response, next: NextFunction): void
     const machineRoute = rule?.allowApiKey === true;
     const sentSomeKey = !!(req.headers["x-api-key"] || (req.headers["authorization"] as string | undefined)?.startsWith("Bearer "));
 
+    // A key in the query string is IGNORED unless API_KEY_ALLOW_QUERY_PARAM is on
+    // (it would otherwise be written to nginx's access log in cleartext). Saying
+    // so here is the difference between a five-minute fix and an afternoon: the
+    // caller did send a credential, it was simply not read, and every other
+    // message on this path implies they sent nothing at all.
+    const queryKeyIgnored = !authConfig.allowApiKeyInQuery
+      && ["key", "apiKey", "api_key"].some((p) => {
+        const v = (req.query as Record<string, unknown> | undefined)?.[p];
+        const raw = Array.isArray(v) ? v[0] : v;
+        return typeof raw === "string" && raw.trim().length > 0;
+      });
+
+    // A copy-and-paste ingest URL that did not resolve. `attachApiClient` records
+    // why it failed; `ingestAuth` in routes/ingest.ts phrases the same cases, but
+    // it never gets to run — `authorize` is mounted ahead of the router, so every
+    // one of those cases fell through to the generic "send a header" message
+    // below. That is wrong advice for someone who pasted a URL and never sent a
+    // header at all, and it left them with precisely the blind 401 that the
+    // copy-and-paste endpoint exists to remove. Answer the actual question here.
+    if (req.ingestTokenFailure) {
+      const why = req.ingestTokenFailure;
+      res.status(why === "scope_too_broad" ? 403 : 401).json({
+        error:
+          why === "unknown"  ? "This ingest URL is not recognised. It may have been regenerated or deleted."
+        : why === "inactive" ? "This ingest endpoint has been disabled or revoked."
+        : why === "expired"  ? "This ingest endpoint has expired."
+        : why === "scope_too_broad"
+                             ? "This credential is too broadly scoped to be used in a URL. Create a dedicated ingest endpoint instead."
+        :                      "This ingest URL is malformed.",
+        code: `ingest_url_${why}`,
+        hint: "Copy the endpoint again from Integration Hub → Broker Management.",
+      });
+      return;
+    }
+
     res.status(401).json({
       error: reason === "session_expired"
         ? "Your session has expired. Please sign in again."
         : reason === "account_inactive"
           ? "Your account is no longer active. Contact your administrator."
           : machineRoute
-            ? sentSomeKey
-              ? "The API key sent with this request is not valid, has expired, or has been revoked."
-              : "This endpoint requires an API key."
+            ? queryKeyIgnored
+              ? "The API key was sent in the URL query string, which is not accepted. Send it as a header instead."
+              : sentSomeKey
+                ? "The API key sent with this request is not valid, has expired, or has been revoked."
+                : "This endpoint requires an API key."
             : "Authentication required",
-      code: reason === "no_session" ? "authentication_required" : reason,
+      code: reason === "no_session"
+        ? (queryKeyIgnored && machineRoute ? "api_key_in_query_string" : "authentication_required")
+        : reason,
       ...(machineRoute && {
         hint: `Send the client secret as  X-API-Key: <clientSecret>  or  Authorization: Bearer <clientSecret>. ${
           req.path.startsWith("/ingest") ? "The key must carry the ingest:write scope." : ""
         }`.trim(),
+        ...(queryKeyIgnored && {
+          why: "A key in the URL is written to proxy access logs in cleartext, so it is rejected by default. "
+             + "Set API_KEY_ALLOW_QUERY_PARAM=true to re-enable it only if the device cannot send headers.",
+        }),
         docs: "Integration Hub → API Client. Secrets are shown once, when created or rotated — if you no longer have it, use Rotate Secret.",
       }),
     });

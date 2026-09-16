@@ -44,6 +44,39 @@ export const apiClientsTable = pgTable("api_clients", {
    * gateway.
    */
   projectId: uuid("project_id"),
+  /**
+   * ── Ingest URL token ──────────────────────────────────────────────────────
+   *
+   * A SECOND credential, separate from `clientSecret`, that exists only to be
+   * embedded in a copy-and-paste ingest URL:
+   *
+   *   http://host/api/ingest/e/<token>/payload
+   *
+   * The product requirement is that an operator can return to Broker Management
+   * at any time and copy a working URL. A hash cannot satisfy that — there is
+   * nothing to put back into the URL — so this token is stored REVERSIBLY, and
+   * that is a deliberate trade made safe by bounding what the token can do:
+   *
+   *   • It is accepted ONLY on /ingest/* routes.
+   *   • It is accepted ONLY when the client's scopes are ingest-only. A
+   *     `*` super-key is never usable through a URL, however it is stored.
+   *   • It is revocable and rotatable independently of `clientSecret`.
+   *
+   * So the blast radius of a leaked ingest URL is "someone can write telemetry
+   * to one project" — attributable, rate-limited, and revoked in one click.
+   * This is the same trade Slack, Teams and Stripe webhook URLs make.
+   *
+   * Two columns, because encryption is not searchable:
+   *   `ingestTokenHash` — SHA-256, indexed, what authentication looks up.
+   *   `ingestTokenEnc`  — AES-256-GCM ciphertext, only ever decrypted to show
+   *                       an administrator the URL again. Requires
+   *                       SECRETS_ENC_KEY; without it no token is issued at all
+   *                       rather than one being stored in clear.
+   */
+  ingestTokenHash: text("ingest_token_hash"),
+  ingestTokenEnc: text("ingest_token_enc"),
+  ingestTokenIssuedAt: timestamp("ingest_token_issued_at", { withTimezone: true }),
+
   tags: text("tags").array().notNull().default([]),
   scopes: text("scopes").array().notNull().default([]),
   status: text("status").notNull().default("active"), // active|inactive|revoked

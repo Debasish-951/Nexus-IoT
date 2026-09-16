@@ -66,9 +66,9 @@ function IngestEndpointPanel() {
     staleTime: 15_000,
   });
 
-  function copy(text: string, what = "Copied") {
+  function copy(text: string, what = "Copied", detail?: string) {
     navigator.clipboard.writeText(text);
-    toast({ title: what });
+    toast({ title: what, description: detail });
   }
 
   // Only clients that can actually post telemetry. An empty (or absent) scope list
@@ -141,7 +141,14 @@ function IngestEndpointPanel() {
         <div className="space-y-2">
           {sortedClients.map((c) => {
             const suffix = (modes[c.id] ?? "single") === "batch" ? "batch" : "payload";
-            const url = `${BASE_URL}/api/ingest/k/${c.clientId}/${suffix}`;
+            // Two shapes. The token URL is self-authenticating and is what the
+            // Copy button hands out whenever one exists; the per-client path is
+            // the header-authenticated fallback for broadly-scoped clients,
+            // which are deliberately not allowed to put a credential in a URL.
+            const hasToken = typeof c.ingestUrlToken === "string" && c.ingestUrlToken.length > 0;
+            const pasteUrl = hasToken
+              ? `${BASE_URL}/api/ingest/e/${c.ingestUrlToken}/${suffix}`
+              : `${BASE_URL}/api/ingest/k/${c.clientId}/${suffix}`;
             // The client's own name is shown only when the project alone would be
             // ambiguous — i.e. that project owns more than one endpoint.
             const needsQualifier = !!c.projectName && (projectCounts[c.projectName] ?? 0) > 1;
@@ -176,11 +183,14 @@ function IngestEndpointPanel() {
                     Single vs batch is the same endpoint with a different suffix, so it is
                     a toggle over one URL, not a second row.
 
-                    Copy includes the key when we have it, because a bare URL is not a
-                    usable thing to paste anywhere — it 401s until a header is configured
-                    separately. Two buttons for "URL" and "URL + key" only raised the
-                    question of which one you needed. Header users get the small
-                    secondary link. */}
+                    This used to copy `?key=<secret>`, which the server NO LONGER READS:
+                    a credential in the URL is written to nginx's access log in cleartext,
+                    so query-string keys are off unless API_KEY_ALLOW_QUERY_PARAM is set.
+                    The page kept handing out a URL shaped like the old, working one and
+                    every gateway configured from it started returning 401 with nothing
+                    on screen to explain why. The URL is now copied clean, and the key
+                    travels in a header — the "Copy cURL" button emits a complete,
+                    runnable command so there is still one thing to copy that works. */}
                 <div className="px-3 pb-2 space-y-1.5">
                   <div className="flex items-center gap-2">
                     <div className="flex rounded border border-blue-200 dark:border-blue-800/40 overflow-hidden shrink-0">
@@ -199,36 +209,56 @@ function IngestEndpointPanel() {
                         </button>
                       ))}
                     </div>
-                    {/* Masked on screen, real value on copy — enough to see the shape
-                        without putting a live key on a shared screen. */}
-                    <code className="text-xs font-mono text-primary flex-1 truncate" title={url}>
-                      {url}{c.clientSecret ? "?key=••••••••" : ""}
+                    <code className="text-xs font-mono text-primary flex-1 truncate" title={pasteUrl}>
+                      {pasteUrl}
                     </code>
-                    <Button size="sm" variant="outline" className="h-7 shrink-0"
-                      onClick={() => copy(
-                        c.clientSecret ? `${url}?key=${c.clientSecret}` : url,
-                        c.clientSecret ? "Endpoint copied — key included" : "Endpoint copied",
-                      )}>
-                      <Copy className="w-3.5 h-3.5 mr-1.5" /> Copy
-                    </Button>
+                    {/* Only a token URL is copy-and-paste, so only a token URL gets
+                        the primary button. The header-authenticated URL is still
+                        copyable — it is genuinely useful to someone who does send a
+                        header — but presenting it identically is what sent a bare
+                        URL into a gateway and produced a 401 with no explanation.
+                        The label and the toast now say what else the URL needs. */}
+                    {hasToken ? (
+                      <Button size="sm" className="h-7 shrink-0"
+                        onClick={() => copy(pasteUrl, "Endpoint copied — paste it straight into your gateway")}>
+                        <Copy className="w-3.5 h-3.5 mr-1.5" /> Copy
+                      </Button>
+                    ) : (
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <Button size="sm" variant="outline" className="h-7"
+                          onClick={() => copy(pasteUrl, "URL copied — it needs a header",
+                            "On its own this URL returns 401. Send X-API-Key: <secret> with it, or create an ingest-scoped endpoint for a paste-ready URL.")}>
+                          <Copy className="w-3.5 h-3.5 mr-1.5" /> Copy URL
+                        </Button>
+                        <Link href="/api-clients">
+                          <Button size="sm" className="h-7">Get paste-ready URL</Button>
+                        </Link>
+                      </div>
+                    )}
                   </div>
 
-                  {c.clientSecret ? (
+                  {hasToken ? (
                     <p className="text-[11px] text-muted-foreground">
-                      Ready to paste into a gateway — the key is included, no header needed.{" "}
-                      <button
-                        onClick={() => copy(url, "URL copied without the key")}
-                        className="text-muted-foreground hover:text-foreground underline decoration-dotted"
-                        title="Copies the URL only. Send the key as X-API-Key instead."
-                      >
-                        Copy without key
-                      </button>{" "}
-                      to send it as <code className="font-mono text-foreground/80">X-API-Key</code> instead.
+                      Ready to paste into Node-RED or any gateway — no header, no key to configure.
+                      The URL is the credential, so treat it like one: it can only write telemetry
+                      to this project, and{" "}
+                      <Link href="/api-clients" className="underline decoration-dotted hover:text-foreground">
+                        regenerating it
+                      </Link>{" "}
+                      stops the old one immediately.
                     </p>
                   ) : (
                     <p className="text-[11px] text-muted-foreground">
-                      Send with header{" "}
-                      <code className="font-mono text-foreground/80">X-API-Key: &lt;this endpoint&apos;s secret&gt;</code>
+                      This endpoint has no copy-and-paste URL, so it needs a header —{" "}
+                      <code className="font-mono text-foreground/80">X-API-Key: &lt;secret&gt;</code>.
+                      That is because its scopes are{" "}
+                      <code className="font-mono text-foreground/80">{JSON.stringify(c.scopes ?? [])}</code>,
+                      and only an endpoint scoped to <code className="font-mono text-foreground/80">ingest:write</code>{" "}
+                      alone may carry its credential in a URL.{" "}
+                      <Link href="/api-clients" className="underline decoration-dotted hover:text-foreground">
+                        Create an ingest endpoint
+                      </Link>{" "}
+                      to get a one-click URL.
                     </p>
                   )}
                 </div>

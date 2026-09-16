@@ -13,6 +13,9 @@ import { hashToken } from "../lib/tokens";
 import { logActivity } from "./activity_log";
 import { recordSecurityEvent } from "../lib/security-log";
 import { ungrantableScopes, canCreateApiClients } from "../lib/rbac";
+import {
+  issueIngestToken, revealIngestToken, assertUrlTokenAllowed, INGEST_SCOPE,
+} from "../lib/ingest-token";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -96,12 +99,30 @@ function redactSecret<T extends { clientSecretHash?: string | null }>(row: T): O
   return rest;
 }
 
-/** Decorate a row with its project name and dedicated ingest path. */
+/**
+ * Decorate a row with its project name and its ingest paths.
+ *
+ * `ingestUrlToken` is the decrypted copy-and-paste credential, and it is
+ * included in this list response deliberately. The alternative — a separate
+ * reveal endpoint logged on each call — would be audited on every render of a
+ * page whose whole purpose is to show the URL, producing noise rather than
+ * safety. The people who can read this list are exactly the people who can
+ * create, rotate and delete the endpoint; there is nothing to withhold from
+ * them. Issuing and rotating the token ARE audited, which is where the
+ * security-relevant events actually are.
+ *
+ * Null when no token exists (a broadly-scoped client) or when the key ring
+ * cannot decrypt it (rotated away) — the UI then offers to regenerate.
+ */
 function decorate(client: typeof apiClientsTable.$inferSelect, projectNames: Map<string, string>) {
+  const { ingestTokenHash: _h, ingestTokenEnc: _e, ...visible } = client;
   return {
-    ...redactSecret(client),
+    ...redactSecret(visible as typeof client),
     projectName: client.projectId ? projectNames.get(client.projectId) ?? null : null,
+    // Legacy per-client path. Still valid, still header-authenticated.
     ingestUrl: `/api/ingest/k/${client.clientId}/payload`,
+    ingestUrlToken: revealIngestToken(client),
+    ingestUrlEligible: assertUrlTokenAllowed(client),
   };
 }
 
@@ -231,6 +252,13 @@ router.post("/api-clients", async (req, res): Promise<void> => {
   // anyone with database access.
   const rawSecret = randomUUID();
 
+  // A client scoped to ingest and nothing else also gets a copy-and-paste URL
+  // token. Anything broader does not: `assertUrlTokenAllowed` would refuse it at
+  // authentication time anyway, and issuing a token that can never work is worse
+  // than issuing none. See lib/ingest-token.ts.
+  const scopes = parsed.data.scopes ?? [];
+  const issued = assertUrlTokenAllowed({ scopes }) ? issueIngestToken() : null;
+
   const [client] = await db
     .insert(apiClientsTable)
     .values({
@@ -239,8 +267,13 @@ router.post("/api-clients", async (req, res): Promise<void> => {
       clientId:    randomUUID(),
       clientSecret: null,
       clientSecretHash: hashToken(rawSecret),
+      ...(issued ? {
+        ingestTokenHash: issued.hash,
+        ingestTokenEnc: issued.encrypted,
+        ingestTokenIssuedAt: new Date(),
+      } : {}),
       tags:        parsed.data.tags  ?? [],
-      scopes:      parsed.data.scopes ?? [],
+      scopes,
       // Owning project. Validated below so a client cannot be attached to a
       // project the caller has no access to.
       projectId,
@@ -335,6 +368,70 @@ router.post("/api-clients/:id/rotate-secret", async (req, res): Promise<void> =>
   void logActivity("api_client.secret_rotated", "api_client", client.id, client.name, null, req);
   // Return the new secret plaintext ONCE — caller must store it
   res.json({ ...redactSecret(client), clientSecret: newSecret });
+});
+
+/**
+ * Issue or replace the copy-and-paste ingest URL token.
+ *
+ * Two uses: minting one for a client created before this existed, and replacing
+ * one that has leaked. Replacing takes effect immediately — the old URL stops
+ * working on the next request, which is the point.
+ */
+router.post("/api-clients/:id/regenerate-ingest-url", async (req, res): Promise<void> => {
+  const { id } = req.params;
+  if (!id || !UUID_RE.test(id)) { res.status(400).json({ error: "Invalid id" }); return; }
+  if (await refuseIfOutOfScope(req, res, id)) return;
+
+  const [existing] = await db.select().from(apiClientsTable).where(eq(apiClientsTable.id, id));
+  if (!existing) { res.status(404).json({ error: "API client not found" }); return; }
+
+  // The scope rule is enforced here as well as at authentication time. Minting a
+  // token for a `*` client would produce a URL that silently never works, and
+  // "it 401s and nothing says why" is the exact failure this feature exists to
+  // remove.
+  if (!assertUrlTokenAllowed(existing)) {
+    res.status(400).json({
+      error: "Only an ingest-scoped endpoint can have a copy-and-paste URL.",
+      code: "scope_too_broad",
+      hint: `This client's scopes are ${JSON.stringify(existing.scopes)}. Create a new endpoint scoped to ${INGEST_SCOPE} instead, or narrow this one.`,
+    });
+    return;
+  }
+
+  const issued = issueIngestToken();
+  if (!issued) {
+    res.status(503).json({
+      error: "Encryption is not configured, so a copy-and-paste URL cannot be issued.",
+      code: "encryption_unavailable",
+      hint: "Set SECRETS_ENC_KEY (or SECRETS_ENC_KEY_FILE) and restart. Until then use a header-authenticated endpoint.",
+    });
+    return;
+  }
+
+  const [client] = await db
+    .update(apiClientsTable)
+    .set({
+      ingestTokenHash: issued.hash,
+      ingestTokenEnc: issued.encrypted,
+      ingestTokenIssuedAt: new Date(),
+    })
+    .where(eq(apiClientsTable.id, id))
+    .returning();
+
+  void logActivity("api_client.ingest_url_regenerated", "api_client", client.id, client.name,
+    existing.ingestTokenHash ? "Replaced an existing URL — the old one no longer works" : "Issued a new ingest URL", req);
+  recordSecurityEvent({
+    type: "access.updated",
+    outcome: "success",
+    reason: "ingest_url_regenerated",
+    userId: req.principal?.user.id ?? null,
+    username: req.principal?.user.username ?? null,
+    detail: { apiClientId: client.id, replaced: Boolean(existing.ingestTokenHash) },
+    req,
+  });
+
+  const projectNames = await loadProjectNames();
+  res.json(decorate(client, projectNames));
 });
 
 // ── Revoke ─────────────────────────────────────────────────────────────────────

@@ -9,8 +9,28 @@ declare global {
   namespace Express {
     interface Request {
       apiClient?: typeof apiClientsTable.$inferSelect;
+      /**
+       * Set when the caller authenticated with a copy-and-paste ingest URL
+       * rather than a header. Route guards check this so a URL token is usable
+       * on ingest and nowhere else — see lib/ingest-token.ts.
+       */
+      viaIngestUrlToken?: boolean;
+      /** Why a URL token was refused, for the 401 body. */
+      ingestTokenFailure?: import("../lib/ingest-token").TokenRejection;
     }
   }
+}
+
+/**
+ * Pull the token out of `/ingest/e/<token>/<action>`.
+ *
+ * Read from the path directly rather than `req.params`, because this runs as
+ * application-level middleware where the route has not been matched yet and
+ * `params` is still empty.
+ */
+function ingestUrlToken(path: string): string | null {
+  const m = /^\/ingest\/e\/([A-Za-z0-9_-]{40,64})\/(payload|batch|validate)\/?$/.exec(path);
+  return m ? m[1] : null;
 }
 
 // ── Per-client in-memory rate limiter ─────────────────────────────────────────
@@ -131,6 +151,28 @@ function warnQueryKeyRejected(): void {
  * counting here as well would double every request.
  */
 export async function attachApiClient(req: Request, _res: Response, next: NextFunction): Promise<void> {
+  // A copy-and-paste ingest URL carries its credential in the path. Resolved
+  // here so `authorize` sees an authenticated machine caller, exactly as it
+  // would for a header. `resolveIngestToken` is what enforces that the client
+  // is ingest-scoped — a `*` super-key pasted into this position is refused.
+  const urlToken = ingestUrlToken(req.path);
+  if (urlToken) {
+    try {
+      const { resolveIngestToken } = await import("../lib/ingest-token");
+      const { client, rejected } = await resolveIngestToken(urlToken);
+      if (client) {
+        req.apiClient = client;
+        req.viaIngestUrlToken = true;
+      } else {
+        req.ingestTokenFailure = rejected;
+      }
+    } catch (err) {
+      logger.error({ err }, "ingest URL token lookup failed");
+    }
+    next();
+    return;
+  }
+
   const secret = readSecret(req);
   if (!secret) { next(); return; }
 

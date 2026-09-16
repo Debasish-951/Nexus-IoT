@@ -1,4 +1,4 @@
-import { useEffect, lazy, Suspense } from "react";
+import { useEffect, useRef, lazy, Suspense } from "react";
 import { Switch, Route, Router as WouterRouter, useLocation } from "wouter";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { Loader2 } from "lucide-react";
@@ -248,8 +248,43 @@ function ProjectWorkspace({ projectId }: { projectId: string }) {
  * page would look right while showing another plant's data.
  */
 function ProjectGate() {
-  const { currentProject, projects, loaded, canListProjects } = useProject();
-  const [, navigate] = useLocation();
+  const { currentProject, currentProjectId, projects, loaded, canListProjects } = useProject();
+  const [location, navigate] = useLocation();
+
+  /**
+   * The last project id that actually resolved.
+   *
+   * This separates the two ways `currentProject` can be null, which look
+   * identical here but must not be treated the same:
+   *
+   *   never resolved  → the id was pasted, mistyped, or belongs to someone
+   *                     else's plant. Refuse it. Silently opening a DIFFERENT
+   *                     project would show another plant's data under a URL
+   *                     that looks correct.
+   *   resolved, then  → the project was deleted while the user was working in
+   *   disappeared       it — almost always because they just deleted that root
+   *                     asset themselves. Nothing is ambiguous and nothing is
+   *                     being substituted behind their back, so stranding them
+   *                     on an error wall is purely an obstacle.
+   *
+   * Comparing the ID rather than keeping a boolean is what makes the second
+   * case safe: a boolean would stay true after the user edits the URL to some
+   * OTHER project's id, and we would bounce them into a project they did not
+   * ask for instead of refusing an id they cannot open.
+   */
+  const lastResolvedId = useRef<string | null>(null);
+  if (currentProject) lastResolvedId.current = currentProject.id;
+  const vanished = !currentProject
+    && currentProjectId !== null
+    && lastResolvedId.current === currentProjectId;
+
+  // Carry the user to another project on the SAME page. `location` is relative
+  // to the `/p/<id>` base, so deleting a root asset from /assets lands back on
+  // /assets — the page they were already on, minus the asset.
+  useEffect(() => {
+    if (!loaded || !vanished || projects.length === 0) return;
+    navigate(`~${APP_BASE}/p/${projects[0].id}${location}`, { replace: true });
+  }, [loaded, vanished, projects, location, navigate]);
 
   if (!loaded) return <Splash label="Opening project…" />;
 
@@ -259,6 +294,17 @@ function ProjectGate() {
   if (!canListProjects) return <WorkspaceShell />;
 
   if (!currentProject) {
+    // Deleted out from under us, with somewhere to go — the effect above is
+    // already moving; showing the wall for that frame would flash an error for
+    // what is a successful delete.
+    if (vanished && projects.length > 0) return <Splash label="Returning…" />;
+
+    // Deleted, and it was the last project. Keep rendering the page they are on.
+    // Routes still match against the now-dead prefix, so Assets shows an empty
+    // tree with its Create Asset button — which is the useful next step, and a
+    // far better end state than an error page with no way forward.
+    if (vanished) return <WorkspaceShell />;
+
     return (
       <div className="flex min-h-screen w-full items-center justify-center p-6">
         <div className="max-w-md text-center">

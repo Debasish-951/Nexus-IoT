@@ -12,6 +12,7 @@ import { initSecretBox } from "./lib/secret-box";
 import { ensureUploadRoot } from "./lib/upload/storage";
 import { reportScannerStatus } from "./lib/upload/scanner";
 import { pruneExpiredSessions } from "./lib/sessions";
+import { pruneSecurityEvents } from "./lib/security-log";
 
 // Fail fast, before the port is bound, on a configuration that would be unsafe
 // in this environment (e.g. activation links printed to the log in production).
@@ -62,6 +63,11 @@ server.listen(port, () => {
     pruneExpiredSessions()
       .then((n) => { if (n > 0) logger.info({ sessions: n }, "Pruned expired sessions"); })
       .catch((e) => logger.warn({ err: e }, "Session pruning error"));
+
+    // Audit retention. Age-based first, then an absolute row cap — see
+    // lib/security-log.ts for why the cap exists alongside the age limit.
+    pruneSecurityEvents()
+      .catch((e) => logger.warn({ err: e }, "Security event pruning error"));
   }, PRUNE_INTERVAL_MS);
 });
 

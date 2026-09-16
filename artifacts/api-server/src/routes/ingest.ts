@@ -705,8 +705,13 @@ router.post("/ingest/seen-devices/prune", async (_req, res): Promise<void> => {
 });
 
 // ── Validate (dry-run) endpoint ───────────────────────────────────────────────
-router.post(["/ingest/validate", "/ingest/k/:clientId/validate"],
+router.post(["/ingest/validate", "/ingest/k/:clientId/validate", "/ingest/e/:token/validate"],
   ingestAuth, requireMatchingClient, async (req, res): Promise<void> => {
+  // `rejectUnusableBody` is declared below — a function declaration, so it is
+  // hoisted. Without it this route threw on an unparsed body exactly as
+  // /payload did, and validate is the one endpoint whose entire purpose is to
+  // tell the caller what is wrong with their payload.
+  if (rejectUnusableBody(req, res)) return;
   const body = req.body as Record<string, unknown>;
   const warnings: string[] = [];
 
@@ -821,6 +826,31 @@ function requireMatchingClient(req: Request, res: Response, next: NextFunction):
  */
 async function ingestAuth(req: Request, res: Response, next: NextFunction): Promise<void> {
   if (req.principal) { next(); return; }
+
+  // Authenticated by a copy-and-paste ingest URL. `attachApiClient` has already
+  // resolved the token and verified status, expiry and — critically — that the
+  // client is ingest-scoped, so there is nothing left to check here.
+  if (req.viaIngestUrlToken && req.apiClient) { next(); return; }
+
+  // A token was present in the URL but did not resolve. Answer the actual
+  // question rather than falling through to "send a header", which would be
+  // wrong advice for someone who pasted a URL.
+  if (req.ingestTokenFailure) {
+    const reason = req.ingestTokenFailure;
+    res.status(reason === "scope_too_broad" ? 403 : 401).json({
+      error:
+        reason === "unknown"    ? "This ingest URL is not recognised. It may have been regenerated or deleted."
+      : reason === "inactive"   ? "This ingest endpoint has been disabled or revoked."
+      : reason === "expired"    ? "This ingest endpoint has expired."
+      : reason === "scope_too_broad"
+                                ? "This credential is too broadly scoped to be used in a URL. Create a dedicated ingest endpoint instead."
+      :                           "This ingest URL is malformed.",
+      code: `ingest_url_${reason}`,
+      hint: "Copy the endpoint again from Integration Hub → Broker Management.",
+    });
+    return;
+  }
+
   // `await` (not `void`) matters here: every OTHER apiKeyAuth() caller registers it
   // directly as Express middleware, where Express 5 natively awaits it and forwards
   // any rejection to the error handler in app.ts. `void`-ing the call instead — as
@@ -834,13 +864,39 @@ async function ingestAuth(req: Request, res: Response, next: NextFunction): Prom
   await apiKeyAuth("ingest:write")(req, res, next);
 }
 
+/**
+ * Reject a body that no parser produced an object from.
+ *
+ * When the Content-Type is not one the parsers claim, Express 5 leaves
+ * `req.body` undefined — and reading `.deviceId` off it threw a TypeError that
+ * surfaced as a 500 with a correlation id. A malformed request is the caller's
+ * to fix, so it has to be a 400 that names which half is wrong: an integrator
+ * reading "something went wrong on our side" has no reason to look at their own
+ * header, which is exactly where the problem is.
+ */
+function rejectUnusableBody(req: Request, res: Response): boolean {
+  const body = req.body as unknown;
+  if (body && typeof body === "object") return false;
+
+  const contentType = String(req.headers["content-type"] ?? "").split(";")[0]?.trim() ?? "";
+  res.status(400).json({
+    error: contentType && contentType !== "application/json"
+      ? `The request body was not read because its Content-Type is "${contentType}".`
+      : "The request body is empty or is not JSON.",
+    code: "body_not_json",
+    hint: 'Send  Content-Type: application/json  with a JSON object, e.g. {"deviceId":"my-device-01","temperature":21.5}.',
+  });
+  return true;
+}
+
 // ── Routes ────────────────────────────────────────────────────────────────────
 //
 // Ingest now REQUIRES a valid `ingest:write` API key (it was previously open to
 // anonymous callers). That is what makes the per-client load figures meaningful:
 // traffic can no longer be posted without attribution.
-router.post(["/ingest/payload", "/ingest/k/:clientId/payload"],
+router.post(["/ingest/payload", "/ingest/k/:clientId/payload", "/ingest/e/:token/payload"],
   ingestAuth, requireMatchingClient, async (req, res): Promise<void> => {
+  if (rejectUnusableBody(req, res)) return;
   const body = req.body as Record<string, unknown>;
 
   // Single-device model: the whole tree is attributed to the top-level deviceId
@@ -862,7 +918,21 @@ router.post(["/ingest/payload", "/ingest/k/:clientId/payload"],
         return;
       }
     }
-    res.status(400).json({ error: "Missing required field: deviceId" });
+    // A gateway shows the caller a status code and nothing else, so the body is
+    // the only place this can be explained. Echo the KEYS that did arrive — not
+    // their values, which are readings the caller already has and may not want
+    // in a log — because "deviceId is missing" and "my payload is nested one
+    // level too deep" look identical from the Node-RED side otherwise.
+    res.status(400).json({
+      error: "Missing required field: deviceId",
+      code: "missing_device_id",
+      hint: "Every payload needs a top-level string `deviceId`, and it must match an asset's Identifier exactly (case-sensitive).",
+      received: {
+        contentType: String(req.headers["content-type"] ?? "").split(";")[0]?.trim() ?? "",
+        topLevelKeys: Object.keys(body).slice(0, 25),
+      },
+      example: { deviceId: "my-device-01", temperature: 21.5, pressure: 3.2 },
+    });
     return;
   }
   const assetIdHint = typeof body.assetId === "string" ? body.assetId : undefined;
@@ -917,8 +987,12 @@ router.post(["/ingest/payload", "/ingest/k/:clientId/payload"],
     alarmsTriggered: triggered.length, alarmsCleared: cleared.length, alarmEvents: result.alarmEvents });
 });
 
-router.post(["/ingest/batch", "/ingest/k/:clientId/batch"],
+router.post(["/ingest/batch", "/ingest/k/:clientId/batch", "/ingest/e/:token/batch"],
   ingestAuth, requireMatchingClient, async (req, res): Promise<void> => {
+  // Same guard as /payload: an unparsed body reaches here as undefined, and
+  // "Body must be an array" would send the caller looking at their payload when
+  // the fault is their Content-Type header.
+  if (rejectUnusableBody(req, res)) return;
   const items = req.body;
   if (!Array.isArray(items)) { res.status(400).json({ error: "Body must be an array" }); return; }
   let successCount = 0, failureCount = 0, totalTriggered = 0, totalCleared = 0;
