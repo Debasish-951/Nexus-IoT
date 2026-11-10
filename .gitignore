@@ -69,3 +69,6 @@ energy_buffer.json.tmp
 *.sql
 *.dump
 *.dump.gpg
+
+# Default upload storage (UPLOAD_DIR unset). User files must never be committed.
+artifacts/api-server/var/
