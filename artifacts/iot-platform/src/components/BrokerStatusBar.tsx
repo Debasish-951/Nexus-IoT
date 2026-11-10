@@ -4,6 +4,7 @@ import { Wifi, WifiOff, AlertCircle, ChevronDown, Clock } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { useWsEvents } from "@/hooks/useWsEvents";
+import { useCurrentUser } from "@/contexts/UserContext";
 
 interface BrokerStatus {
   brokerId: string;
@@ -30,7 +31,12 @@ function statusCfg(s: string) {
 }
 
 export default function BrokerStatusBar() {
-  const { data: brokersData } = useListBrokers();
+  // Shown in the header of every page. Users without the Brokers module were
+  // refused this request on every page load, and each refusal was logged as a
+  // security event, so the query only runs when the server would allow it.
+  const { canModule } = useCurrentUser();
+  const allowed = canModule("brokers");
+  const { data: brokersData } = useListBrokers({ query: { enabled: allowed } as never });
   const rawBrokers = (brokersData as any[] | undefined) ?? [];
 
   const [overrides, setOverrides] = useState<Record<string, BrokerStatus>>({});
@@ -82,6 +88,7 @@ export default function BrokerStatusBar() {
     ? "bg-green-500 animate-pulse"
     : "bg-gray-400";
 
+  if (!allowed) return null;
   return (
     <div className="relative" ref={dropdownRef}>
       <button

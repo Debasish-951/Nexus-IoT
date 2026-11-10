@@ -75,7 +75,10 @@ export default function AlarmRules() {
 
   const { data: rules } = useListAlarmRules();
   const { data: assets } = useListAssets();
-  const { data: usersData } = useListUsers();
+  // Feeds only the recipients picker (behind the notificationChannels switch),
+  // and only users with User Management may list users.
+  const { canModule: canReadModule } = useCurrentUser();
+  const { data: usersData } = useListUsers({ query: { enabled: FEATURES.notificationChannels && canReadModule("users") } as never });
   const createRule = useCreateAlarmRule();
   const deleteRule = useDeleteAlarmRule();
   const updateRule = useUpdateAlarmRule();

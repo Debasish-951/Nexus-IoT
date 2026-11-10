@@ -154,8 +154,11 @@ export default function DataManagement() {
 
   // The server requires manage_assets plus the reports module for every
   // retention write (see ROUTE_RULES for /system/retention in authorize.ts).
-  const { canAction } = useCurrentUser();
-  const canManageRetention = canAction("manage_assets", "reports");
+  const { canAction, session } = useCurrentUser();
+  // Storage and retention cover every project, so the server refuses them to
+  // project-restricted users; nothing is requested for them.
+  const restricted = !!session?.restrictProjects;
+  const canManageRetention = canAction("manage_assets", "reports") && !restricted;
 
   async function getJson<T>(path: string): Promise<T> {
     const r = await apiFetch(`${BASE}${path}`);
@@ -171,11 +174,13 @@ export default function DataManagement() {
     queryKey: ["system/storage"],
     queryFn: () => getJson<StorageStats>("/api/system/storage"),
     refetchInterval: 30_000,
+    enabled: !restricted,
   });
 
   const { data: policies = [], isLoading: policiesLoading, refetch: refetchPolicies } = useQuery<RetentionPolicy[]>({
     queryKey: ["system/retention"],
     queryFn: () => getJson<RetentionPolicy[]>("/api/system/retention"),
+    enabled: !restricted,
   });
 
   async function handleSavePolicy(data: Partial<RetentionPolicy>): Promise<boolean> {
@@ -250,6 +255,14 @@ export default function DataManagement() {
     ? formatDistanceToNow(new Date(stats.telemetry.newestRecord), { addSuffix: true })
     : "—";
 
+  if (restricted) {
+    return (
+      <div className="p-6 max-w-xl space-y-2">
+        <h1 className="text-xl font-semibold">Data Management</h1>
+        <p className="text-sm text-muted-foreground">Storage and data retention cover every project, so they are managed by administrators whose accounts are not limited to specific projects.</p>
+      </div>
+    );
+  }
   return (
     <div className="h-full flex flex-col overflow-hidden">
       {/* Header */}

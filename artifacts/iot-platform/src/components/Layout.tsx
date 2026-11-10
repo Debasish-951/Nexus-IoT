@@ -24,6 +24,8 @@ interface NavChild {
   label: string;
   href: string;
   icon: React.ElementType;
+  /** Hidden for project-restricted users: the server refuses plant-wide data. */
+  plantWide?: boolean;
   /** Module key from the Access Control matrix. Omit for always-visible items. */
   module?: string;
   /** Hidden while this feature switch is off. See lib/features.ts. */
@@ -129,7 +131,7 @@ const navItems: NavItem[] = [
     icon: Database,
     module: "reports",
     children: [
-      { label: "Data Management", href: "/data-management", icon: Database,      module: "reports" },
+      { label: "Data Management", href: "/data-management", icon: Database,      module: "reports", plantWide: true },
       { label: "Reports",         href: "/reports",         icon: ClipboardList, module: "reports" },
     ],
   },
@@ -162,7 +164,7 @@ function visibleNav(
     if (!enabled(item)) return acc;
     if (item.plantWide && restrictProjects) return acc;
     if (item.children) {
-      const children = item.children.filter((c) => enabled(c) && (!c.module || canModule(c.module)));
+      const children = item.children.filter((c) => enabled(c) && !(c.plantWide && restrictProjects) && (!c.module || canModule(c.module)));
       if (children.length > 0) acc.push({ ...item, children });
       return acc;
     }
