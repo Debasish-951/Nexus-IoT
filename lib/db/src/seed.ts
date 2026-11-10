@@ -47,6 +47,9 @@ const IDs = {
   apiClient:    "00000030-0000-0000-0000-000000000001",
 } as const;
 
+/** The fixed secret older versions of this script created. Replaced on re-seed. */
+const LEGACY_PUBLIC_DEV_CREDENTIAL = "local-dev-secret";
+
 /**
  * Issue a fresh, single-use activation token for every account that still has
  * no password, and print the link. Mirrors what the API does when an admin
@@ -204,30 +207,54 @@ async function seed() {
   console.log("  ✅  Alarm rules  (High Temperature, High Vibration on Demo Pump)");
 
   // ── API client ────────────────────────────────────────────────────────────
-  await db.insert(apiClientsTable).values([
+  //
+  // The secret is random for every database and printed once, like a key
+  // created in the UI. It used to be a fixed value written in this file, which
+  // meant every seeded server, production included, accepted a key anyone with
+  // the repository knew. Only its SHA-256 is stored, matching api_clients.ts.
+  const devSecret = crypto.randomBytes(24).toString("base64url");
+  const devSecretHash = crypto.createHash("sha256").update(devSecret).digest("hex");
+
+  const inserted = await db.insert(apiClientsTable).values([
     {
-      id:           IDs.apiClient,
-      name:         "Local Dev Client",
-      description:  "Pre-seeded API client for local testing. Secret: local-dev-secret",
-      clientId:     "local-dev-client",
-      clientSecret: "local-dev-secret",
-      scopes:       ["ingest:write", "telemetry:read", "assets:read", "alarms:read"],
-      status:       "active",
-      allowedIps:   [],
+      id:               IDs.apiClient,
+      name:             "Local Dev Client",
+      description:      "Pre-seeded API client for local testing. Its secret is printed once by the seed script.",
+      clientId:         "local-dev-client",
+      clientSecret:     null,
+      clientSecretHash: devSecretHash,
+      scopes:           ["ingest:write", "telemetry:read", "assets:read", "alarms:read"],
+      status:           "active",
+      allowedIps:       [],
     },
-  ]).onConflictDoNothing();
-  console.log("  ✅  API client   (local-dev-client / local-dev-secret)");
+  ]).onConflictDoNothing().returning({ id: apiClientsTable.id });
+
+  // Re-seeding an older database: replace the formerly published secret.
+  const replaced = inserted.length > 0 ? [] : await db
+    .update(apiClientsTable)
+    .set({ clientSecret: null, clientSecretHash: devSecretHash, secretRotatedAt: new Date() })
+    .where(and(eq(apiClientsTable.id, IDs.apiClient), eq(apiClientsTable.clientSecret, LEGACY_PUBLIC_DEV_CREDENTIAL)))
+    .returning({ id: apiClientsTable.id });
+
+  const shownSecret = inserted.length > 0 || replaced.length > 0 ? devSecret : null;
+  if (replaced.length > 0) console.log("  ⚠️   Replaced the old published secret of local-dev-client.");
+  console.log(shownSecret
+    ? `  ✅  API client   (local-dev-client; secret shown once below)`
+    : `  ✅  API client   (local-dev-client already exists; rotate its secret in Integration Hub → API Clients if you need it)`);
 
   console.log(`
 ✅  Seed complete!
+${shownSecret ? `
+API client secret (shown once, store it now):
+  ${shownSecret}
 
 Quick-start payload to test ingest:
 
   curl -X POST http://localhost:8080/api/ingest/payload \\
     -H "Content-Type: application/json" \\
-    -H "X-API-Key: local-dev-secret" \\
+    -H "X-API-Key: ${shownSecret}" \\
     -d '{"deviceId":"demo-pump-001","timestamp":"${new Date().toISOString()}","metrics":{"temperature":72.5,"vibration":2.1}}'
-
+` : ""}
 Next step: open one of the activation links above to set a password.
 There are no default credentials — accounts stay unusable until activated.
   admin (admin) · jsmith (engineer) · mwilson (operator)

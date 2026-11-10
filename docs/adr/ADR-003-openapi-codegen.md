@@ -45,7 +45,7 @@ Use an **OpenAPI 3.1 specification** as the contract, with **Orval** for code ge
 
 ## Consequences
 
-- `lib/api-spec/src/openapi.yaml` must be updated whenever routes change
+- `lib/api-spec/openapi.yaml` must be updated whenever routes change
 - `pnpm --filter @workspace/api-spec run codegen` must be run after spec changes
 - `lib/api-zod/src/index.ts` must only contain `export * from "./generated/api";`
 - `info.title` in the spec controls generated filenames — do not change it

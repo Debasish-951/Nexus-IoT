@@ -29,11 +29,15 @@ router.get("/alarms", async (req, res): Promise<void> => {
     conditions.push(eq(alarmsTable.severity, query.data.severity));
   }
 
+  // Bounded: the list used to return every alarm ever raised. Newest first, so
+  // the default window always holds the current ones. The response stays an array.
+  const limit = Math.min(Math.max(Math.trunc(query.data.limit ?? 500), 1), 5000);
   const alarms = await db
     .select()
     .from(alarmsTable)
     .where(conditions.length > 0 ? and(...conditions) : undefined)
-    .orderBy(desc(alarmsTable.triggeredAt));
+    .orderBy(desc(alarmsTable.triggeredAt))
+    .limit(limit);
 
   res.json(alarms);
 });
@@ -45,16 +49,35 @@ router.post("/alarms/:id/acknowledge", async (req, res): Promise<void> => {
     return;
   }
 
+  // Only an ACTIVE alarm can be acknowledged. Without the status condition a
+  // cleared alarm was put back to "acknowledged", which reopened it, and could
+  // collide with the one-open-alarm-per-rule index (a 500).
+  const now = new Date();
   const [alarm] = await db
     .update(alarmsTable)
-    .set({ status: "acknowledged", acknowledgedAt: new Date() })
-    .where(eq(alarmsTable.id, params.data.id))
+    .set({ status: "acknowledged", acknowledgedAt: now })
+    .where(and(eq(alarmsTable.id, params.data.id), eq(alarmsTable.status, "active")))
     .returning();
 
   if (!alarm) {
-    res.status(404).json({ error: "Alarm not found" });
+    const [existing] = await db.select({ status: alarmsTable.status })
+      .from(alarmsTable).where(eq(alarmsTable.id, params.data.id));
+    if (!existing) {
+      res.status(404).json({ error: "Alarm not found" });
+      return;
+    }
+    res.status(409).json({
+      error: `Cannot acknowledge — current status is '${existing.status}'`,
+      code: "alarm_not_active",
+    });
     return;
   }
+
+  // Keep the history record in step, so the Alarm History page does not go on
+  // showing an acknowledged alarm as unacknowledged.
+  await db.update(alarmHistoryTable)
+    .set({ status: "acknowledged", acknowledgedAt: now })
+    .where(and(eq(alarmHistoryTable.alarmId, alarm.id), eq(alarmHistoryTable.status, "active")));
 
   void logActivity("alarm.acknowledged", "alarm", alarm.id, alarm.name, null, req);
   broadcast("alarm", {
@@ -86,12 +109,17 @@ router.post("/alarms/history/:id/acknowledge", async (req, res): Promise<void> =
 
   const now = new Date();
 
-  // Update history record status to acknowledged
+  // Update history record status to acknowledged. Conditional on it still being
+  // active, so two operators acknowledging at once cannot both succeed.
   const [updated] = await db
     .update(alarmHistoryTable)
-    .set({ status: "acknowledged" })
-    .where(eq(alarmHistoryTable.id, id))
+    .set({ status: "acknowledged", acknowledgedAt: now })
+    .where(and(eq(alarmHistoryTable.id, id), eq(alarmHistoryTable.status, "active")))
     .returning();
+  if (!updated) {
+    res.status(409).json({ error: "Cannot acknowledge — the record is no longer active", code: "alarm_not_active" });
+    return;
+  }
 
   // Also update the linked active alarm if it still exists and is active
   await db

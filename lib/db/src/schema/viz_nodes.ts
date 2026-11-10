@@ -1,4 +1,6 @@
-import { pgTable, text, timestamp, jsonb, index } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, jsonb, index, uuid, boolean, primaryKey } from "drizzle-orm/pg-core";
+import { usersTable } from "./users";
+import { assetsTable } from "./assets";
 
 /**
  * The Visualization section's own hierarchy, and the dashboard each node holds.
@@ -33,12 +35,42 @@ export const vizNodesTable = pgTable("viz_nodes", {
   parentId: text("parent_id"),
   /** The node's dashboard: the widget array exactly as the canvas serialises it. */
   widgets: jsonb("widgets").notNull().default([]),
+  /**
+   * The user who owns this dashboard. Null for rows created before ownership
+   * existed and for owners since deleted; only a top administrator can reach those.
+   */
+  ownerId: uuid("owner_id").references(() => usersTable.id, { onDelete: "set null" }),
+  /**
+   * The project a top-level node belongs to; nested nodes follow their top-level
+   * node. Null means unassigned, which shows in every project.
+   */
+  projectId: uuid("project_id").references(() => assetsTable.id, { onDelete: "set null" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
 }, (table) => [
   // Every read walks the tree by parent; without this the node list is a full
   // scan on every Visualization page load.
   index("viz_nodes_parent_idx").on(table.parentId),
+  index("viz_nodes_owner_idx").on(table.ownerId),
+]);
+
+/**
+ * Access a Super Admin or Company Admin has granted one user on a dashboard someone else owns.
+ * A grant also covers every dashboard nested under that node; see
+ * artifacts/api-server/src/lib/viz-access.ts.
+ */
+export const vizNodeSharesTable = pgTable("viz_node_shares", {
+  nodeId: text("node_id").notNull().references(() => vizNodesTable.id, { onDelete: "cascade" }),
+  userId: uuid("user_id").notNull().references(() => usersTable.id, { onDelete: "cascade" }),
+  canRead: boolean("can_read").notNull().default(true),
+  canWrite: boolean("can_write").notNull().default(false),
+  canDelete: boolean("can_delete").notNull().default(false),
+  grantedBy: uuid("granted_by").references(() => usersTable.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
+}, (table) => [
+  primaryKey({ columns: [table.nodeId, table.userId] }),
+  index("viz_node_shares_user_idx").on(table.userId),
 ]);
 
 export type VizNodeRow = typeof vizNodesTable.$inferSelect;

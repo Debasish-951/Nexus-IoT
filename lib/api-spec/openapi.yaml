@@ -30,6 +30,24 @@ tags:
     description: API client management
   - name: dashboard
     description: Dashboard summary data
+  - name: auth
+    description: Sign-in, sessions and password flows
+  - name: security
+    description: Security events, sessions and the RBAC catalog
+  - name: visualization
+    description: Visualization hierarchy, sharing and tags
+  - name: uploads
+    description: File uploads
+  - name: system
+    description: Storage, aggregation and data retention
+  - name: export
+    description: Machine-to-machine export API (API key)
+  - name: destinations
+    description: Outbound event destinations
+  - name: ai
+    description: AI assistant
+  - name: activity-log
+    description: Activity log
 
 paths:
   /healthz:
@@ -439,6 +457,14 @@ paths:
           in: query
           schema:
             type: string
+        - name: limit
+          in: query
+          description: Newest alarms returned, at most 5000.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 5000
+            default: 500
       responses:
         "200":
           description: OK
@@ -989,6 +1015,2155 @@ paths:
               schema:
                 $ref: "#/components/schemas/DashboardLiveMetrics"
 
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # Routes below were added to the contract after the fact (audit OPS-06). They
+  # describe the server's existing behaviour; the server validates these routes
+  # with its own hand-written schemas (artifacts/api-server/src/schemas/common.ts
+  # and inline checks), not with the generated Zod schemas. Every route is also
+  # subject to the global middleware: 401 without a session or API key, 403 from
+  # the RBAC table or CSRF check, 429 from rate limiters.
+  # ═══════════════════════════════════════════════════════════════════════════
+
+  /readyz:
+    get:
+      operationId: readinessCheck
+      tags: [health]
+      summary: Readiness check — answers 200 only when PostgreSQL responds to SELECT 1
+      responses:
+        "200":
+          description: Ready
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadinessStatus"
+        "503":
+          description: Database unreachable
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ReadinessStatus"
+
+  # ─── Auth ──────────────────────────────────────────────────────────────────
+  /auth/login:
+    post:
+      operationId: authLogin
+      tags: [auth]
+      summary: Sign in with username or email and password
+      description: |
+        Sets the httpOnly `is_session` cookie and a readable CSRF cookie. One of
+        `username`, `identifier` or `email` carries the identifier (checked in
+        that order). A browser request whose Origin/Referer is not an allowed
+        origin or the request's own host is refused with 403 `origin_not_allowed`.
+        Rate limited per IP, per subnet and per target account.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthLoginRequest"
+      responses:
+        "200":
+          description: Signed in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSessionInfo"
+        "400":
+          description: "`invalid_request` — identifier or password missing"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: "`invalid_credentials` — the same response whether or not the account exists"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: |
+            `origin_not_allowed`, `activation_pending`, `account_suspended`,
+            `account_inactive`, `credential_upgrade_required`, `password_expired`
+            or `session_limit_reached`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "423":
+          description: "`account_locked` — too many failed attempts"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /auth/logout:
+    post:
+      operationId: authLogout
+      tags: [auth]
+      summary: Sign out — revokes the current session (if any) and clears the cookies
+      responses:
+        "204":
+          description: Signed out (also returned when there was no session)
+
+  /auth/session:
+    get:
+      operationId: getAuthSession
+      tags: [auth]
+      summary: Current identity, CSRF token and effective permissions
+      responses:
+        "200":
+          description: Signed in
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthSessionInfo"
+        "401":
+          description: Not signed in. `code` is the failure reason, e.g. `authentication_required` or `session_expired`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /auth/password-policy:
+    get:
+      operationId: getAuthPasswordPolicy
+      tags: [auth]
+      summary: The password rules new passwords must meet
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PasswordPolicy"
+
+  /auth/activation/{token}:
+    get:
+      operationId: getAuthActivation
+      tags: [auth]
+      summary: Check an activation link without consuming it
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Link is valid; account details for the activation form
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthActivationInfo"
+        "404":
+          description: "`token_invalid`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: "`already_activated`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "410":
+          description: "`token_consumed`, `token_revoked` or `token_expired`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /auth/activate:
+    post:
+      operationId: authActivate
+      tags: [auth]
+      summary: Activate an invited account by setting its first password
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthTokenPasswordRequest"
+      responses:
+        "204":
+          description: Activated. The user signs in next.
+        "400":
+          description: "`invalid_request` or `password_policy` (with `violations` and `policy`)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: "`token_invalid`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: "`already_activated`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "410":
+          description: "`token_consumed`, `token_revoked` or `token_expired`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /auth/forgot-password:
+    post:
+      operationId: authForgotPassword
+      tags: [auth]
+      summary: Request a password-reset email
+      description: |
+        Always answers 204 before doing any work, whether or not the account
+        exists. One of `identifier`, `email` or `username` is required.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthForgotPasswordRequest"
+      responses:
+        "204":
+          description: Accepted
+        "400":
+          description: "`invalid_request` — no identifier sent"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /auth/reset/{token}:
+    get:
+      operationId: getAuthResetToken
+      tags: [auth]
+      summary: Check a password-reset link without consuming it
+      parameters:
+        - name: token
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Link is valid
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthResetInfo"
+        "404":
+          description: "`token_invalid`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "410":
+          description: "`token_consumed`, `token_revoked` or `token_expired`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /auth/reset-password:
+    post:
+      operationId: authResetPassword
+      tags: [auth]
+      summary: Set a new password with a reset token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthTokenPasswordRequest"
+      responses:
+        "204":
+          description: Password changed; existing sessions are revoked
+        "400":
+          description: "`invalid_request` or `password_policy`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: "`token_invalid`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "410":
+          description: "`token_consumed`, `token_revoked` or `token_expired`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  /auth/change-password:
+    post:
+      operationId: authChangePassword
+      tags: [auth]
+      summary: Change the signed-in user's password
+      description: |
+        `currentPassword` is required unless the user is on a forced change
+        (admin-issued temporary password), in which case only `newPassword` is read.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuthChangePasswordRequest"
+      responses:
+        "200":
+          description: Changed; the user's other sessions are revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuthChangePasswordResult"
+        "400":
+          description: "`invalid_request`, `password_reused` or `password_policy`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "401":
+          description: "`authentication_required` or `invalid_credentials` (wrong current password)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          $ref: "#/components/responses/RateLimited"
+
+  # ─── Security ──────────────────────────────────────────────────────────────
+  /security/rbac-catalog:
+    get:
+      operationId: getSecurityRbacCatalog
+      tags: [security]
+      summary: Roles, permissions, modules and API scopes, plus the password policy
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RbacCatalog"
+
+  /security/events:
+    get:
+      operationId: listSecurityEvents
+      tags: [security]
+      summary: Security event log, newest first
+      parameters:
+        - $ref: "#/components/parameters/LimitQuery"
+        - $ref: "#/components/parameters/OffsetQuery"
+        - $ref: "#/components/parameters/SecurityEventTypeQuery"
+        - $ref: "#/components/parameters/SecurityOutcomeQuery"
+        - $ref: "#/components/parameters/SecurityUserIdQuery"
+        - $ref: "#/components/parameters/SecurityUsernameQuery"
+        - $ref: "#/components/parameters/SecurityDaysQuery"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SecurityEventPage"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+
+  /security/login-history:
+    get:
+      operationId: listSecurityLoginHistory
+      tags: [security]
+      summary: Sign-in related security events only (same filters as /security/events)
+      parameters:
+        - $ref: "#/components/parameters/LimitQuery"
+        - $ref: "#/components/parameters/OffsetQuery"
+        - $ref: "#/components/parameters/SecurityEventTypeQuery"
+        - $ref: "#/components/parameters/SecurityOutcomeQuery"
+        - $ref: "#/components/parameters/SecurityUserIdQuery"
+        - $ref: "#/components/parameters/SecurityUsernameQuery"
+        - $ref: "#/components/parameters/SecurityDaysQuery"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SecurityEventPage"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+
+  /security/summary:
+    get:
+      operationId: getSecuritySummary
+      tags: [security]
+      summary: Counts for the last 24 hours plus the active security configuration
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SecuritySummary"
+
+  /security/sessions:
+    get:
+      operationId: listSecuritySessions
+      tags: [security]
+      summary: Active (unrevoked, unexpired) sessions
+      parameters:
+        - name: userId
+          in: query
+          required: false
+          description: Only this user's sessions
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ActiveSession"
+
+  /security/sessions/{id}:
+    delete:
+      operationId: revokeSecuritySession
+      tags: [security]
+      summary: Revoke one session
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      responses:
+        "204":
+          description: Revoked
+        "403":
+          description: "`insufficient_rank` — the session's user outranks the caller"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /security/users/{id}/sessions:
+    delete:
+      operationId: revokeSecurityUserSessions
+      tags: [security]
+      summary: Revoke every session of one user
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      responses:
+        "200":
+          description: Revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionsRevokedResult"
+        "403":
+          description: "`insufficient_rank`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ─── Visualization tree ────────────────────────────────────────────────────
+  /viz-nodes:
+    get:
+      operationId: listVizTreeNodes
+      tags: [visualization]
+      summary: Visualization nodes the caller may read, sorted by name
+      description: |
+        A node whose parent the caller cannot read is returned with
+        `parentId: null`. `projectId` is inherited from the top-level ancestor.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/VizTreeNode"
+    post:
+      operationId: createVizTreeNode
+      tags: [visualization]
+      summary: Create a visualization node
+      description: |
+        `id` is optional; the server generates `vn-<uuid>` when it is absent.
+        `projectId` is honoured only for a top-level node. Creating an id that
+        already exists and that the caller can read returns that node with 200.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VizTreeNodeCreate"
+      responses:
+        "200":
+          description: The id already existed; the existing node is returned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VizTreeNode"
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VizTreeNode"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "403":
+          description: "`dashboard_access_denied`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: "`id_conflict` — the id belongs to a node the caller cannot read"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /viz-nodes/import:
+    post:
+      operationId: importVizTreeNodes
+      tags: [visualization]
+      summary: One-time import of browser-stored dashboards
+      description: |
+        Each node is validated on its own; invalid nodes are reported, not fatal.
+        Ids that already exist on the server are skipped (first writer wins).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VizTreeImportRequest"
+      responses:
+        "200":
+          description: Import result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VizTreeImportResult"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+
+  /viz-nodes/{id}:
+    put:
+      operationId: updateVizTreeNode
+      tags: [visualization]
+      summary: Rename, move, assign to a project, or save the node's dashboard
+      parameters:
+        - $ref: "#/components/parameters/VizNodeIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VizTreeNodeUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VizTreeNode"
+        "400":
+          description: Validation failed, nothing to update, a node set as its own parent, or a project on a nested node
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: "`dashboard_access_denied`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: "`viz_node_conflict` — `expectedUpdatedAt` no longer matches; body carries the current `updatedAt`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteVizTreeNode
+      tags: [visualization]
+      summary: Delete a node and its whole subtree
+      parameters:
+        - $ref: "#/components/parameters/VizNodeIdPath"
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VizTreeDeleteResult"
+        "403":
+          description: "`dashboard_access_denied`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /viz-nodes/{id}/shares:
+    get:
+      operationId: listVizTreeNodeShares
+      tags: [visualization]
+      summary: Owner and per-user grants of one node (Super Admin or Company Admin only)
+      parameters:
+        - $ref: "#/components/parameters/VizNodeIdPath"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VizTreeNodeShares"
+        "403":
+          description: "`dashboard_access_denied`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /viz-nodes/{id}/shares/{userId}:
+    put:
+      operationId: putVizTreeNodeShare
+      tags: [visualization]
+      summary: Grant or change one user's access to a node (Super Admin or Company Admin only)
+      description: Write or delete implies read. All three false removes the grant.
+      parameters:
+        - $ref: "#/components/parameters/VizNodeIdPath"
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VizTreeShareFlags"
+      responses:
+        "200":
+          description: The grant as stored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VizTreeShareGrant"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "403":
+          description: "`dashboard_access_denied`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Node or user not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+    delete:
+      operationId: deleteVizTreeNodeShare
+      tags: [visualization]
+      summary: Remove one user's grant on a node (Super Admin or Company Admin only)
+      parameters:
+        - $ref: "#/components/parameters/VizNodeIdPath"
+        - name: userId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Removed (also when no grant existed)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SuccessFlag"
+        "403":
+          description: "`dashboard_access_denied`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /viz-tags:
+    get:
+      operationId: listVizTags
+      tags: [visualization]
+      summary: Asset metrics the caller may combine in a Combined Value widget
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/VizTag"
+
+  /viz-dashboards:
+    get:
+      operationId: listLegacyVizDashboards
+      tags: [visualization]
+      summary: Legacy dashboards (id and name only), read by the Access Control editor
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/LegacyVizDashboard"
+
+  # ─── Uploads ───────────────────────────────────────────────────────────────
+  /uploads:
+    get:
+      operationId: listUploads
+      tags: [uploads]
+      summary: Uploaded files, newest first
+      parameters:
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 200
+            default: 100
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/UploadedFile"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+    post:
+      operationId: createUploads
+      tags: [uploads]
+      summary: Upload one or more files (multipart/form-data, any field name)
+      description: |
+        Each file is type-checked by content, image-checked and (when enabled)
+        malware-scanned. Bad files are rejected individually; the request fails
+        with 400 only when no file was stored. Size and count limits come from
+        UPLOAD_MAX_BYTES (default 10 MiB) and UPLOAD_MAX_FILES (default 5).
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              $ref: "#/components/schemas/UploadFilesForm"
+      responses:
+        "201":
+          description: At least one file stored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UploadBatchResult"
+        "400":
+          description: |
+            Nothing stored. `code` is e.g. `not_multipart`, `no_file`,
+            `too_many_files`, `empty_file` or `upload_rejected` (with `rejected`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /uploads/{id}:
+    delete:
+      operationId: deleteUpload
+      tags: [uploads]
+      summary: Delete an uploaded file
+      parameters:
+        - $ref: "#/components/parameters/UuidPath"
+      responses:
+        "204":
+          description: Deleted
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /uploads/{id}/content:
+    get:
+      operationId: downloadUploadContent
+      tags: [uploads]
+      summary: Download a stored file as an attachment
+      description: Served with the detected MIME type, `nosniff` and a sandbox CSP.
+      parameters:
+        - $ref: "#/components/parameters/UuidPath"
+      responses:
+        "200":
+          description: File bytes
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "403":
+          description: "`malware_detected` or `scan_not_clean`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ─── System ────────────────────────────────────────────────────────────────
+  /system/storage:
+    get:
+      operationId: getSystemStorage
+      tags: [system]
+      summary: Telemetry table size and per-asset row counts
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemStorageReport"
+
+  /system/aggregate:
+    get:
+      operationId: getSystemAggregate
+      tags: [system]
+      summary: Bucketed telemetry aggregates (avg, min, max, sum, count)
+      parameters:
+        - name: assetId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: metric
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 200
+        - name: bucket
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: ["1m", "5m", "15m", "30m", "1h", "6h", "12h", "1d", "1w"]
+            default: "1h"
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 10000
+            default: 1000
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SystemAggregateReport"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+
+  /system/retention:
+    get:
+      operationId: listRetentionPolicies
+      tags: [system]
+      summary: Telemetry retention policies, sorted by name
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RetentionPolicy"
+    post:
+      operationId: createRetentionPolicy
+      tags: [system]
+      summary: Create a retention policy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RetentionPolicyCreate"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RetentionPolicy"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+
+  /system/retention/run:
+    post:
+      operationId: runRetentionPruning
+      tags: [system]
+      summary: Run telemetry pruning now (most specific policy wins per row)
+      responses:
+        "200":
+          description: Run finished
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RetentionRunResult"
+        "409":
+          description: "`pruning_in_progress`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /system/retention/{id}:
+    put:
+      operationId: updateRetentionPolicy
+      tags: [system]
+      summary: Update a retention policy (any subset of fields)
+      parameters:
+        - $ref: "#/components/parameters/UuidPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RetentionPolicyUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RetentionPolicy"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: deleteRetentionPolicy
+      tags: [system]
+      summary: Delete a retention policy
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ─── Export (machine-to-machine) ───────────────────────────────────────────
+  /export/health:
+    get:
+      operationId: getExportHealth
+      tags: [export]
+      summary: Platform health snapshot
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExportHealth"
+
+  /export/schema:
+    get:
+      operationId: getExportSchema
+      tags: [export]
+      summary: Self-description of the export API (static JSON document)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
+
+  /export/assets:
+    get:
+      operationId: exportAssets
+      tags: [export]
+      summary: All assets with their attributes (scope read:assets)
+      security:
+        - apiKeyBearer: []
+        - apiKeyHeader: []
+      parameters:
+        - $ref: "#/components/parameters/ExportFormatQuery"
+      responses:
+        "200":
+          description: JSON envelope by default, or a CSV attachment with `format=csv` (no attributes column)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExportEnvelope"
+            text/csv:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+
+  /export/telemetry:
+    get:
+      operationId: exportTelemetry
+      tags: [export]
+      summary: Telemetry rows, newest first (scope read:telemetry)
+      security:
+        - apiKeyBearer: []
+        - apiKeyHeader: []
+      parameters:
+        - name: assetId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: metric
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 200
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 5000
+            default: 500
+        - $ref: "#/components/parameters/ExportFormatQuery"
+      responses:
+        "200":
+          description: JSON envelope (includes `limit`) or CSV attachment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExportEnvelope"
+            text/csv:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+
+  /export/alarms:
+    get:
+      operationId: exportAlarms
+      tags: [export]
+      summary: Alarms, newest first (scope read:alarms)
+      security:
+        - apiKeyBearer: []
+        - apiKeyHeader: []
+      parameters:
+        - name: status
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [active, acknowledged, cleared]
+        - name: severity
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [critical, high, medium, low, info]
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 5000
+            default: 5000
+        - $ref: "#/components/parameters/ExportFormatQuery"
+      responses:
+        "200":
+          description: JSON envelope (includes `limit`) or CSV attachment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExportEnvelope"
+            text/csv:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+
+  /export/alarm-history:
+    get:
+      operationId: exportAlarmHistory
+      tags: [export]
+      summary: Alarm history, newest first (scope read:alarm-history)
+      security:
+        - apiKeyBearer: []
+        - apiKeyHeader: []
+      parameters:
+        - name: assetId
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 5000
+            default: 200
+        - $ref: "#/components/parameters/ExportFormatQuery"
+      responses:
+        "200":
+          description: JSON envelope (includes `limit`) or CSV attachment
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExportEnvelope"
+            text/csv:
+              schema:
+                type: string
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+
+  # ─── API client actions ────────────────────────────────────────────────────
+  /api-clients/projects:
+    get:
+      operationId: listApiClientProjects
+      tags: [api-clients]
+      summary: Projects (root assets) the caller may assign an API client to
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ProjectRef"
+
+  /api-clients/{id}/rotate-secret:
+    post:
+      operationId: rotateApiClientSecret
+      tags: [api-clients]
+      summary: Issue a new client secret; returned once in `clientSecret`
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      responses:
+        "200":
+          description: Rotated. This is the only response that contains the secret.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiClient"
+        "400":
+          $ref: "#/components/responses/InvalidId"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api-clients/{id}/regenerate-ingest-url:
+    post:
+      operationId: regenerateApiClientIngestUrl
+      tags: [api-clients]
+      summary: Issue (or replace) the copy-and-paste ingest URL token
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      responses:
+        "200":
+          description: Issued; any earlier URL stops working
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiClient"
+        "400":
+          description: Invalid id, or `scope_too_broad` (only ingest-scoped clients may have a URL token)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "503":
+          description: "`encryption_unavailable` — SECRETS_ENC_KEY is not set"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /api-clients/{id}/revoke:
+    post:
+      operationId: revokeApiClient
+      tags: [api-clients]
+      summary: Set the client's status to revoked
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      responses:
+        "200":
+          description: Revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiClient"
+        "400":
+          $ref: "#/components/responses/InvalidId"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api-clients/{id}/restore:
+    post:
+      operationId: restoreApiClient
+      tags: [api-clients]
+      summary: Set the client's status back to active
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      responses:
+        "200":
+          description: Restored
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiClient"
+        "400":
+          $ref: "#/components/responses/InvalidId"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ─── Destinations ──────────────────────────────────────────────────────────
+  /destinations:
+    get:
+      operationId: listDestinations
+      tags: [destinations]
+      summary: Outbound destinations, sorted by name (secrets are never returned)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Destination"
+    post:
+      operationId: createDestination
+      tags: [destinations]
+      summary: Create an outbound destination
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DestinationCreate"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Destination"
+        "400":
+          description: Validation failed, or `unsafe_url` (endpoint refused by the outbound URL guard)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /destinations/{id}:
+    put:
+      operationId: updateDestination
+      tags: [destinations]
+      summary: Update a destination (any subset of fields; an empty secret clears it)
+      parameters:
+        - $ref: "#/components/parameters/UuidPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DestinationUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Destination"
+        "400":
+          description: Validation failed, or `unsafe_url`
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: deleteDestination
+      tags: [destinations]
+      summary: Delete a destination
+      parameters:
+        - $ref: "#/components/parameters/UuidPath"
+      responses:
+        "204":
+          description: Deleted
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /destinations/{id}/test:
+    post:
+      operationId: testDestination
+      tags: [destinations]
+      summary: Send a test event to the destination (6 s timeout)
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      responses:
+        "200":
+          description: The destination answered; `success` mirrors its HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliveryTestResult"
+        "400":
+          description: "`unsafe_url`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliveryTestResult"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "502":
+          description: "`destination_unreachable`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliveryTestResult"
+
+  # ─── AI assistant ──────────────────────────────────────────────────────────
+  /ai/chat:
+    post:
+      operationId: askAiAssistant
+      tags: [ai]
+      summary: Ask the AI assistant a question about assets, telemetry and alarms
+      description: |
+        Requires GROQ_API_KEY on the server. The assistant answers only from
+        tool lookups the caller's permissions allow. Rate limited per user.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AiChatRequest"
+      responses:
+        "200":
+          description: Answer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AiChatAnswer"
+        "400":
+          description: Missing question, `question_too_long` or `invalid_time_range`
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: "`rate_limited` (platform limiter) or `assistant_rate_limited` (model provider; sets Retry-After)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "502":
+          description: "`assistant_unavailable`, or an empty model response"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "503":
+          description: GROQ_API_KEY is not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  # ─── Activity log ──────────────────────────────────────────────────────────
+  /activity-log:
+    get:
+      operationId: listActivityLog
+      tags: [activity-log]
+      summary: Activity log, newest first (limited to the caller's project assets when project-restricted)
+      parameters:
+        - $ref: "#/components/parameters/LimitQuery"
+        - $ref: "#/components/parameters/OffsetQuery"
+        - name: category
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 64
+        - name: actorName
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 200
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ActivityLogPage"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+
+  # ─── Alarm and asset actions ───────────────────────────────────────────────
+  /alarm-rules/{id}/test-webhook:
+    post:
+      operationId: testAlarmRuleWebhook
+      tags: [alarm-rules]
+      summary: Send a test event to the rule's webhook URL
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      responses:
+        "200":
+          description: The webhook answered; `success` mirrors its HTTP status
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliveryTestResult"
+        "400":
+          description: No webhook URL configured, or `unsafe_url`
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliveryTestResult"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "502":
+          description: Webhook could not be reached
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeliveryTestResult"
+
+  /alarms/history/{id}/acknowledge:
+    post:
+      operationId: acknowledgeAlarmHistoryRecord
+      tags: [alarms]
+      summary: Acknowledge an alarm-history record and its linked active alarm
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      responses:
+        "200":
+          description: Acknowledged
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AlarmHistory"
+        "400":
+          $ref: "#/components/responses/InvalidId"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: The record is not active (`alarm_not_active` when lost to a concurrent acknowledge)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /assets/{id}/maintenance:
+    post:
+      operationId: setAssetMaintenanceMode
+      tags: [assets]
+      summary: Turn maintenance mode on or off (toggles when `enable` is omitted)
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssetMaintenanceRequest"
+      responses:
+        "200":
+          description: Updated asset
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Asset"
+        "400":
+          $ref: "#/components/responses/InvalidId"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /assets/{id}/attributes/bulk:
+    post:
+      operationId: bulkCreateAssetAttributes
+      tags: [attributes]
+      summary: Import many attributes; duplicates by name or tag name are skipped
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkAttributesRequest"
+      responses:
+        "200":
+          description: Import result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AttributeImportResult"
+        "400":
+          description: "`attributes` missing or empty"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /assets/{id}/apply-template:
+    post:
+      operationId: applyAssetTemplate
+      tags: [assets]
+      summary: Create attributes from a template and bind the template's device id
+      description: Uses the asset's assigned template when `templateId` is omitted.
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ApplyTemplateRequest"
+      responses:
+        "200":
+          description: Applied
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApplyTemplateResult"
+        "400":
+          description: No template selected and none assigned
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: "`device_in_use_elsewhere` — the device id belongs to an asset outside the caller's projects"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Asset or template not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /assets/{id}/health:
+    get:
+      operationId: getAssetHealth
+      tags: [assets]
+      summary: Health of one asset from alarms and attribute freshness
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AssetHealthReport"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  # ─── Ingest helpers and per-client ingest URLs ─────────────────────────────
+  /ingest/seen-devices:
+    get:
+      operationId: listSeenDevices
+      tags: [ingest]
+      summary: Device ids seen in telemetry or registered, most recent first
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SeenDevice"
+
+  /ingest/seen-devices/prune:
+    post:
+      operationId: pruneSeenDevices
+      tags: [ingest]
+      summary: Remove every seen device id not bound to an asset
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SeenDevicesPruneResult"
+
+  /ingest/seen-devices/{deviceId}:
+    delete:
+      operationId: deleteSeenDevice
+      tags: [ingest]
+      summary: Remove one seen device id
+      parameters:
+        - name: deviceId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Removed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkFlag"
+
+  /ingest/register-device:
+    post:
+      operationId: registerSeenDevice
+      tags: [ingest]
+      summary: Register a device id without telemetry (session with brokers access, or an ingest:write API key)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RegisterDeviceRequest"
+      responses:
+        "200":
+          description: Registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RegisterDeviceResult"
+        "400":
+          description: deviceId missing
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /ingest/k/{clientId}/payload:
+    post:
+      operationId: ingestClientPayload
+      tags: [ingest]
+      summary: Same as /ingest/payload, posted to one API client's own URL
+      description: An API key must belong to the client named in the URL (403 `client_mismatch`).
+      parameters:
+        - $ref: "#/components/parameters/IngestClientIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IngestPayloadBody"
+      responses:
+        "200":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestResult"
+
+  /ingest/k/{clientId}/validate:
+    post:
+      operationId: validateClientPayload
+      tags: [ingest]
+      summary: Same as /ingest/validate, posted to one API client's own URL
+      parameters:
+        - $ref: "#/components/parameters/IngestClientIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IngestPayloadBody"
+      responses:
+        "200":
+          description: Validation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidateResult"
+
+  /ingest/k/{clientId}/batch:
+    post:
+      operationId: ingestClientBatch
+      tags: [ingest]
+      summary: Same as /ingest/batch, posted to one API client's own URL
+      parameters:
+        - $ref: "#/components/parameters/IngestClientIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: "#/components/schemas/IngestPayloadBody"
+      responses:
+        "200":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestBatchResult"
+
+  /ingest/e/{token}/payload:
+    post:
+      operationId: ingestTokenPayload
+      tags: [ingest]
+      summary: Same as /ingest/payload, authenticated by a copy-and-paste ingest URL token
+      parameters:
+        - $ref: "#/components/parameters/IngestTokenPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IngestPayloadBody"
+      responses:
+        "200":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestResult"
+
+  /ingest/e/{token}/validate:
+    post:
+      operationId: validateTokenPayload
+      tags: [ingest]
+      summary: Same as /ingest/validate, authenticated by an ingest URL token
+      parameters:
+        - $ref: "#/components/parameters/IngestTokenPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/IngestPayloadBody"
+      responses:
+        "200":
+          description: Validation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ValidateResult"
+
+  /ingest/e/{token}/batch:
+    post:
+      operationId: ingestTokenBatch
+      tags: [ingest]
+      summary: Same as /ingest/batch, authenticated by an ingest URL token
+      parameters:
+        - $ref: "#/components/parameters/IngestTokenPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                $ref: "#/components/schemas/IngestPayloadBody"
+      responses:
+        "200":
+          description: Accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/IngestBatchResult"
+
+  /telemetry/{assetId}/metrics:
+    get:
+      operationId: listTelemetryMetrics
+      tags: [ingest]
+      summary: Distinct metric names recorded for an asset, sorted
+      parameters:
+        - name: assetId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: string
+
+  /telemetry/{assetId}/export:
+    get:
+      operationId: exportAssetTelemetryCsv
+      tags: [ingest]
+      summary: CSV download of an asset's telemetry, newest first, at most 50,000 rows
+      parameters:
+        - name: assetId
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: metric
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: from
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date-time
+      responses:
+        "200":
+          description: CSV attachment with columns id,assetId,deviceId,metric,value,quality,timestamp
+          content:
+            text/csv:
+              schema:
+                type: string
+
+  # ─── User admin actions ────────────────────────────────────────────────────
+  /users/{id}/access:
+    get:
+      operationId: getUserAccess
+      tags: [users]
+      summary: A user's access overrides and the effective access the API enforces
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserAccessInfo"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      operationId: updateUserAccess
+      tags: [users]
+      summary: Replace a user's access overrides
+      description: |
+        Reads `overrides` from the body, or the whole body when `overrides` is
+        absent. Unknown module keys are dropped. Callers cannot change their own access.
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UserAccessUpdate"
+      responses:
+        "200":
+          description: Updated (no `role` field in this response)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/UserAccessInfo"
+        "403":
+          description: "`self_access_change` or `insufficient_rank`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /users/{id}/resend-invitation:
+    post:
+      operationId: resendUserInvitation
+      tags: [users]
+      summary: Issue a new activation link and email it
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      responses:
+        "200":
+          description: Sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/InvitationResent"
+        "403":
+          description: "`insufficient_rank`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: "`already_activated`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /users/{id}/revoke-invitation:
+    post:
+      operationId: revokeUserInvitation
+      tags: [users]
+      summary: Revoke outstanding activation links
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      responses:
+        "200":
+          description: Revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OkFlag"
+        "403":
+          description: "`insufficient_rank`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /users/{id}/send-password-reset:
+    post:
+      operationId: sendUserPasswordReset
+      tags: [users]
+      summary: Email the user a password-reset link
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      responses:
+        "200":
+          description: Sent
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PasswordResetSent"
+        "403":
+          description: "`insufficient_rank`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: "`activation_pending`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /users/{id}/temporary-password:
+    post:
+      operationId: issueUserTemporaryPassword
+      tags: [users]
+      summary: Issue a temporary password (shown once) and revoke the user's sessions
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/TemporaryPasswordRequest"
+      responses:
+        "200":
+          description: Issued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TemporaryPasswordIssued"
+        "403":
+          description: "`insufficient_rank`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /users/{id}/unlock:
+    post:
+      operationId: unlockUser
+      tags: [users]
+      summary: Clear a sign-in lockout
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      responses:
+        "200":
+          description: Updated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "403":
+          description: "`insufficient_rank`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /users/{id}/session-limit:
+    put:
+      operationId: updateUserSessionLimit
+      tags: [users]
+      summary: Set how many concurrent sessions the user may hold (Super Admin or Company Admin only)
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SessionLimitRequest"
+      responses:
+        "200":
+          description: Updated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "400":
+          description: "`invalid_session_limit`, or an invalid id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: "`top_admin_required` or `insufficient_rank`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /users/{id}/require-password-change:
+    post:
+      operationId: requireUserPasswordChange
+      tags: [users]
+      summary: Force the user to choose a new password at next use
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      responses:
+        "200":
+          description: Updated user
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/User"
+        "403":
+          description: "`insufficient_rank`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
 components:
   schemas:
     HealthStatus:
@@ -1398,6 +3573,10 @@ components:
         triggeredAt:
           type: string
           format: date-time
+        acknowledgedAt:
+          type: string
+          format: date-time
+          nullable: true
         clearedAt:
           type: string
           format: date-time
@@ -1511,6 +3690,22 @@ components:
         description:
           type: string
           nullable: true
+        assetId:
+          type: string
+          nullable: true
+        alarmType:
+          type: string
+          enum: [threshold, deviation, rate_of_change, heartbeat]
+        metric:
+          type: string
+          nullable: true
+        operator:
+          type: string
+          enum: [gt, lt, gte, lte, eq, ne]
+          nullable: true
+        scanRate:
+          type: integer
+          nullable: true
         severity:
           type: string
           enum: [critical, high, medium, low, info]
@@ -1540,7 +3735,7 @@ components:
     # See docs/security/auth-upgrade.md §2.2.
     UserRole:
       type: string
-      enum: [super_admin, admin, customer_admin, engineer, operator, viewer]
+      enum: [super_admin, company_admin, admin, project_manager, team_lead, developer, engineer, operator, viewer]
 
     UserStatus:
       type: string
@@ -1684,6 +3879,25 @@ components:
           type: array
           items:
             type: string
+        mqttTopic:
+          type: string
+          nullable: true
+        mqttClientId:
+          type: string
+          nullable: true
+        mqttUsername:
+          type: string
+          nullable: true
+        hasMqttPassword:
+          type: boolean
+        mappingRules:
+          type: array
+          items:
+            $ref: "#/components/schemas/BrokerMappingRule"
+        connectionNote:
+          type: string
+          nullable: true
+          description: Set when the server does not connect to this broker type itself (Azure types).
         createdAt:
           type: string
           format: date-time
@@ -1691,6 +3905,15 @@ components:
           type: string
           format: date-time
       required: [id, name, type, status, connectedDevices, totalRequests, tags, createdAt, updatedAt]
+
+    BrokerMappingRule:
+      type: object
+      properties:
+        from:
+          type: string
+        to:
+          type: string
+      required: [from, to]
 
     CreateBrokerBody:
       type: object
@@ -1707,6 +3930,23 @@ components:
           type: array
           items:
             type: string
+        mqttTopic:
+          type: string
+          nullable: true
+        mqttClientId:
+          type: string
+          nullable: true
+        mqttUsername:
+          type: string
+          nullable: true
+        mqttPassword:
+          type: string
+          nullable: true
+          description: Write-only. Omit to keep the stored password; an empty string or null clears it.
+        mappingRules:
+          type: array
+          items:
+            $ref: "#/components/schemas/BrokerMappingRule"
       required: [name, type]
 
     UpdateBrokerBody:
@@ -1721,6 +3961,23 @@ components:
           type: array
           items:
             type: string
+        mqttTopic:
+          type: string
+          nullable: true
+        mqttClientId:
+          type: string
+          nullable: true
+        mqttUsername:
+          type: string
+          nullable: true
+        mqttPassword:
+          type: string
+          nullable: true
+          description: Write-only. Omit to keep the stored password; an empty string or null clears it.
+        mappingRules:
+          type: array
+          items:
+            $ref: "#/components/schemas/BrokerMappingRule"
 
     # ─── API Client ────────────────────────────────────────────────────────────
     ApiClient:
@@ -1746,6 +4003,17 @@ components:
         ingestUrl:
           type: string
           description: This client's dedicated ingest endpoint path.
+        ingestUrlToken:
+          type: string
+          nullable: true
+          description: Copy-and-paste ingest URL token, when one has been issued and can be revealed.
+        ingestUrlEligible:
+          type: boolean
+          description: Whether this client may have a copy-and-paste ingest URL (ingest-scoped only).
+        clientSecret:
+          type: string
+          nullable: true
+          description: Null except in the create and rotate-secret responses, which show the secret once.
         totalRequests:
           type: integer
         lastUsedAt:
@@ -1952,6 +4220,15 @@ components:
             staleness: { type: number }
             downtime: { type: number }
           required: [alarmBurden, staleness, downtime]
+        # From machine status tags, never from alarms. percent is null when no
+        # machine has reported a status in the window.
+        availability:
+          type: object
+          properties:
+            percent: { type: number, nullable: true }
+            downtimeSeconds: { type: integer }
+            machineCount: { type: integer }
+          required: [percent, downtimeSeconds, machineCount]
         assetCount: { type: integer }
         worst:
           type: array
@@ -1971,7 +4248,7 @@ components:
             days: { type: integer }
             staleMinutes: { type: integer }
           required: [days, staleMinutes]
-      required: [overall, previous, factors, assetCount, worst, tree, window]
+      required: [overall, previous, factors, availability, assetCount, worst, tree, window]
 
     DashboardAlarmTrend:
       type: object
@@ -2129,3 +4406,1653 @@ components:
           type: string
           format: date-time
       required: [id, brokerId, brokerName, status, timestamp]
+
+    # ═════════════════════════════════════════════════════════════════════════
+    # Schemas for the routes added under audit OPS-06.
+    # ═════════════════════════════════════════════════════════════════════════
+
+    ErrorResponse:
+      type: object
+      description: |
+        The error body every route uses. `code` is a stable machine-readable
+        reason; some errors add fields such as `hint`, `violations`, `policy`,
+        `errors`, `retryAfter`, `correlationId` or `updatedAt`.
+      properties:
+        error:
+          type: string
+        code:
+          type: string
+      required: [error]
+      additionalProperties: true
+
+    ReadinessStatus:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [ok, unavailable]
+        database:
+          type: string
+          enum: [ok, unreachable]
+      required: [status, database]
+
+    OkFlag:
+      type: object
+      properties:
+        ok:
+          type: boolean
+      required: [ok]
+
+    SuccessFlag:
+      type: object
+      properties:
+        success:
+          type: boolean
+      required: [success]
+
+    # ─── Auth ────────────────────────────────────────────────────────────────
+    AuthLoginRequest:
+      type: object
+      properties:
+        username:
+          type: string
+          description: Username or email. Checked first.
+        identifier:
+          type: string
+          description: Accepted instead of `username`.
+        email:
+          type: string
+          description: Accepted instead of `username`.
+        password:
+          type: string
+        rememberMe:
+          type: boolean
+      required: [password]
+
+    PasswordPolicy:
+      type: object
+      properties:
+        minLength:
+          type: integer
+        maxLength:
+          type: integer
+        requireUppercase:
+          type: boolean
+        requireLowercase:
+          type: boolean
+        requireDigit:
+          type: boolean
+        requireSymbol:
+          type: boolean
+        blockCommon:
+          type: boolean
+        blockContextual:
+          type: boolean
+        description:
+          type: array
+          items:
+            type: string
+      required: [minLength, maxLength, requireUppercase, requireLowercase, requireDigit, requireSymbol, blockCommon, blockContextual, description]
+
+    AuthSessionInfo:
+      type: object
+      description: Identity plus the effective permission set, computed on the server.
+      properties:
+        id:
+          type: string
+        username:
+          type: string
+        fullName:
+          type: string
+        email:
+          type: string
+        role:
+          $ref: "#/components/schemas/UserRole"
+        status:
+          $ref: "#/components/schemas/UserStatus"
+        mustChangePassword:
+          type: boolean
+        passwordExpiresAt:
+          type: string
+          format: date-time
+          nullable: true
+          description: Set only while an admin-issued temporary password is in force.
+        mfaEnabled:
+          type: boolean
+        lastLogin:
+          type: string
+          format: date-time
+          nullable: true
+        csrfToken:
+          type: string
+          description: Send as the `x-csrf-token` header on cookie-authenticated writes.
+        permissions:
+          type: array
+          items:
+            type: string
+        modules:
+          type: object
+          description: Module key → boolean (simple module) or {r, w, d} (granular module).
+          additionalProperties: true
+        overriddenModules:
+          type: array
+          items:
+            type: string
+        restrictProjects:
+          type: boolean
+        allowedProjects:
+          type: array
+          items:
+            type: string
+        restrictDashboards:
+          type: boolean
+        allowedDashboards:
+          type: array
+          items:
+            type: string
+        restrictAnalytics:
+          type: boolean
+        allowedAnalytics:
+          type: array
+          items:
+            type: string
+        apiScopes:
+          type: array
+          description: Ceiling on the scopes this user may put on an API credential.
+          items:
+            type: string
+      required: [id, username, fullName, email, role, status, mustChangePassword, csrfToken, permissions, modules]
+
+    AuthActivationInfo:
+      type: object
+      properties:
+        email:
+          type: string
+        username:
+          type: string
+        fullName:
+          type: string
+        role:
+          $ref: "#/components/schemas/UserRole"
+        expiresAt:
+          type: string
+          format: date-time
+        passwordPolicy:
+          $ref: "#/components/schemas/PasswordPolicy"
+      required: [email, username, fullName, role, expiresAt, passwordPolicy]
+
+    AuthResetInfo:
+      type: object
+      properties:
+        email:
+          type: string
+        username:
+          type: string
+        fullName:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+        passwordPolicy:
+          $ref: "#/components/schemas/PasswordPolicy"
+      required: [email, username, fullName, expiresAt, passwordPolicy]
+
+    AuthTokenPasswordRequest:
+      type: object
+      properties:
+        token:
+          type: string
+        password:
+          type: string
+      required: [token, password]
+
+    AuthForgotPasswordRequest:
+      type: object
+      description: One of the three fields is required.
+      properties:
+        identifier:
+          type: string
+        email:
+          type: string
+        username:
+          type: string
+
+    AuthChangePasswordRequest:
+      type: object
+      properties:
+        currentPassword:
+          type: string
+          description: Required except during a forced change.
+        newPassword:
+          type: string
+      required: [newPassword]
+
+    AuthChangePasswordResult:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        sessionsRevoked:
+          type: integer
+          description: The user's other sessions that were signed out.
+      required: [ok, sessionsRevoked]
+
+    # ─── Security ────────────────────────────────────────────────────────────
+    RbacCatalog:
+      type: object
+      properties:
+        roles:
+          type: array
+          items:
+            $ref: "#/components/schemas/RbacRoleEntry"
+        permissions:
+          type: array
+          items: {}
+        modules:
+          type: array
+          items: {}
+        analyticsOptions:
+          type: array
+          items: {}
+        apiScopeOptions:
+          type: array
+          items: {}
+        passwordPolicy:
+          $ref: "#/components/schemas/PasswordPolicy"
+      required: [roles, permissions, modules, analyticsOptions, apiScopeOptions, passwordPolicy]
+
+    RbacRoleEntry:
+      type: object
+      properties:
+        key:
+          $ref: "#/components/schemas/UserRole"
+        label:
+          type: string
+        permissions:
+          type: array
+          items:
+            type: string
+        moduleDefaults:
+          type: object
+          additionalProperties: true
+        apiScopeDefaults:
+          type: array
+          items:
+            type: string
+        projectAccess:
+          type: string
+          enum: [all, assigned, per_user]
+      required: [key, label, permissions, moduleDefaults, apiScopeDefaults, projectAccess]
+
+    SecurityEvent:
+      type: object
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+          nullable: true
+        username:
+          type: string
+          nullable: true
+        eventType:
+          type: string
+        outcome:
+          type: string
+        reason:
+          type: string
+          nullable: true
+        ip:
+          type: string
+          nullable: true
+        userAgent:
+          type: string
+          nullable: true
+        detail:
+          type: object
+          nullable: true
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+      required: [id, eventType, outcome, createdAt]
+
+    SecurityEventPage:
+      type: object
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/SecurityEvent"
+        total:
+          type: integer
+        limit:
+          type: integer
+        offset:
+          type: integer
+      required: [entries, total, limit, offset]
+
+    SecuritySummary:
+      type: object
+      properties:
+        windowHours:
+          type: integer
+        loginSuccess:
+          type: integer
+        loginFailure:
+          type: integer
+        loginBlocked:
+          type: integer
+        authzDenied:
+          type: integer
+        activeSessions:
+          type: integer
+        lockedAccounts:
+          type: integer
+        pendingInvitations:
+          type: integer
+        byType:
+          type: array
+          items:
+            $ref: "#/components/schemas/SecurityEventTally"
+        config:
+          $ref: "#/components/schemas/SecurityConfigSnapshot"
+      required: [windowHours, loginSuccess, loginFailure, loginBlocked, authzDenied, activeSessions, lockedAccounts, pendingInvitations, byType, config]
+
+    SecurityEventTally:
+      type: object
+      properties:
+        eventType:
+          type: string
+        outcome:
+          type: string
+        total:
+          type: integer
+      required: [eventType, outcome, total]
+
+    SecurityConfigSnapshot:
+      type: object
+      properties:
+        lockoutThreshold:
+          type: integer
+        lockoutMinutes:
+          type: integer
+        sessionIdleMinutes:
+          type: integer
+        sessionAbsoluteHours:
+          type: integer
+        activationTtlHours:
+          type: integer
+        passwordResetTtlMinutes:
+          type: integer
+        emailTransport:
+          type: string
+        enforcementEnabled:
+          type: boolean
+
+    ActiveSession:
+      type: object
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+        username:
+          type: string
+        fullName:
+          type: string
+        ip:
+          type: string
+          nullable: true
+        userAgent:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        lastSeenAt:
+          type: string
+          format: date-time
+          nullable: true
+        expiresAt:
+          type: string
+          format: date-time
+        isCurrent:
+          type: boolean
+          description: True for the session making this request.
+      required: [id, userId, createdAt, expiresAt, isCurrent]
+      additionalProperties: true
+
+    SessionsRevokedResult:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        revoked:
+          type: integer
+      required: [ok, revoked]
+
+    # ─── Visualization ───────────────────────────────────────────────────────
+    VizNodeAccessFlags:
+      type: object
+      properties:
+        read:
+          type: boolean
+        write:
+          type: boolean
+        delete:
+          type: boolean
+        owner:
+          type: boolean
+          description: The caller owns this exact node rather than inheriting access.
+      required: [read, write, delete, owner]
+
+    VizTreeNode:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        parentId:
+          type: string
+          nullable: true
+        projectId:
+          type: string
+          nullable: true
+        widgets:
+          type: array
+          description: Free-form widget configs owned by the dashboard canvas.
+          items: {}
+        updatedAt:
+          type: string
+          format: date-time
+          description: Send back as `expectedUpdatedAt` for an optimistic-concurrency save.
+        access:
+          $ref: "#/components/schemas/VizNodeAccessFlags"
+      required: [id, name, parentId, projectId, widgets, updatedAt, access]
+
+    VizTreeNodeCreate:
+      type: object
+      properties:
+        id:
+          type: string
+          maxLength: 64
+          pattern: "^[A-Za-z0-9_-]+$"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        parentId:
+          type: string
+          nullable: true
+          maxLength: 64
+          pattern: "^[A-Za-z0-9_-]+$"
+        projectId:
+          type: string
+          format: uuid
+          nullable: true
+        widgets:
+          type: array
+          maxItems: 500
+          items: {}
+      required: [name]
+
+    VizTreeNodeUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        parentId:
+          type: string
+          nullable: true
+          maxLength: 64
+          pattern: "^[A-Za-z0-9_-]+$"
+        projectId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Only a top-level node may carry a project.
+        widgets:
+          type: array
+          maxItems: 500
+          items: {}
+        expectedUpdatedAt:
+          type: string
+          maxLength: 64
+          description: The `updatedAt` last read. When it no longer matches, the save is refused with 409.
+
+    VizTreeImportRequest:
+      type: object
+      properties:
+        nodes:
+          type: array
+          maxItems: 2000
+          description: Each item should match the shape {id, name, parentId?, widgets?}; it is validated individually.
+          items: {}
+      required: [nodes]
+
+    VizTreeImportResult:
+      type: object
+      properties:
+        imported:
+          type: integer
+        skipped:
+          type: integer
+          description: Nodes whose id already existed.
+        rejected:
+          type: integer
+          description: Absent when the request held no nodes.
+        rejectedDetail:
+          type: array
+          description: Up to 20 rejected nodes; present only when some were rejected.
+          items:
+            $ref: "#/components/schemas/VizTreeImportRejection"
+      required: [imported, skipped]
+
+    VizTreeImportRejection:
+      type: object
+      properties:
+        index:
+          type: integer
+        reason:
+          type: string
+      required: [index, reason]
+
+    VizTreeDeleteResult:
+      type: object
+      properties:
+        success:
+          type: boolean
+        deleted:
+          type: integer
+          description: Nodes removed, including the subtree.
+      required: [success, deleted]
+
+    VizTreeShareFlags:
+      type: object
+      properties:
+        read:
+          type: boolean
+        write:
+          type: boolean
+        delete:
+          type: boolean
+      required: [read, write, delete]
+
+    VizTreeShareGrant:
+      type: object
+      properties:
+        userId:
+          type: string
+        read:
+          type: boolean
+        write:
+          type: boolean
+        delete:
+          type: boolean
+      required: [userId, read, write, delete]
+
+    VizTreeNodeShares:
+      type: object
+      properties:
+        ownerId:
+          type: string
+          nullable: true
+        ownerName:
+          type: string
+          nullable: true
+        shares:
+          type: array
+          items:
+            $ref: "#/components/schemas/VizTreeShareGrant"
+      required: [ownerId, ownerName, shares]
+
+    VizTag:
+      type: object
+      properties:
+        assetId:
+          type: string
+        assetName:
+          type: string
+        projectId:
+          type: string
+        projectName:
+          type: string
+        metric:
+          type: string
+      required: [assetId, assetName, projectId, projectName, metric]
+
+    LegacyVizDashboard:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+      required: [id, name]
+
+    # ─── Uploads ─────────────────────────────────────────────────────────────
+    UploadedFile:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+          description: Original file name, for display only.
+        mimeType:
+          type: string
+          description: Type detected from the content.
+        size:
+          type: integer
+        width:
+          type: integer
+          nullable: true
+        height:
+          type: integer
+          nullable: true
+        scanStatus:
+          type: string
+          description: Malware scan verdict, e.g. clean, skipped or infected.
+        uploadedBy:
+          type: string
+          nullable: true
+        uploadedAt:
+          type: string
+          format: date-time
+        url:
+          type: string
+          description: API path to download the file (/api/uploads/{id}/content).
+      required: [id, name, mimeType, size, scanStatus, uploadedAt, url]
+
+    UploadFilesForm:
+      type: object
+      description: |
+        One or more file parts, under any field name (up to UPLOAD_MAX_FILES).
+        Left as a free-form object on purpose: a `format: binary` property makes
+        the generated Zod package reference the DOM `Blob` type, which it does
+        not have, and the server parses the multipart stream itself.
+      additionalProperties: true
+
+    UploadRejection:
+      type: object
+      properties:
+        name:
+          type: string
+        reason:
+          type: string
+      required: [name, reason]
+
+    UploadBatchResult:
+      type: object
+      properties:
+        uploaded:
+          type: array
+          items:
+            $ref: "#/components/schemas/UploadedFile"
+        rejected:
+          type: array
+          items:
+            $ref: "#/components/schemas/UploadRejection"
+      required: [uploaded, rejected]
+
+    # ─── System ──────────────────────────────────────────────────────────────
+    SystemStorageReport:
+      type: object
+      properties:
+        telemetry:
+          $ref: "#/components/schemas/TelemetryTableStats"
+        perAsset:
+          type: array
+          items:
+            $ref: "#/components/schemas/AssetStorageStats"
+        generatedAt:
+          type: string
+          format: date-time
+      required: [telemetry, perAsset, generatedAt]
+
+    TelemetryTableStats:
+      type: object
+      properties:
+        totalRows:
+          type: integer
+        tableSize:
+          type: string
+          description: Human-readable size from pg_size_pretty, or "unknown".
+        oldestRecord:
+          type: string
+          format: date-time
+          nullable: true
+        newestRecord:
+          type: string
+          format: date-time
+          nullable: true
+      required: [totalRows, tableSize, oldestRecord, newestRecord]
+
+    AssetStorageStats:
+      type: object
+      properties:
+        assetId:
+          type: string
+        assetName:
+          type: string
+        rows:
+          type: integer
+        metrics:
+          type: integer
+        oldest:
+          type: string
+          format: date-time
+        newest:
+          type: string
+          format: date-time
+      required: [assetId, assetName, rows, metrics, oldest, newest]
+
+    SystemAggregateReport:
+      type: object
+      properties:
+        bucket:
+          type: string
+        count:
+          type: integer
+        truncated:
+          type: boolean
+          description: True when more buckets matched than `limit`; the newest are kept.
+        timeZone:
+          type: string
+          description: Plant time zone used for calendar buckets (1d, 1w).
+        data:
+          type: array
+          items:
+            $ref: "#/components/schemas/AggregateBucket"
+        generatedAt:
+          type: string
+          format: date-time
+      required: [bucket, count, truncated, timeZone, data, generatedAt]
+
+    AggregateBucket:
+      type: object
+      description: One bucket, oldest first. Numeric aggregates arrive as strings (PostgreSQL numeric).
+      properties:
+        bucket:
+          type: string
+          format: date-time
+        asset_id:
+          type: string
+        metric:
+          type: string
+        avg_val:
+          type: string
+        min_val:
+          type: string
+        max_val:
+          type: string
+        sum_val:
+          type: string
+        count:
+          type: integer
+      required: [bucket, asset_id, metric, avg_val, min_val, max_val, sum_val, count]
+
+    RetentionPolicy:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        assetId:
+          type: string
+          nullable: true
+          description: Null applies to all assets.
+        metric:
+          type: string
+          nullable: true
+          description: Null applies to all metrics.
+        retentionDays:
+          type: integer
+        enabled:
+          type: boolean
+        lastPrunedAt:
+          type: string
+          format: date-time
+          nullable: true
+        rowsPruned:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required: [id, name, assetId, metric, retentionDays, enabled, rowsPruned, createdAt, updatedAt]
+
+    RetentionPolicyCreate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        assetId:
+          type: string
+          format: uuid
+          nullable: true
+        metric:
+          type: string
+          maxLength: 200
+          nullable: true
+        retentionDays:
+          type: integer
+          minimum: 1
+          maximum: 3650
+        enabled:
+          type: boolean
+          description: Defaults to true.
+      required: [name, retentionDays]
+
+    RetentionPolicyUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        assetId:
+          type: string
+          format: uuid
+          nullable: true
+        metric:
+          type: string
+          maxLength: 200
+          nullable: true
+        retentionDays:
+          type: integer
+          minimum: 1
+          maximum: 3650
+        enabled:
+          type: boolean
+
+    RetentionRunResult:
+      type: object
+      properties:
+        policiesRun:
+          type: integer
+          description: Plan items run; policies with the same scope merge into one item.
+        totalRowsDeleted:
+          type: integer
+        details:
+          type: array
+          items:
+            $ref: "#/components/schemas/RetentionRunDetail"
+      required: [policiesRun, totalRowsDeleted, details]
+
+    RetentionRunDetail:
+      type: object
+      properties:
+        policyId:
+          type: string
+        mergedPolicyIds:
+          type: array
+          items:
+            type: string
+        name:
+          type: string
+        rowsDeleted:
+          type: integer
+        cutoff:
+          type: string
+          format: date-time
+      required: [policyId, mergedPolicyIds, name, rowsDeleted, cutoff]
+
+    # ─── Export ──────────────────────────────────────────────────────────────
+    ExportHealth:
+      type: object
+      properties:
+        status:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+        platform:
+          type: string
+        version:
+          type: string
+        stats:
+          $ref: "#/components/schemas/ExportHealthStats"
+      required: [status, timestamp, platform, version, stats]
+
+    ExportHealthStats:
+      type: object
+      properties:
+        totalAssets:
+          type: integer
+        activeAlarms:
+          type: integer
+        connectedBrokers:
+          type: integer
+        telemetryRateLast60s:
+          type: integer
+        assetsInMaintenance:
+          type: integer
+      required: [totalAssets, activeAlarms, connectedBrokers, telemetryRateLast60s, assetsInMaintenance]
+
+    ExportEnvelope:
+      type: object
+      description: JSON export wrapper. Row fields depend on the endpoint.
+      properties:
+        count:
+          type: integer
+        limit:
+          type: integer
+          description: Present on telemetry, alarms and alarm-history exports.
+        data:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        exportedAt:
+          type: string
+          format: date-time
+      required: [count, data, exportedAt]
+
+    # ─── API clients, destinations, delivery tests ───────────────────────────
+    ProjectRef:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+      required: [id, name]
+
+    DeliveryTestResult:
+      type: object
+      description: Result of a test send. Failure bodies add `error`, `code` and sometimes `correlationId`.
+      properties:
+        success:
+          type: boolean
+        statusCode:
+          type: integer
+          description: HTTP status the receiver answered with.
+        error:
+          type: string
+        code:
+          type: string
+        correlationId:
+          type: string
+      required: [success]
+
+    Destination:
+      type: object
+      description: Secrets (token, secretKey, basicPass) are never returned; the has* flags say whether one is stored.
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+          nullable: true
+        endpoint:
+          type: string
+        authType:
+          type: string
+          enum: [bearer, api_key, basic, none, apikey]
+          description: "`apikey` appears only on rows stored before it was renamed `api_key`."
+        apiKeyHeader:
+          type: string
+          nullable: true
+        basicUser:
+          type: string
+          nullable: true
+        eventTypes:
+          type: array
+          items:
+            type: string
+        enabled:
+          type: boolean
+        lastSentAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastError:
+          type: string
+          nullable: true
+        sendCount:
+          type: integer
+        hasToken:
+          type: boolean
+        hasSecretKey:
+          type: boolean
+        hasBasicPass:
+          type: boolean
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required: [id, name, endpoint, authType, eventTypes, enabled, sendCount, hasToken, hasSecretKey, hasBasicPass, createdAt, updatedAt]
+
+    DestinationCreate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        description:
+          type: string
+          maxLength: 2000
+          nullable: true
+        endpoint:
+          type: string
+          maxLength: 2048
+          description: http(s) URL; must also pass the server's outbound URL guard.
+        authType:
+          type: string
+          enum: [bearer, api_key, basic, none, apikey]
+          default: bearer
+          description: "`apikey` is accepted and stored as `api_key`."
+        token:
+          type: string
+          maxLength: 1024
+          nullable: true
+        secretKey:
+          type: string
+          maxLength: 1024
+          nullable: true
+        apiKeyHeader:
+          type: string
+          maxLength: 128
+          default: X-API-Key
+        basicUser:
+          type: string
+          maxLength: 256
+          nullable: true
+        basicPass:
+          type: string
+          maxLength: 256
+          nullable: true
+        eventTypes:
+          type: array
+          maxItems: 32
+          default: [alarm]
+          items:
+            type: string
+            maxLength: 64
+        enabled:
+          type: boolean
+          default: true
+      required: [name, endpoint]
+
+    DestinationUpdate:
+      type: object
+      description: Any subset of the create fields. An empty or null secret clears the stored one.
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        description:
+          type: string
+          maxLength: 2000
+          nullable: true
+        endpoint:
+          type: string
+          maxLength: 2048
+        authType:
+          type: string
+          enum: [bearer, api_key, basic, none, apikey]
+        token:
+          type: string
+          maxLength: 1024
+          nullable: true
+        secretKey:
+          type: string
+          maxLength: 1024
+          nullable: true
+        apiKeyHeader:
+          type: string
+          maxLength: 128
+        basicUser:
+          type: string
+          maxLength: 256
+          nullable: true
+        basicPass:
+          type: string
+          maxLength: 256
+          nullable: true
+        eventTypes:
+          type: array
+          maxItems: 32
+          items:
+            type: string
+            maxLength: 64
+        enabled:
+          type: boolean
+
+    # ─── AI assistant ────────────────────────────────────────────────────────
+    AiChatRequest:
+      type: object
+      properties:
+        question:
+          type: string
+          maxLength: 2000
+        range:
+          $ref: "#/components/schemas/AiChatRange"
+        timeZone:
+          type: string
+          maxLength: 64
+          description: IANA time zone for presenting times; ignored when invalid.
+        history:
+          type: array
+          description: Earlier turns; only the last 4 are used, each cut to 1000 characters.
+          items:
+            $ref: "#/components/schemas/AiChatTurn"
+      required: [question, range]
+
+    AiChatRange:
+      type: object
+      description: Required. `from` must be earlier than `to`.
+      properties:
+        from:
+          type: string
+          format: date-time
+        to:
+          type: string
+          format: date-time
+      required: [from, to]
+
+    AiChatTurn:
+      type: object
+      properties:
+        role:
+          type: string
+          enum: [user, assistant]
+        content:
+          type: string
+      required: [role, content]
+
+    AiChatAnswer:
+      type: object
+      properties:
+        answer:
+          type: string
+        steps:
+          type: array
+          description: Tool lookups the assistant made.
+          items:
+            $ref: "#/components/schemas/AiChatStep"
+        model:
+          type: string
+        truncated:
+          type: boolean
+          description: Present (true) when the step limit forced a final answer.
+      required: [answer, steps, model]
+
+    AiChatStep:
+      type: object
+      properties:
+        tool:
+          type: string
+        args: {}
+      required: [tool]
+
+    # ─── Activity log ────────────────────────────────────────────────────────
+    ActivityLogEntry:
+      type: object
+      properties:
+        id:
+          type: string
+        action:
+          type: string
+        category:
+          type: string
+        actorName:
+          type: string
+        actorRole:
+          type: string
+        actorUsername:
+          type: string
+          nullable: true
+        targetId:
+          type: string
+          nullable: true
+        targetName:
+          type: string
+          nullable: true
+        detail:
+          type: string
+          nullable: true
+        timestamp:
+          type: string
+          format: date-time
+      required: [id, action, category, timestamp]
+      additionalProperties: true
+
+    ActivityLogPage:
+      type: object
+      properties:
+        entries:
+          type: array
+          items:
+            $ref: "#/components/schemas/ActivityLogEntry"
+        total:
+          type: integer
+      required: [entries, total]
+
+    # ─── Asset actions ───────────────────────────────────────────────────────
+    AssetMaintenanceRequest:
+      type: object
+      properties:
+        enable:
+          type: boolean
+          description: Omit to toggle the current state.
+        note:
+          type: string
+          description: Stored only when enabling; cut to 500 characters.
+
+    BulkAttributeItem:
+      type: object
+      description: Unknown `type` falls back to static, unknown `dataType` to text. Items without a name are skipped.
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+          enum: [static, dynamic, metric, timestamp]
+        dataType:
+          type: string
+          enum: [text, number, double, boolean, timestamp]
+        value: {}
+        tagName:
+          type: string
+        uom:
+          type: string
+        decimalPlaces:
+          type: integer
+      required: [name]
+
+    BulkAttributesRequest:
+      type: object
+      properties:
+        attributes:
+          type: array
+          minItems: 1
+          items:
+            $ref: "#/components/schemas/BulkAttributeItem"
+      required: [attributes]
+
+    AttributeImportResult:
+      type: object
+      properties:
+        created:
+          type: integer
+        skipped:
+          type: integer
+        skippedItems:
+          type: array
+          items:
+            type: string
+      required: [created, skipped, skippedItems]
+
+    ApplyTemplateRequest:
+      type: object
+      properties:
+        templateId:
+          type: string
+          nullable: true
+
+    ApplyTemplateResult:
+      type: object
+      properties:
+        created:
+          type: integer
+        skipped:
+          type: integer
+        skippedItems:
+          type: array
+          items:
+            type: string
+        templateName:
+          type: string
+        deviceIdBound:
+          type: string
+          nullable: true
+          description: Device id newly bound to the asset by this call, if any.
+        sharedWith:
+          type: array
+          description: Other assets already bound to the same device id.
+          items:
+            type: string
+        deviceId:
+          type: string
+          nullable: true
+        message:
+          type: string
+          description: Set (with zero counts and no other fields) when the template has nothing to apply.
+      required: [created, skipped, skippedItems]
+
+    AssetHealthReport:
+      type: object
+      properties:
+        assetId:
+          type: string
+        assetName:
+          type: string
+        health:
+          type: string
+          enum: [ok, stale, alarm]
+        freshnessPct:
+          type: integer
+          nullable: true
+          description: Share of dynamic attributes updated in the last hour; null when there are none.
+        activeAlarms:
+          type: integer
+        lastSeen:
+          type: string
+          format: date-time
+          nullable: true
+        totalAttributes:
+          type: integer
+        dynamicAttributes:
+          type: integer
+        freshAttributes:
+          type: integer
+        keyMetrics:
+          type: array
+          items:
+            $ref: "#/components/schemas/AssetHealthMetric"
+      required: [assetId, assetName, health, freshnessPct, activeAlarms, lastSeen, totalAttributes, dynamicAttributes, freshAttributes, keyMetrics]
+
+    AssetHealthMetric:
+      type: object
+      properties:
+        name:
+          type: string
+        value: {}
+        uom:
+          type: string
+          nullable: true
+        quality:
+          type: string
+          nullable: true
+        timestamp:
+          type: string
+          format: date-time
+          nullable: true
+      required: [name]
+
+    # ─── Ingest helpers ──────────────────────────────────────────────────────
+    SeenDevice:
+      type: object
+      properties:
+        deviceId:
+          type: string
+        lastSeen:
+          type: string
+          format: date-time
+        count:
+          type: integer
+        matched:
+          type: boolean
+          description: The id has matched an existing asset at least once.
+      required: [deviceId, lastSeen, count, matched]
+
+    SeenDevicesPruneResult:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        removed:
+          type: integer
+      required: [ok, removed]
+
+    RegisterDeviceRequest:
+      type: object
+      properties:
+        deviceId:
+          type: string
+      required: [deviceId]
+
+    RegisterDeviceResult:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        deviceId:
+          type: string
+      required: [ok, deviceId]
+
+    # ─── User admin actions ──────────────────────────────────────────────────
+    UserAccessInfo:
+      type: object
+      properties:
+        userId:
+          type: string
+        role:
+          $ref: "#/components/schemas/UserRole"
+        overrides:
+          type: object
+          additionalProperties: true
+        effective:
+          type: object
+          description: Role defaults plus overrides — what the API enforces.
+          additionalProperties: true
+      required: [userId, overrides, effective]
+
+    UserAccessUpdate:
+      type: object
+      description: The overrides object, either under `overrides` or as the whole body.
+      properties:
+        overrides:
+          type: object
+          additionalProperties: true
+      additionalProperties: true
+
+    InvitationResent:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        invitationExpiresAt:
+          type: string
+          format: date-time
+        emailSent:
+          type: boolean
+      required: [ok, invitationExpiresAt, emailSent]
+
+    PasswordResetSent:
+      type: object
+      properties:
+        ok:
+          type: boolean
+        expiresAt:
+          type: string
+          format: date-time
+        emailSent:
+          type: boolean
+      required: [ok, expiresAt, emailSent]
+
+    TemporaryPasswordRequest:
+      type: object
+      properties:
+        expiresInMinutes:
+          type: integer
+          minimum: 1
+          maximum: 1440
+          default: 15
+          description: Clamped to 1–1440.
+
+    TemporaryPasswordIssued:
+      type: object
+      properties:
+        temporaryPassword:
+          type: string
+          description: Shown once; not stored, logged or emailed.
+        username:
+          type: string
+        email:
+          type: string
+        expiresAt:
+          type: string
+          format: date-time
+        expiresInMinutes:
+          type: integer
+        mustChangePassword:
+          type: boolean
+      required: [temporaryPassword, username, email, expiresAt, expiresInMinutes, mustChangePassword]
+
+    SessionLimitRequest:
+      type: object
+      properties:
+        maxSessions:
+          type: integer
+          minimum: 1
+          maximum: 20
+      required: [maxSessions]
+
+  responses:
+    NotFound:
+      description: Not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    InvalidId:
+      description: The id is not a valid UUID
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    ValidationFailed:
+      description: Request validation failed (`errors` lists the fields)
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    RateLimited:
+      description: "`rate_limited`, with `retryAfter` in seconds"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+  parameters:
+    IdPath:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+    UuidPath:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
+    VizNodeIdPath:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        maxLength: 64
+        pattern: "^[A-Za-z0-9_-]+$"
+    IngestClientIdPath:
+      name: clientId
+      in: path
+      required: true
+      description: The API client's public clientId (not a secret).
+      schema:
+        type: string
+    IngestTokenPath:
+      name: token
+      in: path
+      required: true
+      description: The secret token from a copy-and-paste ingest URL.
+      schema:
+        type: string
+    LimitQuery:
+      name: limit
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 500
+        default: 100
+    OffsetQuery:
+      name: offset
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 0
+        maximum: 1000000
+        default: 0
+    SecurityEventTypeQuery:
+      name: eventType
+      in: query
+      required: false
+      schema:
+        type: string
+        maxLength: 64
+    SecurityOutcomeQuery:
+      name: outcome
+      in: query
+      required: false
+      schema:
+        type: string
+        enum: [success, failure]
+    SecurityUserIdQuery:
+      name: userId
+      in: query
+      required: false
+      schema:
+        type: string
+        format: uuid
+    SecurityUsernameQuery:
+      name: username
+      in: query
+      required: false
+      schema:
+        type: string
+        maxLength: 320
+    SecurityDaysQuery:
+      name: days
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 365
+    ExportFormatQuery:
+      name: format
+      in: query
+      required: false
+      description: "`csv` returns a CSV attachment; anything else returns JSON."
+      schema:
+        type: string
+        enum: [json, csv]
+
+  securitySchemes:
+    sessionCookie:
+      type: apiKey
+      in: cookie
+      name: is_session
+      description: Browser session. Writes also need the `x-csrf-token` header.
+    apiKeyBearer:
+      type: http
+      scheme: bearer
+      description: "API client secret as `Authorization: Bearer <clientSecret>`."
+    apiKeyHeader:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: API client secret.

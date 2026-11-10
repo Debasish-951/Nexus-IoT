@@ -1,6 +1,6 @@
 import { Router, type IRouter, type Request, type Response, type NextFunction } from "express";
 import { respondInvalid } from "../lib/respond";
-import { eq, desc, and, gte, lte, count, sql } from "drizzle-orm";
+import { eq, desc, and, gte, lte, count, sql, inArray } from "drizzle-orm";
 import {
   db, telemetryTable, assetsTable, attributesTable,
   alarmRulesTable, alarmsTable, alarmHistoryTable,
@@ -10,8 +10,11 @@ import { Parser } from "expr-eval-fork";
 import { broadcast } from "../lib/ws-broadcast";
 import { apiKeyAuth } from "../middleware/apiKeyAuth";
 import { recordDevice, listSeenDevices, removeSeenDevice, pruneUnusedDevices } from "../lib/seen-devices";
-import { assertSafeOutboundUrl } from "../lib/outbound-url";
+import { assertSafeOutboundUrl, safeFetch } from "../lib/outbound-url";
 import { logger } from "../lib/logger";
+import { ingestScope, recordIngestOutOfScope } from "../lib/project-access";
+import { csvCell } from "../lib/validation";
+import { forwardToDestinations } from "./destinations";
 
 const router: IRouter = Router();
 
@@ -52,6 +55,32 @@ function toDate(unix: number): Date {
   return new Date(unix > 1e12 ? unix : unix * 1000);
 }
 
+/** How far ahead of the server clock a device timestamp may be before it is distrusted. */
+const MAX_CLOCK_AHEAD_MS = 5 * 60 * 1000;
+
+/**
+ * Read a device clock field. Accepts epoch seconds or milliseconds (number or
+ * numeric string) and ISO-like strings, including "2025-11-14 05:11:40.418-05:30".
+ * Returns undefined for anything unusable, and for a time more than five minutes
+ * in the future, so the caller falls back to server time.
+ *
+ * A number used to reach `raw.replace` and throw outside any try block, which
+ * turned every reading from an epoch-clock device into a 500 (HTTP) or a dropped
+ * message (MQTT). A future-dated reading would also stay "latest" for ever and
+ * make the next real reading look out of order.
+ */
+export function parseClock(v: unknown): Date | undefined {
+  let d: Date | undefined;
+  if (typeof v === "number" && Number.isFinite(v)) d = toDate(v);
+  else if (typeof v === "string" && v.trim()) {
+    const s = v.trim();
+    d = /^\d+(\.\d+)?$/.test(s) ? toDate(Number(s)) : new Date(s.replace(" ", "T"));
+  }
+  if (!d || Number.isNaN(d.getTime())) return undefined;
+  if (d.getTime() > Date.now() + MAX_CLOCK_AHEAD_MS) return undefined;
+  return d;
+}
+
 // ── Reserved payload envelope fields (never treated as metrics) ───────────────
 const ENVELOPE_FIELDS = new Set([
   "deviceId", "assetId", "timestamp", "timestampUnix", "capturedAt", "receivedAt",
@@ -82,17 +111,9 @@ export interface NormalisedPayload {
 
 export function normalise(body: Record<string, unknown>): NormalisedPayload | null {
   if (!body.deviceId || typeof body.deviceId !== "string") return null;
-  let ts: Date | undefined;
-  if (typeof body.timestampUnix === "number") ts = toDate(body.timestampUnix);
-  else if (body.capturedAt) ts = new Date(body.capturedAt as string);
-  else if (body.receivedAt) ts = new Date(body.receivedAt as string);
-  else if (body.timestamp) {
-    const raw = body.timestamp as string;
-    // Normalise non-standard format: "2025-11-14 05:11:40.418-05:30" → ISO 8601
-    const isoLike = raw.replace(" ", "T");
-    try { ts = new Date(isoLike); } catch { ts = new Date(); }
-    if (isNaN(ts.getTime())) ts = new Date();
-  }
+  // First usable clock field wins; none usable means server time (set later).
+  const ts = parseClock(body.timestampUnix) ?? parseClock(body.capturedAt)
+    ?? parseClock(body.receivedAt) ?? parseClock(body.timestamp);
 
   // ── Nested {data: {...}} envelope ────────────────────────────────────────
   if (body.data && typeof body.data === "object" && !Array.isArray(body.data)) {
@@ -299,6 +320,33 @@ function resolveAssetByPath(
   return cur;
 }
 
+// ── Numeric readings ──────────────────────────────────────────────────────────
+
+/**
+ * A reading as a number, or null when it is not one.
+ *
+ * `Number(x)` was used everywhere, and `Number("")`, `Number("  ")` and
+ * `Number(null)` are all 0: a sensor sending a blank field read as a real zero,
+ * tripping low-limit alarms and producing huge rates of change. Only finite
+ * numbers, numeric strings and booleans (as 1/0) count.
+ */
+export function toNum(v: unknown): number | null {
+  if (typeof v === "number") return Number.isFinite(v) ? v : null;
+  if (typeof v === "boolean") return v ? 1 : 0;
+  if (typeof v === "string") {
+    const s = v.trim();
+    if (!s) return null;
+    const n = Number(s);
+    return Number.isFinite(n) ? n : null;
+  }
+  return null;
+}
+
+/** A reading that carries no value at all. Stored, but marked quality "bad". */
+export function isBlankReading(v: unknown): boolean {
+  return v === null || v === undefined || (typeof v === "string" && v.trim() === "");
+}
+
 // ── Operator evaluation ───────────────────────────────────────────────────────
 function evalOp(value: number, op: string, threshold: number): boolean {
   switch (op) {
@@ -335,7 +383,7 @@ async function fireWebhook(url: string, payload: Record<string, unknown>): Promi
   }
 
   try {
-    const res = await fetch(url, {
+    const res = await safeFetch(url, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload),
@@ -352,6 +400,9 @@ async function fireWebhook(url: string, payload: Record<string, unknown>): Promi
 }
 
 // ── Alarm rule evaluation (threshold + rate-of-change) ────────────────────────
+/** The newest stored reading of a metric. `value` is null when it was not a number. */
+export interface PrevReading { value: number | null; ts: Date }
+
 interface AlarmEvent {
   ruleId: string; ruleName: string; metric: string;
   value: number; threshold: number | null; operator: string | null;
@@ -359,15 +410,73 @@ interface AlarmEvent {
   webhookUrl: string | null; webhookEnabled: boolean;
 }
 
-async function evaluateAlarmRules(
+/**
+ * When each rule's condition started being met (on) or stopped being met (off), by
+ * rule and asset. In memory because the API is a single process. A restart only
+ * restarts a running delay, which at worst postpones one alarm by the delay.
+ */
+const pendingOn = new Map<string, number>();
+const pendingOff = new Map<string, number>();
+
+/** Drop any running On/Off delay for an asset, when maintenance mode starts or ends. */
+export function forgetAssetDelays(assetId: string): void {
+  for (const map of [pendingOn, pendingOff]) {
+    for (const key of map.keys()) if (key.endsWith(`|${assetId}`)) map.delete(key);
+  }
+}
+
+/** Drop any running On/Off delay for a rule, after it is disabled, changed or deleted. */
+export function forgetRuleDelays(ruleId: string): void {
+  for (const map of [pendingOn, pendingOff]) {
+    for (const key of map.keys()) if (key.startsWith(`${ruleId}|`)) map.delete(key);
+  }
+  invalidateAlarmRuleCache();
+}
+
+// ── Enabled-rule cache ────────────────────────────────────────────────────────
+//
+// Every message used to read the whole alarm_rules table. Rules change rarely,
+// so the enabled set is kept for a few seconds. Anything that creates, edits,
+// enables, disables or deletes a rule should call invalidateAlarmRuleCache();
+// the TTL bounds how stale it can be if a caller forgets.
+type AlarmRuleRow = typeof alarmRulesTable.$inferSelect;
+const RULE_CACHE_TTL_MS = 5_000;
+let ruleCache: { at: number; rules: Promise<AlarmRuleRow[]> } | null = null;
+
+export function invalidateAlarmRuleCache(): void {
+  ruleCache = null;
+}
+
+async function enabledAlarmRules(): Promise<AlarmRuleRow[]> {
+  const now = Date.now();
+  if (!ruleCache || now - ruleCache.at > RULE_CACHE_TTL_MS) {
+    const rules = (async () => db.select().from(alarmRulesTable).where(eq(alarmRulesTable.enabled, true)))();
+    const entry = { at: now, rules };
+    ruleCache = entry;
+    // A failed read must not be served from the cache for the next five seconds.
+    rules.catch(() => { if (ruleCache === entry) ruleCache = null; });
+  }
+  return ruleCache.rules;
+}
+
+/** True once a condition has held for the whole delay. Measured in payload time. */
+function delayElapsed(pending: Map<string, number>, key: string, seconds: number | null, ts: Date): boolean {
+  if (!seconds || seconds <= 0) { pending.delete(key); return true; }
+  const start = pending.get(key);
+  if (start === undefined) { pending.set(key, ts.getTime()); return false; }
+  if (ts.getTime() - start < seconds * 1000) return false;
+  pending.delete(key);
+  return true;
+}
+
+export async function evaluateAlarmRules(
   assetId: string, assetName: string,
   metrics: Record<string, unknown>,
-  prevMetrics: Record<string, { value: number; ts: Date }>,
+  prevMetrics: Record<string, PrevReading>,
   ts: Date
 ): Promise<AlarmEvent[]> {
   const events: AlarmEvent[] = [];
-  const rules = await db.select().from(alarmRulesTable)
-    .where(and(eq(alarmRulesTable.enabled, true)));
+  const allRules = await enabledAlarmRules();
 
   // Resolve a metric value: try exact key first, then strip the first dot-segment
   // (asset-identifier prefix). Rules stored as "testing.grid.consumed_kWh" still match
@@ -378,33 +487,62 @@ async function evaluateAlarmRules(
     const dot = key.indexOf(".");
     return dot > 0 ? map[key.slice(dot + 1)] : undefined;
   }
-  function resolvePrev(map: Record<string, { value: number; ts: Date }>, key: string) {
+  function resolvePrev(map: Record<string, PrevReading>, key: string) {
     const v = map[key];
     if (v !== undefined) return v;
     const dot = key.indexOf(".");
     return dot > 0 ? map[key.slice(dot + 1)] : undefined;
   }
 
+  // Only rules that can apply to this message. Nothing to evaluate means no
+  // open-alarm lookup either.
+  const rules = allRules.filter((rule) =>
+    (!rule.assetId || rule.assetId === assetId)
+    && rule.metric && rule.operator && rule.threshold != null
+    && resolveMetric(metrics, rule.metric) !== undefined);
+  if (rules.length === 0) return events;
+
+  // This asset's open alarms, read once rather than once per rule.
+  //
+  // An acknowledged alarm is still open: the condition must clear before the rule
+  // can raise a new one, or acknowledging would immediately re-fire it.
+  //
+  // Open alarms are per rule AND asset. A rule with no asset applies to every
+  // asset, and keying on the rule alone let one asset's normal reading clear
+  // another asset's alarm, and hid a second asset's breach.
+  const openRows = await db.select({ id: alarmsTable.id, ruleId: alarmsTable.ruleId }).from(alarmsTable)
+    .where(and(
+      eq(alarmsTable.assetId, assetId),
+      inArray(alarmsTable.status, ["active", "acknowledged"]),
+    ));
+  const openByRule = new Map<string, string>();
+  for (const row of openRows) if (row.ruleId) openByRule.set(row.ruleId, row.id);
+
   for (const rule of rules) {
-    if (rule.assetId && rule.assetId !== assetId) continue;
     if (!rule.metric || !rule.operator || rule.threshold == null) continue;
+
+    // A reading older than the newest one already stored (a gateway flushing its
+    // buffer after an outage) must not decide alarm state: it would clear an alarm
+    // that is still real, or produce a huge rate of change from a negative time step.
+    const latest = resolvePrev(prevMetrics, rule.metric);
+    if (latest && ts.getTime() <= latest.ts.getTime()) continue;
 
     let effectiveValue: number | null = null;
 
+    // Blank or non-numeric readings are skipped, never evaluated as 0.
     if (rule.alarmType === "threshold") {
-      const raw = resolveMetric(metrics, rule.metric);
-      if (raw === undefined) continue;
-      effectiveValue = Number(raw);
-      if (isNaN(effectiveValue)) continue;
+      effectiveValue = toNum(resolveMetric(metrics, rule.metric));
+      if (effectiveValue === null) continue;
     } else if (rule.alarmType === "rate_of_change") {
-      const raw = resolveMetric(metrics, rule.metric);
-      if (raw === undefined) continue;
-      const newVal = Number(raw);
-      if (isNaN(newVal)) continue;
-      const prev = resolvePrev(prevMetrics, rule.metric);
-      if (!prev) continue;
-      const deltaSeconds = Math.max((ts.getTime() - prev.ts.getTime()) / 1000, 0.001);
+      const newVal = toNum(resolveMetric(metrics, rule.metric));
+      if (newVal === null) continue;
+      // The previous reading must be a number too: a blank one is not a zero.
+      const prev = latest;
+      if (!prev || prev.value === null) continue;
+      const deltaSeconds = (ts.getTime() - prev.ts.getTime()) / 1000;
+      if (!(deltaSeconds > 0)) continue;
       effectiveValue = Math.abs((newVal - prev.value) / deltaSeconds);
+      if (!Number.isFinite(effectiveValue)) continue;
     } else {
       continue; // other types not yet evaluated here
     }
@@ -412,16 +550,25 @@ async function evaluateAlarmRules(
     if (effectiveValue === null) continue;
     const conditionMet = evalOp(effectiveValue, rule.operator, rule.threshold);
 
-    const [existing] = await db.select({ id: alarmsTable.id }).from(alarmsTable)
-      .where(and(eq(alarmsTable.ruleId, rule.id), eq(alarmsTable.status, "active"))).limit(1);
+    // The delays stop a value hovering around its limit from opening and clearing
+    // alarms repeatedly. The opposite timer resets whenever the condition flips.
+    const delayKey = `${rule.id}|${assetId}`;
+    (conditionMet ? pendingOff : pendingOn).delete(delayKey);
+
+    const existingId = openByRule.get(rule.id);
+    const existing = existingId ? { id: existingId } : undefined;
 
     if (conditionMet && !existing) {
+      if (!delayElapsed(pendingOn, delayKey, rule.onDelay, ts)) continue;
+      // The unique index decides the race between concurrent payloads. Only the
+      // winner gets a row back, so history and webhooks fire once per alarm.
       const [newAlarm] = await db.insert(alarmsTable).values({
         name: rule.name, assetId, assetName, ruleId: rule.id,
         severity: rule.severity, status: "active", alarmClass: rule.alarmType,
         message: `${rule.metric} ${rule.operator} ${rule.threshold} (value: ${effectiveValue.toFixed(4)})`,
         triggerValue: effectiveValue, triggeredAt: ts,
-      }).returning();
+      }).onConflictDoNothing().returning();
+      if (!newAlarm) continue;
       await db.insert(alarmHistoryTable).values({
         alarmId: newAlarm.id, assetId, assetName, name: rule.name,
         severity: rule.severity, status: "active", triggeredAt: ts,
@@ -431,9 +578,17 @@ async function evaluateAlarmRules(
         severity: rule.severity, event: "triggered", alarmId: newAlarm.id,
         webhookUrl: rule.webhookUrl ?? null, webhookEnabled: rule.webhookEnabled });
     } else if (!conditionMet && existing) {
+      // The value must move past the limit by the deadband before the alarm clears:
+      // below threshold - deadband for a high limit, above threshold + deadband for
+      // a low limit. Subtracting for every operator made low-limit deadbands do nothing.
       const deadband = rule.deadband ?? 0;
-      const clearOk = deadband === 0 ? true : !evalOp(effectiveValue, rule.operator, rule.threshold - deadband);
-      if (clearOk) {
+      const lowLimit = rule.operator === "lt" || rule.operator === "lte";
+      const highLimit = rule.operator === "gt" || rule.operator === "gte";
+      const clearOk = deadband === 0 || !(lowLimit || highLimit)
+        ? true
+        : !evalOp(effectiveValue, rule.operator, lowLimit ? rule.threshold + deadband : rule.threshold - deadband);
+      if (!clearOk) pendingOff.delete(delayKey);
+      if (clearOk && delayElapsed(pendingOff, delayKey, rule.offDelay, ts)) {
         await db.update(alarmsTable).set({ status: "cleared", clearedAt: ts }).where(eq(alarmsTable.id, existing.id));
         await db.update(alarmHistoryTable).set({ status: "cleared", clearedAt: ts }).where(eq(alarmHistoryTable.alarmId, existing.id));
         events.push({ ruleId: rule.id, ruleName: rule.name, metric: rule.metric,
@@ -458,36 +613,144 @@ async function evaluateAlarmRules(
   return events;
 }
 
-// ── Runtime attribute evaluator ───────────────────────────────────────────────
-async function evaluateRuntimeAttributes(assetId: string, ts: Date): Promise<void> {
-  const allAttrs = await db.select({
-    id: attributesTable.id, name: attributesTable.name,
+// ── Attribute updates ─────────────────────────────────────────────────────────
+
+interface AttrRow {
+  id: string; name: string; type: string; value: unknown; expression: string | null;
+  tagName: string | null; sourceMetric: string | null;
+}
+
+/** Every attribute of the given assets, in one query, grouped by asset. */
+async function loadAttributes(assetIds: string[]): Promise<Map<string, AttrRow[]>> {
+  const byAsset = new Map<string, AttrRow[]>();
+  for (const id of assetIds) byAsset.set(id, []);
+  if (assetIds.length === 0) return byAsset;
+  const rows = await db.select({
+    id: attributesTable.id, assetId: attributesTable.assetId, name: attributesTable.name,
     type: attributesTable.type, value: attributesTable.value, expression: attributesTable.expression,
-  }).from(attributesTable).where(eq(attributesTable.assetId, assetId));
+    tagName: attributesTable.tagName, sourceMetric: attributesTable.sourceMetric,
+  }).from(attributesTable).where(inArray(attributesTable.assetId, assetIds));
+  for (const { assetId, ...row } of rows) byAsset.get(assetId)?.push(row);
+  return byAsset;
+}
+
+/**
+ * Which attribute receives which value from one message. Same rules as the
+ * per-metric UPDATEs this replaces, applied in the same order so the last match
+ * wins: the full "deviceId.metric" tag or the bare metric (case-insensitive),
+ * then an explicit `sourceMetric` remap, then the sensor serial.
+ */
+export function assignAttributeValues(
+  attrs: Pick<AttrRow, "id" | "tagName" | "sourceMetric">[],
+  deviceId: string, metrics: Record<string, unknown>, sensorSerial?: string,
+): Map<string, unknown> {
+  const byTag = new Map<string, string[]>();
+  const bySource = new Map<string, string[]>();
+  for (const a of attrs) {
+    if (a.tagName) {
+      const k = a.tagName.toLowerCase();
+      byTag.set(k, [...(byTag.get(k) ?? []), a.id]);
+    }
+    if (a.sourceMetric) {
+      const k = a.sourceMetric.toLowerCase();
+      bySource.set(k, [...(bySource.get(k) ?? []), a.id]);
+    }
+  }
+  const out = new Map<string, unknown>();
+  for (const [metric, value] of Object.entries(metrics)) {
+    const full = `${deviceId}.${metric}`.toLowerCase();
+    const bare = metric.toLowerCase();
+    const tagged = new Set([...(byTag.get(full) ?? []), ...(byTag.get(bare) ?? [])]);
+    for (const id of tagged) out.set(id, value);
+    for (const id of bySource.get(bare) ?? []) out.set(id, value);
+  }
+  if (sensorSerial) {
+    for (const a of attrs) if (a.tagName === `${deviceId}.sensor_serial`) out.set(a.id, sensorSerial);
+  }
+  return out;
+}
+
+/**
+ * Write the assigned values in ONE statement. A late reading must not overwrite
+ * a newer value already shown, so attributes stamped after `ts` are skipped.
+ * Returns the ids actually updated.
+ */
+async function writeAttributeValues(assigned: Map<string, unknown>, ts: Date): Promise<Set<string>> {
+  if (assigned.size === 0) return new Set();
+  const values = [...assigned].map(([id, value]) =>
+    sql`(${id}::uuid, ${value === null || value === undefined ? null : JSON.stringify(value)}::jsonb, ${isBlankReading(value) ? "bad" : "good"}::text)`);
+  const result = await db.execute<{ id: string }>(sql`
+    UPDATE attributes AS a
+    SET value = v.val, "timestamp" = ${ts}, quality = v.q
+    FROM (VALUES ${sql.join(values, sql`, `)}) AS v(id, val, q)
+    WHERE a.id = v.id AND (a."timestamp" IS NULL OR a."timestamp" <= ${ts})
+    RETURNING a.id
+  `);
+  return new Set(result.rows.map((r) => r.id));
+}
+
+// ── Runtime attribute evaluator ───────────────────────────────────────────────
+/** Evaluate runtime (computed) attributes from the asset's current values, in one write. */
+async function evaluateRuntimeAttributes(allAttrs: AttrRow[], ts: Date): Promise<void> {
+  const runtime = allAttrs.filter((a) => a.type === "runtime" && a.expression);
+  if (runtime.length === 0) return;
 
   const vars: Record<string, number> = {};
   for (const attr of allAttrs) {
-    if (attr.value == null) continue;
-    const num = Number(attr.value);
-    if (!isNaN(num)) {
+    // Blank values are not variables: they used to become 0.
+    const num = toNum(attr.value);
+    if (num !== null) {
       vars[attr.name] = num;
       vars[attr.name.replace(/\s+/g, "_")] = num;
       vars[attr.name.replace(/[^a-zA-Z0-9_]/g, "_")] = num;
     }
   }
-  for (const attr of allAttrs.filter((a) => a.type === "runtime" && a.expression)) {
+  const rows = runtime.map((attr) => {
     const result = evalExpression(attr.expression!, vars);
-    if (result !== null) {
-      await db.update(attributesTable).set({ value: result, timestamp: ts, quality: "good" }).where(eq(attributesTable.id, attr.id));
-    } else {
-      await db.update(attributesTable).set({ quality: "bad", timestamp: ts }).where(eq(attributesTable.id, attr.id));
-    }
+    return sql`(${attr.id}::uuid, ${JSON.stringify(result)}::jsonb, ${result !== null}::boolean)`;
+  });
+  await db.execute(sql`
+    UPDATE attributes AS a
+    SET value = CASE WHEN v.ok THEN v.val ELSE a.value END,
+        "timestamp" = ${ts},
+        quality = CASE WHEN v.ok THEN 'good' ELSE 'bad' END
+    FROM (VALUES ${sql.join(rows, sql`, `)}) AS v(id, val, ok)
+    WHERE a.id = v.id
+  `);
+}
+
+/** The newest stored reading of each metric, one index seek per metric in a single query. */
+async function latestReadings(assetId: string, metrics: string[]): Promise<Record<string, PrevReading>> {
+  const out: Record<string, PrevReading> = {};
+  if (metrics.length === 0) return out;
+  const result = await db.execute<{ metric: string; value: unknown; ts: string | Date }>(sql`
+    SELECT m.metric, t.value, t."timestamp" AS ts
+    FROM unnest(ARRAY[${sql.join(metrics.map((m) => sql`${m}`), sql`, `)}]::text[]) AS m(metric)
+    CROSS JOIN LATERAL (
+      SELECT value, "timestamp" FROM telemetry
+      WHERE asset_id = ${assetId} AND metric = m.metric
+      ORDER BY "timestamp" DESC LIMIT 1
+    ) t
+  `);
+  for (const row of result.rows) {
+    const ts = new Date(row.ts);
+    if (!Number.isNaN(ts.getTime())) out[row.metric] = { value: toNum(row.value), ts };
   }
+  return out;
 }
 
 // ── Core ingest logic ─────────────────────────────────────────────────────────
-export async function processNormalised(n: NormalisedPayload, assetIdHint?: string, emitBroadcast = true) {
+/**
+ * @param scope Assets this caller may write to, or null for no restriction. Set
+ *   for a project-bound API key or a project-restricted user (see ingestScope in
+ *   lib/project-access.ts). Matching assets outside it are ignored and the result
+ *   reports `outOfScope`.
+ */
+export async function processNormalised(
+  n: NormalisedPayload, assetIdHint?: string, emitBroadcast = true, scope: Set<string> | null = null,
+) {
   let assetId: string | null = assetIdHint ?? null;
+  let outOfScope = false;
   let assetName = n.externalAssetName ?? n.deviceId;
 
   /**
@@ -509,15 +772,29 @@ export async function processNormalised(n: NormalisedPayload, assetIdHint?: stri
   if (!assetId) {
     siblings = await db.select({ id: assetsTable.id, name: assetsTable.name, maintenanceMode: assetsTable.maintenanceMode })
       .from(assetsTable).where(eq(assetsTable.identifier, n.deviceId));
+    if (scope) {
+      const before = siblings.length;
+      siblings = siblings.filter((s) => scope.has(s.id));
+      outOfScope = before > 0 && siblings.length === 0;
+    }
     const first = siblings[0];
     assetId = first?.id ?? null;
     if (first?.name) assetName = first.name;
     if (first?.maintenanceMode) isInMaintenance = true;
   } else {
     const [asset] = await db.select({ id: assetsTable.id, name: assetsTable.name, maintenanceMode: assetsTable.maintenanceMode }).from(assetsTable).where(eq(assetsTable.id, assetId));
-    if (asset?.name) assetName = asset.name;
-    if (asset?.maintenanceMode) isInMaintenance = true;
-    if (asset) siblings = [asset];
+    if (!asset) {
+      // An unknown asset id used to be written anyway, leaving telemetry that
+      // belongs to no asset.
+      assetId = null;
+    } else if (scope && !scope.has(asset.id)) {
+      assetId = null;
+      outOfScope = true;
+    } else {
+      assetName = asset.name ?? assetName;
+      if (asset.maintenanceMode) isInMaintenance = true;
+      siblings = [asset];
+    }
   }
 
   const ts = n.timestamp ?? new Date();
@@ -527,7 +804,7 @@ export async function processNormalised(n: NormalisedPayload, assetIdHint?: stri
   // Do NOT auto-create assets. Telemetry is only stored when its deviceId matches
   // an existing asset's identifier; unknown deviceIds are ignored (no asset created).
   if (!assetId) {
-    return { recordsWritten: 0, assetId: null, assetName, alarmEvents: [], claimantIds: [] as string[] };
+    return { recordsWritten: 0, assetId: null, assetName, alarmEvents: [], claimantIds: [] as string[], outOfScope };
   }
   if (Object.keys(n.metrics).length === 0) {
     return { recordsWritten: 0, assetId, assetName, alarmEvents: [], claimantIds: siblings.map((s) => s.id) };
@@ -541,14 +818,17 @@ export async function processNormalised(n: NormalisedPayload, assetIdHint?: stri
   let shares: { assetId: string; assetName: string; maintenance: boolean; metrics: Record<string, unknown> }[];
   const unclaimedMetrics: string[] = [];
 
+  // Attributes of every claimant, read once and reused for partitioning,
+  // attribute updates and runtime expressions.
+  const attrsByAsset = await loadAttributes(siblings.length > 1 ? siblings.map((s) => s.id) : [assetId as string]);
+
   if (siblings.length <= 1) {
     shares = [{ assetId: assetId as string, assetName, maintenance: isInMaintenance, metrics: n.metrics }];
   } else {
     const claimed = new Set<string>();
     shares = [];
     for (const sib of siblings) {
-      const attrs = await db.select({ tagName: attributesTable.tagName, sourceMetric: attributesTable.sourceMetric })
-        .from(attributesTable).where(eq(attributesTable.assetId, sib.id));
+      const attrs = attrsByAsset.get(sib.id) ?? [];
       const owned = new Set<string>();
       for (const a of attrs) {
         if (a.tagName) owned.add(a.tagName.toLowerCase());
@@ -578,24 +858,15 @@ export async function processNormalised(n: NormalisedPayload, assetIdHint?: stri
     const assetName = share.assetName;
     const metrics = share.metrics;
 
-  // Snapshot previous values for rate-of-change evaluation
-  const prevMetrics: Record<string, { value: number; ts: Date }> = {};
-  const metricKeys = Object.keys(metrics);
-  if (metricKeys.length > 0) {
-    for (const metric of metricKeys) {
-      const [prev] = await db.select({ value: telemetryTable.value, timestamp: telemetryTable.timestamp })
-        .from(telemetryTable)
-        .where(and(eq(telemetryTable.assetId, assetId), eq(telemetryTable.metric, metric)))
-        .orderBy(desc(telemetryTable.timestamp)).limit(1);
-      if (prev && prev.timestamp) {
-        const v = Number(prev.value);
-        if (!isNaN(v)) prevMetrics[metric] = { value: v, ts: prev.timestamp };
-      }
-    }
-  }
+  // Snapshot previous values for rate-of-change evaluation and the late-data
+  // check: one query for all metrics instead of one per metric.
+  const prevMetrics = await latestReadings(assetId, Object.keys(metrics));
 
+  // A blank reading is stored as sent but marked bad, so it is visible and
+  // never mistaken for a measured zero.
   const records = Object.entries(metrics).map(([metric, value]) => ({
-    assetId, deviceId: n.deviceId, metric, value, timestamp: ts, quality: "good",
+    assetId, deviceId: n.deviceId, metric, value, timestamp: ts,
+    quality: isBlankReading(value) ? "bad" : "good",
   }));
   await db.insert(telemetryTable).values(records as any[]);
 
@@ -603,27 +874,14 @@ export async function processNormalised(n: NormalisedPayload, assetIdHint?: stri
   // bare metric name (case-insensitive; telemetry keys are camelCase, tagNames lower).
   // Safe because the caller (/ingest/payload) only reaches this after the payload's
   // root deviceId matched an asset — wrong device id ⇒ no asset ⇒ no values.
-  for (const [metric, value] of Object.entries(metrics)) {
-    const full = `${n.deviceId}.${metric}`.toLowerCase();
-    const bare = metric.toLowerCase();
-    await db.update(attributesTable).set({ value, timestamp: ts })
-      .where(and(
-        eq(attributesTable.assetId, assetId as string),
-        sql`(lower(${attributesTable.tagName}) = ${full} OR lower(${attributesTable.tagName}) = ${bare})`,
-      ));
-    // Secondary: explicit sourceMetric remapping (attribute.sourceMetric = "energy_meter_kwh")
-    await db.update(attributesTable).set({ value, timestamp: ts })
-      .where(and(eq(attributesTable.assetId, assetId as string), sql`lower(${attributesTable.sourceMetric}) = ${metric.toLowerCase()}`));
-  }
-  if (n.sensorSerial) {
-    await db.update(attributesTable).set({ value: n.sensorSerial, timestamp: ts })
-      .where(and(eq(attributesTable.assetId, assetId as string), eq(attributesTable.tagName, `${n.deviceId}.sensor_serial`)));
-  }
+  // Matched in memory and written in one statement (it was two UPDATEs per metric).
+  const attrs = attrsByAsset.get(assetId) ?? [];
+  const assigned = assignAttributeValues(attrs, n.deviceId, metrics, n.sensorSerial);
+  const written = await writeAttributeValues(assigned, ts);
+  for (const a of attrs) if (written.has(a.id)) a.value = assigned.get(a.id);
 
-  // (Timestamp attributes are bound after the loop — see below.)
-
-  // Evaluate runtime (computed) attributes
-  await evaluateRuntimeAttributes(assetId as string, ts);
+  // Evaluate runtime (computed) attributes from the values just written.
+  await evaluateRuntimeAttributes(attrs, ts);
 
   // Evaluate alarm rules — skip when asset is in maintenance mode
   const shareAlarms = share.maintenance
@@ -642,8 +900,7 @@ export async function processNormalised(n: NormalisedPayload, assetIdHint?: stri
   }
 
   for (const ev of shareAlarms) {
-    broadcast("alarm", {
-      event:     ev.event,
+    const alarmPayload = {
       alarmId:   ev.alarmId,
       ruleName:  ev.ruleName,
       metric:    ev.metric,
@@ -654,7 +911,13 @@ export async function processNormalised(n: NormalisedPayload, assetIdHint?: stri
       assetId,
       assetName,
       timestamp: ts.toISOString(),
-    });
+    };
+    broadcast("alarm", { event: ev.event, ...alarmPayload });
+    // Configured destinations (Integration Hub). Fire-and-forget: a slow or
+    // failing receiver must never hold up ingest. forwardToDestinations does
+    // not throw; the catch is belt and braces for an unhandled rejection.
+    void forwardToDestinations("alarm", { alarmEvent: ev.event, ...alarmPayload })
+      .catch((err) => logger.warn({ err }, "alarm forwarding to destinations failed"));
   }
 
   recordsWritten += records.length;
@@ -685,7 +948,11 @@ router.get("/ingest/seen-devices", (_req, res): void => {
 
 // Register a deviceId as a known device WITHOUT telemetry — used when a device
 // payload is pasted into a template, so the id becomes selectable for assets.
-router.post("/ingest/register-device", (req, res): void => {
+//
+// A signed-in user passes on the `brokers` module (authorize). A machine caller
+// goes through the same checks as /ingest/payload: `ingest:write` scope, status,
+// expiry, IP allowlist and the per-client rate limit. Any key used to be enough.
+router.post("/ingest/register-device", ingestAuth, (req, res): void => {
   const deviceId = (req.body?.deviceId ?? "").toString().trim();
   if (!deviceId) { res.status(400).json({ error: "deviceId required" }); return; }
   recordDevice(deviceId, false);
@@ -730,8 +997,11 @@ router.post(["/ingest/validate", "/ingest/k/:clientId/validate", "/ingest/e/:tok
 
   // Every asset claiming this device id — a payload split across section assets has
   // more than one, and the dry run should show exactly which metric lands where.
-  const claimants = await db.select({ id: assetsTable.id, name: assetsTable.name })
-    .from(assetsTable).where(eq(assetsTable.identifier, n.deviceId));
+  const scope = await ingestScope(req);
+  const claimants = (await db.select({ id: assetsTable.id, name: assetsTable.name })
+    .from(assetsTable).where(eq(assetsTable.identifier, n.deviceId)))
+    // Assets outside the caller's project are neither written to nor named.
+    .filter((c) => !scope || scope.has(c.id));
   const asset = claimants[0];
 
   const metricCount = Object.keys(n.metrics).length;
@@ -902,19 +1172,35 @@ router.post(["/ingest/payload", "/ingest/k/:clientId/payload", "/ingest/e/:token
   // Single-device model: the whole tree is attributed to the top-level deviceId
   // (e.g. "testing" = the root). normalise() deep-flattens the nested tree into
   // dotted metric keys; per-machine views resolve their slice by name.
+  const scope = await ingestScope(req);
   const normalised = normalise(body);
   if (!normalised) {
+    // An array of readings. Every item is processed; only the last one used to be
+    // stored, while the response still said success.
     if (Array.isArray(req.body) && req.body.length > 0) {
-      const item = req.body[req.body.length - 1] as Record<string, unknown>;
-      const fallback = normalise(item);
-      if (fallback) {
-        const assetIdHint = typeof item.assetId === "string" ? item.assetId : undefined;
-        const result = await processNormalised(fallback, assetIdHint);
-        const triggered = result.alarmEvents.filter((e) => e.event === "triggered");
-        const cleared   = result.alarmEvents.filter((e) => e.event === "cleared");
-        res.json({ success: true, recordsWritten: result.recordsWritten, assetId: result.assetId,
-          assetName: result.assetName, message: `Ingested ${result.recordsWritten} metric(s)`,
-          alarmsTriggered: triggered.length, alarmsCleared: cleared.length, alarmEvents: result.alarmEvents });
+      const items = req.body as Record<string, unknown>[];
+      let recordsWritten = 0, accepted = 0, rejected = 0, outOfScope = 0, triggered = 0, cleared = 0;
+      const alarmEvents: AlarmEvent[] = [];
+      for (const item of items) {
+        const n = item && typeof item === "object" ? normalise(item) : null;
+        if (!n) { rejected++; continue; }
+        const hint = typeof item.assetId === "string" ? item.assetId : undefined;
+        const result = await processNormalised(n, hint, true, scope);
+        if (result.outOfScope) { outOfScope++; recordIngestOutOfScope(req, n.deviceId); continue; }
+        if (result.assetId) accepted++;
+        recordsWritten += result.recordsWritten;
+        triggered += result.alarmEvents.filter((e) => e.event === "triggered").length;
+        cleared   += result.alarmEvents.filter((e) => e.event === "cleared").length;
+        alarmEvents.push(...result.alarmEvents);
+      }
+      if (accepted > 0 || rejected < items.length) {
+        res.status(outOfScope > 0 && accepted === 0 ? 403 : 200).json({
+          success: rejected === 0 && outOfScope === 0 && accepted > 0,
+          items: items.length, matched: accepted, rejected, outOfScope, recordsWritten,
+          message: `Ingested ${recordsWritten} metric(s) from ${accepted} of ${items.length} reading(s)`,
+          alarmsTriggered: triggered, alarmsCleared: cleared, alarmEvents,
+          ...(outOfScope > 0 && { code: "out_of_project_scope" }),
+        });
         return;
       }
     }
@@ -938,7 +1224,17 @@ router.post(["/ingest/payload", "/ingest/k/:clientId/payload", "/ingest/e/:token
   const assetIdHint = typeof body.assetId === "string" ? body.assetId : undefined;
   // 1) Attribute the whole flattened tree to the root device owner (identifier ==
   //    payload deviceId). By-Asset dashboards read these dotted keys and filter by name.
-  const result = await processNormalised(normalised, assetIdHint);
+  const result = await processNormalised(normalised, assetIdHint, true, scope);
+  if (result.outOfScope) {
+    recordIngestOutOfScope(req, normalised.deviceId);
+    res.status(403).json({
+      success: false,
+      error: "This device belongs to a project this credential cannot write to.",
+      code: "out_of_project_scope",
+      hint: "Use an API key assigned to the device's project, or an unassigned key.",
+    });
+    return;
+  }
 
   // 2) Distribute each machine's own slice to its asset, resolved by NAME path under
   //    the root. This populates every machine's own Attributes/Telemetry. Gated on the
@@ -973,6 +1269,7 @@ router.post(["/ingest/payload", "/ingest/k/:clientId/payload", "/ingest/e/:token
           { deviceId: normalised.deviceId, timestamp: normalised.timestamp, metrics: rec.metrics, payloadFormat: "flat" },
           machineAssetId,
           false, // no WS broadcast per machine — avoids flooding the UI
+          scope,
         );
         machinesAttributed++;
       }
@@ -983,7 +1280,11 @@ router.post(["/ingest/payload", "/ingest/k/:clientId/payload", "/ingest/e/:token
   const cleared   = result.alarmEvents.filter((e) => e.event === "cleared");
   res.json({ success: true, recordsWritten: result.recordsWritten, assetId: result.assetId,
     assetName: result.assetName, machinesAttributed,
-    message: `Ingested ${result.recordsWritten} metric(s); ${machinesAttributed} machine(s) attributed`,
+    // False when no asset has this deviceId. Matching is exact and case-sensitive.
+    matched: !!result.assetId,
+    message: result.assetId
+      ? `Ingested ${result.recordsWritten} metric(s); ${machinesAttributed} machine(s) attributed`
+      : `No asset has the identifier "${normalised.deviceId}" (matching is case-sensitive), so nothing was stored.`,
     alarmsTriggered: triggered.length, alarmsCleared: cleared.length, alarmEvents: result.alarmEvents });
 });
 
@@ -995,19 +1296,21 @@ router.post(["/ingest/batch", "/ingest/k/:clientId/batch", "/ingest/e/:token/bat
   if (rejectUnusableBody(req, res)) return;
   const items = req.body;
   if (!Array.isArray(items)) { res.status(400).json({ error: "Body must be an array" }); return; }
-  let successCount = 0, failureCount = 0, totalTriggered = 0, totalCleared = 0;
+  const scope = await ingestScope(req);
+  let successCount = 0, failureCount = 0, totalTriggered = 0, totalCleared = 0, outOfScopeCount = 0;
   for (const item of items) {
     try {
       const n = normalise(item as Record<string, unknown>);
       if (!n) { failureCount++; continue; }
-      const result = await processNormalised(n);
+      const result = await processNormalised(n, undefined, true, scope);
+      if (result.outOfScope) { outOfScopeCount++; failureCount++; recordIngestOutOfScope(req, n.deviceId); continue; }
       totalTriggered += result.alarmEvents.filter((e) => e.event === "triggered").length;
       totalCleared   += result.alarmEvents.filter((e) => e.event === "cleared").length;
       successCount++;
     } catch { failureCount++; }
   }
   res.json({ success: failureCount === 0, totalRecords: items.length, successCount, failureCount,
-    alarmsTriggered: totalTriggered, alarmsCleared: totalCleared });
+    outOfScopeCount, alarmsTriggered: totalTriggered, alarmsCleared: totalCleared });
 });
 
 // ── Distinct metrics for an asset (for widget dialog when no attributes exist) ─
@@ -1046,11 +1349,14 @@ router.get("/telemetry/:assetId/export", async (req, res): Promise<void> => {
   const records = await db.select().from(telemetryTable).where(and(...conditions))
     .orderBy(desc(telemetryTable.timestamp)).limit(50000);
   const header = "id,assetId,deviceId,metric,value,quality,timestamp";
+  // csvCell quotes AND neutralises spreadsheet formulas: a device string or
+  // metric name starting with = + - @ used to run as a formula in Excel.
   const rows = records.map((r) =>
     [r.id, r.assetId, r.deviceId ?? "", r.metric,
-      typeof r.value === "object" ? JSON.stringify(r.value) : String(r.value ?? ""),
+      r.value !== null && typeof r.value === "object" ? JSON.stringify(r.value) : r.value,
       r.quality ?? "", r.timestamp?.toISOString() ?? ""]
-      .map((v) => `"${String(v).replace(/"/g, '""')}"`)
+      // A real number cannot be a formula; written as-is so "-5" stays numeric.
+      .map((v) => (typeof v === "number" && Number.isFinite(v) ? String(v) : csvCell(v)))
       .join(",")
   );
   const csv = [header, ...rows].join("\n");

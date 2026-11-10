@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useVizNodes, useVizNodeActions, migrateLocalDashboards, type VizNode as StoredNode } from "./vizStore";
+import { useVizNodes, useVizNodeActions, migrateLocalDashboards, type VizNode as StoredNode, type VizNodeAccess } from "./vizStore";
 
 // The Visualization section owns its OWN hierarchy, independent of the asset
 // hierarchy in Asset Management. Nodes here are purely organisational containers
@@ -16,11 +16,14 @@ export interface VizNode {
   id: string;
   name: string;
   parentId: string | null;
+  projectId: string | null;
+  access: VizNodeAccess;
 }
 
-export function useVizHierarchy() {
+/** With a project id, shows that project's nodes plus unassigned ones. */
+export function useVizHierarchy(projectId?: string | null) {
   const { nodes: stored, loading, failed } = useVizNodes();
-  const { createNode, renameNode: renameOnServer, deleteNode: deleteOnServer } = useVizNodeActions();
+  const { createNode, renameNode: renameOnServer, deleteNode: deleteOnServer, assignProject, invalidate } = useVizNodeActions();
 
   // Anything this browser still holds is pushed up once, on first mount, then
   // never again. `ran` guards against React's development double-invoke firing
@@ -30,12 +33,18 @@ export function useVizHierarchy() {
   useEffect(() => {
     if (ran.current) return;
     ran.current = true;
-    migrateLocalDashboards().catch((e: Error) => setMigrationError(e));
-  }, []);
+    // Refetch afterwards: the tree may already have loaded empty, and the
+    // dashboards just uploaded must appear without a manual reload.
+    migrateLocalDashboards()
+      .catch((e: Error) => setMigrationError(e))
+      .finally(invalidate);
+  }, [invalidate]);
 
   const nodes: VizNode[] = useMemo(
-    () => stored.map((n: StoredNode) => ({ id: n.id, name: n.name, parentId: n.parentId })),
-    [stored],
+    () => stored
+      .filter((n: StoredNode) => !projectId || !n.projectId || n.projectId === projectId)
+      .map((n: StoredNode) => ({ id: n.id, name: n.name, parentId: n.parentId, projectId: n.projectId, access: n.access })),
+    [stored, projectId],
   );
 
   // parentId -> children, with "root" holding the top level (shape the shared
@@ -66,8 +75,8 @@ export function useVizHierarchy() {
   // created — which is why the id is minted client-side rather than by the
   // database.
   const addNode = useCallback(
-    (name: string, parentId: string | null): string => createNode(name, parentId),
-    [createNode],
+    (name: string, parentId: string | null): string => createNode(name, parentId, projectId ?? null),
+    [createNode, projectId],
   );
 
   const renameNode = useCallback(
@@ -86,7 +95,7 @@ export function useVizHierarchy() {
   }, [deleteOnServer, subtreeIds]);
 
   return {
-    nodes, childrenByParent, subtreeIds, addNode, renameNode, deleteNode,
+    nodes, childrenByParent, subtreeIds, addNode, renameNode, deleteNode, assignProject,
     loading,
     /** The tree could not be loaded — distinct from "there are no nodes yet". */
     failed,

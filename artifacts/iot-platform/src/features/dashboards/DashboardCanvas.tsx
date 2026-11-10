@@ -7,8 +7,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { GRID_COLS, ROW_H, MIN_W, MIN_H, type Widget } from "./types";
 import { WidgetView, widgetDef } from "./registry";
+import { largestFreeSize, nearestFreeSpot } from "./layout";
 import { WidgetTimePopover } from "./WidgetTimePopover";
 import { newId } from "./useDashboards";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import type { TimeCfg } from "./timeRange";
 
 // Breathing room around and between widgets. PAD keeps the outermost widgets off
@@ -34,11 +36,13 @@ interface Props {
   // The dashboard-wide range, read live by any widget that hasn't set its own
   // (see WidgetView) — not copied into any widget's stored config.
   dashTimeCfg?: TimeCfg | null;
+  // View only: widgets cannot be moved, resized, edited or removed.
+  readOnly?: boolean;
 }
 
 export function DashboardCanvas({
   widgets, setWidgets, selectedId, onSelect, onDropWidget,
-  updateConfig, refreshNonces, onRefreshWidget, onCopyWidget, onEditWidget, futuristic, dashTimeCfg,
+  updateConfig, refreshNonces, onRefreshWidget, onCopyWidget, onEditWidget, futuristic, dashTimeCfg, readOnly,
 }: Props) {
   const ref = useRef<HTMLDivElement>(null);
   // Same node as `ref`, but as state so it can be handed to Radix as a collision
@@ -70,8 +74,9 @@ export function DashboardCanvas({
     const dy = Math.round((e.clientY - d.sy) / ROW_H);
     setWidgets((prev) => prev.map((w) => {
       if (w.id !== d.id) return w;
-      if (d.mode === "move") return { ...w, x: Math.max(0, Math.min(GRID_COLS - w.w, d.orig.x + dx)), y: Math.max(0, d.orig.y + dy) };
-      return { ...w, w: Math.max(MIN_W, Math.min(GRID_COLS - w.x, d.orig.w + dx)), h: Math.max(MIN_H, d.orig.h + dy) };
+      const others = prev.filter((o) => o.id !== d.id);
+      if (d.mode === "move") return { ...w, ...nearestFreeSpot(others, w.w, w.h, d.orig.x + dx, d.orig.y + dy) };
+      return { ...w, ...largestFreeSize(others, w, Math.max(MIN_W, Math.min(GRID_COLS - w.x, d.orig.w + dx)), Math.max(MIN_H, d.orig.h + dy)) };
     }));
   }, [cellW, setWidgets]);
 
@@ -97,11 +102,12 @@ export function DashboardCanvas({
     const rect = ref.current.getBoundingClientRect();
     const x = Math.max(0, Math.min(GRID_COLS - def.w, Math.floor((e.clientX - rect.left - PAD) / cellW)));
     const y = Math.max(0, Math.floor((e.clientY - rect.top + ref.current.scrollTop - PAD) / ROW_H));
-    onDropWidget(type, x, y);
+    const spot = nearestFreeSpot(widgets, def.w, def.h, x, y);
+    onDropWidget(type, spot.x, spot.y);
   }
 
   const removeWidget = (id: string) => { setWidgets((prev) => prev.filter((w) => w.id !== id)); onSelect(null); };
-  const dupWidget = (w: Widget) => { const c = { ...w, id: newId("w"), x: Math.min(GRID_COLS - w.w, w.x + 1), y: w.y + 1 }; setWidgets((prev) => [...prev, c]); onSelect(c.id); };
+  const dupWidget = (w: Widget) => { const c = { ...w, id: newId("w"), ...nearestFreeSpot(widgets, w.w, w.h, w.x, w.y + w.h) }; setWidgets((prev) => [...prev, c]); onSelect(c.id); };
 
   const maxRow = widgets.reduce((m, w) => Math.max(m, w.y + w.h), 0);
   const canvasRows = Math.max(maxRow + 4, 16);
@@ -127,7 +133,7 @@ export function DashboardCanvas({
       <div className="relative" style={{ height: canvasRows * ROW_H + PAD * 2 }}>
         {widgets.length === 0 && (
           <div className="absolute inset-0 flex items-center justify-center text-muted-foreground text-sm pointer-events-none">
-            Click "Add Widget" above, then drag a widget onto the canvas
+            {readOnly ? "This dashboard has no widgets yet" : 'Click "Add Widget" above, then drag a widget onto the canvas'}
           </div>
         )}
         {widgets.map((w) => {
@@ -151,8 +157,8 @@ export function DashboardCanvas({
             >
               {/* header / drag handle */}
               <div
-                onPointerDown={(e) => startDrag(e, w, "move")}
-                className="flex items-center gap-1 px-1.5 h-6 shrink-0 border-b border-border bg-muted/50 cursor-move select-none"
+                onPointerDown={readOnly ? undefined : (e) => startDrag(e, w, "move")}
+                className={cn("flex items-center gap-1 px-1.5 h-6 shrink-0 border-b border-border bg-muted/50 select-none", !readOnly && "cursor-move")}
               >
                 <GripVertical className="w-3 h-3 text-muted-foreground shrink-0" />
                 <span className="text-[11px] truncate flex-1">
@@ -165,12 +171,12 @@ export function DashboardCanvas({
                   {w.config?.subtitle ? <span className="text-muted-foreground"> · {w.config.subtitle}</span> : null}
                 </span>
                 <div onPointerDown={(e) => e.stopPropagation()} onClick={(e) => e.stopPropagation()} className="flex items-center shrink-0 text-muted-foreground">
-                  <WidgetTimePopover widget={w} updateConfig={updateConfig} dashTimeCfg={dashTimeCfg} boundary={canvasEl} />
-                  <button onClick={() => onEditWidget(w.id)} title="Edit widget" className="p-0.5 hover:text-foreground"><Pencil className="w-3 h-3" /></button>
+                  {!readOnly && <WidgetTimePopover widget={w} updateConfig={updateConfig} dashTimeCfg={dashTimeCfg} boundary={canvasEl} />}
+                  {!readOnly && <button onClick={() => onEditWidget(w.id)} title="Edit widget" className="p-0.5 hover:text-foreground"><Pencil className="w-3 h-3" /></button>}
                   <button onClick={() => onRefreshWidget(w.id)} title="Refresh" className="p-0.5 hover:text-foreground"><RefreshCw className="w-3 h-3" /></button>
                   <button onClick={() => setFullscreenId(w.id)} title="Fullscreen" className="p-0.5 hover:text-foreground"><Maximize2 className="w-3 h-3" /></button>
-                  <button onClick={() => removeWidget(w.id)} title="Delete widget" className="p-0.5 hover:text-destructive"><Trash2 className="w-3 h-3" /></button>
-                  <DropdownMenu>
+                  {!readOnly && <button onClick={() => removeWidget(w.id)} title="Delete widget" className="p-0.5 hover:text-destructive"><Trash2 className="w-3 h-3" /></button>}
+                  {!readOnly && <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <button title="More options" className="p-0.5 hover:text-foreground"><MoreVertical className="w-3 h-3" /></button>
                     </DropdownMenuTrigger>
@@ -179,20 +185,21 @@ export function DashboardCanvas({
                       <DropdownMenuItem onClick={() => dupWidget(w)}><Copy className="w-3.5 h-3.5 mr-2" /> Clone Widget</DropdownMenuItem>
                       <DropdownMenuItem onClick={() => onCopyWidget(w)}><Clipboard className="w-3.5 h-3.5 mr-2" /> Copy to Clipboard</DropdownMenuItem>
                     </DropdownMenuContent>
-                  </DropdownMenu>
+                  </DropdownMenu>}
                 </div>
               </div>
               <div className="flex-1 min-h-0 p-1.5 relative">
-                {w.config?.imageUrl && (
+                {/* The Image widget draws imageUrl itself, at full strength. */}
+                {w.config?.imageUrl && w.type !== "image" && (
                   <img src={w.config.imageUrl} alt="" className="absolute inset-0 w-full h-full object-cover opacity-[0.08] pointer-events-none select-none"
                     onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />
                 )}
-                <div className="relative h-full"><WidgetView widget={w} refreshNonce={refreshNonces[w.id] ?? 0} dashTimeCfg={dashTimeCfg} /></div>
+                <div className="relative h-full"><ErrorBoundary scope="widget" resetKey={w}><WidgetView widget={w} refreshNonce={refreshNonces[w.id] ?? 0} dashTimeCfg={dashTimeCfg} /></ErrorBoundary></div>
               </div>
               {/* resize handle */}
-              <div onPointerDown={(e) => startDrag(e, w, "resize")}
+              {!readOnly && <div onPointerDown={(e) => startDrag(e, w, "resize")}
                 className="absolute bottom-0 right-0 w-3 h-3 cursor-se-resize"
-                style={{ background: "linear-gradient(135deg, transparent 50%, hsl(var(--muted-foreground)) 50%)" }} />
+                style={{ background: "linear-gradient(135deg, transparent 50%, hsl(var(--muted-foreground)) 50%)" }} />}
             </div>
           );
         })}
@@ -207,7 +214,7 @@ export function DashboardCanvas({
                 here to say what you are looking at. */}
             <DialogTitle>{fullscreenWidget?.config?.title || widgetDef(fullscreenWidget?.type ?? "")?.label || "Widget"}</DialogTitle>
           </DialogHeader>
-          <div className="h-[60vh] p-1">{fullscreenWidget && <WidgetView widget={fullscreenWidget} refreshNonce={refreshNonces[fullscreenWidget.id] ?? 0} dashTimeCfg={dashTimeCfg} />}</div>
+          <div className="h-[60vh] p-1">{fullscreenWidget && <ErrorBoundary scope="widget" resetKey={fullscreenWidget}><WidgetView widget={fullscreenWidget} refreshNonce={refreshNonces[fullscreenWidget.id] ?? 0} dashTimeCfg={dashTimeCfg} /></ErrorBoundary>}</div>
         </DialogContent>
       </Dialog>
     </div>

@@ -1,4 +1,4 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Request } from "express";
 import { respondInvalid } from "../lib/respond";
 import { eq } from "drizzle-orm";
 import { db, alarmRulesTable } from "@workspace/db";
@@ -6,15 +6,51 @@ import {
   CreateAlarmRuleBody, UpdateAlarmRuleBody,
   UpdateAlarmRuleParams, DeleteAlarmRuleParams,
 } from "@workspace/api-zod";
-import { checkOutboundUrl, assertSafeOutboundUrl, UnsafeUrlError } from "../lib/outbound-url";
+import { checkOutboundUrl, assertSafeOutboundUrl, safeFetch, UnsafeUrlError } from "../lib/outbound-url";
 import { logger } from "../lib/logger";
 import { correlationIdOf } from "../lib/errors";
+import { closeOpenAlarmsForRule } from "../lib/alarm-lifecycle";
+import { forgetRuleDelays, invalidateAlarmRuleCache } from "./ingest";
+import { hasPermission } from "../lib/rbac";
 
 const router: IRouter = Router();
 
+/**
+ * Webhook URLs are shown only to people who can manage alarm rules.
+ *
+ * A Slack or Teams incoming-webhook URL is a bearer credential: whoever has it
+ * can post to that channel. Every alarm reader could see it in the rule list.
+ * Everyone else now gets the scheme and host only, followed by WEBHOOK_MASK, so the UI
+ * can still show that a webhook is configured and where it goes.
+ */
+export const WEBHOOK_MASK = "••••";
+
+export function maskWebhookUrl(url: string | null): string | null {
+  if (!url) return url;
+  try {
+    const u = new URL(url);
+    return `${u.protocol}//${u.host}/${WEBHOOK_MASK}`;
+  } catch {
+    return WEBHOOK_MASK;
+  }
+}
+
+/** A value that came from maskWebhookUrl, sent back by a client. Never saved. */
+export function isMaskedWebhookUrl(value: unknown): boolean {
+  return typeof value === "string" && value.includes(WEBHOOK_MASK);
+}
+
+function canSeeWebhooks(req: Request): boolean {
+  return !!req.principal && hasPermission(req.principal.access, "manage_alarms");
+}
+
+function forClient<T extends { webhookUrl: string | null }>(req: Request, rule: T): T {
+  return canSeeWebhooks(req) ? rule : { ...rule, webhookUrl: maskWebhookUrl(rule.webhookUrl) };
+}
+
 router.get("/alarm-rules", async (req, res): Promise<void> => {
   const rules = await db.select().from(alarmRulesTable).orderBy(alarmRulesTable.name);
-  res.json(rules);
+  res.json(rules.map((r) => forClient(req, r)));
 });
 
 router.post("/alarm-rules", async (req, res): Promise<void> => {
@@ -25,6 +61,10 @@ router.post("/alarm-rules", async (req, res): Promise<void> => {
   // The server is what will call this address, so it is checked here rather than
   // only in the browser — see lib/outbound-url.ts for why that matters.
   const newWebhookUrl = typeof body.webhookUrl === "string" ? body.webhookUrl || null : null;
+  if (isMaskedWebhookUrl(newWebhookUrl)) {
+    res.status(400).json({ error: "Enter the full webhook URL.", code: "masked_webhook_url" });
+    return;
+  }
   if (newWebhookUrl) {
     const check = checkOutboundUrl(newWebhookUrl);
     if (!check.ok) { res.status(400).json({ error: check.error, code: "unsafe_url" }); return; }
@@ -49,7 +89,8 @@ router.post("/alarm-rules", async (req, res): Promise<void> => {
     webhookUrl: newWebhookUrl,
     webhookEnabled: typeof body.webhookEnabled === "boolean" ? body.webhookEnabled : false,
   }).returning();
-  res.status(201).json(rule);
+  invalidateAlarmRuleCache();
+  res.status(201).json(forClient(req, rule));
 });
 
 router.put("/alarm-rules/:id", async (req, res): Promise<void> => {
@@ -68,7 +109,16 @@ router.put("/alarm-rules/:id", async (req, res): Promise<void> => {
   if (parsed.data.offDelay !== undefined)           updateData.offDelay = parsed.data.offDelay;
   if (parsed.data.enabled !== undefined)            updateData.enabled = parsed.data.enabled;
   if (parsed.data.requireAcknowledge !== undefined) updateData.requireAcknowledge = parsed.data.requireAcknowledge;
-  if (body.webhookUrl !== undefined) {
+  // These define what the rule watches. They were accepted by the form but not
+  // saved, so an edited rule kept evaluating its old condition.
+  if (parsed.data.assetId !== undefined)            updateData.assetId = parsed.data.assetId;
+  if (parsed.data.alarmType !== undefined)          updateData.alarmType = parsed.data.alarmType;
+  if (parsed.data.metric !== undefined)             updateData.metric = parsed.data.metric;
+  if (parsed.data.operator !== undefined)           updateData.operator = parsed.data.operator;
+  if (parsed.data.scanRate !== undefined)           updateData.scanRate = parsed.data.scanRate;
+  // A masked URL sent back (e.g. a form that loaded the list for a reader and
+  // was saved later) means "unchanged". Saving it would overwrite the real URL.
+  if (body.webhookUrl !== undefined && !isMaskedWebhookUrl(body.webhookUrl)) {
     // The server is the one that will call this address, so it is checked
     // here rather than only in the browser — see lib/outbound-url.ts.
     const url = body.webhookUrl || null;
@@ -80,9 +130,29 @@ router.put("/alarm-rules/:id", async (req, res): Promise<void> => {
   }
   if (body.webhookEnabled !== undefined) updateData.webhookEnabled = Boolean(body.webhookEnabled);
   if (body.rocWindow !== undefined)      updateData.rocWindow = Number(body.rocWindow) || 60;
-  const [rule] = await db.update(alarmRulesTable).set(updateData).where(eq(alarmRulesTable.id, params.data.id)).returning();
+  if (Object.keys(updateData).length === 0) {
+    res.status(400).json({ error: "No changes were sent.", code: "no_changes" });
+    return;
+  }
+
+  const [before] = await db.select().from(alarmRulesTable).where(eq(alarmRulesTable.id, params.data.id));
+  if (!before) { res.status(404).json({ error: "Alarm rule not found" }); return; }
+  const [rule] = await db.update(alarmRulesTable).set({ ...updateData, updatedAt: new Date() })
+    .where(eq(alarmRulesTable.id, params.data.id)).returning();
   if (!rule) { res.status(404).json({ error: "Alarm rule not found" }); return; }
-  res.json(rule);
+  // Ingest caches enabled rules for a few seconds; an edit takes effect now.
+  invalidateAlarmRuleCache();
+
+  // Disabled rules are not evaluated, and a redefined rule no longer describes
+  // the condition its open alarms were raised for. Either way those alarms could
+  // never clear on their own, so they are closed now.
+  const redefined = (["assetId", "alarmType", "metric", "operator", "threshold"] as const)
+    .some((k) => k in updateData && updateData[k] !== before[k]);
+  if ((before.enabled && rule.enabled === false) || redefined) {
+    await closeOpenAlarmsForRule(rule.id, rule.name);
+    forgetRuleDelays(rule.id);
+  }
+  res.json(forClient(req, rule));
 });
 
 router.post("/alarm-rules/:id/test-webhook", async (req, res): Promise<void> => {
@@ -99,7 +169,7 @@ router.post("/alarm-rules/:id/test-webhook", async (req, res): Promise<void> => 
     return;
   }
   try {
-    const resp = await fetch(rule.webhookUrl, {
+    const resp = await safeFetch(rule.webhookUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ event: "test", ruleName: rule.name, severity: rule.severity,
@@ -124,6 +194,9 @@ router.delete("/alarm-rules/:id", async (req, res): Promise<void> => {
   if (!params.success) { respondInvalid(req, res, params.error); return; }
   const [rule] = await db.delete(alarmRulesTable).where(eq(alarmRulesTable.id, params.data.id)).returning();
   if (!rule) { res.status(404).json({ error: "Alarm rule not found" }); return; }
+  // Open alarms of a deleted rule would otherwise stay open for ever.
+  await closeOpenAlarmsForRule(rule.id, rule.name);
+  forgetRuleDelays(rule.id);
   res.sendStatus(204);
 });
 

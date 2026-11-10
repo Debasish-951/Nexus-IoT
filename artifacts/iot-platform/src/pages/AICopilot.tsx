@@ -97,18 +97,25 @@ export default function AICopilot() {
     const action = new URLSearchParams(search).get("action");
     if (!action || lastAction.current === action) return;
     const qa = QUICK_ACTIONS.find((a) => a.key === action);
-    if (qa?.prompt) {
-      lastAction.current = action;
-      send(qa.prompt);
-    }
+    // Marked handled only once send() accepts it. Clicked while an answer was
+    // still loading, it used to be marked and then dropped; now it waits, and
+    // this effect re-runs when loading ends.
+    if (qa?.prompt && send(qa.prompt)) lastAction.current = action;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [search]);
+  }, [search, loading, rangeError]);
 
-  async function send(question: string) {
+  /** Returns false when the question was not sent (empty, busy, or bad range). */
+  function send(question: string): boolean {
     const q = question.trim();
-    if (!q || loading || rangeError) return;
+    if (!q || loading || rangeError) return false;
+    void sendNow(q);
+    return true;
+  }
 
-    const history = messages.map((m) => ({ role: m.role, content: m.content }));
+  async function sendNow(q: string) {
+
+    // Error bubbles are not part of the conversation: resending them only spends tokens.
+    const history = messages.filter((m) => !m.error).map((m) => ({ role: m.role, content: m.content }));
     const next: Msg[] = [...messages, { role: "user", content: q }];
     setMessages(next);
     setInput("");

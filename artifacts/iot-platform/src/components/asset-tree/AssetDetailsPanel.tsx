@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import {
-  Asset, deriveStatus, STATUS_STYLES, siteOf, useAssetHealthMap, HealthBar, STALE_AFTER_MS,
+  Asset, deriveStatus, STATUS_STYLES, siteOf, useAssetHealthMap, HealthBar, STALE_AFTER_MS, lastUpdatedAt,
 } from "@/pages/assetShared";
 
 function Info({ label, value, mono }: { label: string; value: React.ReactNode; mono?: boolean }) {
@@ -40,6 +40,7 @@ export function AssetDetailsPanel({
 
   const h = healthMap[asset.id] ?? null;
   const status = deriveStatus(asset, h);
+  const updated = lastUpdatedAt(asset.updatedAt, h?.lastSeen);
 
   return (
     <div className="p-6 overflow-auto h-full">
@@ -65,7 +66,7 @@ export function AssetDetailsPanel({
             <HealthBar pct={(!!h?.lastSeen && (Date.now() - new Date(h.lastSeen).getTime()) <= STALE_AFTER_MS) ? 100 : 0} />
           </div>
           <Info label="Created / Installed" value={asset.createdAt ? format(new Date(asset.createdAt), "yyyy-MM-dd") : "—"} />
-          <Info label="Last Updated" value={asset.updatedAt ? format(new Date(asset.updatedAt), "yyyy-MM-dd HH:mm") : "—"} />
+          <Info label="Last Updated" value={updated ? format(updated, "yyyy-MM-dd HH:mm") : "—"} />
         </div>
       </div>
 

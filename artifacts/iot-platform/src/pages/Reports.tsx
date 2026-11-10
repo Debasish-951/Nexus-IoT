@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useListAssets, useListAssetAttributes } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -7,6 +7,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Separator } from "@/components/ui/separator";
+import { useToast } from "@/hooks/use-toast";
+import { apiFetch } from "@/lib/auth-api";
+import { toCsv, downloadCsvText } from "@/lib/csv";
+import { useCurrentUser } from "@/contexts/UserContext";
+import { useProjectScope } from "@/hooks/useProjectScope";
+import { describeApiError, formatApiError } from "@/lib/validation";
 import {
   FileText, Download, Play, RefreshCw, Table, BarChart2,
   ClipboardList, AlertTriangle, Blocks, TrendingUp, Activity,
@@ -99,12 +105,7 @@ const BUCKETS = [
 function downloadCsv(rows: Record<string, unknown>[], filename: string) {
   if (!rows.length) return;
   const headers = Object.keys(rows[0]);
-  const lines = [
-    headers.join(","),
-    ...rows.map((r) => headers.map((h) => JSON.stringify(r[h] ?? "")).join(",")),
-  ];
-  const blob = new Blob([lines.join("\n")], { type: "text/csv" });
-  const a = document.createElement("a"); a.href = URL.createObjectURL(blob); a.download = filename; a.click();
+  downloadCsvText(toCsv(headers, rows.map((r) => headers.map((h) => r[h] ?? ""))), filename);
 }
 
 function downloadJson(data: unknown, filename: string) {
@@ -291,7 +292,20 @@ function InlineChart({ rows, type }: { rows: Record<string, unknown>[]; type: Re
 }
 
 // ── Main Reports page ──────────────────────────────────────────────────────────
+/**
+ * GET a report source and return its JSON body, or throw with the server's own
+ * error message. An error body (403 project restriction, 400 validation) must
+ * never be read as data — that is how a refused report used to render as an
+ * empty success.
+ */
+async function getReportJson<T>(path: string): Promise<T> {
+  const r = await apiFetch(`${BASE}${path}`);
+  if (!r.ok) throw new Error(formatApiError(await describeApiError(r)));
+  return (await r.json()) as T;
+}
+
 export default function Reports() {
+  const { toast } = useToast();
   const [reportType, setReportType] = useState<ReportType>("telemetry");
   const [assetId,  setAssetId]      = useState("all");
   const [metric,   setMetric]       = useState("all");
@@ -310,7 +324,16 @@ export default function Reports() {
     query: { enabled: assetId !== "all", queryKey: ["report-attrs", assetId] },
   });
 
-  const assetList   = (assets as any[] | undefined) ?? [];
+  const { session } = useCurrentUser();
+  const { inScope } = useProjectScope();
+  // A project-restricted user is refused plant-wide figures, so their telemetry
+  // report always names one asset instead of offering "All assets".
+  const singleAssetOnly = !!session?.restrictProjects;
+  // Only the open project's assets.
+  const assetList   = ((assets as any[] | undefined) ?? []).filter((a: any) => inScope(a.id, { strict: true }));
+  useEffect(() => {
+    if (singleAssetOnly && assetId === "all" && assetList.length > 0) setAssetId(assetList[0].id);
+  }, [singleAssetOnly, assetId, assetList]);
   const attrList    = (attributes as any[] | undefined) ?? [];
   const metricKeyOf = (a: any) => a.sourceMetric?.split(".").pop() ?? a.tagName?.split(".").pop() ?? a.name;
   const metricAttrs = attrList.filter((a: any) => metricKeyOf(a));
@@ -329,9 +352,8 @@ export default function Reports() {
         const params = new URLSearchParams({ from, to, bucket, limit: "5000" });
         if (assetId !== "all") params.set("assetId", assetId);
         if (metric !== "all")  params.set("metric", metric);
-        const r = await fetch(`${BASE}/api/system/aggregate?${params}`, { credentials: "include" });
-        const json = await r.json();
-        const data: Record<string, unknown>[] = (json.data ?? []).map((row: any) => ({
+        const json = await getReportJson<{ data?: any[] }>(`/api/system/aggregate?${params}`);
+        const data: Record<string, unknown>[] = (json.data ?? []).filter((row: any) => inScope(row.asset_id, { strict: true })).map((row: any) => ({
           bucket: row.bucket ? format(new Date(row.bucket), "yyyy-MM-dd HH:mm") : "",
           asset_id: row.asset_id, metric: row.metric,
           avg: Number(row.avg_val ?? 0).toFixed(4),
@@ -347,8 +369,7 @@ export default function Reports() {
       } else if (reportType === "alarms") {
         const params = new URLSearchParams({ limit: "5000" });
         if (severity !== "all") params.set("severity", severity);
-        const r = await fetch(`${BASE}/api/alarms?${params}`, { credentials: "include" });
-        const allRows: any[] = await r.json();
+        const allRows = (await getReportJson<any[]>(`/api/alarms?${params}`)).filter((row: any) => inScope(row.assetId, { strict: true }));
         const filtered = allRows.filter((row: any) => {
           const ts = new Date(row.triggeredAt ?? "").getTime();
           return ts >= new Date(from).getTime() && ts <= new Date(to).getTime();
@@ -365,8 +386,7 @@ export default function Reports() {
 
       // ── Asset Status ──────────────────────────────────────────────────
       } else if (reportType === "asset-status") {
-        const r = await fetch(`${BASE}/api/assets`, { credentials: "include" });
-        const allAssets: any[] = await r.json();
+        const allAssets = (await getReportJson<any[]>("/api/assets")).filter((a: any) => inScope(a.id, { strict: true }));
         const data: Record<string, unknown>[] = allAssets.map((a: any) => ({
           id: a.id, name: a.name, identifier: a.identifier,
           attributes: a.attributeCount, children: a.childCount,
@@ -381,12 +401,10 @@ export default function Reports() {
 
       // ── Alarm Analysis by Asset (Manager) ─────────────────────────────
       } else if (reportType === "alarm-analysis") {
-        const [alarmsRes, historyRes] = await Promise.all([
-          fetch(`${BASE}/api/alarms?limit=5000`, { credentials: "include" }),
-          fetch(`${BASE}/api/alarm-history?limit=5000`, { credentials: "include" }),
-        ]);
-        const activeAlarms: any[] = await alarmsRes.json();
-        const historyData: any[] = await historyRes.json();
+        const [activeAlarms, historyData] = (await Promise.all([
+          getReportJson<any[]>("/api/alarms?limit=5000"),
+          getReportJson<any[]>("/api/alarms/history?limit=5000"),
+        ])).map((list) => list.filter((row: any) => inScope(row.assetId, { strict: true })));
 
         // Filter history to date range
         const filtered = historyData.filter((row: any) => {
@@ -448,13 +466,12 @@ export default function Reports() {
 
       // ── Operational Health (Executive) ────────────────────────────────
       } else if (reportType === "operational-health") {
-        const assetsRes = await fetch(`${BASE}/api/assets`, { credentials: "include" });
-        const allAssets: any[] = await assetsRes.json();
+        const allAssets = (await getReportJson<any[]>("/api/assets")).filter((a: any) => inScope(a.id, { strict: true }));
 
+        // A failed health fetch rejects, so that asset reads as Unknown below
+        // rather than borrowing an error body as its health.
         const healthResults = await Promise.allSettled(
-          allAssets.map((a: any) =>
-            fetch(`${BASE}/api/assets/${a.id}/health`, { credentials: "include" }).then((r) => r.json())
-          )
+          allAssets.map((a: any) => getReportJson<any>(`/api/assets/${a.id}/health`))
         );
 
         const data: Record<string, unknown>[] = allAssets.map((asset: any, idx: number) => {
@@ -463,8 +480,11 @@ export default function Reports() {
           const activeAlarms   = h?.activeAlarms ?? 0;
           const health         = h?.health ?? "unknown";
 
-          let status = "Healthy";
-          if (health === "alarm") status = "In Alarm";
+          // Only a positive "ok" from the server counts as Healthy; a failed or
+          // unrecognised health result is Unknown, not green.
+          let status = "Unknown";
+          if (health === "ok") status = "Healthy";
+          else if (health === "alarm") status = "In Alarm";
           else if (health === "stale") status = "Stale / Offline";
 
           return {
@@ -485,6 +505,13 @@ export default function Reports() {
         setMeta({ type: "operational-health", generatedAt: new Date().toISOString(), totalRows: data.length,
           filters: { scope: "All Assets", generatedAt: format(new Date(), "yyyy-MM-dd HH:mm") } });
       }
+    } catch (err) {
+      setRows(null); setMeta(null);
+      toast({
+        title: "Could not generate report",
+        description: err instanceof Error ? err.message : String(err),
+        variant: "destructive",
+      });
     } finally { setLoading(false); }
   }
 
@@ -497,7 +524,7 @@ export default function Reports() {
     if (reportType === "operational-health") {
       if (row.health === "alarm") return "bg-red-50/60 dark:bg-red-950/20";
       if (row.health === "stale") return "bg-yellow-50/60 dark:bg-yellow-950/20";
-      return "bg-green-50/30 dark:bg-green-950/10";
+      if (row.health === "ok")    return "bg-green-50/30 dark:bg-green-950/10";
     }
     if (reportType === "alarms") {
       if (row.severity === "critical") return "bg-red-50/60 dark:bg-red-950/20";
@@ -598,7 +625,7 @@ export default function Reports() {
                   <Select value={assetId} onValueChange={(v) => { setAssetId(v); setMetric("all"); }}>
                     <SelectTrigger className="h-8 text-xs mt-0.5"><SelectValue placeholder="All assets" /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all" className="text-xs">All assets</SelectItem>
+                      {!singleAssetOnly && <SelectItem value="all" className="text-xs">All assets</SelectItem>}
                       {assetList.map((a: any) => <SelectItem key={a.id} value={a.id} className="text-xs">{a.name}</SelectItem>)}
                     </SelectContent>
                   </Select>
@@ -764,11 +791,11 @@ export default function Reports() {
                               }
                               // Status badge
                               if (h === "status" && val) {
-                                const color = val === "active" ? "text-red-600" : val === "acknowledged" ? "text-orange-600" : "text-green-600";
+                                const color = val === "active" ? "text-red-600" : val === "acknowledged" ? "text-orange-600" : val === "Unknown" ? "text-muted-foreground" : "text-green-600";
                                 return <td key={h} className={`px-3 py-1.5 whitespace-nowrap font-medium ${color}`}>{val}</td>;
                               }
                               if (h === "health" && val) {
-                                const color = val === "ok" ? "text-green-600" : val === "alarm" ? "text-red-600" : "text-yellow-600";
+                                const color = val === "ok" ? "text-green-600" : val === "alarm" ? "text-red-600" : val === "stale" ? "text-yellow-600" : "text-muted-foreground";
                                 return <td key={h} className={`px-3 py-1.5 whitespace-nowrap font-medium capitalize ${color}`}>{val}</td>;
                               }
                               return (

@@ -1,5 +1,5 @@
-import { useMemo } from "react";
 import { useLocation } from "wouter";
+import { Activity, Bell, Database, PowerOff, Timer, TriangleAlert } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { DashboardHealthIndex, DashboardAlarmTrend, DashboardAttention, DashboardIngestSeries, HealthNode }
   from "@workspace/api-client-react";
@@ -80,33 +80,101 @@ export function BandOverview({ health, trend, attention, ingest, loading }: {
   const openAlarms = attention?.counts.alarm ?? 0;
   const bySeverity = attention?.counts.bySeverity;
 
-  // Availability is derived here rather than server-side because it is a
-  // presentation of the same downtime term the score already reports — a second
-  // endpoint computing a second definition of "available" is how two numbers
-  // that should agree stop agreeing.
-  const availability = useMemo(() => {
-    if (!health || !trend) return null;
-    const windowSeconds = health.window.days * 86_400;
-    const assets = Math.max(1, health.assetCount);
-    const down = trend.worstPerformers.reduce((s, w) => s + w.openSeconds, 0);
-    return Math.max(0, Math.min(100, 100 - (down / (windowSeconds * assets)) * 100));
-  }, [health, trend]);
-
-  const totalDowntime = trend?.worstPerformers.reduce((s, w) => s + w.openSeconds, 0) ?? 0;
+  // Both come from machine status tags on the server, never from alarm open time.
+  // No machine reporting a status means unknown, which is not the same as 100%.
+  const availability = health?.availability?.percent ?? null;
+  const machineCount = health?.availability?.machineCount ?? 0;
+  const totalDowntime = health?.availability?.downtimeSeconds ?? 0;
 
   return (
     <>
       <BandHeader n={1} title="Overview" question="“How are we doing?”"
                   context={health ? `Rolling ${health.window.days} days` : undefined} />
 
-      <div className="grid grid-cols-1 xl:grid-cols-[280px_1fr_320px] gap-3.5">
+      {/* ── KPI grid ── */}
+      <div className="grid grid-cols-2 md:grid-cols-3 2xl:grid-cols-6 gap-3.5">
+        <KpiTile
+          label="Needs action"
+          icon={TriangleAlert} iconClassName="bg-primary/10 text-primary"
+          value={openAlarms}
+          unit={openAlarms === 1 ? "open alarm" : "open alarms"}
+          className={openAlarms > 0 ? "!border-red-500/40" : undefined}
+          badge={openAlarms > 0
+            ? <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-500/15 text-red-500">{openAlarms}</span>
+            : undefined}
+          footLeft={bySeverity
+            ? `${bySeverity.critical} crit · ${bySeverity.high} high · ${bySeverity.medium} med`
+            : "—"}
+        >
+          <div className="flex gap-[3px] mt-2 mb-1">
+            {(["critical", "high", "medium", "low"] as const).map((s) => {
+              const n = bySeverity?.[s] ?? 0;
+              return <span key={s} className={cn("h-1 rounded-sm", n > 0 ? SEVERITY[s].bar : "bg-muted")}
+                           style={{ flex: Math.max(1, n) }} />;
+            })}
+          </div>
+        </KpiTile>
 
+        <KpiTile
+          label="Availability"
+          icon={Activity} iconClassName="bg-primary/10 text-primary"
+          value={availability == null ? "—" : availability.toFixed(1)}
+          unit={availability == null ? undefined : "%"}
+          footLeft={health ? (machineCount > 0 ? `${health.window.days}-day` : "No machine status data") : undefined}
+          footRight={machineCount > 0 ? `${machineCount} machine(s)` : undefined}
+        >
+          <Track value={availability ?? 0} className="mt-2.5 mb-1" barClassName="bg-green-500" />
+        </KpiTile>
+
+        <KpiTile
+          label="MTTA / MTTR"
+          icon={Timer} iconClassName="bg-primary/10 text-primary"
+          value={<>
+            {formatDuration(trend?.mttaSeconds ?? null)}
+            <span className="text-muted-foreground font-medium"> / {formatDuration(trend?.mttrSeconds ?? null)}</span>
+          </>}
+          footLeft="Acknowledge / resolve"
+          footRight={trend ? `${trend.clearedCount} cleared` : undefined}
+        />
+
+        <KpiTile
+          label="Downtime"
+          icon={PowerOff} iconClassName="bg-primary/10 text-primary"
+          value={machineCount > 0 ? formatDuration(totalDowntime) : "—"}
+          footLeft={health ? (machineCount > 0 ? `${health.window.days}-day` : "No machine status data") : undefined}
+          footRight={machineCount > 0 ? `${machineCount} machine(s)` : undefined}
+        >
+          <Track value={Math.min(100, (totalDowntime / 3600) * 5)} className="mt-2.5 mb-1"
+                 barClassName="bg-orange-500" />
+        </KpiTile>
+
+        <KpiTile
+          label="Data points ingested"
+          icon={Database} iconClassName="bg-primary/10 text-primary"
+          value={formatCount(ingest?.totalPoints ?? 0)}
+          footLeft={ingest ? `last ${ingest.window.hours} h` : undefined}
+          footRight={ingest ? `peak ${ingest.peakPerMinute}/min` : undefined}
+        />
+
+        <KpiTile
+          label="New alarms (last hour)"
+          icon={Bell} iconClassName="bg-primary/10 text-primary"
+          value={trend?.alarmsLastHour ?? 0}
+          footLeft={trend ? `${trend.rules.enabled} rule(s) enabled` : undefined}
+          footRight={trend && trend.rules.neverFired > 0
+            ? <span className="text-amber-500">{trend.rules.neverFired} never fired</span>
+            : undefined}
+        />
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-2 gap-3.5 mt-3.5">
         {/* ── Health Index ── */}
         <Panel title="Health Index" sub="Composite score">
           {loading && !health ? <PanelSkeleton rows={4} /> : !health ? (
             <EmptyHint title="No score yet" hint="Add an asset to start scoring." />
           ) : (
-            <div className="p-4 pt-5">
+            <div className="p-4 pt-5 grid grid-cols-1 sm:grid-cols-2 gap-6 items-center">
+              <div>
               <Gauge score={health.overall} />
               {/* No week-on-week delta: nothing persists a daily snapshot, so a
                   trend arrow here would be invented. `previous` stays null until
@@ -114,8 +182,10 @@ export function BandOverview({ health, trend, attention, ingest, loading }: {
               <p className="text-center text-[11px] text-muted-foreground mt-1">
                 across {health.assetCount} asset{health.assetCount === 1 ? "" : "s"}
               </p>
+              </div>
 
-              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground mt-5 mb-2.5">
+              <div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground mb-2.5">
                 What's costing points
               </p>
               {([
@@ -134,78 +204,10 @@ export function BandOverview({ health, trend, attention, ingest, loading }: {
               <p className="text-[10.5px] text-muted-foreground mt-3 pt-3 border-t border-border">
                 Score is 100 minus these three, so the arithmetic on screen always adds up.
               </p>
+              </div>
             </div>
           )}
         </Panel>
-
-        {/* ── KPI grid ── */}
-        <div className="grid grid-cols-2 lg:grid-cols-3 gap-3.5 content-start">
-          <KpiTile
-            label="Needs action"
-            value={openAlarms}
-            unit={openAlarms === 1 ? "open alarm" : "open alarms"}
-            className={openAlarms > 0 ? "border-red-500/30" : undefined}
-            badge={openAlarms > 0
-              ? <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-red-500/15 text-red-500">{openAlarms}</span>
-              : undefined}
-            footLeft={bySeverity
-              ? `${bySeverity.critical} crit · ${bySeverity.high} high · ${bySeverity.medium} med`
-              : "—"}
-          >
-            <div className="flex gap-[3px] mt-2 mb-1">
-              {(["critical", "high", "medium", "low"] as const).map((s) => {
-                const n = bySeverity?.[s] ?? 0;
-                return <span key={s} className={cn("h-1 rounded-sm", n > 0 ? SEVERITY[s].bar : "bg-muted")}
-                             style={{ flex: Math.max(1, n) }} />;
-              })}
-            </div>
-          </KpiTile>
-
-          <KpiTile
-            label="Availability"
-            value={availability == null ? "—" : availability.toFixed(1)}
-            unit={availability == null ? undefined : "%"}
-            footLeft={health ? `${health.window.days}-day` : undefined}
-          >
-            <Track value={availability ?? 0} className="mt-2.5 mb-1" barClassName="bg-green-500" />
-          </KpiTile>
-
-          <KpiTile
-            label="MTTA / MTTR"
-            value={<>
-              {formatDuration(trend?.mttaSeconds ?? null)}
-              <span className="text-muted-foreground font-medium"> / {formatDuration(trend?.mttrSeconds ?? null)}</span>
-            </>}
-            footLeft="Acknowledge / resolve"
-            footRight={trend ? `${trend.clearedCount} cleared` : undefined}
-          />
-
-          <KpiTile
-            label="Downtime"
-            value={formatDuration(totalDowntime)}
-            footLeft={health ? `${health.window.days}-day` : undefined}
-            footRight={trend ? `${trend.worstPerformers.length} asset(s)` : undefined}
-          >
-            <Track value={Math.min(100, (totalDowntime / 3600) * 5)} className="mt-2.5 mb-1"
-                   barClassName="bg-orange-500" />
-          </KpiTile>
-
-          <KpiTile
-            label="Data points ingested"
-            value={formatCount(ingest?.totalPoints ?? 0)}
-            footLeft={ingest ? `last ${ingest.window.hours} h` : undefined}
-            footRight={ingest ? `peak ${ingest.peakPerMinute}/min` : undefined}
-          />
-
-          <KpiTile
-            label="Alarms this hour"
-            value={trend?.alarmsLastHour ?? 0}
-            footLeft={trend ? `${trend.rules.enabled} rule(s) enabled` : undefined}
-            footRight={trend && trend.rules.neverFired > 0
-              ? <span className="text-amber-500">{trend.rules.neverFired} never fired</span>
-              : undefined}
-          />
-        </div>
 
         {/* ── Hierarchy ── */}
         <Panel title="Health by hierarchy" sub="Rolled up from asset scores">

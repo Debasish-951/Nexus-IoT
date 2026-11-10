@@ -10,6 +10,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { useToast } from "@/hooks/use-toast";
+import { apiFetch } from "@/lib/auth-api";
+import { describeApiError, formatApiError } from "@/lib/validation";
+import { useCurrentUser } from "@/contexts/UserContext";
+import { RoleGuard } from "@/components/RoleGuard";
 import {
   Database, HardDrive, Clock, Activity, Plus, Trash2, Play, Pencil,
   RefreshCw, Calendar, Rows3,
@@ -75,7 +79,8 @@ function PolicyDialog({
   open: boolean;
   onOpenChange: (v: boolean) => void;
   initial?: RetentionPolicy | null;
-  onSave: (data: Partial<RetentionPolicy>) => Promise<void>;
+  /** Resolves true when the server accepted the save; the dialog stays open otherwise. */
+  onSave: (data: Partial<RetentionPolicy>) => Promise<boolean>;
 }) {
   const [name, setName]             = useState(initial?.name ?? "");
   const [days, setDays]             = useState(String(initial?.retentionDays ?? 90));
@@ -87,11 +92,11 @@ function PolicyDialog({
   async function handleSave() {
     setSaving(true);
     try {
-      await onSave({
+      const ok = await onSave({
         name, retentionDays: Number(days),
         assetId: assetId || null, metric: metric || null, enabled,
       });
-      onOpenChange(false);
+      if (ok) onOpenChange(false);
     } finally {
       setSaving(false);
     }
@@ -147,57 +152,81 @@ export default function DataManagement() {
   const [editPolicy, setEditPolicy]             = useState<RetentionPolicy | null>(null);
   const [pruning, setPruning]                   = useState(false);
 
+  // The server requires manage_assets plus the reports module for every
+  // retention write (see ROUTE_RULES for /system/retention in authorize.ts).
+  const { canAction } = useCurrentUser();
+  const canManageRetention = canAction("manage_assets", "reports");
+
+  async function getJson<T>(path: string): Promise<T> {
+    const r = await apiFetch(`${BASE}${path}`);
+    if (!r.ok) throw new Error(formatApiError(await describeApiError(r)));
+    return (await r.json()) as T;
+  }
+
+  async function reportFailure(title: string, r: Response) {
+    toast({ title, description: formatApiError(await describeApiError(r)), variant: "destructive" });
+  }
+
   const { data: stats, isLoading: statsLoading, refetch: refetchStats } = useQuery<StorageStats>({
     queryKey: ["system/storage"],
-    queryFn: () => fetch(`${BASE}/api/system/storage`, { credentials: "include" }).then((r) => r.json()),
+    queryFn: () => getJson<StorageStats>("/api/system/storage"),
     refetchInterval: 30_000,
   });
 
   const { data: policies = [], isLoading: policiesLoading, refetch: refetchPolicies } = useQuery<RetentionPolicy[]>({
     queryKey: ["system/retention"],
-    queryFn: () => fetch(`${BASE}/api/system/retention`, { credentials: "include" }).then((r) => r.json()),
+    queryFn: () => getJson<RetentionPolicy[]>("/api/system/retention"),
   });
 
-  async function handleSavePolicy(data: Partial<RetentionPolicy>) {
-    if (editPolicy) {
-      await fetch(`${BASE}/api/system/retention/${editPolicy.id}`, {
-        method: "PUT",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
-    } else {
-      await fetch(`${BASE}/api/system/retention`, {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(data),
-      });
+  async function handleSavePolicy(data: Partial<RetentionPolicy>): Promise<boolean> {
+    const r = editPolicy
+      ? await apiFetch(`${BASE}/api/system/retention/${editPolicy.id}`, {
+          method: "PUT",
+          body: JSON.stringify(data),
+        })
+      : await apiFetch(`${BASE}/api/system/retention`, {
+          method: "POST",
+          body: JSON.stringify(data),
+        });
+    if (!r.ok) {
+      await reportFailure(editPolicy ? "Could not update policy" : "Could not create policy", r);
+      return false;
     }
     refetchPolicies();
     toast({ title: editPolicy ? "Policy updated" : "Policy created" });
+    return true;
   }
 
   async function deletePolicy(id: string) {
-    await fetch(`${BASE}/api/system/retention/${id}`, { method: "DELETE", credentials: "include" });
+    const r = await apiFetch(`${BASE}/api/system/retention/${id}`, { method: "DELETE" });
+    if (!r.ok) {
+      await reportFailure("Could not delete policy", r);
+      return;
+    }
     refetchPolicies();
     toast({ title: "Policy deleted" });
   }
 
   async function togglePolicy(policy: RetentionPolicy) {
-    await fetch(`${BASE}/api/system/retention/${policy.id}`, {
+    const r = await apiFetch(`${BASE}/api/system/retention/${policy.id}`, {
       method: "PUT",
-      credentials: "include",
-      headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ enabled: !policy.enabled }),
     });
+    if (!r.ok) {
+      await reportFailure("Could not change policy", r);
+      return;
+    }
     refetchPolicies();
   }
 
   async function runPruneNow() {
     setPruning(true);
     try {
-      const r = await fetch(`${BASE}/api/system/retention/run`, { method: "POST", credentials: "include" });
+      const r = await apiFetch(`${BASE}/api/system/retention/run`, { method: "POST" });
+      if (!r.ok) {
+        await reportFailure("Pruning failed", r);
+        return;
+      }
       const result = await r.json();
       toast({
         title: "Pruning complete",
@@ -205,6 +234,8 @@ export default function DataManagement() {
       });
       refetchStats();
       refetchPolicies();
+    } catch (err) {
+      toast({ title: "Pruning failed", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
     } finally {
       setPruning(false);
     }
@@ -236,9 +267,11 @@ export default function DataManagement() {
           <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5" onClick={() => { refetchStats(); refetchPolicies(); }}>
             <RefreshCw className="w-3.5 h-3.5" /> Refresh
           </Button>
-          <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5" onClick={runPruneNow} disabled={pruning}>
-            <Play className="w-3.5 h-3.5" /> {pruning ? "Pruning…" : "Run Pruning Now"}
-          </Button>
+          <RoleGuard permission="manage_assets" module="reports">
+            <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5" onClick={runPruneNow} disabled={pruning}>
+              <Play className="w-3.5 h-3.5" /> {pruning ? "Pruning…" : "Run Pruning Now"}
+            </Button>
+          </RoleGuard>
         </div>
       </div>
 
@@ -296,9 +329,11 @@ export default function DataManagement() {
               <h2 className="text-sm font-medium">Retention Policies</h2>
               <p className="text-xs text-muted-foreground">Pruning runs automatically every hour. More specific policies (asset+metric) take precedence.</p>
             </div>
-            <Button size="sm" className="h-8 text-xs gap-1.5" onClick={() => { setEditPolicy(null); setPolicyDialogOpen(true); }}>
-              <Plus className="w-3.5 h-3.5" /> Add Policy
-            </Button>
+            <RoleGuard permission="manage_assets" module="reports">
+              <Button size="sm" className="h-8 text-xs gap-1.5" onClick={() => { setEditPolicy(null); setPolicyDialogOpen(true); }}>
+                <Plus className="w-3.5 h-3.5" /> Add Policy
+              </Button>
+            </RoleGuard>
           </div>
 
           {policiesLoading ? (
@@ -316,6 +351,7 @@ export default function DataManagement() {
                   <Switch
                     checked={policy.enabled}
                     onCheckedChange={() => togglePolicy(policy)}
+                    disabled={!canManageRetention}
                     className="shrink-0"
                   />
                   <div className="flex-1 min-w-0">
@@ -350,6 +386,7 @@ export default function DataManagement() {
                       )}
                     </div>
                   </div>
+                  {canManageRetention && (
                   <div className="flex items-center gap-1 shrink-0">
                     <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => { setEditPolicy(policy); setPolicyDialogOpen(true); }}>
                       <Pencil className="w-3.5 h-3.5" />
@@ -358,6 +395,7 @@ export default function DataManagement() {
                       <Trash2 className="w-3.5 h-3.5" />
                     </Button>
                   </div>
+                  )}
                 </div>
               ))}
             </div>

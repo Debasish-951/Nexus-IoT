@@ -1,9 +1,14 @@
 import { Router, type IRouter } from "express";
 import { respondInvalid } from "../lib/respond";
 import { eq, isNull, sql, and, or, inArray } from "drizzle-orm";
-import { db, assetsTable, attributesTable, assetTemplatesTable, telemetryTable, alarmsTable } from "@workspace/db";
+import {
+  db, assetsTable, attributesTable, assetTemplatesTable, telemetryTable, alarmsTable,
+  alarmHistoryTable, alarmRulesTable,
+} from "@workspace/db";
+import { forgetRuleDelays, invalidateAlarmRuleCache, forgetAssetDelays } from "./ingest";
 import { logActivity } from "./activity_log";
 import { hasSeenDevice, removeSeenDevice } from "../lib/seen-devices";
+import { deviceClaimedOutsideScope, DEVICE_IN_USE } from "../lib/project-access";
 import {
   CreateAssetBody,
   UpdateAssetBody,
@@ -61,6 +66,7 @@ router.post("/assets", async (req, res): Promise<void> => {
     });
     return;
   }
+  if (devId && await deviceClaimedOutsideScope(req, devId)) { res.status(403).json(DEVICE_IN_USE); return; }
 
   let asset;
   try {
@@ -126,14 +132,32 @@ router.put("/assets/:id", async (req, res): Promise<void> => {
   const rawIdentifier = (req.body as any)?.identifier;
   if (typeof rawIdentifier === "string") {
     const devId = rawIdentifier.trim();
-    if (devId && !hasSeenDevice(devId)) {
-      res.status(400).json({ error: `"${devId}" is not a known device id.` });
-      return;
+    // The edit dialog always sends the identifier. When it has not changed it
+    // is not re-checked: a device that has gone quiet (or been pruned from the
+    // seen list) would otherwise block renaming or retagging its own asset.
+    const [current] = devId
+      ? await db.select({ identifier: assetsTable.identifier }).from(assetsTable).where(eq(assetsTable.id, params.data.id))
+      : [];
+    const unchanged = !!devId && current?.identifier === devId;
+    if (!unchanged) {
+      if (devId && !hasSeenDevice(devId)) {
+        res.status(400).json({ error: `"${devId}" is not a known device id.` });
+        return;
+      }
+      if (devId && await deviceClaimedOutsideScope(req, devId)) { res.status(403).json(DEVICE_IN_USE); return; }
+      updateData.identifier = devId || null;
     }
-    updateData.identifier = devId || null;
   }
 
   let asset;
+  // Nothing to write (e.g. only an unchanged identifier was sent): drizzle
+  // refuses an empty SET, so answer with the row as it stands.
+  if (Object.keys(updateData).length === 0) {
+    [asset] = await db.select().from(assetsTable).where(eq(assetsTable.id, params.data.id));
+    if (!asset) { res.status(404).json({ error: "Asset not found" }); return; }
+    res.json(asset);
+    return;
+  }
   try {
     [asset] = await db.update(assetsTable).set(updateData).where(eq(assetsTable.id, params.data.id)).returning();
   } catch (err) {
@@ -154,7 +178,7 @@ router.post("/assets/:id/maintenance", async (req, res): Promise<void> => {
 
   const body = req.body as Record<string, unknown>;
   const enable = typeof body.enable === "boolean" ? body.enable : !current.maintenanceMode;
-  const note   = typeof body.note === "string" ? body.note : null;
+  const note   = typeof body.note === "string" ? body.note.slice(0, 500) : null;
 
   const [asset] = await db
     .update(assetsTable)
@@ -170,6 +194,9 @@ router.post("/assets/:id/maintenance", async (req, res): Promise<void> => {
     enable ? "asset.maintenance_enabled" : "asset.maintenance_disabled",
     "asset", id, current.name, null, req
   );
+  // A running On/Off delay was measured before maintenance. Kept, it could raise
+  // an alarm on the first reading after maintenance without waiting the delay.
+  forgetAssetDelays(id);
   res.json(asset);
 });
 
@@ -183,40 +210,70 @@ router.delete("/assets/:id", async (req, res): Promise<void> => {
   const [rootAsset] = await db.select().from(assetsTable).where(eq(assetsTable.id, rootId));
   if (!rootAsset) { res.status(404).json({ error: "Asset not found" }); return; }
 
-  // Collect full subtree via recursive CTE (root + all descendants)
-  const subtree = await db.execute<{ id: string; identifier: string | null }>(sql`
-    WITH RECURSIVE tree AS (
-      SELECT id, identifier FROM assets WHERE id = ${rootId}
-      UNION ALL
-      SELECT a.id, a.identifier FROM assets a INNER JOIN tree t ON a.parent_id = t.id
-    )
-    SELECT id, identifier FROM tree
-  `);
-  const allIds = subtree.rows.map((r) => r.id);
-  const identifiers = subtree.rows.map((r) => r.identifier).filter((x): x is string => !!x);
+  // One transaction: a failure part-way used to leave the subtree half deleted,
+  // with assets gone but their attributes, alarms or rules still in place.
+  const { allIds, identifiers, ruleIds } = await db.transaction(async (tx) => {
+    // Collect full subtree via recursive CTE (root + all descendants). UNION, not
+    // UNION ALL, so a parent cycle in bad data cannot recurse for ever.
+    const subtree = await tx.execute<{ id: string; identifier: string | null }>(sql`
+      WITH RECURSIVE tree AS (
+        SELECT id, identifier FROM assets WHERE id = ${rootId}
+        UNION
+        SELECT a.id, a.identifier FROM assets a INNER JOIN tree t ON a.parent_id = t.id
+      )
+      SELECT id, identifier FROM tree
+    `);
+    const allIds = subtree.rows.map((r) => r.id);
+    const identifiers = subtree.rows.map((r) => r.identifier).filter((x): x is string => !!x);
+    const now = new Date();
 
-  // Remove dependent rows first — telemetry/attributes/alarms have no FK cascade,
-  // so without this they'd be orphaned and keep showing up (e.g. in the Live Feed).
-  await db.delete(telemetryTable).where(inArray(telemetryTable.assetId, allIds));
-  await db.delete(attributesTable).where(inArray(attributesTable.assetId, allIds));
-  await db.delete(alarmsTable).where(inArray(alarmsTable.assetId, allIds));
+    // Remove dependent rows first — telemetry/attributes/alarms have no FK cascade,
+    // so without this they'd be orphaned and keep showing up (e.g. in the Live Feed).
+    await tx.delete(telemetryTable).where(inArray(telemetryTable.assetId, allIds));
+    await tx.delete(attributesTable).where(inArray(attributesTable.assetId, allIds));
 
-  // Delete the whole subtree in one statement
-  await db.delete(assetsTable).where(inArray(assetsTable.id, allIds));
+    // History rows are records and are kept, but any still open are closed:
+    // their alarm is deleted below, so nothing could ever clear or acknowledge them.
+    await tx.update(alarmHistoryTable)
+      .set({ status: "cleared", clearedAt: now })
+      .where(and(
+        inArray(alarmHistoryTable.assetId, allIds),
+        inArray(alarmHistoryTable.status, ["active", "acknowledged"]),
+      ));
+    await tx.delete(alarmsTable).where(inArray(alarmsTable.assetId, allIds));
+
+    // Rules bound to a deleted asset can never fire again; they are deleted
+    // rather than left as ghost rules. Rules with no asset (all assets) stay.
+    const rules = await tx.delete(alarmRulesTable)
+      .where(inArray(alarmRulesTable.assetId, allIds))
+      .returning({ id: alarmRulesTable.id });
+
+    // Delete the whole subtree in one statement
+    await tx.delete(assetsTable).where(inArray(assetsTable.id, allIds));
+
+    // Decrement parent's childCount
+    if (rootAsset.parentId) {
+      await tx
+        .update(assetsTable)
+        .set({ childCount: sql`GREATEST(${assetsTable.childCount} - 1, 0)` })
+        .where(eq(assetsTable.id, rootAsset.parentId));
+    }
+    return { allIds, identifiers, ruleIds: rules.map((r) => r.id) };
+  });
+
+  // In-memory rule state, only once the transaction has committed.
+  for (const id of ruleIds) forgetRuleDelays(id);
+  invalidateAlarmRuleCache();
 
   // Drop the devices from the seen-devices registry so they leave "Connected
   // Devices" until/unless they transmit again.
   await Promise.all(identifiers.map((id) => removeSeenDevice(id).catch(() => {})));
 
-  // Decrement parent's childCount
-  if (rootAsset.parentId) {
-    await db
-      .update(assetsTable)
-      .set({ childCount: sql`GREATEST(${assetsTable.childCount} - 1, 0)` })
-      .where(eq(assetsTable.id, rootAsset.parentId));
-  }
-
-  void logActivity("asset.deleted", "asset", rootId, rootAsset.name, `Deleted ${allIds.length} asset(s) in subtree`, req);
+  // Note: viz_nodes.project_id references assets with ON DELETE SET NULL, so a
+  // deleted project's top-level dashboards become unassigned (shown in every
+  // project). That is the frontend's warning to give; it is unchanged here.
+  void logActivity("asset.deleted", "asset", rootId, rootAsset.name,
+    `Deleted ${allIds.length} asset(s) in subtree${ruleIds.length ? `, ${ruleIds.length} alarm rule(s)` : ""}`, req);
   res.sendStatus(204);
 });
 
@@ -352,6 +409,10 @@ router.post("/assets/:id/apply-template", async (req, res): Promise<void> => {
    */
   let deviceIdBound: string | null = null;
   const sharedWith: string[] = [];
+  if (declaredDeviceId && asset.identifier !== declaredDeviceId && await deviceClaimedOutsideScope(req, declaredDeviceId)) {
+    res.status(403).json(DEVICE_IN_USE);
+    return;
+  }
   if (declaredDeviceId && asset.identifier !== declaredDeviceId) {
     // Mirrors the template, including re-pointing an asset whose template's device id
     // was corrected — the template is the single source of truth for the binding. A

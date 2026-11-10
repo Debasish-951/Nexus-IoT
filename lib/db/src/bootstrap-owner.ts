@@ -100,7 +100,7 @@ const NAME   = arg("name");
 /** Minutes a --temp-password stays valid. Default 15, capped at 24h. */
 const MINUTES = Math.min(Math.max(Math.round(Number(arg("minutes", "15"))) || 15, 1), 24 * 60);
 
-const VALID_ROLES = ["super_admin", "admin", "customer_admin", "engineer", "operator", "viewer"];
+const VALID_ROLES = ["super_admin", "company_admin", "admin", "engineer", "operator", "viewer"];
 if (!VALID_ROLES.includes(ROLE)) {
   console.error(`❌  Unknown role "${ROLE}". Expected one of: ${VALID_ROLES.join(", ")}`);
   process.exit(1);

@@ -26,9 +26,11 @@ import {
 import { cn } from "@/lib/utils";
 import { format } from "date-fns";
 import { useCurrentUser } from "@/contexts/UserContext";
+import { toCsv, downloadCsvText } from "@/lib/csv";
+import { markProjectDeletedHere } from "@/lib/session-events";
 import {
   Asset, AssetHealth, TrendsPanel, ExpressionEditor,
-  deriveStatus, STATUS_STYLES, siteOf, HealthBar, STALE_AFTER_MS,
+  deriveStatus, STATUS_STYLES, siteOf, HealthBar, STALE_AFTER_MS, lastUpdatedAt,
 } from "./assetShared";
 import { apiFetch } from "@/lib/auth-api";
 
@@ -59,11 +61,39 @@ export default function AssetDetails({ assetId: assetIdProp, embedded }: { asset
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const qc = useQueryClient();
-  const { can } = useCurrentUser();
+  const { canAction } = useCurrentUser();
+  // Same rules the API applies to asset/attribute writes and DELETEs.
+  const canWrite = canAction("manage_assets", "assets", "write");
+  const canDelete = canAction("manage_assets", "assets", "delete");
 
   const { data: assets } = useListAssets();
   const allAssets = (assets as Asset[] | undefined) ?? [];
   const asset = allAssets.find((a) => a.id === assetId) ?? null;
+
+  // Maintenance mode suppresses alarm evaluation for this asset. The server has
+  // supported it for a while; this is the only control for it.
+  const [maintNote, setMaintNote] = useState("");
+  const [maintBusy, setMaintBusy] = useState(false);
+  async function setMaintenance(enable: boolean) {
+    if (!asset) return;
+    setMaintBusy(true);
+    try {
+      const res = await apiFetch(`/api/assets/${asset.id}/maintenance`, {
+        method: "POST",
+        body: JSON.stringify({ enable, ...(enable && maintNote.trim() ? { note: maintNote.trim() } : {}) }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => null) as { error?: string } | null;
+        toast({ title: "Maintenance mode not changed", description: body?.error ?? `The server answered ${res.status}.`, variant: "destructive" });
+        return;
+      }
+      setMaintNote("");
+      toast({ title: enable ? "Maintenance mode on" : "Maintenance mode off", description: enable ? "Alarms are not raised for this asset until it is switched off." : "Alarm evaluation has resumed." });
+      qc.invalidateQueries({ queryKey: getListAssetsQueryKey() });
+    } finally {
+      setMaintBusy(false);
+    }
+  }
 
   const { data: attributes } = useListAssetAttributes(assetId, {
     query: { enabled: !!assetId, queryKey: getListAssetAttributesQueryKey(assetId) },
@@ -161,13 +191,8 @@ export default function AssetDetails({ assetId: assetIdProp, embedded }: { asset
     const rows = attrList.map((a: any) =>
       [a.name, a.type, a.dataType, a.value != null ? String(typeof a.value === "object" ? JSON.stringify(a.value) : a.value) : "",
         a.tagName ?? "", a.sourceMetric ?? "", a.uom ?? "", a.decimalPlaces != null ? String(a.decimalPlaces) : "",
-        a.thousandSeparator ? "TRUE" : "FALSE", a.expression ?? ""]
-        .map((v) => `"${String(v).replace(/"/g, '""')}"`).join(","));
-    const csv = [header, ...rows].join("\n");
-    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
-    const a = document.createElement("a");
-    a.href = url; a.download = `${asset?.identifier ?? "attributes"}_attributes.csv`;
-    a.click(); URL.revokeObjectURL(url);
+        a.thousandSeparator ? "TRUE" : "FALSE", a.expression ?? ""]);
+    downloadCsvText(toCsv(header.split(","), rows), `${asset?.identifier ?? "attributes"}_attributes.csv`);
   }
 
   function onAddAttr(data: any) {
@@ -223,6 +248,7 @@ export default function AssetDetails({ assetId: assetIdProp, embedded }: { asset
   }
 
   const status = deriveStatus(asset, health);
+  const updated = lastUpdatedAt(asset.updatedAt, health?.lastSeen);
   // Availability = live or not. 100% only while telemetry is flowing now; 0% if the
   // source is offline (even if old values are still stored on the asset).
   const live = !!health?.lastSeen && !isNaN(new Date(health.lastSeen).getTime())
@@ -244,10 +270,10 @@ export default function AssetDetails({ assetId: assetIdProp, embedded }: { asset
           <span className="text-foreground font-medium">{asset.name}</span>
         </div>
         <div className="flex items-center gap-2">
-          {can("manage_assets") && (
+          {canDelete && (
             <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive h-8 text-xs"
               onClick={() => deleteAsset.mutate({ id: asset.id }, {
-                onSuccess: () => { toast({ title: "Asset deleted" }); qc.invalidateQueries({ queryKey: getListAssetsQueryKey() }); navigate("/assets"); },
+                onSuccess: () => { if (!asset.parentId) markProjectDeletedHere(asset.id); toast({ title: "Asset deleted" }); qc.invalidateQueries({ queryKey: getListAssetsQueryKey() }); navigate("/assets"); },
               })}>
               <Trash2 className="w-3.5 h-3.5 mr-1" /> Delete
             </Button>
@@ -280,7 +306,35 @@ export default function AssetDetails({ assetId: assetIdProp, embedded }: { asset
               <HealthBar pct={availabilityPct} />
             </div>
             <Info2 label="Created / Installed" value={asset.createdAt ? format(new Date(asset.createdAt), "yyyy-MM-dd") : "—"} />
-            <Info2 label="Last Updated" value={asset.updatedAt ? format(new Date(asset.updatedAt), "yyyy-MM-dd HH:mm") : "—"} />
+            <Info2 label="Last Updated" value={updated ? format(updated, "yyyy-MM-dd HH:mm") : "—"} />
+            <div>
+              <p className="text-xs text-muted-foreground mb-1">Maintenance mode</p>
+              {(() => {
+                const m = asset as unknown as { maintenanceMode?: boolean | null; maintenanceSince?: string | null; maintenanceNote?: string | null };
+                return (
+                  <div className="space-y-1.5">
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={!!m.maintenanceMode}
+                        disabled={!canWrite || maintBusy}
+                        onCheckedChange={(on) => void setMaintenance(on)}
+                        aria-label="Maintenance mode"
+                      />
+                      <span className="text-xs text-muted-foreground">
+                        {m.maintenanceMode
+                          ? `On${m.maintenanceSince ? ` since ${format(new Date(m.maintenanceSince), "yyyy-MM-dd HH:mm")}` : ""}`
+                          : "Off"}
+                      </span>
+                    </div>
+                    {m.maintenanceMode && m.maintenanceNote && <p className="text-xs text-muted-foreground">{m.maintenanceNote}</p>}
+                    {!m.maintenanceMode && canWrite && (
+                      <Input value={maintNote} onChange={(e) => setMaintNote(e.target.value)} maxLength={200}
+                        placeholder="Reason (optional)" className="h-7 text-xs" aria-label="Maintenance reason" />
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
           </div>
         </CardContent>
       </Card>
@@ -296,13 +350,13 @@ export default function AssetDetails({ assetId: assetIdProp, embedded }: { asset
         <TabsContent value="attributes" className="mt-3">
           <Card className="shadow-sm overflow-hidden">
             <div className="p-3 flex items-center gap-2 border-b border-border bg-muted/30 flex-wrap">
-              {can("manage_assets") && (
+              {canWrite && (
                 <Button size="sm" className="h-7 text-xs" onClick={() => { attrForm.reset(); setAttrUseExpr(false); setAddAttrOpen(true); }}>
                   <Plus className="w-3.5 h-3.5 mr-1" /> Add Attribute
                 </Button>
               )}
-              {can("manage_assets") && <div className="h-5 w-px bg-border" />}
-              {can("manage_assets") && (
+              {canWrite && <div className="h-5 w-px bg-border" />}
+              {canWrite && (
                 <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setImportOpen(true)}>
                   <LayoutTemplate className="w-3.5 h-3.5 mr-1" /> Apply Template
                 </Button>
@@ -335,7 +389,7 @@ export default function AssetDetails({ assetId: assetIdProp, embedded }: { asset
                     <tr><td colSpan={7} className="px-3 py-12 text-center">
                       <div className="flex flex-col items-center gap-3 text-muted-foreground">
                         <Blocks className="w-8 h-8 opacity-20" /><p className="text-sm">No attributes yet</p>
-                        {can("manage_assets") && (
+                        {canWrite && (
                           <Button size="sm" variant="outline" className="h-7 text-xs" onClick={() => setImportOpen(true)}>
                             <LayoutTemplate className="w-3.5 h-3.5 mr-1" /> Apply Template
                           </Button>
@@ -346,7 +400,7 @@ export default function AssetDetails({ assetId: assetIdProp, embedded }: { asset
                     attrList.map((attr: any) => (
                       <tr key={attr.id} className={cn("border-b border-border/50 hover:bg-muted/30 transition-colors group", attr.type === "runtime" && "bg-orange-50/30 dark:bg-orange-950/10")}>
                         <td className="px-3 py-2">
-                          {can("manage_assets") && (
+                          {canWrite && (
                             <button className="text-muted-foreground hover:text-primary opacity-0 group-hover:opacity-100" onClick={() => openEditAttr(attr)}><Edit2 className="w-3 h-3" /></button>
                           )}
                         </td>
@@ -377,7 +431,7 @@ export default function AssetDetails({ assetId: assetIdProp, embedded }: { asset
                           {attr.timestamp ? format(new Date(attr.timestamp), "MM/dd HH:mm:ss") : <span className="text-muted-foreground/40">—</span>}
                         </td>
                         <td className="px-3 py-2">
-                          {can("manage_assets") && (
+                          {canDelete && (
                             <button className="text-muted-foreground hover:text-destructive opacity-0 group-hover:opacity-100"
                               onClick={() => deleteAttr.mutate({ id: attr.id }, { onSuccess: () => { toast({ title: "Deleted" }); qc.invalidateQueries({ queryKey: getListAssetAttributesQueryKey(assetId) }); } })}>
                               <Trash2 className="w-3 h-3" />

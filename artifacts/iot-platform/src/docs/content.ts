@@ -44,7 +44,7 @@ export function buildDocumentContent(): ContentItem[] {
     ul([
       "Chapter 1: Introduction & Overview",
       "Chapter 2: Navigation & Interface",
-      "Chapter 3: Dashboard",
+      "Chapter 3: Home — Project List",
       "Chapter 4: Asset Hub",
       "Chapter 5: Data Insights",
       "Chapter 6: Event Manager",
@@ -54,7 +54,7 @@ export function buildDocumentContent(): ContentItem[] {
       "Chapter 10: Visualization Dashboards",
       "Chapter 11: Live Telemetry Monitor",
       "Chapter 12: Audit Log",
-      "Chapter 13: Payload Simulator",
+      "Chapter 13: Payload Simulator (switched off by default)",
       "Chapter 14: Role-Based Access Control",
     ]),
     p("PART II — TECHNICAL DOCUMENTATION"),
@@ -89,17 +89,17 @@ export function buildDocumentContent(): ContentItem[] {
       "Asset Hierarchy Management — Model physical equipment as a tree of Projects and Assets, with unlimited nesting and parent-child relationships.",
       "Multi-Format Data Ingest — Accept telemetry payloads in four auto-detected formats (flat, nested-root, nested-data, nested-metrics) from any HTTP or MQTT source.",
       "Real-Time Telemetry — Stream live sensor readings to the browser via WebSocket with per-asset metric tiles and animated LIVE indicators.",
-      "Alarm Rules Engine — Evaluate threshold, rate-of-change, heartbeat, and deviation rules on every ingest and fire webhook notifications.",
+      "Alarm Rules Engine — Evaluate threshold and rate-of-change rules on every ingest and fire webhook notifications. (Heartbeat and deviation rules can be stored but are not evaluated yet; their options are hidden unless the advanced alarm options switch is on.)",
       "Dynamic & Runtime Attributes — Automatically update asset attribute values from incoming telemetry; compute derived values using a safe math expression engine.",
       "Integration Hub — Connect MQTT brokers, REST API sources, and Azure IoT Hubs with configurable payload mapping rules.",
       "Visualization Dashboards — Build named, persistent dashboards with 11 widget types (Line, Area, Bar, Gauge, Pie, Donut, KPI, Heatmap, Table, ScatterPlot, StackedBar) and global time-range control.",
       "Data Destinations — Forward alarm and telemetry events as HTTP POST webhooks to any external system with Bearer, API Key, or Basic Auth.",
-      "Security & RBAC — Four built-in roles (Admin, Engineer, Operator, Viewer) with granular permission control applied to every UI element and route.",
+      "Security & RBAC — Nine built-in roles (Super Admin, Company Admin, Admin, Project Manager, Team Lead, Developer, Engineer, Operator, Viewer). The API server enforces every permission; the UI hides or disables what your role cannot do.",
       "Audit Trail — Immutable activity log capturing all significant actions with actor identity, timestamps, and change details.",
       "Data Retention — Configurable per-asset, per-metric retention policies with hourly automated pruning and manual trigger support.",
       "Reporting — On-demand generation of Telemetry Summary, Alarm Report, and Asset Status Snapshot reports in CSV and JSON format.",
       "API Client Management — Issue OAuth-style bearer tokens with scoped access, IP allowlisting, and token rotation for external system integration.",
-      "Payload Simulator — Browser-based tool to send test payloads without physical hardware, with sliders, auto-send, live chart, and request log.",
+      "Payload Simulator — Browser-based tool to send test payloads without physical hardware. Switched off by default; your administrator can enable it for commissioning or demos.",
     ]),
 
     h2("1.3 Supported Use Cases"),
@@ -129,8 +129,9 @@ export function buildDocumentContent(): ContentItem[] {
     h2("1.5 Getting Started — First Login"),
     ol([
       "Navigate to the platform URL provided by your administrator.",
-      "You will be presented with a login page. Sign in with your username (or email) and password. Once authenticated, the Dashboard loads.",
-      "Your role (Admin, Engineer, Operator, or Viewer) determines which features and actions are available.",
+      "New accounts start as invitations: open the activation link your administrator sent you and choose a password. There are no default credentials.",
+      "On the login page, sign in with your username (or email) and password. Once authenticated, Home opens and lists the projects you may open.",
+      "Your role (one of the nine roles in Chapter 14) determines which features and actions are available.",
       "Check the top-right corner for your profile and role. To work as a different role, sign out from the profile menu and log back in as that user.",
       "Begin by navigating to Asset Hub to create your first project and add assets.",
     ]),
@@ -143,16 +144,16 @@ export function buildDocumentContent(): ContentItem[] {
     table(
       ["Group", "Pages Included"],
       [
-        ["Home", "Dashboard — overview of the entire installation"],
+        ["Home", "Project list — the projects your role lets you open"],
         ["Asset Hub", "Assets (hierarchy + attributes), Asset Templates, Media Library"],
         ["Data Insights", "Visualization, Live Twin, dashboard templates, Live Feed"],
         ["AI Advisor", "Natural-language questions, health insights, recommendations"],
         ["Event Manager", "Active Alarms, Alarm History, Alarm Rules"],
         ["Integration Hub", "Broker configuration, API Clients, Destinations, Connections, Integration Guide"],
-        ["Governance", "User Management, Security Center, Notification Groups"],
+        ["Governance", "User Management, Security Center (Notification Groups appears only when notification channels are switched on)"],
         ["System", "Data Management, Reports"],
         ["Audit Log", "Audit trail of all platform actions"],
-        ["Payload Simulator", "Browser-based device payload tester"],
+        ["Payload Simulator", "Browser-based device payload tester (shown only when the payload simulator is switched on)"],
       ]
     ),
     p("Click any parent group to expand or collapse its child pages. The currently active page is highlighted in the sidebar."),
@@ -166,18 +167,19 @@ export function buildDocumentContent(): ContentItem[] {
     ]),
 
     h2("2.3 User Profile & Roles"),
-    p("Each user signs in with their own credentials and has a single role (Admin, Engineer, Operator, or Viewer). The User Profile menu (top-right) shows your current name and role. To work under a different role, sign out and log back in as that user."),
-    p("On login, the platform automatically sends your identity in request headers (X-Actor-Name, X-Actor-Role, X-Actor-Username) so that all subsequent actions are recorded in the Audit Log under the correct identity."),
-    note("Login is credential-based (username/email + password). The signed-in identity and role are held for the current browser session; permissions are recalculated from the role on login."),
+    p("Each user signs in with their own credentials and has a single role. The User Profile menu (top-right) shows your current name and role. To work under a different role, sign out and log back in as that user."),
+    p("Signing in creates a server-side session held in an HttpOnly cookie. The API server identifies you from that session and records every action in the Audit Log under your identity; the browser cannot supply or change that identity."),
+    note("Login is credential-based (username/email + password). Your role and permissions are read from the server on every request, so a role change by an administrator applies without signing out."),
 
     h2("2.4 Responsive Layout"),
     p("The platform layout consists of the fixed sidebar on the left and a main content area on the right. The content area is scrollable independently of the sidebar. All modal dialogs and dropdown menus are rendered at the document level and appear above all other content using z-index stacking contexts."),
     pb(),
 
     // ─── CHAPTER 3 ────────────────────────────────────────────────────────────
-    h1("Chapter 3: Dashboard"),
+    h1("Chapter 3: Home — Project List"),
     h2("3.1 Overview"),
-    p("The Dashboard (Home page) provides a real-time snapshot of your entire installation. It is the first page shown on login and auto-refreshes every 30 seconds. It is divided into four main sections: Stat Cards, Asset Health Grid, Recent Telemetry Table, and Alarm Severity Chart."),
+    p("Home is the first page shown on login. It lists the projects you may open; a project is a top-level asset in the Asset Hub. Pick a project to work inside it. Project Managers see every project. Team Leads and Developers see only the projects assigned to them. Other roles follow the per-user project setting chosen by an administrator."),
+    note("Earlier versions opened a plant-wide Dashboard with stat cards, an asset health grid, recent telemetry and an alarm severity chart. That page is no longer reachable. The sections below describe the status information that the platform's dashboard API still serves and that other pages reuse."),
 
     h2("3.2 Stat Cards"),
     p("Four summary cards appear at the top of the dashboard:"),
@@ -403,7 +405,7 @@ export function buildDocumentContent(): ContentItem[] {
       "Asset — the asset that owns the alarm rule.",
       "Severity — Critical, High, Medium, or Low.",
       "Status — Active (not yet acknowledged) or Acknowledged.",
-      "Class — threshold, rate_of_change, heartbeat, or deviation.",
+      "Class — threshold or rate_of_change. (heartbeat and deviation can be stored on a rule but are not evaluated yet.)",
       "Message — human-readable description including the metric name, condition, and actual value.",
       "Trigger Value — the numeric value that triggered the alarm.",
       "Triggered At — timestamp when the alarm was created.",
@@ -475,11 +477,12 @@ export function buildDocumentContent(): ContentItem[] {
       "An alarm is triggered when the computed rate exceeds the rule threshold.",
     ]),
 
-    h3("6.7.3 Heartbeat Rules"),
-    p("Detects missing data — triggers an alarm when no telemetry has been received for an asset/metric within the expected interval. Used to detect device offline or connectivity issues."),
+    h3("6.7.3 Heartbeat Rules (not evaluated yet)"),
+    p("Intended to raise an alarm when no telemetry arrives for an asset/metric within an expected interval. The server stores this rule type but does not evaluate it yet, so it never fires. The option is hidden unless the advanced alarm options switch (VITE_ENABLE_ADVANCED_ALARM_OPTIONS) is on at build time."),
 
-    h3("6.7.4 Deviation Rules"),
-    p("Triggers when a metric deviates from an expected value by more than a configured threshold amount. Useful for detecting drift or calibration issues."),
+    h3("6.7.4 Deviation Rules (not evaluated yet)"),
+    p("Intended to raise an alarm when a metric drifts from an expected value. Like heartbeat rules, the server stores this type but does not evaluate it, and the option is hidden behind the advanced alarm options switch."),
+    note("The rate-of-change Window, Scan Rate and Require Acknowledge options are also stored but not evaluated, and are hidden behind the same switch. Existing rules keep their stored values. Email, WhatsApp and SMS notification toggles and Notification Groups are hidden behind the notification channels switch (VITE_ENABLE_NOTIFICATION_CHANNELS) because the server does not deliver those channels yet. Webhooks are delivered and always visible."),
 
     h3("6.7.5 Rule Configuration Fields"),
     table(
@@ -491,9 +494,9 @@ export function buildDocumentContent(): ContentItem[] {
         ["Condition", "The comparison operator (gt, lt, gte, lte, eq, neq)"],
         ["Threshold", "The numeric value to compare against"],
         ["Severity", "Critical, High, Medium, or Low"],
-        ["Alarm Class", "threshold, rate_of_change, heartbeat, or deviation"],
+        ["Alarm Class", "threshold or rate_of_change (heartbeat and deviation only with the advanced alarm options switch on, and not evaluated)"],
         ["Enabled", "Toggle to activate or deactivate the rule without deleting it"],
-        ["ROC Window", "Time window in seconds for rate-of-change evaluation (default: 60)"],
+        ["ROC Window", "Stored but not evaluated yet; shown only with the advanced alarm options switch on"],
         ["Webhook URL", "Optional HTTP endpoint to notify when this specific rule fires"],
         ["Webhook Enabled", "Toggle to enable/disable the webhook for this rule"],
       ]
@@ -621,7 +624,7 @@ export function buildDocumentContent(): ContentItem[] {
     // ─── CHAPTER 8 ────────────────────────────────────────────────────────────
     h1("Chapter 8: Security — Users & API Clients"),
     h2("8.1 User Management"),
-    p("User Management (Security → User) provides a full CRUD interface for platform user accounts. Only users with the Admin role can create, edit, or delete users."),
+    p("User Management (Governance → User) provides a full CRUD interface for platform user accounts. Only Super Admins, Company Admins and Admins (the roles with manage_users) can create, edit, or delete users, and only users of a lower-ranked role: only a Super Admin can create or change a Company Admin, and a Company Admin can never change a Super Admin."),
     h3("8.1.1 User Fields"),
     table(
       ["Field", "Description"],
@@ -629,17 +632,17 @@ export function buildDocumentContent(): ContentItem[] {
         ["Full Name", "Display name shown in the interface and audit logs"],
         ["Username", "Unique login identifier (cannot be changed after creation)"],
         ["Email", "Contact email address"],
-        ["Role", "Platform role: Admin, Engineer, Operator, or Viewer"],
-        ["Status", "Account status: Active, Inactive, or Suspended"],
+        ["Role", "One of the nine platform roles listed in Chapter 14"],
+        ["Status", "Account status: Invited, Active, Suspended, or Inactive"],
         ["Last Login", "Timestamp of the most recent successful login"],
       ]
     ),
 
     h3("8.1.2 Creating a User"),
     ol([
-      "Click 'Add User' (visible to Admin only).",
-      "Enter Full Name, Username, Email, Role, and Password.",
-      "Click Create. The user appears in the user list.",
+      "Click 'Add User' (visible only to roles with manage_users).",
+      "Enter Full Name, Username, Email and Role. You do not choose a password.",
+      "Click Create. The account is created with status Invited and the user receives a single-use activation link to set their own password. The account cannot sign in until it is activated.",
     ]),
 
     h3("8.1.3 Editing a User"),
@@ -648,13 +651,15 @@ export function buildDocumentContent(): ContentItem[] {
       "Modify Full Name, Email, Role, and/or Status.",
       "Click Save Changes. Updates take effect immediately.",
     ]),
-    note("Passwords cannot be changed via the user management interface in the current version. Contact your system administrator for password resets."),
+    note("Administrators never see or set a user's password. From the user row they can resend or revoke an invitation, send a password reset link, issue a temporary password that must be changed at next login, require a password change, unlock a locked account, and (Super Admin or Company Admin only) change the number of simultaneous sessions allowed."),
 
     h3("8.1.4 User Status"),
     table(
       ["Status", "Effect"],
       [
+        ["Invited", "Account created but not yet activated; login is not possible until the user sets a password via the activation link"],
         ["Active", "User can log in and use the platform normally"],
+        ["Suspended", "Login is blocked, typically temporarily"],
         ["Inactive", "Account exists but login is not permitted"],
         ["Suspended", "Account is suspended pending review; login blocked"],
       ]
@@ -665,7 +670,7 @@ export function buildDocumentContent(): ContentItem[] {
 
     h3("8.2.1 Creating an API Client"),
     ol([
-      "Click 'New Client' (requires manage_api_clients permission — Admin role).",
+      "Click 'New Client' (requires the manage_api_clients permission: the three administrator roles, Engineer and Developer).",
       "Enter Name and optional Description.",
       "Select the access Scopes.",
       "Optionally set an expiry date (leave blank for no expiry).",
@@ -968,9 +973,10 @@ export function buildDocumentContent(): ContentItem[] {
     pb(),
 
     // ─── CHAPTER 13 ───────────────────────────────────────────────────────────
-    h1("Chapter 13: Payload Simulator"),
+    h1("Chapter 13: Payload Simulator (switched off by default)"),
     h2("13.1 Overview"),
-    p("The Payload Simulator (/payload-simulator) is a browser-based tool for sending test telemetry payloads to the platform without physical hardware. It is essential for testing alarm rules, validating attribute mappings, and demonstrating the platform to stakeholders."),
+    note("The Payload Simulator is switched off in standard builds: it does not appear in the sidebar and its URL shows Not Found. An administrator enables it by building the frontend with VITE_ENABLE_PAYLOAD_SIMULATOR=true. The rest of this chapter applies only when it is on."),
+    p("The Payload Simulator (/simulator) is a browser-based tool for sending test telemetry payloads to the platform without physical hardware. It is essential for testing alarm rules, validating attribute mappings, and demonstrating the platform to stakeholders."),
 
     h2("13.2 Device Presets Tab"),
     p("The Device Presets tab provides hardcoded payload templates for common industrial device types:"),
@@ -1009,23 +1015,26 @@ export function buildDocumentContent(): ContentItem[] {
     // ─── CHAPTER 14 ───────────────────────────────────────────────────────────
     h1("Chapter 14: Role-Based Access Control"),
     h2("14.1 Overview"),
-    p("The platform implements Role-Based Access Control (RBAC) with four built-in roles. Every UI element and action is governed by the permission system. Users with insufficient permissions see elements grayed out or hidden, and actions are blocked at the API level as well."),
+    p("The platform implements Role-Based Access Control (RBAC) with nine built-in roles. The API server is the control: it refuses any request your role does not allow and records the refusal. The UI mirrors the same rules, so controls you cannot use are grayed out or hidden."),
+    p("Roles: Super Admin, Company Admin, Admin, Project Manager, Team Lead, Developer, Engineer, Operator, Viewer. Super Admin, Company Admin and Admin hold every permission; they differ in rank (who may administer whom). Developer has the same rights as Engineer, but only on assigned projects. Project Manager and Team Lead are read-and-acknowledge roles that differ in which projects they see."),
 
     h2("14.2 Role Permission Matrix"),
     table(
-      ["Permission", "Admin", "Engineer", "Operator", "Viewer"],
+      ["Permission", "Super Admin / Company Admin / Admin", "Engineer / Developer", "Project Manager / Team Lead", "Operator", "Viewer"],
       [
-        ["view (read all pages)", "✓", "✓", "✓", "✓"],
-        ["manage_assets (create, edit, delete assets & attributes)", "✓", "✓", "✗", "✗"],
-        ["manage_templates (create, delete asset templates)", "✓", "✓", "✗", "✗"],
-        ["manage_alarms (create, edit, delete alarm rules)", "✓", "✓", "✗", "✗"],
-        ["acknowledge_alarms (acknowledge active alarms)", "✓", "✓", "✓", "✗"],
-        ["manage_users (create, edit, delete users)", "✓", "✗", "✗", "✗"],
-        ["manage_brokers (create, edit, delete brokers)", "✓", "✓", "✗", "✗"],
-        ["manage_destinations (create, edit, delete destinations)", "✓", "✓", "✗", "✗"],
-        ["manage_api_clients (create, delete API clients)", "✓", "✗", "✗", "✗"],
+        ["view (read pages your modules allow)", "✓", "✓", "✓", "✓", "✓"],
+        ["manage_assets (create, edit, delete assets & attributes)", "✓", "✓", "✗", "✗", "✗"],
+        ["manage_templates (create, delete asset templates)", "✓", "✓", "✗", "✗", "✗"],
+        ["manage_alarms (create, edit, delete alarm rules)", "✓", "✓", "✗", "✗", "✗"],
+        ["acknowledge_alarms (acknowledge active alarms)", "✓", "✓", "✓", "✓", "✗"],
+        ["manage_users (create, edit, delete users)", "✓", "✗", "✗", "✗", "✗"],
+        ["manage_brokers (create, edit, delete brokers)", "✓", "✓", "✗", "✗", "✗"],
+        ["manage_destinations (create, edit, delete destinations)", "✓", "✓", "✗", "✗", "✗"],
+        ["manage_api_clients (create, rotate, revoke API clients)", "✓", "✓", "✗", "✗", "✗"],
+        ["manage_security (Security Center, sessions, security events)", "✓", "✗", "✗", "✗", "✗"],
       ]
     ),
+    p("Projects: Project Managers see every project; Team Leads and Developers see only the projects assigned to them; all other roles follow a per-user project setting. Administrators can also override module access per user (User → Access)."),
 
     h2("14.3 ReadOnly Banner"),
     p("On pages where the active role cannot perform write actions, an amber ReadOnly Banner is displayed at the top of the page explaining the limitation. For example, on the Alarm Rule page, a Viewer sees: 'Read-only — Viewers cannot create or modify alarm rules.'"),
@@ -1037,12 +1046,8 @@ export function buildDocumentContent(): ContentItem[] {
       "mode='disable' — the element is rendered but grayed out and non-interactive.",
     ]),
 
-    h2("14.5 Actor Headers"),
-    p("When a user logs in, the platform automatically sets actor headers for all subsequent API requests:"),
-    code("http", `X-Actor-Name: Debasish Panda
-X-Actor-Role: admin
-X-Actor-Username: Deb`),
-    p("These headers allow the API server to record the correct actor identity in the Audit Log without requiring a separate authentication middleware on every route."),
+    h2("14.5 Audit Identity"),
+    p("The API server takes your identity from your session cookie (or, for machine clients, from the API key) and writes it to the Audit Log. The server removes or overwrites any X-Actor-* headers a client sends, so the browser cannot claim to be someone else."),
     pb(),
 
     // ═══════════════════════════════════════════════════════════════════════════
@@ -1258,7 +1263,7 @@ X-Actor-Username: Deb`),
         ["username", "TEXT UNIQUE NOT NULL", "Login identifier"],
         ["email", "TEXT", "Contact email"],
         ["fullName", "TEXT NOT NULL", "Display name"],
-        ["role", "ENUM", "admin | engineer | operator | viewer"],
+        ["role", "TEXT", "super_admin | company_admin | admin | project_manager | team_lead | developer | engineer | operator | viewer (unknown values are treated as viewer)"],
         ["status", "ENUM DEFAULT 'active'", "active | inactive | suspended"],
         ["passwordHash", "TEXT NOT NULL", "Hashed password (bcrypt)"],
         ["lastLogin", "TIMESTAMP", "Most recent successful login"],
@@ -1380,8 +1385,8 @@ X-Actor-Username: Deb`),
     h2("17.2 Authentication"),
     p("Two authentication mechanisms are supported:"),
     ul([
-      "Bearer Token (API Client) — Include the client secret in the Authorization header: Authorization: Bearer <secret>. Required for /api/export/* endpoints.",
-      "Session — Cookie-based session for browser access. Automatically maintained after login.",
+      "API key (API Client) — Send the client secret as Authorization: Bearer <secret> or X-API-Key: <secret>. Used by gateways for /api/ingest/* and by integrations for /api/export/*.",
+      "Session — HttpOnly session cookie for browser access, created at login. Write requests (POST, PUT, PATCH, DELETE) made with the cookie must also send the x-csrf-token header.",
     ]),
 
     h2("17.3 Asset Endpoints"),
@@ -1462,7 +1467,7 @@ X-Actor-Username: Deb`),
       ["Method", "Path", "Description"],
       [
         ["GET", "/api/users", "List all users"],
-        ["POST", "/api/users", "Create a user (body: username, email, fullName, role, password)"],
+        ["POST", "/api/users", "Invite a user (body: username, email, fullName, role). No password: the account is created as invited and an activation link is sent"],
         ["GET", "/api/users/:id", "Get a single user"],
         ["PUT", "/api/users/:id", "Update user (body: fullName?, email?, role?, status?)"],
         ["DELETE", "/api/users/:id", "Delete a user"],
@@ -1728,7 +1733,7 @@ conditionMet = rate > rule.threshold`),
     h2("22.1 Connection"),
     p("The WebSocket server is attached to the Express HTTP server at the path /api/ws. Clients connect using:"),
     code("text", "wss://<platform-domain>/api/ws"),
-    p("The platform frontend establishes this connection automatically using the useWsEvents React hook. Multiple browser tabs maintain independent WebSocket connections."),
+    p("The platform frontend establishes this connection automatically using the useWsEvents React hook. Every component in a tab shares one WebSocket connection; multiple browser tabs maintain independent connections."),
 
     h2("22.2 Event Types"),
     table(
@@ -1745,11 +1750,11 @@ conditionMet = rate > rule.threshold`),
     h2("22.3 useWsEvents Hook"),
     p("The frontend useWsEvents hook (src/hooks/useWsEvents.ts) manages the WebSocket lifecycle:"),
     ul([
-      "Establishes the WebSocket connection on mount.",
-      "Automatically reconnects with exponential backoff on disconnection.",
+      "Opens one shared WebSocket connection when the first component subscribes.",
+      "Automatically reconnects with exponential backoff on disconnection (immediately when the server closes it because the user's access changed), then refreshes loaded data so events missed while disconnected are picked up.",
       "Parses incoming JSON messages and dispatches them to registered event handlers.",
-      "Exposes connection status (connected, connecting, disconnected) to consuming components.",
-      "Cleans up the connection on component unmount.",
+      "Exposes connection status (connecting, connected, reconnecting) to consuming components.",
+      "Closes the connection shortly after the last subscribing component unmounts.",
     ]),
 
     h2("22.4 Per-Asset Signal Map"),
@@ -1762,14 +1767,14 @@ conditionMet = rate > rule.threshold`),
     // ─── CHAPTER 23 ───────────────────────────────────────────────────────────
     h1("Chapter 23: Authentication & Authorization"),
     h2("23.1 Session Authentication"),
-    p("Browser sessions are managed using session cookies. The session secret is configured via the SESSION_SECRET environment variable. Session data is stored server-side. All browser-originated requests to the API include the session cookie automatically."),
+    p("Browser sessions are stored server-side in PostgreSQL and identified by an HttpOnly cookie (is_session). A session expires after 30 minutes idle and 12 hours absolute by default (AUTH_SESSION_IDLE_MINUTES, AUTH_SESSION_ABSOLUTE_HOURS). Cookie-authenticated write requests must send the x-csrf-token header that matches the is_csrf cookie."),
 
     h2("23.2 API Key Authentication (Bearer Token)"),
     p("External applications authenticate using API client credentials:"),
     ol([
-      "Create an API client via Security → API Clients. A clientSecret (UUID) is generated.",
-      "Include the secret as a Bearer token on every request: Authorization: Bearer <clientSecret>",
-      "The API server extracts the token, looks up the matching api_clients record, verifies status=active and not expired, and grants access to the permitted scopes.",
+      "Create an API client via Integration Hub → API Client. The secret is shown once; the server stores only its SHA-256 hash.",
+      "Send the secret on every request as Authorization: Bearer <clientSecret> or X-API-Key: <clientSecret>. A key in the query string (?key=) is ignored unless the server sets API_KEY_ALLOW_QUERY_PARAM=true.",
+      "The API server hashes the secret, looks up the matching api_clients record, verifies status=active and not expired, checks the IP allowlist and scopes, and applies a per-client limit of 1200 requests per minute by default (INGEST_RATE_LIMIT_RPM). Over the limit it returns HTTP 429.",
     ]),
     p("Requests without a valid token to protected endpoints (e.g., /api/export/alarms) receive HTTP 401."),
 
@@ -1784,21 +1789,21 @@ router.get('/export/alarms', apiKeyAuth('read:alarms'), async (req, res) => {
     p("If an API client has entries in its allowedIps array, the middleware extracts the requesting IP from req.ip (or X-Forwarded-For header). If the IP is not in the allowlist, HTTP 403 is returned immediately."),
 
     h2("23.5 Role-Based Access Control Implementation"),
-    p("RBAC is implemented client-side in UserContext.tsx. The ROLE_PERMISSIONS map defines which permissions each role has:"),
-    code("typescript", `const ROLE_PERMISSIONS: Record<string, string[]> = {
-  admin:    ['view', 'manage_assets', 'manage_templates', 'manage_alarms', 
-             'acknowledge_alarms', 'manage_users', 'manage_brokers', 
-             'manage_destinations', 'manage_api_clients'],
-  engineer: ['view', 'manage_assets', 'manage_templates', 'manage_alarms', 
-             'acknowledge_alarms', 'manage_brokers', 'manage_destinations'],
-  operator: ['view', 'acknowledge_alarms'],
-  viewer:   ['view'],
-};
+    p("RBAC is enforced by the API server. The catalogue of roles, permissions and module defaults lives in artifacts/api-server/src/lib/rbac.ts, and middleware/authorize.ts holds a deny-by-default route table: a route without a rule is refused, and every refusal is written to security_events. The server sends the catalogue to the browser, where UserContext.tsx and RoleGuard use it so the UI matches. The permission sets per role are:"),
+    code("typescript", `// artifacts/api-server/src/lib/rbac.ts (abridged)
+super_admin, company_admin, admin:
+  view, manage_assets, manage_templates, manage_alarms, acknowledge_alarms,
+  manage_users, manage_brokers, manage_destinations, manage_api_clients, manage_security
+engineer, developer:
+  view, manage_assets, manage_templates, manage_alarms, acknowledge_alarms,
+  manage_brokers, manage_destinations, manage_api_clients
+project_manager, team_lead, operator: view, acknowledge_alarms
+viewer: view
 
 // Usage in components:
 const { can } = useCurrentUser();
 if (can('manage_users')) { /* show admin controls */ }`),
-    note("RBAC is enforced at the UI level for a smooth user experience. Critical write operations are also protected at the API level using role checks in route handlers."),
+    note("The UI checks are for usability only. The server decision is authoritative; AUTH_ENFORCE=false disables it and exists only as a documented rollback switch (the server refuses to start with it in production)."),
     pb(),
 
     // ─── CHAPTER 24 ───────────────────────────────────────────────────────────
@@ -1893,7 +1898,7 @@ if (can('manage_users')) { /* show admin controls */ }`),
         ["How do I scale to many assets?", "Add composite indexes on the telemetry table (already included). Consider data retention policies to limit table size. Use batch ingest for high-frequency sources."],
         ["How do I connect a legacy device that doesn't send JSON?", "Use an MQTT or HTTP gateway (e.g., Node-RED, AWS IoT Greengrass) to translate the protocol and format before forwarding to the platform ingest endpoint."],
         ["Can multiple devices report to the same asset?", "Yes, but only one deviceId per asset is matched. If multiple devices report similar data, create separate assets with separate identifiers and use the hierarchy to group them."],
-        ["What happens if the WebSocket disconnects?", "The useWsEvents hook reconnects automatically with exponential backoff. Data missed during the disconnect is not replayed; refresh the page to load current values."],
+        ["What happens if the WebSocket disconnects?", "The useWsEvents hook reconnects automatically with exponential backoff. Missed events are not replayed, but once it reconnects the page reloads its data from the server, so current values appear without a manual refresh."],
       ]
     ),
 
@@ -1902,10 +1907,10 @@ if (can('manage_users')) { /* show admin controls */ }`),
     table(
       ["Symptom", "Likely Cause", "Resolution"],
       [
-        ["No data in telemetry chart", "deviceId mismatch or telemetry not being sent", "Use Payload Simulator to send a test payload; check the request log for errors."],
+        ["No data in telemetry chart", "deviceId mismatch or telemetry not being sent", "Confirm the payload deviceId exactly matches the asset identifier (case-sensitive); send a test payload with curl (see the Integration Guide)."],
         ["Alarms not triggering", "Rule disabled, asset in maintenance, wrong metric key", "Verify rule is enabled; check maintenance mode; confirm metric key matches exactly."],
         ["MQTT broker shows 'error'", "Wrong credentials, host unreachable, or firewall block", "Test connectivity from server with mosquitto_pub; verify credentials; check firewall rules."],
-        ["Dashboard widgets show 'No data'", "Asset has no telemetry in the selected time range", "Send test data via Payload Simulator; check the time range selector."],
+        ["Dashboard widgets show 'No data'", "Asset has no telemetry in the selected time range", "Send test data with curl or a gateway; check the time range selector."],
         ["Add Destination dialog crashes", "Form component rendered outside proper context", "Refresh the page. If persistent, clear browser cache and reload."],
         ["API client returns 401", "Token expired or client revoked", "Check client status in Security → API Clients; create a new client if needed."],
         ["Reports show empty alarm data", "Date range does not include any alarm events", "Expand the date range; check Alarm History page for actual event timestamps."],

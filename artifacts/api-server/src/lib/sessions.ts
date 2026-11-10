@@ -1,10 +1,12 @@
 import crypto from "node:crypto";
 import type { Request, Response } from "express";
-import { and, eq, ne, isNull, gt, lt, inArray } from "drizzle-orm";
+import { and, eq, ne, isNull, gt, lt, inArray, sql } from "drizzle-orm";
 import { db, sessionsTable, usersTable, type Session } from "@workspace/db";
 import { authConfig } from "./auth-config";
 import { generateToken, hashToken } from "./tokens";
 import { clientIp, userAgent } from "./security-log";
+import { isTopAdminRole } from "./rbac";
+import { closeSockets } from "./ws-broadcast";
 
 /**
  * Server-side session lifecycle.
@@ -23,10 +25,54 @@ export interface CreatedSession {
   csrfToken: string;
 }
 
+/** This user already has as many live sessions as they are allowed. */
+export class SessionLimitError extends Error {
+  constructor(readonly limit: number) {
+    super(`Session limit of ${limit} reached`);
+  }
+}
+
+/**
+ * Create a session unless the user is at their limit of simultaneous logins.
+ *
+ * The user row is locked so two logins arriving together cannot both pass the
+ * count. Super Admins and Company Admins are exempt: a limit could lock the only
+ * person able to fix it out of the platform.
+ *
+ * A browser closed without signing out still counts until its session reaches
+ * the idle timeout. An administrator can end it sooner from the Security Center.
+ */
+export async function createSessionWithinLimit(
+  user: { id: string; role: string; maxSessions: number },
+  req: Request,
+  opts: { rememberMe?: boolean } = {},
+): Promise<CreatedSession> {
+  return db.transaction(async (tx) => {
+    await tx.select({ id: usersTable.id }).from(usersTable).where(eq(usersTable.id, user.id)).for("update");
+
+    if (!isTopAdminRole(user.role)) {
+      const now = new Date();
+      const [{ live }] = await tx
+        .select({ live: sql<number>`count(*)::int` })
+        .from(sessionsTable)
+        .where(and(
+          eq(sessionsTable.userId, user.id),
+          isNull(sessionsTable.revokedAt),
+          gt(sessionsTable.expiresAt, now),
+          gt(sessionsTable.absoluteExpiresAt, now),
+        ));
+      if (live >= user.maxSessions) throw new SessionLimitError(user.maxSessions);
+    }
+
+    return createSession(user.id, req, opts, tx);
+  });
+}
+
 export async function createSession(
   userId: string,
   req: Request,
   opts: { rememberMe?: boolean } = {},
+  executor: Pick<typeof db, "insert"> = db,
 ): Promise<CreatedSession> {
   const rawToken = generateToken();
   const csrfToken = generateToken();
@@ -40,7 +86,7 @@ export async function createSession(
   const absoluteExpiresAt = new Date(now + absoluteTtl);
   const expiresAt = new Date(Math.min(now + authConfig.session.idleTtlMs, absoluteExpiresAt.getTime()));
 
-  const [session] = await db.insert(sessionsTable).values({
+  const [session] = await executor.insert(sessionsTable).values({
     userId,
     tokenHash: hashToken(rawToken),
     csrfToken,
@@ -104,6 +150,7 @@ export async function revokeSession(sessionId: string, reason: string): Promise<
     .update(sessionsTable)
     .set({ revokedAt: new Date(), revokedReason: reason })
     .where(and(eq(sessionsTable.id, sessionId), isNull(sessionsTable.revokedAt)));
+  closeSockets({ sessionId }, reason);
 }
 
 /**
@@ -128,6 +175,8 @@ export async function revokeAllUserSessions(
     ))
     .returning({ id: sessionsTable.id });
 
+  // Live connections opened with those sessions end now too.
+  closeSockets({ userId, exceptSessionId: opts.exceptSessionId }, reason);
   return revoked.length;
 }
 
@@ -170,26 +219,44 @@ export async function pruneExpiredSessions(): Promise<number> {
 
 // ── Cookies ──────────────────────────────────────────────────────────────────
 
-function baseCookieOptions(maxAgeMs: number) {
+/**
+ * Cookie options for the session and CSRF cookies.
+ *
+ * Only a "Remember me" sign-in gets a `maxAge`. Without one the browser treats
+ * the cookie as a session cookie and drops it when it closes, so a shared or
+ * kiosk computer does not hand the next person a signed-in tab. Before this
+ * every sign-in carried the full 12-hour lifetime on disk. The server-side
+ * idle and absolute expiry apply either way.
+ *
+ * The cookie keeps its `is_session` name. A `__Host-` prefix would be better in
+ * production, but renaming the cookie would sign every user out at deploy, and
+ * the WebSocket handshake and the SPA read the current names.
+ */
+export function sessionCookieOptions(persistent: boolean, maxAgeMs: number) {
   return {
     path: "/",
     sameSite: authConfig.session.sameSite,
     secure: authConfig.session.secure,
-    maxAge: maxAgeMs,
+    ...(persistent ? { maxAge: Math.max(0, maxAgeMs) } : {}),
   } as const;
 }
 
-export function setSessionCookies(res: Response, created: CreatedSession): void {
+export function setSessionCookies(
+  res: Response,
+  created: CreatedSession,
+  opts: { rememberMe?: boolean } = {},
+): void {
   const maxAge = created.session.absoluteExpiresAt.getTime() - Date.now();
+  const base = sessionCookieOptions(opts.rememberMe === true, maxAge);
 
   // Session token: HttpOnly, so XSS cannot exfiltrate it.
-  res.cookie(cookieName, created.rawToken, { ...baseCookieOptions(maxAge), httpOnly: true });
+  res.cookie(cookieName, created.rawToken, { ...base, httpOnly: true });
 
   // CSRF token: deliberately readable by JS — the SPA must echo it back in the
   // X-CSRF-Token header. That is the whole point of the double-submit pattern:
   // a cross-site attacker can cause the cookie to be *sent* but cannot *read*
   // it to construct the matching header.
-  res.cookie(csrfCookieName, created.csrfToken, { ...baseCookieOptions(maxAge), httpOnly: false });
+  res.cookie(csrfCookieName, created.csrfToken, { ...base, httpOnly: false });
 }
 
 export function clearSessionCookies(res: Response): void {

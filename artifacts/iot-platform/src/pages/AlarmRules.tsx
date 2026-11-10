@@ -42,6 +42,8 @@ import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { ReadOnlyBanner } from "@/components/RoleGuard";
 import { apiFetch } from "@/lib/auth-api";
+import { FEATURES } from "@/lib/features";
+import { useProjectScope } from "@/hooks/useProjectScope";
 
 const SEVERITY_STYLES: Record<string, string> = {
   critical: "bg-red-100 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-400",
@@ -64,7 +66,12 @@ export default function AlarmRules() {
   const [open, setOpen] = useState(false);
   const [editingRule, setEditingRule] = useState<any | null>(null);
   const [testingWebhook, setTestingWebhook] = useState<string | null>(null);
-  const { can } = useCurrentUser();
+  const { canAction } = useCurrentUser();
+  // Same rule the API applies to every /alarm-rules write (module checked at read level).
+  const canManage = canAction("manage_alarms", "alarms");
+  // Options the server stores but does not evaluate — see FEATURES.advancedAlarmOptions.
+  const advanced = FEATURES.advancedAlarmOptions;
+  const { inScope } = useProjectScope();
 
   const { data: rules } = useListAlarmRules();
   const { data: assets } = useListAssets();
@@ -158,7 +165,7 @@ export default function AlarmRules() {
       const tag = a.tagName ?? a.sourceMetric ?? ""; if (!tag) return false;
       return tag === key || tag.split(".").slice(1).join(".") === key;
     });
-    return m ? `${m.name} (${key})` : key;
+    return m && m.name !== key ? `${m.name} (${key})` : key;
   }
   const attributeOptions: Array<{ key: string; label: string }> = telemetryMetricKeys.length > 0
     ? telemetryMetricKeys.map(k => ({ key: k, label: attrLabelForKey(k) }))
@@ -228,7 +235,9 @@ export default function AlarmRules() {
     } finally { setTestingWebhook(null); }
   }
 
-  const ruleList = (rules as any[] | undefined) ?? [];
+  // The open project's rules, plus rules with no asset (they apply to every asset).
+  const ruleList = ((rules as any[] | undefined) ?? []).filter((r: any) => inScope(r.assetId));
+  const assetOptions = ((assets as any[] | undefined) ?? []).filter((a: any) => inScope(a.id, { strict: true }));
 
   return (
     <div className="p-6 space-y-4">
@@ -239,7 +248,7 @@ export default function AlarmRules() {
           </h1>
           <p className="text-sm text-muted-foreground">Configure threshold, rate-of-change, and event-based alarm conditions</p>
         </div>
-        {can("manage_alarms") && <Button onClick={openCreate} size="sm"><Plus className="w-4 h-4 mr-1.5" /> Add Rule</Button>}
+        {canManage && <Button onClick={openCreate} size="sm"><Plus className="w-4 h-4 mr-1.5" /> Add Rule</Button>}
       </div>
       <ReadOnlyBanner permission="manage_alarms" message="cannot create, edit, or delete alarm rules." />
 
@@ -289,7 +298,7 @@ export default function AlarmRules() {
                   {rule.threshold != null ? (
                     <span>
                       {rule.operator} {rule.threshold}
-                      {rule.alarmType === "rate_of_change" && rule.rocWindow && (
+                      {advanced && rule.alarmType === "rate_of_change" && rule.rocWindow && (
                         <span className="text-muted-foreground ml-1">/ {rule.rocWindow}s</span>
                       )}
                     </span>
@@ -307,7 +316,7 @@ export default function AlarmRules() {
                   )}
                 </td>
                 <td className="px-4 py-3">
-                  <Switch checked={rule.enabled} disabled={!can("manage_alarms")}
+                  <Switch checked={rule.enabled} disabled={!canManage}
                     onCheckedChange={(checked) => updateRule.mutate({ id: rule.id, data: { enabled: checked } as any },
                       { onSuccess: () => qc.invalidateQueries({ queryKey: getListAlarmRulesQueryKey() }) })}
                   />
@@ -326,7 +335,7 @@ export default function AlarmRules() {
                           : <Webhook className="w-3.5 h-3.5" />}
                       </button>
                     )}
-                    {can("manage_alarms") && (<>
+                    {canManage && (<>
                       <button className="text-muted-foreground hover:text-primary transition-colors"
                         title="Edit rule"
                         onClick={() => openEdit(rule)}>
@@ -366,7 +375,7 @@ export default function AlarmRules() {
                       <Select value={field.value} onValueChange={field.onChange}>
                         <FormControl><SelectTrigger><SelectValue placeholder="Select asset" /></SelectTrigger></FormControl>
                         <SelectContent>
-                          {(((assets as any[] | undefined) ?? [])).map((asset: any) => (
+                          {assetOptions.map((asset: any) => (
                             <SelectItem key={asset.id} value={asset.id}>{asset.name}</SelectItem>
                           ))}
                         </SelectContent>
@@ -400,9 +409,10 @@ export default function AlarmRules() {
                           <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
                           <SelectContent>
                             <SelectItem value="threshold">Threshold</SelectItem>
-                            <SelectItem value="deviation">Deviation</SelectItem>
+                            {/* A rule already saved with a hidden type keeps it, so it opens and saves unchanged. */}
+                            {(advanced || field.value === "deviation") && <SelectItem value="deviation">Deviation</SelectItem>}
                             <SelectItem value="rate_of_change">Rate of Change</SelectItem>
-                            <SelectItem value="heartbeat">Heartbeat</SelectItem>
+                            {(advanced || field.value === "heartbeat") && <SelectItem value="heartbeat">Heartbeat</SelectItem>}
                           </SelectContent>
                         </Select>
                       </FormItem>
@@ -429,8 +439,13 @@ export default function AlarmRules() {
                         <TrendingUp className="w-3.5 h-3.5" /> Rate of Change
                       </p>
                       <p className="text-blue-700 dark:text-blue-400">
-                        Triggers when the absolute change per second exceeds the threshold over the window period.
-                        E.g. threshold=5 with window=60s fires if value changes by more than 5 units/second.
+                        {advanced ? (<>
+                          Triggers when the absolute change per second exceeds the threshold over the window period.
+                          E.g. threshold=5 with window=60s fires if value changes by more than 5 units/second.
+                        </>) : (<>
+                          Triggers when the absolute change per second between consecutive readings exceeds the threshold.
+                          E.g. threshold=5 fires if the value changes by more than 5 units/second.
+                        </>)}
                       </p>
                     </div>
                   )}
@@ -454,7 +469,7 @@ export default function AlarmRules() {
                     <FormField control={form.control} name="threshold" render={({ field }) => (
                       <FormItem><FormLabel>Threshold</FormLabel><FormControl><Input type="number" {...field} /></FormControl></FormItem>
                     )} />
-                    {watchAlarmType === "rate_of_change" ? (
+                    {advanced && watchAlarmType === "rate_of_change" ? (
                       <FormField control={form.control} name="rocWindow" render={({ field }) => (
                         <FormItem>
                           <FormLabel>Window (seconds)</FormLabel>
@@ -475,7 +490,7 @@ export default function AlarmRules() {
                     <FormField control={form.control} name="offDelay" render={({ field }) => (
                       <FormItem><FormLabel>Off Delay (s)</FormLabel><FormControl><Input type="number" {...field} /></FormControl></FormItem>
                     )} />
-                    <FormField control={form.control} name="scanRate" render={({ field }) => (
+                    {advanced && <FormField control={form.control} name="scanRate" render={({ field }) => (
                       <FormItem><FormLabel>Scan Rate (s)</FormLabel>
                         <Select value={field.value} onValueChange={field.onChange}>
                           <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
@@ -486,14 +501,14 @@ export default function AlarmRules() {
                           </SelectContent>
                         </Select>
                       </FormItem>
-                    )} />
+                    )} />}
                   </div>
-                  <div className="flex items-center gap-2">
+                  {advanced && <div className="flex items-center gap-2">
                     <Controller control={form.control} name="requireAcknowledge" render={({ field }) => (
                       <Switch checked={field.value} onCheckedChange={field.onChange} />
                     )} />
                     <Label className="text-sm">Require Acknowledge</Label>
-                  </div>
+                  </div>}
                 </TabsContent>
 
                 <TabsContent value="message" className="mt-4 space-y-4">
@@ -501,12 +516,15 @@ export default function AlarmRules() {
                     Choose one or more delivery channels for alarm events.
                   </div>
 
+                  {/* Email / WhatsApp / SMS have no server-side delivery yet, so they
+                      sit behind FEATURES.notificationChannels. Webhook is real and
+                      always shown. */}
                   {[
-                    { name: "webhookEnabled", label: "Webhook", icon: Webhook, desc: "Deliver HTTP POST on trigger and clear" },
-                    { name: "emailEnabled", label: "Email", icon: Mail, desc: "Send an email notification" },
-                    { name: "whatsappEnabled", label: "WhatsApp", icon: MessageCircle, desc: "Send a WhatsApp alert" },
-                    { name: "smsEnabled", label: "Text Message", icon: MessageSquareText, desc: "Send an SMS alert" },
-                  ].map(({ name, label, icon: Icon, desc }) => (
+                    { name: "webhookEnabled", label: "Webhook", icon: Webhook, desc: "Deliver HTTP POST on trigger and clear", channel: false },
+                    { name: "emailEnabled", label: "Email", icon: Mail, desc: "Send an email notification", channel: true },
+                    { name: "whatsappEnabled", label: "WhatsApp", icon: MessageCircle, desc: "Send a WhatsApp alert", channel: true },
+                    { name: "smsEnabled", label: "Text Message", icon: MessageSquareText, desc: "Send an SMS alert", channel: true },
+                  ].filter(({ channel }) => !channel || FEATURES.notificationChannels).map(({ name, label, icon: Icon, desc }) => (
                     <div key={name} className="flex items-center justify-between rounded-lg border border-border p-3">
                       <div className="space-y-0.5">
                         <Label className="text-sm font-medium flex items-center gap-1.5">
@@ -549,7 +567,7 @@ export default function AlarmRules() {
                     </div>
                   )}
 
-                  {(watchEmailEnabled || watchWaEnabled) && (
+                  {FEATURES.notificationChannels && (watchEmailEnabled || watchWaEnabled) && (
                     <div className="space-y-3 rounded-lg border border-border p-3 bg-muted/20">
                       <p className="text-xs font-semibold flex items-center gap-1.5">
                         <Mail className="w-3.5 h-3.5 text-primary" />

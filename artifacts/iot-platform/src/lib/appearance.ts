@@ -9,7 +9,7 @@ import { useEffect, useState } from "react";
  * never drops you back to the other skin.
  *
  * Both live as attributes on <html>:
- *   skin  → `data-skin="slate" | "classic"`   (see styles/slate.css)
+ *   skin  → `data-skin`, one of SKINS            (see styles/slate.css, palettes.css)
  *   theme → `class="dark"` or its absence     (Tailwind's `dark:` variant)
  *
  * Attributes on the document rather than React context because they must be set
@@ -17,7 +17,10 @@ import { useEffect, useState } from "react";
  * styles needs to read the current values without being inside a provider.
  */
 
-export type Skin = "slate" | "classic";
+const SKINS = [
+  "slate", "classic", "navy", "cool-grey", "soft-white", "pale-blue",
+] as const;
+export type Skin = (typeof SKINS)[number];
 export type Theme = "light" | "dark";
 
 const SKIN_KEY = "skin";
@@ -41,8 +44,15 @@ export const DEFAULT_SKIN: Skin =
 export const DEFAULT_THEME: Theme = "light";
 
 function isSkin(value: unknown): value is Skin {
-  return value === "slate" || value === "classic";
+  return SKINS.includes(value as Skin);
 }
+
+/** Skins designed for one theme only. These ignore the Light and Dark setting. */
+const FIXED_THEME: Partial<Record<Skin, Theme>> = {
+  "cool-grey": "light",
+  "soft-white": "light",
+  "pale-blue": "light",
+};
 
 export function readSkin(): Skin {
   try {
@@ -71,7 +81,7 @@ export function readTheme(): Theme {
 export function applyAppearance(skin: Skin, theme: Theme): void {
   const root = document.documentElement;
   root.setAttribute("data-skin", skin);
-  root.classList.toggle("dark", theme === "dark");
+  root.classList.toggle("dark", (FIXED_THEME[skin] ?? theme) === "dark");
 }
 
 export function persistSkin(skin: Skin): void {
@@ -133,7 +143,9 @@ export function useAppearance(): {
     theme,
     setSkin: (next: Skin) => {
       persistSkin(next);
-      applyAppearance(next, theme);
+      // The saved theme, not the live one: leaving a fixed-theme skin must return the
+      // user to the theme they chose.
+      applyAppearance(next, readTheme());
     },
     setTheme: (next: Theme) => {
       persistTheme(next);

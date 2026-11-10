@@ -15,6 +15,33 @@ import { Component, type ErrorInfo, type ReactNode } from "react";
 
 interface Props {
   children: ReactNode;
+  /**
+   * Where the boundary sits, which decides how much room the fallback takes:
+   *   "app"    — the root boundary in main.tsx; fills the screen (default).
+   *   "page"   — around the routed page, INSIDE Layout, so the sidebar and top
+   *              bar survive a page that throws.
+   *   "widget" — around one dashboard widget, so one bad widget does not take
+   *              the rest of the dashboard with it.
+   */
+  scope?: "app" | "page" | "widget";
+  /**
+   * Clears a caught error when it changes — the route for a page boundary, the
+   * widget object for a widget boundary — so navigating away or editing the
+   * widget gets a fresh render instead of the stale fallback.
+   */
+  resetKey?: unknown;
+}
+
+/**
+ * A lazily-loaded page chunk that failed to download. After a deploy the old
+ * hashed file names are gone, and React caches the rejected import, so "Try
+ * again" would only re-render the same failure — a full reload is what fetches
+ * the new build's index and chunk names.
+ */
+function isChunkLoadError(error: Error): boolean {
+  return error.name === "ChunkLoadError"
+    || /Failed to fetch dynamically imported module|Importing a module script failed|error loading dynamically imported module|Unable to preload CSS/i
+      .test(error.message ?? "");
 }
 
 interface State {
@@ -36,6 +63,10 @@ export class ErrorBoundary extends Component<Props, State> {
     this.setState({ componentStack: info.componentStack ?? null });
   }
 
+  componentDidUpdate(prev: Props): void {
+    if (this.state.error && !Object.is(prev.resetKey, this.props.resetKey)) this.reset();
+  }
+
   private reset = (): void => {
     this.setState({ error: null, componentStack: null });
   };
@@ -44,12 +75,39 @@ export class ErrorBoundary extends Component<Props, State> {
     const { error, componentStack } = this.state;
     if (!error) return this.props.children;
 
+    const scope = this.props.scope ?? "app";
+    const chunk = isChunkLoadError(error);
+
+    if (scope === "widget") {
+      return (
+        <div className="flex h-full w-full flex-col items-center justify-center gap-1.5 p-2 text-center">
+          <p className="text-xs font-medium text-foreground">This widget could not be displayed</p>
+          {import.meta.env.DEV && (
+            <p className="max-w-full truncate text-[10px] text-muted-foreground" title={error.message}>{error.message}</p>
+          )}
+          <button
+            onClick={chunk ? () => window.location.reload() : this.reset}
+            className="h-6 rounded-md border border-input px-2 text-[11px] font-medium text-foreground hover:bg-muted"
+          >
+            {chunk ? "Reload page" : "Try again"}
+          </button>
+        </div>
+      );
+    }
+
     return (
-      <div className="min-h-screen flex items-center justify-center bg-background p-6">
+      <div className={scope === "page"
+        ? "flex min-h-[50vh] w-full items-center justify-center p-6"
+        : "min-h-screen flex items-center justify-center bg-background p-6"}>
         <div className="w-full max-w-2xl rounded-lg border border-destructive/40 bg-card p-6 shadow-sm">
           <h1 className="text-lg font-semibold text-foreground">Something went wrong</h1>
 
-          {import.meta.env.DEV ? (
+          {chunk ? (
+            <p className="mt-1 text-sm text-muted-foreground">
+              This page could not be loaded, usually because a new version of the
+              application has been installed. Reload to get the latest version.
+            </p>
+          ) : import.meta.env.DEV ? (
             <>
               <p className="mt-1 text-sm text-muted-foreground">
                 An error was thrown while rendering. This detail is shown in development only.
@@ -72,12 +130,15 @@ export class ErrorBoundary extends Component<Props, State> {
           )}
 
           <div className="mt-5 flex gap-2">
-            <button
-              onClick={this.reset}
-              className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90"
-            >
-              Try again
-            </button>
+            {/* A failed chunk would fail again on re-render; only a reload helps. */}
+            {!chunk && (
+              <button
+                onClick={this.reset}
+                className="h-9 rounded-md bg-primary px-4 text-sm font-medium text-primary-foreground hover:opacity-90"
+              >
+                Try again
+              </button>
+            )}
             <button
               onClick={() => window.location.reload()}
               className="h-9 rounded-md border border-input px-4 text-sm font-medium text-foreground hover:bg-muted"

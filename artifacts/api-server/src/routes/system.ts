@@ -1,9 +1,15 @@
+import { aggregateTelemetryWithMeta } from "../lib/telemetry-aggregate";
+import { PLANT_TIME_ZONE } from "../lib/plant-time";
 import { Router, type IRouter } from "express";
 import { z } from "zod";
 import { validate } from "../middleware/validate";
 import { AggregateQuery, RetentionBody, UpdateRetentionBody, IdParams } from "../schemas/common";
-import { eq, and, gte, lte, sql, isNull, or, lt } from "drizzle-orm";
-import { db, pool, assetsTable, telemetryTable, alarmsTable, dataRetentionTable } from "@workspace/db";
+import { eq, and, sql, lt, inArray, notInArray, type SQL } from "drizzle-orm";
+import type { PgTable } from "drizzle-orm/pg-core";
+import {
+  db, assetsTable, telemetryTable, alarmsTable, alarmHistoryTable, dataRetentionTable,
+  activityLogsTable, brokerEventsTable, authTokensTable,
+} from "@workspace/db";
 import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
@@ -69,57 +75,14 @@ router.get("/system/storage", async (_req, res): Promise<void> => {
 router.get("/system/aggregate", validate({ query: AggregateQuery }), async (req, res): Promise<void> => {
   const { assetId, metric, from, to, limit, bucket } = req.query as unknown as z.infer<typeof AggregateQuery>;
 
-  // Map bucket names to seconds — used for epoch-floor bucketing (avoids INTERVAL parameterization)
-  const bucketSeconds: Record<string, number> = {
-    "1m": 60, "5m": 300, "15m": 900, "30m": 1800,
-    "1h": 3600, "6h": 21600, "12h": 43200,
-    "1d": 86400, "1w": 604800,
-  };
-  // `bucket` is an enum, so this lookup can no longer miss or reach the
-  // prototype chain; the fallback is kept only to satisfy the index signature.
-  const stepSec  = bucketSeconds[bucket] ?? 3600;
-  const maxLimit = limit ?? 1000;
-
-  // Build WHERE clause as a raw SQL string to avoid Drizzle prepared-statement
-  // type-inference issues with EXTRACT/FLOOR arithmetic.
-  // stepSec and maxLimit are validated integers from a whitelist; string params are bound.
-  const filters: string[] = ["value::text ~ '^-?[0-9]+(\\.[0-9]+)?$'"];
-  const params: (string | number | Date)[] = [];
-
-  if (assetId) { params.push(assetId);           filters.push(`asset_id = $${params.length}`); }
-  if (metric)  { params.push(metric);             filters.push(`metric = $${params.length}`); }
-  if (from)    { params.push(from);               filters.push(`"timestamp" >= $${params.length}`); }
-  if (to)      { params.push(to);                 filters.push(`"timestamp" <= $${params.length}`); }
-  params.push(maxLimit);
-  const limitParam = params.length;
-
-  // stepSec is from a fixed whitelist — safe to inline as an integer literal
-  const rawSql = `
-    SELECT
-      to_timestamp(FLOOR(EXTRACT(EPOCH FROM "timestamp") / ${stepSec}) * ${stepSec}) AS bucket,
-      asset_id,
-      metric,
-      AVG((value::text)::numeric)  AS avg_val,
-      MIN((value::text)::numeric)  AS min_val,
-      MAX((value::text)::numeric)  AS max_val,
-      SUM((value::text)::numeric)  AS sum_val,
-      COUNT(*)::int                AS count
-    FROM telemetry
-    WHERE ${filters.join(" AND ")}
-    GROUP BY 1, asset_id, metric
-    ORDER BY bucket ASC
-    LIMIT $${limitParam}
-  `;
-
-  const aggResult = await pool.query<{
-    bucket: Date; asset_id: string; metric: string;
-    avg_val: string; min_val: string; max_val: string; sum_val: string; count: number;
-  }>(rawSql, params);
-  const aggRows = aggResult.rows;
+  const { rows: aggRows, truncated } = await aggregateTelemetryWithMeta({ assetId, metric, from, to, limit, bucket });
 
   res.json({
     bucket,
-    count: (aggRows as unknown[]).length,
+    count: aggRows.length,
+    // True when older buckets were left out to stay within `limit`.
+    truncated,
+    timeZone: PLANT_TIME_ZONE,
     data: aggRows,
     generatedAt: new Date().toISOString(),
   });
@@ -171,34 +134,268 @@ router.delete("/system/retention/:id", async (req, res): Promise<void> => {
 // ── Manual pruning trigger ────────────────────────────────────────────────────
 router.post("/system/retention/run", async (_req, res): Promise<void> => {
   const result = await runPruning();
+  if (result.skipped) {
+    res.status(409).json({ error: "A pruning run is already in progress.", code: "pruning_in_progress" });
+    return;
+  }
   res.json(result);
 });
 
+// ── Retention precedence (pure) ───────────────────────────────────────────────
+
+export interface RetentionPolicyLike {
+  id: string;
+  name?: string;
+  assetId: string | null;
+  metric: string | null;
+  retentionDays: number;
+  enabled?: boolean;
+}
+
+/** How specific a policy is: asset + metric (3) > asset (2) > metric (1) > global (0). */
+export function policyLevel(p: { assetId: string | null; metric: string | null }): number {
+  return p.assetId && p.metric ? 3 : p.assetId ? 2 : p.metric ? 1 : 0;
+}
+
+export interface RetentionPlanItem {
+  policyIds: string[];
+  names: string[];
+  assetId: string | null;
+  metric: string | null;
+  retentionDays: number;
+  /** Rows these exclusions match belong to a more specific policy and are left alone here. */
+  excludeAssets: string[];
+  excludeMetrics: string[];
+  excludePairs: Array<[string, string]>;
+}
+
+/**
+ * Turn enabled policies into deletes where the MOST SPECIFIC policy covering a
+ * row decides its retention.
+ *
+ * Each policy used to delete independently, so a 30-day global policy deleted
+ * data that a 365-day policy on one asset was meant to keep. Now each policy
+ * skips rows that a more specific policy covers. Two enabled policies with the
+ * same scope merge, and the longer retention wins.
+ */
+export function planRetention(policies: RetentionPolicyLike[]): RetentionPlanItem[] {
+  const byScope = new Map<string, RetentionPlanItem>();
+  for (const p of policies) {
+    if (p.enabled === false) continue;
+    const key = `${p.assetId ?? "*"}|${p.metric ?? "*"}`;
+    const existing = byScope.get(key);
+    if (existing) {
+      existing.retentionDays = Math.max(existing.retentionDays, p.retentionDays);
+      existing.policyIds.push(p.id);
+      existing.names.push(p.name ?? p.id);
+      continue;
+    }
+    byScope.set(key, {
+      policyIds: [p.id], names: [p.name ?? p.id], assetId: p.assetId, metric: p.metric,
+      retentionDays: p.retentionDays, excludeAssets: [], excludeMetrics: [], excludePairs: [],
+    });
+  }
+  const items = [...byScope.values()];
+  const assetOnly = items.filter((i) => policyLevel(i) === 2).map((i) => i.assetId!);
+  const metricOnly = items.filter((i) => policyLevel(i) === 1).map((i) => i.metric!);
+  const pairs = items.filter((i) => policyLevel(i) === 3).map((i) => [i.assetId!, i.metric!] as [string, string]);
+
+  for (const item of items) {
+    switch (policyLevel(item)) {
+      case 0:
+        item.excludeAssets = assetOnly;
+        item.excludeMetrics = metricOnly;
+        item.excludePairs = pairs;
+        break;
+      case 1:
+        item.excludeAssets = assetOnly;
+        item.excludePairs = pairs.filter(([, m]) => m === item.metric);
+        break;
+      case 2:
+        item.excludePairs = pairs.filter(([a]) => a === item.assetId);
+        break;
+      default:
+        break;
+    }
+  }
+  return items;
+}
+
+/** Whether a plan item's delete would touch a row of this asset and metric (age aside). */
+export function planItemCovers(item: RetentionPlanItem, row: { assetId: string; metric: string }): boolean {
+  if (item.assetId && item.assetId !== row.assetId) return false;
+  if (item.metric && item.metric !== row.metric) return false;
+  if (item.excludeAssets.includes(row.assetId)) return false;
+  if (item.excludeMetrics.includes(row.metric)) return false;
+  if (item.excludePairs.some(([a, m]) => a === row.assetId && m === row.metric)) return false;
+  return true;
+}
+
+/** The retention that applies to one row, by the most-specific-wins rule. Null if no policy applies. */
+export function effectiveRetentionDays(row: { assetId: string; metric: string }, policies: RetentionPolicyLike[]): number | null {
+  let best: { level: number; days: number } | null = null;
+  for (const p of policies) {
+    if (p.enabled === false) continue;
+    if (p.assetId && p.assetId !== row.assetId) continue;
+    if (p.metric && p.metric !== row.metric) continue;
+    const level = policyLevel(p);
+    if (!best || level > best.level) best = { level, days: p.retentionDays };
+    else if (level === best.level) best.days = Math.max(best.days, p.retentionDays);
+  }
+  return best?.days ?? null;
+}
+
 // ── Pruning logic (also used by background job) ───────────────────────────────
-export async function runPruning(): Promise<{ policiesRun: number; totalRowsDeleted: number; details: unknown[] }> {
+
+/** Rows deleted per statement. Small batches keep locks and WAL bursts short. */
+const PRUNE_BATCH_SIZE = 5000;
+/** Batches per table per run; the hourly job picks up the rest next time. */
+const PRUNE_MAX_BATCHES = 200;
+
+/** Delete matching rows in batches by primary key. Returns the number deleted. */
+async function deleteInBatches(table: PgTable, where: SQL): Promise<number> {
+  let total = 0;
+  for (let i = 0; i < PRUNE_MAX_BATCHES; i++) {
+    const result = await db.execute(sql`
+      DELETE FROM ${table} WHERE id IN (
+        SELECT id FROM ${table} WHERE ${where} LIMIT ${PRUNE_BATCH_SIZE}
+      )`);
+    const n = result.rowCount ?? 0;
+    total += n;
+    if (n < PRUNE_BATCH_SIZE) break;
+  }
+  return total;
+}
+
+export interface PruneResult {
+  policiesRun: number;
+  totalRowsDeleted: number;
+  details: unknown[];
+  /** Set when another run was still in progress, so nothing was done. */
+  skipped?: boolean;
+}
+
+let pruningInProgress = false;
+
+export async function runPruning(): Promise<PruneResult> {
+  // The hourly job and the "Run now" button must not prune the same rows at
+  // once, and a slow run must not overlap the next one.
+  if (pruningInProgress) return { policiesRun: 0, totalRowsDeleted: 0, details: [], skipped: true };
+  pruningInProgress = true;
+  try {
+    return await pruneTelemetry();
+  } finally {
+    pruningInProgress = false;
+  }
+}
+
+async function pruneTelemetry(): Promise<PruneResult> {
   const policies = await db.select().from(dataRetentionTable).where(eq(dataRetentionTable.enabled, true));
+  const plan = planRetention(policies);
   let totalDeleted = 0;
   const details: unknown[] = [];
 
-  for (const policy of policies) {
-    const cutoff = new Date(Date.now() - policy.retentionDays * 86_400_000);
-    const conditions = [lt(telemetryTable.timestamp, cutoff as unknown as Date)];
-    if (policy.assetId) conditions.push(eq(telemetryTable.assetId, policy.assetId));
-    if (policy.metric)  conditions.push(eq(telemetryTable.metric, policy.metric));
+  for (const item of plan) {
+    const cutoff = new Date(Date.now() - item.retentionDays * 86_400_000);
+    const conditions: SQL[] = [lt(telemetryTable.timestamp, cutoff)];
+    if (item.assetId) conditions.push(eq(telemetryTable.assetId, item.assetId));
+    if (item.metric)  conditions.push(eq(telemetryTable.metric, item.metric));
+    if (item.excludeAssets.length)  conditions.push(notInArray(telemetryTable.assetId, item.excludeAssets));
+    if (item.excludeMetrics.length) conditions.push(notInArray(telemetryTable.metric, item.excludeMetrics));
+    if (item.excludePairs.length) {
+      conditions.push(sql`(${telemetryTable.assetId}, ${telemetryTable.metric}) NOT IN (${sql.join(
+        item.excludePairs.map(([a, m]) => sql`(${a}::uuid, ${m}::text)`), sql`, `)})`);
+    }
 
-    const deleted = await db.delete(telemetryTable).where(and(...conditions));
-    const count = (deleted as unknown as { rowCount?: number }).rowCount ?? 0;
+    const count = await deleteInBatches(telemetryTable, and(...conditions)!);
     totalDeleted += count;
 
+    // Rows are credited to the first policy of a merged scope; every one is stamped as run.
+    const [first, ...rest] = item.policyIds;
     await db.update(dataRetentionTable)
       .set({ lastPrunedAt: new Date(), rowsPruned: sql`${dataRetentionTable.rowsPruned} + ${count}` })
-      .where(eq(dataRetentionTable.id, policy.id));
+      .where(eq(dataRetentionTable.id, first));
+    if (rest.length) {
+      await db.update(dataRetentionTable).set({ lastPrunedAt: new Date() }).where(inArray(dataRetentionTable.id, rest));
+    }
 
-    details.push({ policyId: policy.id, name: policy.name, rowsDeleted: count, cutoff });
-    if (count > 0) logger.info({ policyId: policy.id, name: policy.name, rowsDeleted: count }, "Pruning complete");
+    details.push({ policyId: first, mergedPolicyIds: rest, name: item.names[0], rowsDeleted: count, cutoff });
+    if (count > 0) logger.info({ policyId: first, name: item.names[0], rowsDeleted: count }, "Pruning complete");
   }
 
-  return { policiesRun: policies.length, totalRowsDeleted: totalDeleted, details };
+  return { policiesRun: plan.length, totalRowsDeleted: totalDeleted, details };
+}
+
+// ── Age-based retention for operational tables ───────────────────────────────
+
+function daysEnv(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined || raw.trim() === "") return fallback;
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= 0 ? Math.floor(n) : fallback;
+}
+
+/**
+ * Days each operational table is kept. 0 turns that table's pruning off.
+ * Defaults are deliberately long: these are records people look back at.
+ */
+export function operationalRetentionDays(): Record<"clearedAlarms" | "alarmHistory" | "activityLogs" | "brokerEvents" | "authTokens", number> {
+  return {
+    clearedAlarms: daysEnv("RETENTION_CLEARED_ALARMS_DAYS", 365),
+    alarmHistory: daysEnv("RETENTION_ALARM_HISTORY_DAYS", 730),
+    activityLogs: daysEnv("RETENTION_ACTIVITY_LOG_DAYS", 365),
+    brokerEvents: daysEnv("RETENTION_BROKER_EVENTS_DAYS", 90),
+    authTokens: daysEnv("RETENTION_AUTH_TOKENS_DAYS", 30),
+  };
+}
+
+let operationalPruningInProgress = false;
+
+/**
+ * Prune alarms, alarm history, activity logs, broker events and auth tokens by age.
+ * These tables used to grow for ever. Open alarms (active or acknowledged) and
+ * the history of open alarms are never deleted.
+ */
+export async function runOperationalPruning(): Promise<{ deleted: Record<string, number>; skipped?: boolean }> {
+  if (operationalPruningInProgress) return { deleted: {}, skipped: true };
+  operationalPruningInProgress = true;
+  try {
+    const days = operationalRetentionDays();
+    const cutoff = (d: number) => new Date(Date.now() - d * 86_400_000);
+    const deleted: Record<string, number> = {};
+
+    if (days.clearedAlarms > 0) {
+      const c = cutoff(days.clearedAlarms);
+      deleted.alarms = await deleteInBatches(alarmsTable, sql`${alarmsTable.status} = 'cleared'
+        AND COALESCE(${alarmsTable.clearedAt}, ${alarmsTable.triggeredAt}) < ${c}`);
+    }
+    if (days.alarmHistory > 0) {
+      const c = cutoff(days.alarmHistory);
+      deleted.alarmHistory = await deleteInBatches(alarmHistoryTable, sql`${alarmHistoryTable.triggeredAt} < ${c}
+        AND NOT EXISTS (
+          SELECT 1 FROM ${alarmsTable} open_alarm
+          WHERE open_alarm.id = ${alarmHistoryTable.alarmId}
+            AND open_alarm.status IN ('active', 'acknowledged')
+        )`);
+    }
+    if (days.activityLogs > 0) {
+      deleted.activityLogs = await deleteInBatches(activityLogsTable,
+        sql`${activityLogsTable.timestamp} < ${cutoff(days.activityLogs)}`);
+    }
+    if (days.brokerEvents > 0) {
+      deleted.brokerEvents = await deleteInBatches(brokerEventsTable,
+        sql`${brokerEventsTable.timestamp} < ${cutoff(days.brokerEvents)}`);
+    }
+    if (days.authTokens > 0) {
+      // Only tokens that can no longer be used: expired, redeemed or revoked that long ago.
+      const c = cutoff(days.authTokens);
+      deleted.authTokens = await deleteInBatches(authTokensTable, sql`(${authTokensTable.expiresAt} < ${c}
+        OR ${authTokensTable.consumedAt} < ${c} OR ${authTokensTable.revokedAt} < ${c})`);
+    }
+    return { deleted };
+  } finally {
+    operationalPruningInProgress = false;
+  }
 }
 
 export default router;

@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import { authConfig } from "../lib/auth-config";
-import { hasModuleAccess, hasPermission, type EffectiveAccess } from "../lib/rbac";
+import { hasModuleAccess, hasPermission, MODULES, type EffectiveAccess } from "../lib/rbac";
 import { recordSecurityEvent } from "../lib/security-log";
 
 /**
@@ -34,6 +34,8 @@ interface Rule {
   self?: boolean;
   permission?: string;
   module?: string;
+  /** Any one of these modules is enough (used instead of `module`). */
+  anyModule?: string[];
   level?: Level;
   /** Route also accepts an API key (machine caller) — apiKeyAuth does the checking. */
   allowApiKey?: boolean;
@@ -64,6 +66,7 @@ const ROUTE_RULES: Rule[] = [
 
   // ── Public: infrastructure ─────────────────────────────────────────────────
   { path: "/healthz",       methods: READ, public: true },
+  { path: "/readyz",        methods: READ, public: true },
   { path: "/export/health", methods: READ, public: true },
   { path: "/export/schema", methods: READ, public: true },
 
@@ -100,6 +103,9 @@ const ROUTE_RULES: Rule[] = [
   // ── Dashboard ──────────────────────────────────────────────────────────────
   { path: "/dashboard/:metric", methods: READ, module: "dashboard", level: "read" },
 
+  // Tags the Combined Value widget can add together.
+  { path: "/viz-tags", methods: READ, module: "visualization", level: "read" },
+
   // ── Assets, attributes, templates ──────────────────────────────────────────
   { path: "/assets",                      methods: READ,       module: "assets", level: "read" },
   { path: "/assets",                      methods: ["POST"],   permission: "manage_assets", module: "assets", level: "write" },
@@ -121,37 +127,53 @@ const ROUTE_RULES: Rule[] = [
   { path: "/asset-templates/:id",         methods: ["DELETE"], permission: "manage_templates", module: "assets", level: "delete" },
 
   // ── Telemetry ──────────────────────────────────────────────────────────────
-  { path: "/telemetry/:assetId",          methods: READ, module: "explorer", level: "read" },
-  { path: "/telemetry/:assetId/:view",    methods: READ, module: "explorer", level: "read" },
+  // Dashboards (Visualization, Live Twin) read recent raw telemetry here, so the
+  // visualization module is enough. Operators and Viewers have Visualization
+  // but not Data Explorer, and their short-range charts were empty. Longer
+  // ranges already came through /system/aggregate with the same data. The CSV
+  // export stays a Data Explorer feature.
+  { path: "/telemetry/:assetId/export",   methods: READ, module: "explorer", level: "read" },
+  { path: "/telemetry/:assetId",          methods: READ, anyModule: ["explorer", "visualization"], level: "read" },
+  { path: "/telemetry/:assetId/metrics",  methods: READ, anyModule: ["explorer", "visualization"], level: "read" },
 
   // ── Alarms ─────────────────────────────────────────────────────────────────
   { path: "/alarms",                          methods: READ,     module: "alarms", level: "read" },
   { path: "/alarms/history",                  methods: READ,     module: "alarms", level: "read" },
-  { path: "/alarms/:id/acknowledge",          methods: ["POST"], permission: "acknowledge_alarms", module: "alarms" },
-  { path: "/alarms/history/:id/acknowledge",  methods: ["POST"], permission: "acknowledge_alarms", module: "alarms" },
+  //
+  // Write rules carry `level: "write"` (or "delete") even on simple modules, where
+  // the level makes no difference today. A rule with no level defaults to "read",
+  // so if a module ever becomes granular its write routes would otherwise open up
+  // to anyone with read access to it.
+  { path: "/alarms/:id/acknowledge",          methods: ["POST"], permission: "acknowledge_alarms", module: "alarms", level: "write" },
+  { path: "/alarms/history/:id/acknowledge",  methods: ["POST"], permission: "acknowledge_alarms", module: "alarms", level: "write" },
   { path: "/alarm-rules",                     methods: READ,     module: "alarms", level: "read" },
-  { path: "/alarm-rules",                     methods: WRITE,    permission: "manage_alarms", module: "alarms" },
-  { path: "/alarm-rules/:id",                 methods: WRITE,    permission: "manage_alarms", module: "alarms" },
-  { path: "/alarm-rules/:id",                 methods: ["DELETE"], permission: "manage_alarms", module: "alarms" },
-  { path: "/alarm-rules/:id/test-webhook",    methods: ["POST"], permission: "manage_alarms", module: "alarms" },
+  { path: "/alarm-rules",                     methods: WRITE,    permission: "manage_alarms", module: "alarms", level: "write" },
+  { path: "/alarm-rules/:id",                 methods: WRITE,    permission: "manage_alarms", module: "alarms", level: "write" },
+  { path: "/alarm-rules/:id",                 methods: ["DELETE"], permission: "manage_alarms", module: "alarms", level: "delete" },
+  { path: "/alarm-rules/:id/test-webhook",    methods: ["POST"], permission: "manage_alarms", module: "alarms", level: "write" },
 
   // ── Brokers & destinations ─────────────────────────────────────────────────
+  // Platform-wide rows with no project column: a project-restricted user may read
+  // them but not change them (lib/project-access.ts).
   { path: "/brokers",              methods: READ,       module: "brokers" },
-  { path: "/brokers",              methods: WRITE,      permission: "manage_brokers", module: "brokers" },
-  { path: "/brokers/:id",          methods: ALL_WRITE,  permission: "manage_brokers", module: "brokers" },
+  { path: "/brokers",              methods: WRITE,      permission: "manage_brokers", module: "brokers", level: "write" },
+  { path: "/brokers/:id",          methods: WRITE,      permission: "manage_brokers", module: "brokers", level: "write" },
+  { path: "/brokers/:id",          methods: ["DELETE"], permission: "manage_brokers", module: "brokers", level: "delete" },
   { path: "/brokers/:id/history",  methods: READ,       module: "brokers" },
   { path: "/destinations",         methods: READ,       module: "brokers" },
-  { path: "/destinations",         methods: WRITE,      permission: "manage_destinations", module: "brokers" },
-  { path: "/destinations/:id",     methods: ALL_WRITE,  permission: "manage_destinations", module: "brokers" },
-  { path: "/destinations/:id/test", methods: ["POST"],  permission: "manage_destinations", module: "brokers" },
+  { path: "/destinations",         methods: WRITE,      permission: "manage_destinations", module: "brokers", level: "write" },
+  { path: "/destinations/:id",     methods: WRITE,      permission: "manage_destinations", module: "brokers", level: "write" },
+  { path: "/destinations/:id",     methods: ["DELETE"], permission: "manage_destinations", module: "brokers", level: "delete" },
+  { path: "/destinations/:id/test", methods: ["POST"],  permission: "manage_destinations", module: "brokers", level: "write" },
 
   // ── API clients ────────────────────────────────────────────────────────────
   // Must precede /api-clients/:id so "projects" is not read as an id.
   { path: "/api-clients/projects",     methods: READ,      module: "api_clients" },
   { path: "/api-clients",              methods: READ,      module: "api_clients" },
-  { path: "/api-clients",              methods: WRITE,     permission: "manage_api_clients", module: "api_clients" },
-  { path: "/api-clients/:id",          methods: ALL_WRITE, permission: "manage_api_clients", module: "api_clients" },
-  { path: "/api-clients/:id/:action",  methods: ["POST"],  permission: "manage_api_clients", module: "api_clients" },
+  { path: "/api-clients",              methods: WRITE,     permission: "manage_api_clients", module: "api_clients", level: "write" },
+  { path: "/api-clients/:id",          methods: WRITE,     permission: "manage_api_clients", module: "api_clients", level: "write" },
+  { path: "/api-clients/:id",          methods: ["DELETE"], permission: "manage_api_clients", module: "api_clients", level: "delete" },
+  { path: "/api-clients/:id/:action",  methods: ["POST"],  permission: "manage_api_clients", module: "api_clients", level: "write" },
 
   // ── Visualization ──────────────────────────────────────────────────────────
   // Visualization hierarchy + each node's dashboard. `/viz-nodes/import` must
@@ -159,9 +181,16 @@ const ROUTE_RULES: Rule[] = [
   // to a collection, so it needs write, not the :id rule's level.
   { path: "/viz-nodes/import",    methods: ["POST"],   module: "visualization", level: "write" },
   { path: "/viz-nodes",           methods: READ,       module: "visualization", level: "read" },
-  { path: "/viz-nodes",           methods: ["POST"],   module: "visualization", level: "write" },
-  { path: "/viz-nodes/:id",       methods: ["PUT"],    module: "visualization", level: "write" },
-  { path: "/viz-nodes/:id",       methods: ["DELETE"], module: "visualization", level: "delete" },
+  // Create, update and delete are level "read" here on purpose: whether this user
+  // may touch this dashboard depends on who owns it and what was granted, so the
+  // route decides using lib/viz-access.ts. A rule here would refuse a Viewer who
+  // holds an explicit write grant on one dashboard.
+  { path: "/viz-nodes",           methods: ["POST"],   module: "visualization", level: "read" },
+  // Super Admin or Company Admin only; enforced in the route, because no permission maps to those roles alone.
+  { path: "/viz-nodes/:id/shares",         methods: READ,              module: "visualization", level: "read" },
+  { path: "/viz-nodes/:id/shares/:userId", methods: ["PUT", "DELETE"], module: "visualization", level: "read" },
+  { path: "/viz-nodes/:id",       methods: ["PUT"],    module: "visualization", level: "read" },
+  { path: "/viz-nodes/:id",       methods: ["DELETE"], module: "visualization", level: "read" },
 
   // ── Uploads ────────────────────────────────────────────────────────────────
   // `/uploads/:id/content` precedes the collection rules so the download is not
@@ -172,17 +201,19 @@ const ROUTE_RULES: Rule[] = [
   { path: "/uploads",             methods: ["POST"],   module: "visualization", level: "write" },
   { path: "/uploads/:id",         methods: ["DELETE"], module: "visualization", level: "delete" },
 
+  // Legacy dashboards, superseded by viz_nodes. Only the list survives, as id and
+  // name, because the Access Control editor still reads it; create, update and
+  // delete were removed (no owner check, no validation, no live caller).
   { path: "/viz-dashboards",      methods: READ,       module: "visualization", level: "read" },
-  { path: "/viz-dashboards",      methods: ["POST"],   module: "visualization", level: "write" },
-  { path: "/viz-dashboards/:id",  methods: ["PUT", "PATCH"], module: "visualization", level: "write" },
-  { path: "/viz-dashboards/:id",  methods: ["DELETE"], module: "visualization", level: "delete" },
 
   // ── Users & security ───────────────────────────────────────────────────────
   { path: "/users",                methods: READ,      permission: "manage_users", module: "users" },
-  { path: "/users",                methods: ["POST"],  permission: "manage_users", module: "users" },
+  { path: "/users",                methods: ["POST"],  permission: "manage_users", module: "users", level: "write" },
   { path: "/users/:id",            methods: READ,      permission: "manage_users", module: "users" },
-  { path: "/users/:id",            methods: ALL_WRITE, permission: "manage_users", module: "users" },
-  { path: "/users/:id/:action",    methods: "*",       permission: "manage_users", module: "users" },
+  { path: "/users/:id",            methods: WRITE,     permission: "manage_users", module: "users", level: "write" },
+  { path: "/users/:id",            methods: ["DELETE"], permission: "manage_users", module: "users", level: "delete" },
+  { path: "/users/:id/:action",    methods: READ,      permission: "manage_users", module: "users" },
+  { path: "/users/:id/:action",    methods: ALL_WRITE, permission: "manage_users", module: "users", level: "write" },
   { path: "/security/rbac-catalog", methods: READ,     self: true },
   { path: "/security/:resource",          methods: "*", permission: "manage_security", module: "security" },
   { path: "/security/:resource/:id",      methods: "*", permission: "manage_security", module: "security" },
@@ -193,9 +224,10 @@ const ROUTE_RULES: Rule[] = [
   { path: "/system/storage",       methods: READ,      module: "reports" },
   { path: "/system/aggregate",     methods: READ,      module: "reports" },
   { path: "/system/retention",     methods: READ,      module: "reports" },
-  { path: "/system/retention",     methods: ["POST"],  permission: "manage_assets", module: "reports" },
-  { path: "/system/retention/run", methods: ["POST"],  permission: "manage_assets", module: "reports" },
-  { path: "/system/retention/:id", methods: ALL_WRITE, permission: "manage_assets", module: "reports" },
+  { path: "/system/retention",     methods: ["POST"],  permission: "manage_assets", module: "reports", level: "write" },
+  { path: "/system/retention/run", methods: ["POST"],  permission: "manage_assets", module: "reports", level: "write" },
+  { path: "/system/retention/:id", methods: WRITE,     permission: "manage_assets", module: "reports", level: "write" },
+  { path: "/system/retention/:id", methods: ["DELETE"], permission: "manage_assets", module: "reports", level: "delete" },
 
   // ── AI copilot ─────────────────────────────────────────────────────────────
   { path: "/ai/chat", methods: ["POST"], module: "explorer", level: "read" },
@@ -231,25 +263,43 @@ function findRule(method: string, path: string): CompiledRule | undefined {
 /**
  * Precedence:
  *
- *   1. If an administrator has explicitly set this module's grants for this
- *      user, that decision is authoritative for the module. The role verb is
- *      the *source of the default*, not a ceiling — otherwise switching on
- *      `assets.w` for an operator in the Access Control editor would silently
- *      do nothing, which is worse than not offering the toggle.
- *   2. Otherwise both the role verb and the role's module default must allow
- *      it. With no overrides in play this is identical to the pre-upgrade
- *      frontend behaviour, so existing roles behave exactly as before.
+ *   1. A GRANULAR module (separate read / write / delete) explicitly set for this
+ *      user is authoritative for that module: the administrator chose each level,
+ *      so switching on `assets.w` for an Operator lets them edit assets. The role
+ *      verb is the source of the default, not a ceiling.
+ *   2. Everything else needs both the role verb and the module grant. That
+ *      includes overridden SIMPLE modules: they have one on/off value, so an
+ *      override can only mean "may open this area". It used to skip the verb
+ *      check, and rules without a level defaulted to read, so turning on "User
+ *      Management" or "API Clients" for an Operator so they could look at it
+ *      gave them full administration of that area, including delete.
  *
  * Only an administrator holding `manage_users` can create an override, and
  * every change is written to `security_events` as `access.updated`.
  */
+const GRANULAR = new Set(MODULES.filter((m) => m.type === "granular").map((m) => m.key));
+
 function grants(access: EffectiveAccess, rule: Rule): boolean {
-  if (rule.module && access.overriddenModules.includes(rule.module)) {
+  if (rule.anyModule) {
+    return rule.anyModule.some((module) => grants(access, { ...rule, anyModule: undefined, module }));
+  }
+  if (rule.module && GRANULAR.has(rule.module) && access.overriddenModules.includes(rule.module)) {
     return hasModuleAccess(access, rule.module, rule.level ?? "read");
   }
   if (rule.permission && !hasPermission(access, rule.permission)) return false;
   if (rule.module && !hasModuleAccess(access, rule.module, rule.level ?? "read")) return false;
   return true;
+}
+
+/**
+ * Whether a signed-in user with `access` passes the rule table for this request.
+ * Pure: exported for the regression tests, and usable by any route that needs
+ * the same answer the middleware would give.
+ */
+export function ruleAllows(access: EffectiveAccess, method: string, path: string): boolean {
+  const rule = findRule(method, path);
+  if (!rule) return false;
+  return !!rule.public || !!rule.self || grants(access, rule);
 }
 
 // ── Middleware ───────────────────────────────────────────────────────────────
@@ -267,7 +317,27 @@ export function authorize(req: Request, res: Response, next: NextFunction): void
   }
 
   // A valid API key already satisfied its own scope check in apiKeyAuth.
-  if (req.apiClient && (rule?.allowApiKey || rule === undefined)) { next(); return; }
+  if (req.apiClient && rule?.allowApiKey) { next(); return; }
+
+  // An API key on any other route is refused, including a path that matches no
+  // rule. Rules are case-sensitive while Express routing is not, so an unmatched
+  // path is not evidence that no route exists: `/api/Users` reaches the users
+  // router. This used to let any key through on an unmatched path, which made
+  // every admin route reachable by changing the case of one letter.
+  if (req.apiClient && !req.principal) {
+    recordSecurityEvent({
+      type: "authz.denied",
+      outcome: "failure",
+      reason: rule ? "api_key_not_allowed" : "api_key_no_rule",
+      detail: { method: req.method, path: req.path, apiClientId: req.apiClient.id, clientId: req.apiClient.clientId },
+      req,
+    });
+    res.status(403).json({
+      error: "API keys cannot be used on this endpoint.",
+      code: "api_key_not_allowed",
+    });
+    return;
+  }
 
   if (!req.principal) {
     if (!authConfig.sessionRequired && req.method === "GET") { next(); return; }
@@ -300,6 +370,22 @@ export function authorize(req: Request, res: Response, next: NextFunction): void
     // below. That is wrong advice for someone who pasted a URL and never sent a
     // header at all, and it left them with precisely the blind 401 that the
     // copy-and-paste endpoint exists to remove. Answer the actual question here.
+    if (req.ingestTokenFailure === "rate_limited") {
+      res.setHeader("Retry-After", "60");
+      res.status(429).json({
+        error: "Rate limit exceeded",
+        code: "rate_limited",
+        limit: `${authConfig.apiKey.rateLimitRpm} requests per minute`,
+        retryAfter: "60",
+      });
+      return;
+    }
+    if (req.ingestTokenFailure === "ip_not_allowed") {
+      // Same answer as a header key from the wrong address (apiKeyAuth), without
+      // the allowlist itself.
+      res.status(403).json({ error: "Request IP not in allowlist", code: "ip_not_allowed" });
+      return;
+    }
     if (req.ingestTokenFailure) {
       const why = req.ingestTokenFailure;
       res.status(why === "scope_too_broad" ? 403 : 401).json({
@@ -387,7 +473,7 @@ export function authorize(req: Request, res: Response, next: NextFunction): void
     username: req.principal.user.username,
     reason: rule.permission && !hasPermission(req.principal.access, rule.permission)
       ? `missing_permission:${rule.permission}`
-      : `missing_module:${rule.module}.${rule.level ?? "read"}`,
+      : `missing_module:${rule.module ?? rule.anyModule?.join("|")}.${rule.level ?? "read"}`,
     detail: { method: req.method, path: req.path, role: req.principal.user.role },
     req,
   });
@@ -395,7 +481,7 @@ export function authorize(req: Request, res: Response, next: NextFunction): void
   res.status(403).json({
     error: "You do not have permission to perform this action.",
     code: "insufficient_permission",
-    required: { permission: rule.permission, module: rule.module, level: rule.level ?? "read" },
+    required: { permission: rule.permission, module: rule.module ?? rule.anyModule, level: rule.level ?? "read" },
   });
 }
 

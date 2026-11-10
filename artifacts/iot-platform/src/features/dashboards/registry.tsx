@@ -17,6 +17,9 @@ import type { Widget } from "./types";
 import { useSeriesSet, useAttributeMeta, aggregate, type SeriesSpec } from "./useWidgetData";
 import type { TimeCfg } from "./timeRange";
 import { SERIES, STATUS } from "@/lib/chartColors";
+import { FEATURES } from "@/lib/features";
+import { useOpenAlarms } from "@/hooks/useOpenAlarms";
+import { useListAssets } from "@workspace/api-client-react";
 
 /**
  * Widget colours. Status colours come from the shared STATUS set; `primary` is the
@@ -113,7 +116,9 @@ export const MULTI_SERIES_TYPES = [
 ];
 
 // ── Catalog (Phase 1 core set + full list of names) ──
-export const WIDGET_CATEGORIES: { name: string; items: WidgetDef[] }[] = [
+// The full list. What the library and the type dropdown offer is
+// WIDGET_CATEGORIES below, which leaves out types switched off in lib/features.ts.
+const ALL_WIDGET_CATEGORIES: { name: string; items: WidgetDef[] }[] = [
   { name: "Charts", items: [
     // A single generic Card, not nine near-identical single-value widgets (Custom
     // KPI, Health Score, OEE, …) that all rendered the same label+value tile. One
@@ -179,6 +184,9 @@ export const WIDGET_CATEGORIES: { name: string; items: WidgetDef[] }[] = [
     { type: "alarms",  label: "Alarm Table",     icon: Bell,       category: "Tables", w: 6, h: 5 },
     { type: "events",  label: "Events",          icon: ListOrdered,category: "Tables", w: 6, h: 5 },
   ]},
+  { name: "Combined", items: [
+    { type: "combined", label: "Combined Value", icon: Layers, category: "Combined", w: 4, h: 4, defaults: { op: "sum", sources: [] } },
+  ]},
   { name: "Media & Controls", items: [
     { type: "text",    label: "Text",            icon: Type,       category: "Media & Controls", w: 4, h: 2, defaults: { text: "Text widget" } },
     { type: "image",   label: "Image",           icon: ImageIcon,  category: "Media & Controls", w: 4, h: 4, defaults: { src: "" } },
@@ -187,8 +195,22 @@ export const WIDGET_CATEGORIES: { name: string; items: WidgetDef[] }[] = [
   ]},
 ];
 
+/**
+ * Types that are built but not offered, each behind a switch in lib/features.ts.
+ * A dashboard that already holds one renders a "not available" placeholder.
+ */
+const HIDDEN_TYPES = new Set<string>([
+  ...(FEATURES.dashboardEventsWidget ? [] : ["events"]),
+]);
+export function isWidgetTypeEnabled(type: string): boolean { return !HIDDEN_TYPES.has(type); }
+
+export const WIDGET_CATEGORIES: { name: string; items: WidgetDef[] }[] = ALL_WIDGET_CATEGORIES
+  .map((c) => ({ ...c, items: c.items.filter((it) => isWidgetTypeEnabled(it.type)) }))
+  .filter((c) => c.items.length > 0);
+
+// Built from the full list so a saved widget of a hidden type still has a label and icon.
 const BY_TYPE: Record<string, WidgetDef> = {};
-for (const c of WIDGET_CATEGORIES) for (const it of c.items) BY_TYPE[it.type] = it;
+for (const c of ALL_WIDGET_CATEGORIES) for (const it of c.items) BY_TYPE[it.type] = it;
 export function widgetDef(type: string): WidgetDef | undefined { return BY_TYPE[type]; }
 
 // ── Legacy KPI types → Card ──
@@ -373,7 +395,11 @@ export const WidgetView = memo(function WidgetView({ widget, refreshNonce, dashT
   // can only be resolved after the attribute-name lookup a few lines down.
   interface SeriesSrc { assetId?: string; tag?: string; color?: string; label?: string; unit?: string }
   const seriesSrc: Record<string, SeriesSrc> = {};
-  if (isScatter) {
+  const typeEnabled = isWidgetTypeEnabled(t);
+  if (!typeEnabled || t === "alarms" || t === "image") {
+    // Nothing to fetch: a hidden type renders a placeholder, the alarm table
+    // reads alarms rather than a telemetry series, and an image is an image.
+  } else if (isScatter) {
     if (c.xTag) seriesList.push({ key: "x", assetId: c.assetId, tag: c.xTag });
     if (c.yTag) seriesList.push({ key: "y", assetId: c.assetId, tag: c.yTag });
   } else if (isMultiSeriesChart) {
@@ -409,6 +435,9 @@ export const WidgetView = memo(function WidgetView({ widget, refreshNonce, dashT
       seriesList.push({ key, assetId: m.assetId, tag: m.tag });
       seriesSrc[key] = { assetId: m.assetId, tag: m.tag, color: (m as any).color, label: (m as any).label, unit: (m as any).unit };
     });
+  } else if (t === "combined") {
+    const sources: { assetId?: string; tag?: string }[] = Array.isArray(c.sources) ? c.sources : [];
+    sources.forEach((s, i) => { if (s.tag) seriesList.push({ key: `c${i}`, assetId: s.assetId, tag: s.tag }); });
   } else if (c.tag) {
     seriesList.push({ key: "s0", assetId: c.assetId, tag: c.tag });
     seriesSrc.s0 = { assetId: c.assetId, tag: c.tag, color: c.color, label: c.label, unit: c.unit };
@@ -502,9 +531,58 @@ export const WidgetView = memo(function WidgetView({ widget, refreshNonce, dashT
 
   // Bound to an asset+tag but no rows in range → show a real "no data" note instead
   // of misleading demo data. Only unbound (builder preview) widgets use demo data.
+  if (!typeEnabled) {
+    const def = widgetDef(t);
+    const Icon = def?.icon ?? Activity;
+    return (
+      <div className="h-full flex flex-col items-center justify-center text-muted-foreground gap-1 text-center px-2">
+        <Icon className="w-6 h-6" />
+        <span className="text-xs">{def?.label ?? t} is not available.</span>
+      </div>
+    );
+  }
+  if (t === "alarms") return <AlarmTableView assetId={c.assetId} />;
+  if (t === "image") {
+    // imageUrl is what the edit panel's image field writes (an /api/uploads
+    // link from the Media Library, or any URL); src is the old default key.
+    const src = String(c.imageUrl || c.src || "").trim();
+    if (!src) {
+      return <div className="h-full w-full flex items-center justify-center text-muted-foreground text-xs text-center px-2">Set an image URL in the Edit Widget panel.</div>;
+    }
+    return <img src={src} alt={c.title ?? ""} className="h-full w-full object-contain" draggable={false} />;
+  }
+
   const CHART_TYPES = [...MULTI_SERIES_TYPES, "sparkline", "scatter", "heatmap", "table"];
   if (wantsData && !bound && CHART_TYPES.includes(t)) {
     return <div className="h-full w-full flex items-center justify-center text-muted-foreground text-xs">No data in selected range</div>;
+  }
+
+  if (t === "combined") {
+    if (seriesList.length === 0) {
+      return <div className="h-full w-full flex items-center justify-center text-muted-foreground text-xs">Choose tags in the Edit Widget panel</div>;
+    }
+    // The latest reading of each tag, then combined, so a tag that has stopped
+    // reporting is counted from its last value in range and shown as a shortfall below.
+    const latest = seriesList.flatMap((s) => {
+      for (let i = rows.length - 1; i >= 0; i--) { const v = rows[i]?.[s.key]; if (v != null) return [v as number]; }
+      return [];
+    });
+    const op = (c.op ?? "sum") as string;
+    const total = latest.length === 0 ? null
+      : op === "avg" ? latest.reduce((a, b) => a + b, 0) / latest.length
+      : op === "min" ? Math.min(...latest)
+      : op === "max" ? Math.max(...latest)
+      : latest.reduce((a, b) => a + b, 0);
+    const OP_LABEL: Record<string, string> = { sum: "Total", avg: "Average", min: "Lowest", max: "Highest" };
+    return (
+      <div className="h-full w-full flex flex-col justify-center px-2">
+        <p className="text-3xl font-bold tabular-nums leading-tight">
+          {total == null ? "—" : total.toLocaleString(undefined, { maximumFractionDigits: 2 })}
+          {total != null && c.unit && <span className="text-sm font-medium text-muted-foreground ml-1">{c.unit}</span>}
+        </p>
+        <p className="text-[11px] text-muted-foreground">{OP_LABEL[op] ?? "Total"} · {latest.length} of {seriesList.length} reporting</p>
+      </div>
+    );
   }
 
   if (t === "card") {
@@ -541,7 +619,12 @@ export const WidgetView = memo(function WidgetView({ widget, refreshNonce, dashT
             const Icon: React.ElementType = CARD_ICONS[m.icon as string] ?? Activity;
             const customIcon = String(m.customIcon ?? "").trim();
             const color = m.color || PALETTE.primary;
-            const shown = val != null ? fmt(val, m) : (m.defaultValue != null ? fmt(Number(m.defaultValue), m) : (metricBound ? "—" : "0.0"));
+            // Bound: the reading, or "—" when there is none. A sample/default
+            // number is only for an unbound tile in the builder; on a bound tile
+            // it would pass for a live value.
+            const shown = metricBound
+              ? (val != null ? fmt(val, m) : "—")
+              : (m.defaultValue != null ? fmt(Number(m.defaultValue), m) : "0.0");
             // A filled tile switches everything on it to black-or-white so the
             // user's own accent color (meant to read on the neutral default
             // tile) never fights the fill for contrast — but that's a default,
@@ -815,13 +898,23 @@ export const WidgetView = memo(function WidgetView({ widget, refreshNonce, dashT
             const state: string = m.state ?? "ok";
             const stateColor = state === "ok" ? PALETTE.success : state === "warn" ? PALETTE.warning : PALETTE.critical;
 
-            const resolved = val ?? (m.defaultValue != null ? Number(m.defaultValue) : (isStateType ? null : 0));
+            // Bound with no reading -> null, which shows "—" and an empty mark.
+            // It used to fall back to 0, so a dead sensor read as a real zero.
+            // Unbound tiles (builder preview) keep their default/sample value.
+            const resolved = metricBound
+              ? val
+              : (m.defaultValue != null ? Number(m.defaultValue) : (isStateType ? null : 0));
             const color = onFill ?? statusColor(resolved, m);
             const max = Number(m.max) || 100;
             const pct = resolved != null ? Math.max(0, Math.min(100, (resolved / max) * 100)) : 0;
-            const valueText = resolved != null ? fmt(resolved, m) : "—";
-            const unitSuffix = t === "progress" || t === "battery" ? "%" : (unit ? (unitPlacement === "prefix" ? "" : ` ${unit}`) : "");
-            const unitPrefix = unit && unitPlacement === "prefix" && t !== "progress" && t !== "battery" ? `${unit} ` : "";
+            // Battery/Progress: with a unit, show the reading in that unit; without
+            // one, show it as a percentage OF MAX. Appending "%" to the raw value
+            // turned 12.4 V into "12.4%".
+            const isPctType = t === "progress" || t === "battery";
+            const pctMode = isPctType && !unit;
+            const valueText = resolved == null ? "—" : pctMode ? pct.toFixed(0) : fmt(resolved, m);
+            const unitSuffix = resolved == null ? "" : pctMode ? "%" : (unit ? (unitPlacement === "prefix" ? "" : ` ${unit}`) : "");
+            const unitPrefix = resolved != null && unit && unitPlacement === "prefix" && !pctMode ? `${unit} ` : "";
 
             let mark: React.ReactNode;
             if (t === "gauge") {
@@ -945,7 +1038,7 @@ export const WidgetView = memo(function WidgetView({ widget, refreshNonce, dashT
       </div>
     );
   }
-  if (t === "table" || t === "alarms" || t === "events") {
+  if (t === "table" || t === "events") {
     const colName = firstKey ? (seriesMeta[firstKey]?.label ?? "Value") : "Value";
     const tableRows = bound && firstKey
       ? [...rows].reverse().slice(0, 30).map((r) => ({ t: r.t as string, v: r[firstKey] as number }))
@@ -1002,3 +1095,60 @@ export const WidgetView = memo(function WidgetView({ widget, refreshNonce, dashT
   const Icon = def?.icon ?? Activity;
   return <div className="h-full flex flex-col items-center justify-center text-muted-foreground gap-1"><Icon className="w-6 h-6" /><span className="text-xs">{def?.label ?? t}</span></div>;
 });
+
+// ── Alarm Table ──
+// Open (active + acknowledged) alarms from the server, through the same shared
+// query the notification bell uses, so the widget and the bell cannot disagree.
+// It used to render the bound telemetry series, or sample rows, under alarm
+// headings. With a Data Source set, only alarms on that asset or anything below
+// it are listed.
+const SEVERITY_COLOR: Record<string, string> = {
+  critical: PALETTE.critical, high: PALETTE.critical, medium: PALETTE.warning, low: PALETTE.primary, info: PALETTE.neutral,
+};
+function AlarmTableView({ assetId }: { assetId?: string }) {
+  const { enabled, alarms } = useOpenAlarms();
+  const { data: assetsData } = useListAssets();
+  if (!enabled) {
+    return <div className="h-full w-full flex items-center justify-center text-muted-foreground text-xs text-center px-2">You do not have access to alarms.</div>;
+  }
+  let rows = alarms;
+  if (assetId) {
+    const assets = (assetsData as any[] | undefined) ?? [];
+    const scope = new Set<string>([assetId]);
+    // Walk down from the chosen asset; scope doubles as the cycle guard.
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const a of assets) if (a.parentId && scope.has(a.parentId) && !scope.has(a.id)) { scope.add(a.id); grew = true; }
+    }
+    rows = alarms.filter((a) => {
+      const id = (a as { assetId?: string }).assetId;
+      return !!id && scope.has(id);
+    });
+  }
+  if (rows.length === 0) {
+    return <div className="h-full w-full flex items-center justify-center text-muted-foreground text-xs">No open alarms</div>;
+  }
+  return (
+    <div className="h-full overflow-auto text-xs">
+      <table className="w-full">
+        <thead className="sticky top-0 bg-card">
+          <tr className="text-muted-foreground border-b border-border">
+            <th className="text-left py-1 pr-2">Time</th><th className="text-left pr-2">Asset</th><th className="text-left pr-2">Alarm</th><th className="text-left pr-2">Severity</th><th className="text-left">Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.slice(0, 100).map((a) => (
+            <tr key={a.id} className="border-b border-border">
+              <td className="py-1 pr-2 whitespace-nowrap tabular-nums">{new Date(a.triggeredAt).toLocaleString()}</td>
+              <td className="pr-2 truncate max-w-[10rem]" title={a.assetName}>{a.assetName}</td>
+              <td className="pr-2 truncate max-w-[14rem]" title={a.message ?? a.name}>{a.name}</td>
+              <td className="pr-2 capitalize font-medium" style={{ color: SEVERITY_COLOR[a.severity] }}>{a.severity}</td>
+              <td className="capitalize">{a.status}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  );
+}

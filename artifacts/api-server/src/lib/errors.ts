@@ -115,9 +115,40 @@ const PG_MESSAGES: Record<string, { status: number; code: string; message: strin
   "57014": { status: 504, code: "timeout",            message: "That took too long to complete. Try narrowing the request." },
 };
 
+/**
+ * The PostgreSQL error inside a query error. Drizzle wraps every driver error in
+ * a DrizzleQueryError whose own `code` is undefined and whose message holds the
+ * full SQL and parameter values; the driver's error is its `cause`.
+ */
+function pgErrorOf(err: unknown): unknown {
+  const cause = (err as { cause?: unknown })?.cause;
+  return cause && typeof (cause as { code?: unknown }).code === "string" ? cause : err;
+}
+
 function pgCodeOf(err: unknown): string | null {
-  const code = (err as { code?: unknown })?.code;
+  const code = (pgErrorOf(err) as { code?: unknown })?.code;
   return typeof code === "string" && /^[0-9A-Z]{5}$/.test(code) ? code : null;
+}
+
+/**
+ * An error safe to write to the log. A wrapped query error is replaced by its
+ * driver error's name, message and code, so parameter values (password hashes,
+ * tokens, personal data) and the driver's `detail` (which repeats key values) are
+ * never logged. Other errors pass through unchanged.
+ */
+export function loggableError(err: unknown): unknown {
+  const e = err as { query?: unknown; params?: unknown; stack?: string };
+  if (e && typeof e === "object" && "query" in e && "params" in e) {
+    const pg = pgErrorOf(err) as { name?: string; message?: string; code?: string; constraint?: string; table?: string };
+    return {
+      type: "DrizzleQueryError",
+      message: pg && pg !== err ? pg.message : "Database query failed",
+      code: pg?.code, constraint: pg?.constraint, table: pg?.table,
+      // Stack frames only: the first line of the wrapper's stack repeats its message.
+      stack: e.stack?.split("\n").filter((l) => l.trimStart().startsWith("at ")).join("\n"),
+    };
+  }
+  return err;
 }
 
 // ── Framework errors that already carry a status ─────────────────────────────
@@ -229,7 +260,7 @@ export function isExpected(err: unknown): boolean {
  * must not appear in the response.
  */
 export function logContext(err: unknown): Record<string, unknown> {
-  const e = err as { code?: unknown; constraint?: unknown; table?: unknown; detail?: unknown; name?: unknown };
+  const e = pgErrorOf(err) as { code?: unknown; constraint?: unknown; table?: unknown; detail?: unknown; name?: unknown };
   return {
     kind: err instanceof AppError ? "AppError" : (e?.name ?? typeof err),
     ...(typeof e?.code === "string" ? { pgCode: e.code } : {}),

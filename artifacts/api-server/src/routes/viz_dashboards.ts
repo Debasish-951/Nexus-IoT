@@ -1,57 +1,28 @@
 import { Router, type IRouter } from "express";
-import { eq } from "drizzle-orm";
 import { db, vizDashboardsTable } from "@workspace/db";
 
+/**
+ * Legacy dashboards, superseded by viz_nodes (routes/viz_nodes.ts).
+ *
+ * Create, update and delete were removed: they had no owner check, no input
+ * validation and no activity logging, so anyone with Visualization write could
+ * rewrite or delete anyone's dashboard, and nothing in the app called them any
+ * more (the Analytics & KPI page that did is no longer routed).
+ *
+ * The list stays, reduced to id and name, only because the Access Control
+ * editor (pages/Users.tsx) still reads it to offer its dashboard restriction.
+ * Widgets are not returned: no caller needs them, and they name assets and
+ * metrics. Remove this route, and its rule in middleware/authorize.ts, once the
+ * editor stops asking.
+ */
 const router: IRouter = Router();
 
 router.get("/viz-dashboards", async (_req, res): Promise<void> => {
-  const rows = await db.select().from(vizDashboardsTable).orderBy(vizDashboardsTable.createdAt);
-  res.json(rows.map(dbToClient));
+  const rows = await db
+    .select({ id: vizDashboardsTable.id, name: vizDashboardsTable.name })
+    .from(vizDashboardsTable)
+    .orderBy(vizDashboardsTable.createdAt);
+  res.json(rows);
 });
-
-router.post("/viz-dashboards", async (req, res): Promise<void> => {
-  const body = req.body as Record<string, unknown>;
-  const name = typeof body.name === "string" && body.name.trim() ? body.name.trim() : null;
-  if (!name) { res.status(400).json({ error: "name is required" }); return; }
-  const roleAccess = Array.isArray(body.roleAccess) ? (body.roleAccess as string[]) : ["admin", "engineer", "operator", "viewer"];
-  const widgets    = Array.isArray(body.widgets)    ? body.widgets    : [];
-  const assetFilter = typeof body.assetFilter === "string" ? body.assetFilter : null;
-  const [row] = await db.insert(vizDashboardsTable).values({
-    name, roleFilter: roleAccess.join(","), assetFilter, widgets,
-  }).returning();
-  res.status(201).json(dbToClient(row));
-});
-
-router.put("/viz-dashboards/:id", async (req, res): Promise<void> => {
-  const { id } = req.params;
-  const body = req.body as Record<string, unknown>;
-  const update: Partial<typeof vizDashboardsTable.$inferInsert> = {};
-  if (typeof body.name === "string")          update.name        = body.name.trim();
-  if (Array.isArray(body.roleAccess))         update.roleFilter  = (body.roleAccess as string[]).join(",");
-  if ("assetFilter" in body)                  update.assetFilter = typeof body.assetFilter === "string" ? body.assetFilter : null;
-  if (Array.isArray(body.widgets))            update.widgets     = body.widgets;
-  if (Object.keys(update).length === 0) { res.json({}); return; }
-  const [row] = await db.update(vizDashboardsTable).set(update).where(eq(vizDashboardsTable.id, id)).returning();
-  if (!row) { res.status(404).json({ error: "Dashboard not found" }); return; }
-  res.json(dbToClient(row));
-});
-
-router.delete("/viz-dashboards/:id", async (req, res): Promise<void> => {
-  const { id } = req.params;
-  await db.delete(vizDashboardsTable).where(eq(vizDashboardsTable.id, id));
-  res.json({ success: true });
-});
-
-function dbToClient(row: typeof vizDashboardsTable.$inferSelect) {
-  return {
-    id:          row.id,
-    name:        row.name,
-    assetFilter: row.assetFilter ?? null,
-    roleAccess:  row.roleFilter ? row.roleFilter.split(",") : ["admin", "engineer", "operator", "viewer"],
-    widgets:     Array.isArray(row.widgets) ? row.widgets : [],
-    createdAt:   row.createdAt,
-    updatedAt:   row.updatedAt,
-  };
-}
 
 export default router;

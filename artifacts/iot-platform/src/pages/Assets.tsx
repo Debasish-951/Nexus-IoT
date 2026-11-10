@@ -12,6 +12,7 @@ import type { ImperativePanelHandle } from "react-resizable-panels";
 import { Blocks, ArrowLeft, ChevronLeft, ChevronRight } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { useCurrentUser } from "@/contexts/UserContext";
+import { useProject } from "@/contexts/ProjectContext";
 import { Asset } from "./assetShared";
 import CreateAssetWizard from "./CreateAssetWizard";
 import { AssetTreeProvider } from "@/components/asset-tree/AssetTreeContext";
@@ -20,16 +21,32 @@ import { TreeToolbar } from "@/components/asset-tree/TreeToolbar";
 import AssetDetails from "./AssetDetails";
 import { MousePointerClick } from "lucide-react";
 import { apiFetch } from "@/lib/auth-api";
+import { subtreeIds } from "@/hooks/useProjectScope";
+import { markProjectDeletedHere } from "@/lib/session-events";
+
+const APP_BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 export default function Assets() {
   const [, navigate] = useLocation();
-  const { can } = useCurrentUser();
+  const { canAction, session } = useCurrentUser();
   const { toast } = useToast();
   const qc = useQueryClient();
   const deleteAsset = useDeleteAsset();
   const { data: assets } = useListAssets();
-  const allAssets = (assets as Asset[] | undefined) ?? [];
-  const canManage = can("manage_assets");
+  const { currentProjectId } = useProject();
+  // Only the open project's tree. Without a project (a fresh install), everything.
+  const allAssets = useMemo(() => {
+    const list = (assets as Asset[] | undefined) ?? [];
+    if (!currentProjectId) return list;
+    const keep = subtreeIds(list, currentProjectId);
+    return list.filter((a) => keep.has(a.id));
+  }, [assets, currentProjectId]);
+  // Same rules the API applies to PUT/POST (write) and DELETE (delete) on /assets.
+  const canWrite = canAction("manage_assets", "assets", "write");
+  const canDelete = canAction("manage_assets", "assets", "delete");
+  const canManage = canWrite || canDelete;
+  // A top-level asset is a new project; a project-restricted user is refused it.
+  const canCreateRoot = canWrite && !session?.restrictProjects;
 
   const [search, setSearch] = useState("");
   const [wizardOpen, setWizardOpen] = useState(false);
@@ -90,7 +107,10 @@ export default function Assets() {
   function handleDelete(a: Asset) {
     if (!confirm(`Delete asset "${a.name}"? This also removes its child assets.`)) return;
     deleteAsset.mutate({ id: a.id }, {
-      onSuccess: () => { toast({ title: "Asset deleted" }); if (selectedId === a.id) setSelectedId(null); qc.invalidateQueries({ queryKey: getListAssetsQueryKey() }); },
+      onSuccess: () => {
+        // A root asset is a project; tells ProjectGate this disappearance was ours.
+        if (!a.parentId) markProjectDeletedHere(a.id);
+        toast({ title: "Asset deleted" }); if (selectedId === a.id) setSelectedId(null); qc.invalidateQueries({ queryKey: getListAssetsQueryKey() }); },
       onError: () => toast({ title: "Delete failed", variant: "destructive" }),
     });
   }
@@ -103,17 +123,34 @@ export default function Assets() {
   // device-less, so this dialog is where the Device ID link is made or changed.
   const [seenDevices, setSeenDevices] = useState<{ deviceId: string }[]>([]);
   useEffect(() => {
-    if (!editAsset) return;
+    // Plant-wide list: refused to project-restricted users, so not asked for.
+    if (!editAsset || session?.restrictProjects) return;
     apiFetch("/api/ingest/seen-devices")
       .then((r) => (r.ok ? r.json() : []))
       .then((d) => setSeenDevices(Array.isArray(d) ? d : []))
       .catch(() => setSeenDevices([]));
-  }, [editAsset]);
+  }, [editAsset, session?.restrictProjects]);
   // A device is taken if some OTHER asset already uses it as its identifier.
   const takenByOther = useMemo(
     () => new Set(allAssets.filter((a) => a.id !== editAsset?.id).map((a) => a.identifier).filter(Boolean)),
     [allAssets, editAsset],
   );
+
+  // Per-machine payloads reach an asset by walking NAMES down from the asset
+  // whose Device ID sent them (api-server routes/ingest.ts resolveAssetByPath).
+  // So when any ancestor has a Device ID, renaming this asset can stop that data
+  // reaching it and everything below it. Ancestors are looked up in the full list.
+  const feedsByNamePath = useMemo(() => {
+    if (!editAsset) return false;
+    const byId = new Map(((assets as Asset[] | undefined) ?? []).map((a) => [a.id, a]));
+    let cur = editAsset.parentId ? byId.get(editAsset.parentId) : undefined;
+    for (let guard = 0; cur && guard < 100; guard++) {
+      if (cur.identifier) return true;
+      cur = cur.parentId ? byId.get(cur.parentId) : undefined;
+    }
+    return false;
+  }, [assets, editAsset]);
+  const renameWarning = !!editAsset && feedsByNamePath && editName.trim() !== "" && editName.trim() !== editAsset.name;
 
   function openEdit(a: Asset) { setEditAsset(a); setEditName(a.name); setEditIdentifier(a.identifier ?? ""); }
   async function saveEdit() {
@@ -135,6 +172,7 @@ export default function Assets() {
 
   const ctx = {
     childrenByParent, selectedId, setSelectedId, isExpanded, toggle, visibleIds, canManage,
+    nodeAccess: () => ({ write: canWrite, delete: canDelete }),
     onAddChild: openAddChild,
     onRename: openEdit,
     onDelete: handleDelete,
@@ -143,7 +181,7 @@ export default function Assets() {
 
   return (
     <div className="p-6 space-y-3 h-full flex flex-col">
-      <button onClick={() => navigate("/asset-management")} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground shrink-0">
+      <button onClick={() => navigate("/")} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground shrink-0">
         <ArrowLeft className="w-4 h-4" /> Back
       </button>
       <div className="shrink-0">
@@ -176,7 +214,7 @@ export default function Assets() {
                   <TreeToolbar
                     query={search} setQuery={setSearch}
                     onAdd={() => { setWizardParent(""); setWizardOpen(true); }}
-                    canManage={canManage}
+                    canManage={canCreateRoot}
                   />
                   {/* independent scroll for the hierarchy */}
                   <div className="flex-1 overflow-auto">
@@ -229,7 +267,14 @@ export default function Assets() {
         </AssetTreeProvider>
       </Card>
 
-      <CreateAssetWizard open={wizardOpen} onOpenChange={setWizardOpen} initialParentId={wizardParent} onCreated={(id) => { setSelectedId(id); }} />
+      <CreateAssetWizard open={wizardOpen} onOpenChange={setWizardOpen} initialParentId={wizardParent} onCreated={(id) => {
+        // An asset with no parent is a new project, so open it.
+        if (!wizardParent && currentProjectId) {
+          void qc.invalidateQueries({ queryKey: getListAssetsQueryKey() }).then(() => navigate(`~${APP_BASE}/p/${id}/assets`));
+          return;
+        }
+        setSelectedId(id);
+      }} />
 
       <Dialog open={!!editAsset} onOpenChange={(v) => { if (!v) setEditAsset(null); }}>
         <DialogContent>
@@ -239,6 +284,13 @@ export default function Assets() {
               <Label className="text-sm">Asset Name</Label>
               <Input value={editName} onChange={(e) => setEditName(e.target.value)} autoFocus
                 onKeyDown={(e) => { if (e.key === "Enter") saveEdit(); }} />
+              {renameWarning && (
+                <p className="text-xs text-amber-600 dark:text-amber-500">
+                  This asset may receive per-machine data matched by its name under a parent
+                  device. Renaming it can stop that data reaching it (and the assets below it)
+                  unless the payload's names are changed to match.
+                </p>
+              )}
             </div>
             {/* Read-only: the Device ID is declared on the asset template and stamped on
                 when the template is applied, so there is one place it can be wrong

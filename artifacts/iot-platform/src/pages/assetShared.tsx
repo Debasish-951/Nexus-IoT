@@ -45,6 +45,17 @@ export type AssetStatus = "Running" | "Warning" | "Critical" | "Offline" | "Unkn
 // (Node-RED / simulator) stops, the status flips to Stale (grey) within ~this long.
 export const STALE_AFTER_MS = 60_000;
 
+/**
+ * When the asset last changed: its newest data or the last edit of its details,
+ * whichever is later. Incoming data does not touch the asset's own updatedAt.
+ */
+export function lastUpdatedAt(updatedAt?: string | Date | null, lastSeen?: string | Date | null): Date | null {
+  const times = [updatedAt, lastSeen]
+    .map((value) => (value ? new Date(value).getTime() : NaN))
+    .filter((time) => !isNaN(time));
+  return times.length > 0 ? new Date(Math.max(...times)) : null;
+}
+
 export function deriveStatus(_asset: Asset, health: AssetHealth | null): AssetStatus {
   if (!health) return "Unknown";
   // No telemetry ever → Offline. Telemetry that stopped arriving → Offline after the window.
@@ -84,7 +95,7 @@ export function useAssetHealthMap(assetIds: string[]): Record<string, AssetHealt
   useEffect(() => {
     let cancelled = false;
     if (assetIds.length === 0) { setMap({}); return; }
-    Promise.all(assetIds.map(async (id) => {
+    const load = () => Promise.all(assetIds.map(async (id) => {
       try {
         const res = await fetch(`/api/assets/${id}/health`, { credentials: "include" });
         return res.ok ? ([id, await res.json()] as const) : null;
@@ -95,7 +106,10 @@ export function useAssetHealthMap(assetIds: string[]): Record<string, AssetHealt
       for (const e of entries) if (e) m[e[0]] = e[1];
       setMap(m);
     });
-    return () => { cancelled = true; };
+    void load();
+    // Same interval as the asset details page, so the times shown stay current.
+    const timer = setInterval(() => { void load(); }, 30_000);
+    return () => { cancelled = true; clearInterval(timer); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
   return map;

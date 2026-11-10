@@ -1,4 +1,5 @@
 import { Router, type IRouter } from "express";
+import { authConfig } from "../lib/auth-config";
 import { eq, and, desc, gte, lte, sql } from "drizzle-orm";
 import {
   db, assetsTable, attributesTable, telemetryTable,
@@ -28,8 +29,19 @@ function toCSV(rows: Record<string, unknown>[]): string {
   const headers = Object.keys(rows[0]);
   return [
     headers.map(csvCell).join(","),
-    ...rows.map((row) => headers.map((h) => csvCell(row[h])).join(",")),
+    ...rows.map((row) => headers.map((h) => cell(row[h])).join(",")),
   ].join("\r\n"); // RFC 4180 line ending; Excel is happier and Unix tools do not care
+}
+
+/**
+ * One CSV cell. A finite number cannot be a formula, so it is written as-is
+ * (csvCell would turn -5 into the text '-5). Objects such as a JSON trigger
+ * value are serialised rather than written as "[object Object]".
+ */
+function cell(v: unknown): string {
+  if (typeof v === "number" && Number.isFinite(v)) return String(v);
+  if (v !== null && typeof v === "object" && !(v instanceof Date)) return csvCell(JSON.stringify(v));
+  return csvCell(v);
 }
 
 function sendResult(
@@ -96,7 +108,8 @@ router.get("/export/schema", (_req, res) => {
       ],
       note: "Create an API Client in the Security → API Clients section to obtain a clientSecret.",
     },
-    rateLimiting: { requestsPerMinute: 120, header: "Retry-After" },
+    // The real per-client limit (INGEST_RATE_LIMIT_RPM), not a fixed figure.
+    rateLimiting: { requestsPerMinute: authConfig.apiKey.rateLimitRpm, header: "Retry-After" },
     scopes: {
       "read:assets":        "List all assets and their current attribute values",
       "read:telemetry":     "Query time-series telemetry data",
@@ -137,6 +150,7 @@ router.get("/export/schema", (_req, res) => {
         queryParams: [
           { name: "status",   values: "active|acknowledged|cleared" },
           { name: "severity", values: "critical|high|medium|low|info" },
+          { name: "limit",    description: "Max rows, newest first (default 5000, max 5000)" },
           { name: "format",   values: "json|csv" },
         ],
       },
@@ -232,7 +246,8 @@ router.get("/export/telemetry", apiKeyAuth("read:telemetry"), validate({ query: 
 
 // ── Alarms export ─────────────────────────────────────────────────────────────
 router.get("/export/alarms", apiKeyAuth("read:alarms"), validate({ query: AlarmExportQuery }), async (req, res): Promise<void> => {
-  const { status, severity, format } = req.query as z.infer<typeof AlarmExportQuery>;
+  const { status, severity, limit, format } = req.query as z.infer<typeof AlarmExportQuery>;
+  const maxLimit = limit ?? 5000;
 
   const conditions = [];
   if (status)   conditions.push(eq(alarmsTable.status, status));
@@ -242,7 +257,8 @@ router.get("/export/alarms", apiKeyAuth("read:alarms"), validate({ query: AlarmE
     .select()
     .from(alarmsTable)
     .where(conditions.length > 0 ? and(...conditions) : undefined)
-    .orderBy(desc(alarmsTable.triggeredAt));
+    .orderBy(desc(alarmsTable.triggeredAt))
+    .limit(maxLimit);
 
   const flat = rows.map((r) => ({
     id: r.id, assetId: r.assetId, assetName: r.assetName,
@@ -255,7 +271,7 @@ router.get("/export/alarms", apiKeyAuth("read:alarms"), validate({ query: AlarmE
     clearedAt: r.clearedAt?.toISOString() ?? "",
   }));
 
-  sendResult(res, format, "alarms", flat as Record<string, unknown>[]);
+  sendResult(res, format, "alarms", flat as Record<string, unknown>[], { limit: maxLimit });
 });
 
 // ── Alarm history export ──────────────────────────────────────────────────────

@@ -46,7 +46,7 @@ WS-Integrated Suite ingests industrial sensor telemetry over HTTP (with MQTT and
 | Backend framework | Express 5 | Async handlers typed `Promise<void>` |
 | ORM | Drizzle ORM | Schema-first, `drizzle-kit push` (no migration files yet — see §11) |
 | Database | PostgreSQL 16 | Single instance |
-| API contract | OpenAPI 3.1 | `lib/api-spec/src/openapi.yaml`, source of truth for the API surface |
+| API contract | OpenAPI 3.1 | `lib/api-spec/openapi.yaml`, source of truth for the API surface |
 | Codegen | Orval | Generates TanStack Query hooks (`lib/api-client-react`) + Zod schemas (`lib/api-zod`) |
 | Real-time transport | WebSocket, co-hosted on `/api/ws` | Single `broadcast()` fan-out, no pub/sub layer |
 | Session auth | Opaque token + scrypt | Server-side session store, not JWT |
@@ -77,7 +77,7 @@ Nexus-IoT/                          (pnpm workspace root)
 └── docs/technical-reference.md     Detailed per-table / per-route reference (formerly `replit.md`)
 ```
 
-**Dependency rule:** `artifacts/*` are leaf nodes and never import each other. The codegen chain flows one direction: `lib/db` → `lib/api-spec` → `lib/api-zod` + `lib/api-client-react`. The API server imports `lib/db` and `lib/api-zod`; the frontend imports `lib/api-client-react`. Editing an endpoint means editing `lib/api-spec/src/openapi.yaml` and running codegen — `src/generated/` files are never hand-edited.
+**Dependency rule:** `artifacts/*` are leaf nodes and never import each other. The codegen chain flows one direction: `lib/db` → `lib/api-spec` → `lib/api-zod` + `lib/api-client-react`. The API server imports `lib/db` and `lib/api-zod`; the frontend imports `lib/api-client-react`. Editing an endpoint means editing `lib/api-spec/openapi.yaml` and running codegen — `src/generated/` files are never hand-edited.
 
 **Root scripts** (`package.json`):
 
@@ -218,7 +218,7 @@ Key behavioural rules:
 
 One WebSocket endpoint (`/api/ws`), one `broadcast(type, data, options?)` function in `lib/ws-broadcast.ts`. Delivery is filtered per-connection by the caller's resolved permissions — a socket only receives event types its principal is allowed to see. There is no pub/sub layer or message queue; `broadcast()` iterates every open connection on the process synchronously. This is the reason horizontal scaling is not currently possible (see §9).
 
-Eleven frontend surfaces consume it through a single `useWsEvents` hook: Home dashboard, Live Feed, Live Twin, Visualization, Alarm History, Activity Log, Brokers, the alarm toast listener, the notification bell, the broker status bar, and Analytics & KPI (currently unreachable — see §8.5).
+Server event types: `telemetry`, `alarm`, `broker_status`, `activity_log` and `security_event`. Nine reachable frontend surfaces consume them through a single `useWsEvents` hook (`hooks/useWsEvents.ts`): Live Feed, Live Twin, Visualization (through `features/dashboards/AssetVizPanel.tsx`), Active Alarms, Alarm History, Activity Log, Brokers, the notification bell and the broker status bar (both in `Layout.tsx`). Three more pages still call the hook but are not routed: `Dashboard.tsx`, `HomeOverview.tsx` (with `features/home/StatusRibbon.tsx`) and `AnalyticsKpi.tsx` (see §8.5); Home is now the project list and opens no socket of its own. The former alarm toast listener has been removed.
 
 ### 5.5 Deployment architecture (current)
 
@@ -229,7 +229,7 @@ The platform is self-hosted on a single Linux VM. Two things must be running:
 
 Full step-by-step instructions, including the exact nginx config and a systemd unit template, are in **`docs/operations/vm-deployment-checklist.md`**.
 
-**Critical operational constraint:** run exactly **one** instance of the API server. Rate-limit counters, the WebSocket connection registry, the in-process MQTT subscriber, and the hourly retention pruner are all held in that single process's memory. A second instance would double-count rate limits, miss half of WebSocket broadcasts, and double-ingest every MQTT message.
+**Critical operational constraint:** run exactly **one** instance of the API server. Rate-limit counters, alarm On/Off delay timers, the WebSocket connection registry, the in-process MQTT subscriber, and the hourly retention pruner are all held in that single process's memory. A second instance would double the effective rate limits, miss half of WebSocket broadcasts, and fight the first over the MQTT connection.
 
 ---
 
@@ -318,14 +318,14 @@ Fifteen of nineteen tables have no index beyond their primary key. Full ranked r
 
 ### 7.1 Surface size
 
-95 endpoints across 20 route files, all mounted under `/api`. Full per-route documentation with request/response shapes is in `docs/api/api-reference.md` and `lib/api-spec/src/openapi.yaml` (the source of truth — the OpenAPI spec, not the route files, is what codegen reads).
+126 route handlers across 22 route files (`routes/*.ts` other than `index.ts`), all mounted under `/api`. Counting the per-client ingest aliases (`/ingest/k/:clientId/…` and `/ingest/e/:token/…` for payload, batch and validate) separately, that is 132 method-and-path pairs, all of which are described in `lib/api-spec/openapi.yaml`. Full per-route documentation with request/response shapes is in `docs/api/api-reference.md` and `lib/api-spec/openapi.yaml` (the source of truth — the OpenAPI spec, not the route files, is what codegen reads).
 
 ### 7.2 Authentication modes
 
 | Mode | Credential | CSRF | Used by |
 |---|---|---|---|
 | Session (human) | `is_session` cookie, opaque, SHA-256 stored | Required on state-changing requests | The SPA |
-| API key (machine) | `X-API-Key` header, `Authorization: Bearer`, or `?key=` query param | Exempt (explicit header/query, not attachable cross-site) | Gateways, SCADA bridges, export integrations |
+| API key (machine) | `X-API-Key` header or `Authorization: Bearer`. The `?key=` / `?apiKey=` / `?api_key=` query forms are ignored unless `API_KEY_ALLOW_QUERY_PARAM=true`. Per-client copy-and-paste URLs (`/ingest/e/:token/…`) carry their own token. Limit: `INGEST_RATE_LIMIT_RPM` (default 1200) requests per minute per client | Exempt (explicit header/query, not attachable cross-site) | Gateways, SCADA bridges, export integrations |
 | None | — | — | Login, activation, password reset, health check, OpenAPI schema |
 
 ### 7.3 Endpoint groups
@@ -339,7 +339,7 @@ Fifteen of nineteen tables have no index beyond their primary key. Full ranked r
 | Alarms | `/alarms`, `/alarms/:id/acknowledge`, `/alarm-rules/*` | `acknowledge_alarms` / `manage_alarms` + `alarms` module |
 | Brokers/destinations | `/brokers/*`, `/destinations/*` | `manage_brokers` / `manage_destinations` + `brokers` module |
 | API clients | `/api-clients`, `/api-clients/:id/*` | `manage_api_clients` + `api_clients` module, plus a server-enforced scope ceiling (§7.5) |
-| Visualization | `/viz-dashboards/*` | `visualization` module R/W/D |
+| Visualization | `/viz-nodes`, `/viz-nodes/:id`, `/viz-nodes/:id/shares/*`, `/viz-nodes/import`, `/viz-tags`, `/uploads/*`; legacy `/viz-dashboards` (list only) | `visualization` module R/W/D; node ownership and shares checked in the route (`lib/viz-access.ts`) |
 | Users/security | `/users/*`, `/security/*` | `manage_users` / `manage_security` |
 | Reports/system | `/activity-log`, `/system/*` | `activity_log` / `reports` module |
 | AI | `/ai/chat` | `explorer` module |
@@ -360,7 +360,7 @@ Fifteen of nineteen tables have no index beyond their primary key. Full ranked r
 Two independent axes:
 
 1. **What a signed-in human can do** — `permissions` (verbs like `manage_assets`) combined with a per-module R/W/D matrix (`modules.assets.write`, etc.). An administrator's explicit per-user override always wins over the role default; without an override, both the role's permission list and its module default must allow the action.
-2. **What a credential a user *creates* is allowed to do** — a separate scope ceiling (`ROLE_API_SCOPE_DEFAULTS`, per-user overridable). By default, `engineer` and `customer_admin` may only grant `ingest:write` on a credential they create; only `admin`/`super_admin` may grant read scopes or the `*` super-scope. This is enforced at the `POST /api-clients` route itself, not only hidden in the UI — a direct API call from an engineer account requesting `read:telemetry` returns `403 scope_forbidden`.
+2. **What a credential a user *creates* is allowed to do** — a separate scope ceiling (`ROLE_API_SCOPE_DEFAULTS`, per-user overridable). By default, `engineer` may only grant `ingest:write` on a credential they create; only `admin`, `company_admin` and `super_admin` may grant read scopes or the `*` super-scope. This is enforced at the `POST /api-clients` route itself, not only hidden in the UI — a direct API call from an engineer account requesting `read:telemetry` returns `403 scope_forbidden`.
 
 The full route-rule table lives in `middleware/authorize.ts`; the scope-ceiling logic lives in `lib/rbac.ts` (`ROLE_API_SCOPE_DEFAULTS`, `ungrantableScopes`, `canCreateApiClients`).
 
@@ -405,11 +405,13 @@ The platform is **single-instance by construction**. The following state lives o
 | State | Where | Consequence of a second instance |
 |---|---|---|
 | Per-client rate-limit counters | `middleware/apiKeyAuth.ts` | Effective rate limit multiplies by instance count |
+| Sign-in, API and flood rate-limit counters | `lib/rate-limit-store.ts`, `middleware/rateLimit.ts`, `middleware/apiRateLimit.ts` | Effective limits multiply by instance count |
+| Alarm On/Off delay timers | `routes/ingest.ts` (`pendingOn`, `pendingOff`) | Each instance times delays from only the messages it sees |
 | WebSocket connection registry | `lib/ws-broadcast.ts` | Each instance only reaches its own sockets — some clients silently miss events |
-| MQTT subscriber | `services/mqtt.ts` | Every instance subscribes independently → duplicate ingest of every MQTT message |
+| MQTT subscriber | `services/mqtt.ts` | Every instance connects with the same stable client id, so the broker keeps disconnecting one in favour of the other (reconnect loop, gaps in ingest) |
 | Hourly retention pruner | `src/index.ts` | Concurrent pruners running against the same tables |
 
-Horizontal scaling requires moving all four onto shared infrastructure (Redis for counters and pub/sub, an MQTT shared subscription or leader election, an advisory-lock-based pruner leader) — none of which is currently implemented.
+A restart resets the counters and restarts running alarm delays (an alarm can fire up to one delay period late); see `docs/technical-reference.md`, "Process-local state", for the full list and restart effects. Horizontal scaling requires moving this state onto shared infrastructure (Redis for counters and pub/sub, an MQTT shared subscription or leader election, an advisory-lock-based pruner leader) — none of which is currently implemented.
 
 ---
 

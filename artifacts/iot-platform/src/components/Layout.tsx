@@ -1,7 +1,7 @@
 import { useState, useMemo } from "react";
 import { Link, useLocation } from "wouter";
 import {
-  ChevronDown, ChevronRight, ChevronsLeft, ChevronsRight, Home, LayoutDashboard,
+  ChevronDown, ChevronRight, Home, LayoutDashboard,
   FileText, Image, BarChart2, Blocks, Cpu, Bell,
   AlarmClock, BookOpen, Settings2, Router, Plug,
   Shield, Users, KeyRound, Activity, Menu, X,
@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useCurrentUser } from "@/contexts/UserContext";
 import NotificationBell from "@/components/NotificationBell";
+import CriticalAlarmBanner from "@/components/CriticalAlarmBanner";
 import UserProfileTopMenu from "@/components/UserProfileTopMenu";
 import BrokerStatusBar from "@/components/BrokerStatusBar";
 import AppearanceMenu from "@/components/AppearanceMenu";
@@ -37,13 +38,20 @@ interface NavItem {
   children?: NavChild[];
   /** Hidden while this feature switch is off. See lib/features.ts. */
   feature?: FeatureKey;
+  /**
+   * Hidden from project-restricted users: the API refuses these plant-wide
+   * endpoints to them (lib/project-access.ts PLATFORM_WIDE), so the entry would
+   * only lead to errors.
+   */
+  plantWide?: boolean;
 }
 
 const navItems: NavItem[] = [
   { label: "Home", href: "/", icon: Home, module: "dashboard" },
   {
+    // No `href`: the header only toggles, like Data Insights. The /asset-management
+    // card page still exists; restoring the href here brings it back.
     label: "Asset Hub",
-    href: "/asset-management",
     icon: LayoutDashboard,
     module: "assets",
     children: [
@@ -71,6 +79,7 @@ const navItems: NavItem[] = [
     label: "AI Advisor",
     icon: BrainCircuit,
     module: "explorer",
+    plantWide: true,
     children: [
       { label: "Ask Your Assets",       href: "/ai-copilot",                   icon: MessageSquare,  module: "explorer" },
       { label: "Health Insights",       href: "/ai-copilot?action=health",     icon: Activity,       module: "explorer" },
@@ -112,7 +121,7 @@ const navItems: NavItem[] = [
     children: [
       { label: "User",                href: "/users",               icon: Users,  module: "users" },
       { label: "Security Center",     href: "/security",            icon: Shield, module: "security" },
-      { label: "Notification Groups", href: "/notification-groups", icon: Users,  module: "alarms" },
+      { label: "Notification Groups", href: "/notification-groups", icon: Users,  module: "alarms", feature: "notificationChannels" },
     ],
   },
   {
@@ -147,9 +156,11 @@ function enabled(item: { feature?: FeatureKey }): boolean {
 function visibleNav(
   items: NavItem[],
   canModule: (key: string, level?: "read" | "write" | "delete") => boolean,
+  restrictProjects: boolean,
 ): NavItem[] {
   return items.reduce<NavItem[]>((acc, item) => {
     if (!enabled(item)) return acc;
+    if (item.plantWide && restrictProjects) return acc;
     if (item.children) {
       const children = item.children.filter((c) => enabled(c) && (!c.module || canModule(c.module)));
       if (children.length > 0) acc.push({ ...item, children });
@@ -204,7 +215,7 @@ function NavGroup({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
         // Group with a landing page: the label navigates AND expands.
         //
         // It used to only navigate, with the children reachable solely via the
-        // small chevron. Asset Hub is the only group in this shape, so it
+        // small chevron. Asset Hub was the only group in this shape, so it
         // was the only one that appeared to "lag": the click kicked off a route
         // change and page fetch while the submenu stayed shut, which reads as
         // slowness rather than as "that click did something else". Expanding on
@@ -271,10 +282,11 @@ function NavGroup({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
 
 export default function Layout({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
-  const { canModule } = useCurrentUser();
+  const { canModule, session } = useCurrentUser();
+  const restrictProjects = !!session?.restrictProjects;
 
   // Recomputed when the session's grants change (login, admin edit + refresh).
-  const nav = useMemo(() => visibleNav(navItems, canModule), [canModule]);
+  const nav = useMemo(() => visibleNav(navItems, canModule, restrictProjects), [canModule, restrictProjects]);
 
   return (
     <div className="app-shell flex h-screen bg-background overflow-hidden">
@@ -282,32 +294,28 @@ export default function Layout({ children }: { children: React.ReactNode }) {
       <aside
         className={cn(
           "flex flex-col shrink-0 bg-sidebar border-r border-sidebar-border transition-all duration-200",
-          collapsed ? "w-12" : "w-60"
+          collapsed ? "w-12" : "w-60 sidebar-iot"
         )}
       >
-        {/* Logo + collapse toggle */}
+        {/* Logo */}
         <div className={cn(
           "flex items-center gap-2 px-3 py-3 border-b border-sidebar-border",
           collapsed && "justify-center px-0"
         )}>
-          {!collapsed && (
-            <span className="inline-flex items-center bg-white rounded-md px-2 py-1 shadow-sm shrink-0">
-              <img src={`${BASE}/web-synergies-logo.png`} alt="Web Synergies"
-                className="h-6 w-auto object-contain select-none" draggable={false} />
+          {collapsed ? (
+            <span className="relative block w-10 h-[18px] bg-white rounded shadow-sm overflow-hidden">
+              <img src={`${BASE}/web-synergies-logo-sidebar.png`} alt="Web Synergies"
+                className="absolute top-0 left-0 w-10 max-w-none select-none" draggable={false} />
             </span>
+          ) : (
+            <>
+              <span className="inline-flex items-center bg-white rounded-md p-1 shadow-sm shrink-0">
+                <img src={`${BASE}/web-synergies-logo-sidebar.png`} alt="Web Synergies"
+                  className="h-9 w-auto object-contain select-none" draggable={false} />
+              </span>
+              <span className="text-sm font-semibold leading-tight text-sidebar-accent-foreground">Integrated Suite</span>
+            </>
           )}
-          <button
-            onClick={() => setCollapsed((c) => !c)}
-            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            className={cn(
-              "flex items-center justify-center w-7 h-7 rounded-md border border-sidebar-border text-sidebar-foreground hover:bg-sidebar-accent hover:text-sidebar-accent-foreground transition-colors",
-              !collapsed && "ml-auto"
-            )}
-            data-testid="sidebar-toggle"
-          >
-            {collapsed ? <ChevronsRight className="w-4 h-4" /> : <ChevronsLeft className="w-4 h-4" />}
-          </button>
         </div>
 
         {/* Nav */}
@@ -330,7 +338,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
             onClick={() => setCollapsed((c) => !c)}
             title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            className="flex items-center justify-center w-8 h-8 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            className="flex items-center justify-center w-8 h-8 rounded-md border !border-primary/40 text-primary hover:bg-muted hover:text-foreground transition-colors"
           >
             <Menu className="w-4 h-4" />
           </button>
@@ -342,6 +350,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <div className="w-px h-5 bg-border" />
           <UserProfileTopMenu />
         </header>
+
+        <CriticalAlarmBanner />
 
         {/* Page content */}
         <main className="flex-1 overflow-auto">

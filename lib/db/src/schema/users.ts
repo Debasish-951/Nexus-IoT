@@ -37,13 +37,16 @@ export const usersTable = pgTable("users", {
   username: text("username").notNull().unique(),
   email: text("email").notNull().unique(),
   fullName: text("full_name").notNull(),
-  role: text("role").notNull().default("viewer"), // super_admin|admin|customer_admin|engineer|operator|viewer
+  role: text("role").notNull().default("viewer"), // super_admin|company_admin|admin|engineer|operator|viewer
   // invited → active → (suspended|inactive). Accounts are born `invited`: an
   // account can never be usable without going through the activation flow.
   status: text("status").notNull().default("invited"),
 
   // ── Credentials ─────────────────────────────────────────────────────────────
   /** scrypt$N$r$p$salt_b64$hash_b64 — never cleartext. NULL until activation. */
+  /** Simultaneous logins allowed for this user. Only a Super Admin or Company Admin can change it. */
+  maxSessions: integer("max_sessions").notNull().default(3),
+
   passwordHash: text("password_hash"),
   passwordUpdatedAt: timestamp("password_updated_at", { withTimezone: true }),
   /**

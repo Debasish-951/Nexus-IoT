@@ -117,7 +117,7 @@ const httpRequestDuration = new promClient.Histogram({
 ## Alerting
 
 ### Current State
-- Alarm events are pushed via WebSocket to connected browsers (toast notifications)
+- Alarm events are pushed via WebSocket to connected browsers (the notification bell, plus a one-line banner for unacknowledged critical alarms)
 - Webhook delivery to external systems per alarm rule
 
 ### Gaps

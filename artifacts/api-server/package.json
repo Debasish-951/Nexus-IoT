@@ -8,6 +8,7 @@
     "build": "node ./build.mjs",
     "start": "node --enable-source-maps ./dist/index.mjs",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "cross-env DATABASE_URL=postgres://placeholder@127.0.0.1:1/test node --import tsx --test \"src/**/*.test.ts\"",
     "rotate-secrets": "tsx src/scripts/rotate-secrets.ts"
   },
   "dependencies": {
@@ -21,7 +22,7 @@
     "expr-eval-fork": "3.0.3",
     "express": "^5",
     "mqtt": "^5.15.1",
-    "nodemailer": "^9.0.3",
+    "nodemailer": "^10.4.0",
     "pino": "^9",
     "pino-http": "^10",
     "ws": "^8.20.0",

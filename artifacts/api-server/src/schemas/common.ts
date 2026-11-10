@@ -2,13 +2,16 @@ import { z } from "zod";
 import * as v from "../lib/validation";
 
 /**
- * Request schemas for the routes the generated OpenAPI client does not cover.
+ * Hand-written request schemas for exports, system aggregation, the security
+ * feed and the visualization tree.
  *
- * These are hand-written because the endpoints they describe are not in
- * `lib/api-spec/src/openapi.yaml` — exports, system aggregation, the security
- * feed, the visualization tree. Anything that IS in the spec keeps using the
- * generated schema from `@workspace/api-zod`; the middleware adds strictness and
- * the primitives add constraints without either file being hand-edited.
+ * These routes were added to the server before they were described in
+ * `lib/api-spec/openapi.yaml`. They are described there now (documentation and
+ * generated client), but these schemas remain the validation the routes
+ * actually run, so a change to one of these routes must update both this file
+ * and the spec. Routes whose validation already came from the spec keep using
+ * the generated schema from `@workspace/api-zod`; the middleware adds strictness
+ * and the primitives add constraints without either file being hand-edited.
  *
  * Every query schema gives its optional fields explicit bounds. Before this,
  * `?limit=abc` reached `Number()` and produced NaN, which Postgres rejected as a
@@ -49,6 +52,8 @@ export const AlarmExportQuery = z.object({
   // nothing — better to say so than to run the query.
   status: z.enum(["active", "acknowledged", "cleared"]).optional(),
   severity: z.enum(["critical", "high", "medium", "low", "info"]).optional(),
+  // Newest first. The export used to return every alarm ever raised.
+  limit: v.boundedInt(1, 5000, 5000).optional(),
   format: formatEnum,
 });
 
@@ -127,16 +132,26 @@ export const CreateVizNodeBody = z.object({
   id: v.nodeId().optional(),
   name: v.name(),
   parentId: v.nodeId().nullable().optional(),
+  projectId: v.uuid().nullable().optional(),
   widgets: widgetArray.optional(),
 });
 
 export const UpdateVizNodeBody = z.object({
   name: v.name().optional(),
   parentId: v.nodeId().nullable().optional(),
+  projectId: v.uuid().nullable().optional(),
   widgets: widgetArray.optional(),
 });
 
 export const VizNodeParams = z.object({ id: v.nodeId() });
+
+export const VizNodeShareParams = z.object({ id: v.nodeId(), userId: v.uuid() });
+
+export const PutVizNodeShareBody = z.object({
+  read: z.boolean(),
+  write: z.boolean(),
+  delete: z.boolean(),
+});
 
 /** The shape a single imported node must satisfy. Applied per node, not to the batch. */
 export const ImportVizNode = z.object({
@@ -175,7 +190,14 @@ export const CreateDestinationBody = z.object({
   name: v.name(),
   description: v.description().nullable().optional(),
   endpoint: v.httpUrl(),
-  authType: z.enum(["bearer", "hmac", "apikey", "basic", "none"]).default("bearer"),
+  // `api_key` is what the UI sends and what the sender checks. The schema used to
+  // allow `apikey` instead, so every API-key destination was rejected; legacy
+  // `apikey` is still accepted and stored as `api_key`. `hmac` was listed but
+  // never implemented by the sender, so it is no longer offered.
+  authType: z.preprocess(
+    (v) => (v === "apikey" ? "api_key" : v),
+    z.enum(["bearer", "api_key", "basic", "none"]),
+  ).default("bearer"),
   token: v.text(1024).nullable().optional(),
   secretKey: v.text(1024).nullable().optional(),
   apiKeyHeader: v.text(128).default("X-API-Key"),
@@ -244,3 +266,32 @@ export const LiveMetricsQuery = z.object({
   /** Points per sparkline. */
   points: v.boundedInt(2, 200, 40).optional(),
 });
+
+// ── Asset templates ──────────────────────────────────────────────────────────
+
+const lowerEnum = <T extends readonly [string, ...string[]]>(values: T) =>
+  z.preprocess((x) => (typeof x === "string" ? x.trim().toLowerCase() : x), z.enum(values));
+
+/**
+ * One attribute definition on an asset template (`asset_templates.attribute_definitions`).
+ *
+ * Mirrors `AttributeDefinition` in lib/db. `deviceid` is accepted because the
+ * template editor offers it as a row type (it declares the device binding).
+ * Type names are matched case-insensitively so a re-saved spreadsheet still
+ * imports. Unknown keys are dropped rather than stored. `value` is bounded
+ * because a runtime attribute's expression lives there and is evaluated later.
+ */
+export const AttributeDefinitionSchema = z.object({
+  name: z.string().trim().min(1, "every attribute needs a name").max(200),
+  type: lowerEnum(["static", "dynamic", "metric", "runtime", "timestamp", "deviceid"] as const),
+  dataType: lowerEnum(["text", "number", "double", "boolean", "timestamp"] as const),
+  tagName: z.string().max(200).nullable().optional(),
+  uom: z.string().max(50).nullable().optional(),
+  value: z.string().max(2000).nullable().optional(),
+  required: z.boolean().nullable().optional(),
+  description: z.string().max(1000).nullable().optional(),
+  decimalPlaces: z.number().int().min(0).max(10).nullable().optional(),
+});
+
+export const AttributeDefinitionsSchema = z.array(AttributeDefinitionSchema)
+  .max(1000, "a template may hold at most 1000 attribute definitions");

@@ -30,6 +30,9 @@ export default defineConfig({
       clean: true,
       prettier: true,
       override: {
+        // The workspace uses TanStack Query 5. Orval cannot always detect it and
+        // otherwise generates hooks for v4.
+        query: { version: 5 },
         fetch: {
           includeHttpResponseReturnType: false,
         },
@@ -56,6 +59,10 @@ export default defineConfig({
       prettier: true,
       override: {
         zod: {
+          // The workspace uses zod 3. Orval otherwise picks the zod 4 call syntax
+          // (e.g. zod.int()) from its own zod 4 dependency, and the output no longer
+          // compiles. Change to 4 together with a zod 4 upgrade.
+          version: 3,
           coerce: {
             // Query params always arrive as strings — a date-time query param (e.g.
             // /telemetry/:assetId?from=&to=) needs `date` coerced here too, or it comes

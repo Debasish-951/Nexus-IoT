@@ -1,6 +1,7 @@
 import { useEffect, useRef, lazy, Suspense } from "react";
 import { Switch, Route, Router as WouterRouter, useLocation } from "wouter";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryCache, MutationCache, QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { reportForbidden, wasProjectDeletedHere } from "@/lib/session-events";
 import { Loader2 } from "lucide-react";
 import { Toaster } from "@/components/ui/toaster";
 import { Toaster as SonnerToaster } from "sonner";
@@ -8,7 +9,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import Layout from "@/components/Layout";
 import { UserProvider } from "@/contexts/UserContext";
 import { Protected } from "@/components/RouteGuard";
-import AlarmToastListener from "@/components/AlarmToastListener";
+import { ErrorBoundary } from "@/components/ErrorBoundary";
 import NotFound from "@/pages/not-found";
 import Login from "@/pages/Login";
 import Activate from "@/pages/Activate";
@@ -28,8 +29,8 @@ import { FEATURES, type FeatureKey } from "@/lib/features";
  * first thing rendered after sign-in or the thing rendered when nothing else
  * matches, so lazy-loading them would only add a spinner to the critical path.
  *
- * `Home` picks between the banded Overview and the original Dashboard from a
- * per-browser preference — both pages are live, neither replaces the other.
+ * `Home` picks between Projects, the banded Overview and the original Dashboard
+ * from a per-browser preference.
  */
 const AICopilot = lazy(() => import("@/pages/AICopilot"));
 const ActivityLog = lazy(() => import("@/pages/ActivityLog"));
@@ -73,7 +74,20 @@ import { encodePath } from "@/lib/routeSlugs";
  */
 const APP_BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
+/**
+ * A 403 from the generated client may mean the session payload is stale (a
+ * forced password change, a role or project change). Hand its code to
+ * UserProvider, which re-reads /auth/session. apiFetch does the same.
+ */
+function forbiddenCode(error: unknown): void {
+  const e = error as { status?: number; data?: { code?: unknown } | null } | null;
+  if (e?.status !== 403) return;
+  reportForbidden(typeof e.data?.code === "string" ? e.data.code : null);
+}
+
 const queryClient = new QueryClient({
+  queryCache: new QueryCache({ onError: forbiddenCode }),
+  mutationCache: new MutationCache({ onError: forbiddenCode }),
   defaultOptions: {
     queries: {
       // 401/403 are terminal — retrying a permission failure just delays the
@@ -117,7 +131,7 @@ const ROUTES: {
   { path: "/alarms",               component: Alarms,               module: "alarms" },
   { path: "/alarm-history",        component: AlarmHistory,         module: "alarms" },
   { path: "/alarm-rules",          component: AlarmRules,           module: "alarms" },
-  { path: "/notification-groups",  component: NotificationGroups,   module: "alarms" },
+  { path: "/notification-groups",  component: NotificationGroups,   module: "alarms", feature: "notificationChannels" },
   { path: "/users",                component: Users,                module: "users" },
   { path: "/security",             component: SecurityCenter,       module: "security" },
   { path: "/brokers",              component: Brokers,              module: "brokers" },
@@ -166,9 +180,15 @@ function OpaqueUrlNormaliser() {
 
 /** The signed-in application: sidebar plus the route table above. */
 function WorkspaceShell() {
+  const [location] = useLocation();
   return (
     <Layout>
       <OpaqueUrlNormaliser />
+      {/* A page that throws, or a lazy chunk missing after a deploy, is caught
+          here, inside Layout, so the sidebar survives and the user can go
+          elsewhere. Changing route clears it. The root boundary in main.tsx
+          stays as the last resort. */}
+      <ErrorBoundary scope="page" resetKey={location}>
       {/* Every page below the Dashboard is a lazy chunk, so the first visit to a
           route needs somewhere to wait. The boundary sits INSIDE Layout on
           purpose: the sidebar and top bar stay on screen while the page loads,
@@ -187,6 +207,7 @@ function WorkspaceShell() {
           <Route component={NotFound} />
         </Switch>
       </Suspense>
+      </ErrorBoundary>
     </Layout>
   );
 }
@@ -274,9 +295,14 @@ function ProjectGate() {
    */
   const lastResolvedId = useRef<string | null>(null);
   if (currentProject) lastResolvedId.current = currentProject.id;
+  // Only a delete made from THIS tab counts. A project that resolved and then
+  // disappeared for any other reason — access withdrawn (picked up when the
+  // session is re-read), or deleted by someone else — gets the "Project
+  // unavailable" wall below instead of a silent switch to another project.
   const vanished = !currentProject
     && currentProjectId !== null
-    && lastResolvedId.current === currentProjectId;
+    && lastResolvedId.current === currentProjectId
+    && wasProjectDeletedHere(currentProjectId);
 
   // Carry the user to another project on the SAME page. `location` is relative
   // to the `/p/<id>` base, so deleting a root asset from /assets lands back on
@@ -338,7 +364,8 @@ function ProjectGate() {
  *
  * Two jobs. It keeps every pre-existing link working — `/alarm-rules` from an
  * old bookmark, an email, or the docs resolves to the last project the user had
- * open, rather than 404ing. And it is the landing step after login.
+ * open, rather than 404ing. The bare `/` stays here: it is Home, the project list
+ * shown after login.
  *
  * An installation with no projects yet renders unscoped, so a brand-new
  * deployment is still usable: you cannot pick a project before creating the
@@ -349,12 +376,11 @@ function ProjectEntry() {
   const [location, navigate] = useLocation();
 
   useEffect(() => {
-    if (!loaded || projects.length === 0) return;
+    if (!loaded || projects.length === 0 || location === "/") return;
     const remembered = window.localStorage.getItem(LAST_PROJECT_KEY);
     const target = projects.find((p) => p.id === remembered) ?? projects[0];
     // Carry the whole address across, so a deep link keeps its query and hash.
-    const suffix = location === "/" ? "" : location;
-    navigate(`/p/${target.id}${suffix}${window.location.search}${window.location.hash}`, {
+    navigate(`/p/${target.id}${location}${window.location.search}${window.location.hash}`, {
       replace: true,
     });
   }, [loaded, projects, location, navigate]);
@@ -362,7 +388,7 @@ function ProjectEntry() {
   if (!loaded) return <Splash label="Loading projects…" />;
   // No projects to scope to — a fresh installation, or a user who cannot read
   // the asset list. Either way the app runs unprefixed rather than blocking.
-  if (!canListProjects || projects.length === 0) return <WorkspaceShell />;
+  if (!canListProjects || projects.length === 0 || location === "/") return <WorkspaceShell />;
   return <Splash label="Opening project…" />;
 }
 
@@ -407,7 +433,6 @@ function App() {
           >
             <AppRouter />
           </WouterRouter>
-          <AlarmToastListener />
           <Toaster />
           <SonnerToaster position="top-right" richColors={false} closeButton />
         </TooltipProvider>

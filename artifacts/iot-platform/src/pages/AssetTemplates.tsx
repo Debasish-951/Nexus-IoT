@@ -29,7 +29,10 @@ export default function AssetTemplates() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const qc = useQueryClient();
-  const { can } = useCurrentUser();
+  const { canAction, session } = useCurrentUser();
+  // Same rules the API applies to /asset-templates writes and DELETE.
+  const canWrite = canAction("manage_templates", "assets", "write");
+  const canDelete = canAction("manage_templates", "assets", "delete");
 
   const [search, setSearch] = useState("");
   const [createOpen, setCreateOpen] = useState(false);
@@ -216,7 +219,8 @@ export default function AssetTemplates() {
       if (!put.ok) throw new Error((await put.json())?.error ?? "save failed");
 
       // So the id is offered when binding assets, even before any telemetry arrives.
-      if (deviceId) {
+      // Plant-wide registry: refused to project-restricted users, so not attempted.
+      if (deviceId && !session?.restrictProjects) {
         void apiFetch("/api/ingest/register-device", {
           method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ deviceId }),
         }).catch(() => {});
@@ -274,7 +278,7 @@ export default function AssetTemplates() {
 
   return (
     <div className="p-6 space-y-4 max-w-7xl mx-auto">
-      <button onClick={() => navigate("/asset-management")} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+      <button onClick={() => navigate("/")} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="w-4 h-4" /> Back
       </button>
       {/* Header */}
@@ -283,7 +287,7 @@ export default function AssetTemplates() {
           <h1 className="text-xl font-bold flex items-center gap-2"><LayoutTemplate className="w-5 h-5 text-primary" /> Asset Templates</h1>
           <p className="text-sm text-muted-foreground">Create and manage reusable attribute templates</p>
         </div>
-        {can("manage_templates") && (
+        {canWrite && (
           <div className="flex items-center gap-2">
             <Button variant="outline" onClick={exportSelected} title={selected.size === 0 ? "Exports every template as one master CSV" : `Exports ${selected.size} selected template(s)`}>
               <Download className="w-4 h-4 mr-1.5" /> Export
@@ -311,7 +315,7 @@ export default function AssetTemplates() {
             <thead>
               <tr className="border-b border-border bg-muted/50 text-xs text-muted-foreground">
                 <th className="px-4 py-2.5 w-10">
-                  {can("manage_templates") && templateList.length > 0 && (
+                  {canWrite && templateList.length > 0 && (
                     <Checkbox checked={selected.size > 0 && selected.size === templateList.length} onCheckedChange={toggleSelectAll} />
                   )}
                 </th>
@@ -332,7 +336,7 @@ export default function AssetTemplates() {
                 <tr><td colSpan={7} className="px-4 py-16 text-center text-muted-foreground">
                   <LayoutTemplate className="w-8 h-8 mx-auto mb-2 opacity-20" />
                   <p className="text-sm">No templates {search ? "match your search" : "yet"}</p>
-                  {!search && can("manage_templates") && (
+                  {!search && canWrite && (
                     <Button size="sm" variant="outline" className="mt-3" onClick={() => setCreateOpen(true)}><Plus className="w-3.5 h-3.5 mr-1" /> Create your first template</Button>
                   )}
                 </td></tr>
@@ -341,7 +345,7 @@ export default function AssetTemplates() {
                   <tr key={t.id} onClick={() => navigate(`/asset-templates/${t.id}`)}
                     className="border-b border-border/50 hover:bg-muted/30 transition-colors cursor-pointer group">
                     <td className="px-4 py-2.5" onClick={(e) => e.stopPropagation()}>
-                      {can("manage_templates") && (
+                      {canWrite && (
                         <Checkbox checked={selected.has(t.id)} onCheckedChange={() => toggleSelected(t.id)} />
                       )}
                     </td>
@@ -351,7 +355,7 @@ export default function AssetTemplates() {
                     <td className="px-4 py-2.5 tabular-nums">{t.attributeCount ?? (t.attributeDefinitions?.length ?? 0)}</td>
                     <td className="px-4 py-2.5 text-xs text-muted-foreground">{t.updatedAt ? format(new Date(t.updatedAt), "MM/dd/yyyy") : "—"}</td>
                     <td className="px-4 py-2.5 text-right" onClick={(e) => e.stopPropagation()}>
-                      {can("manage_templates") && (
+                      {canDelete && (
                         <button title="Delete template" onClick={(e) => handleDeleteTemplate(e, t)}
                           className="text-muted-foreground hover:text-destructive transition-colors opacity-0 group-hover:opacity-100">
                           <Trash2 className="w-4 h-4" />

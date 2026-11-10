@@ -55,7 +55,7 @@
 
 | Item | Impact | Action Required |
 |------|--------|----------------|
-| OpenAPI spec content | Some API endpoint details inferred from route code | Review `lib/api-spec/src/openapi.yaml` against `docs/api/api-reference.md` |
+| OpenAPI spec content | Some API endpoint details inferred from route code | Review `lib/api-spec/openapi.yaml` against `docs/api/api-reference.md` |
 | Actual performance benchmarks | Quality attributes use estimates, not measured values | Run load tests; update `docs/architecture/quality-attributes.md` |
 | Replit infrastructure internals | Deployment section uses known platform model | Verify with Replit documentation |
 | Database migration history | Migration files not inspected | Cross-reference `lib/db/` migration files with `docs/data/data-model.md` |

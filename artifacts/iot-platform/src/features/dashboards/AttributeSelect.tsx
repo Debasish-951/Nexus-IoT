@@ -26,6 +26,7 @@ export function AttributeSelect({ value, options, onChange, disabled, placeholde
   const [query, setQuery] = useState("");
   const boxRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+  const popupRef = useRef<HTMLDivElement>(null);
 
   // Close on outside click or Escape — the panel it lives in also scrolls, so a
   // dropdown left open would follow the wrong field.
@@ -45,8 +46,8 @@ export function AttributeSelect({ value, options, onChange, disabled, placeholde
     setQuery("");
     inputRef.current?.focus();
     // The config panel is a scroll container, so a dropdown opening near its
-    // bottom edge would be clipped — pull the field into view first.
-    boxRef.current?.scrollIntoView({ block: "nearest" });
+    // bottom edge would be cut off — bring the whole list into view.
+    popupRef.current?.scrollIntoView({ block: "nearest" });
   }, [open]);
 
   const filtered = useMemo(() => {
@@ -54,7 +55,7 @@ export function AttributeSelect({ value, options, onChange, disabled, placeholde
     return q ? options.filter((o) => o.label.toLowerCase().includes(q) || o.key.toLowerCase().includes(q)) : options;
   }, [query, options]);
 
-  const h = size === "sm" ? "h-7" : "h-8";
+  const h = size === "sm" ? "min-h-[1.75rem]" : "min-h-[2rem]";
   const text = size === "sm" ? "text-xs" : "text-sm";
 
   // The trigger shows the friendly Attribute Name, not the raw tag `value` is
@@ -66,18 +67,20 @@ export function AttributeSelect({ value, options, onChange, disabled, placeholde
   return (
     <div ref={boxRef} className="relative min-w-0">
       <button
-        type="button" disabled={disabled} onClick={() => setOpen((o) => !o)}
+        type="button" disabled={disabled} onClick={() => setOpen((o) => !o)} title={selectedLabel || undefined}
         className={cn(
-          "w-full rounded-md border border-border bg-background px-2 flex items-center gap-1.5 text-left",
+          "w-full rounded-md border border-border bg-background px-2 py-1 flex items-center gap-1.5 text-left",
           h, text, disabled && "opacity-50 cursor-not-allowed",
         )}
       >
-        <span className={cn("flex-1 truncate", !value && "text-muted-foreground")}>{selectedLabel || placeholder}</span>
+        {/* Names wrap instead of being cut off: the part that tells similar attributes
+            apart is usually at the end of a long name. */}
+        <span className={cn("flex-1 min-w-0 [overflow-wrap:anywhere]", !value && "text-muted-foreground")}>{selectedLabel || placeholder}</span>
         <ChevronDown className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
       </button>
 
       {open && !disabled && (
-        <div className="absolute z-50 mt-1 w-full rounded-md border border-border bg-popover shadow-lg overflow-hidden">
+        <div ref={popupRef} className="absolute z-50 mt-1 w-full rounded-md border border-border bg-popover shadow-lg overflow-hidden">
           <div className="relative border-b border-border">
             <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground" />
             <input
@@ -95,11 +98,11 @@ export function AttributeSelect({ value, options, onChange, disabled, placeholde
               </button>
             )}
             {filtered.map((o) => (
-              <button key={o.key} type="button" onClick={() => choose(o.key)}
-                className={cn("w-full flex items-center gap-1.5 px-2 py-1 text-left text-xs hover:bg-muted/60",
+              <button key={o.key} type="button" onClick={() => choose(o.key)} title={o.label}
+                className={cn("w-full flex items-start gap-1.5 px-2 py-1 text-left text-xs hover:bg-muted/60",
                   o.key === value && "text-primary")}>
-                {o.key === value ? <Check className="w-3 h-3 shrink-0" /> : <span className="w-3 shrink-0" />}
-                <span className="truncate">{o.label}</span>
+                {o.key === value ? <Check className="w-3 h-3 mt-0.5 shrink-0" /> : <span className="w-3 shrink-0" />}
+                <span className="min-w-0 [overflow-wrap:anywhere]">{o.label}</span>
               </button>
             ))}
             {filtered.length === 0 && (

@@ -147,6 +147,19 @@ export const authConfig = {
      * (which is durable, in the database) remains the first control to fire.
      */
     account: { max: num("AUTH_RL_ACCOUNT_MAX", 12), windowMs: num("AUTH_RL_ACCOUNT_WINDOW_MINUTES", 15) * 60_000 },
+    /**
+     * Self-service password change, per signed-in user. Each attempt verifies the
+     * current password with a 64 MiB scrypt, and a hijacked session could
+     * otherwise guess the current password without limit and without touching
+     * the login lockout. Cleared on success.
+     */
+    changePassword: { max: num("AUTH_RL_CHANGE_PASSWORD_MAX", 5), windowMs: num("AUTH_RL_CHANGE_PASSWORD_WINDOW_MINUTES", 15) * 60_000 },
+    /**
+     * AI Advisor questions, per user. Each question makes several calls to the
+     * external model and spends the installation's shared Groq quota, so one
+     * user looping on it would stop it for everyone.
+     */
+    ai: { max: num("AI_RL_MAX", 20), windowMs: num("AI_RL_WINDOW_MINUTES", 10) * 60_000 },
 
     /**
      * Ordinary authenticated API traffic, keyed per user (falling back to IP).
@@ -186,7 +199,7 @@ export const authConfig = {
   },
 
   password: {
-    minLength: num("AUTH_PASSWORD_MIN_LENGTH", 8),
+    minLength: num("AUTH_PASSWORD_MIN_LENGTH", 12),
     maxLength: num("AUTH_PASSWORD_MAX_LENGTH", 128),
     requireUppercase: bool("AUTH_PASSWORD_REQUIRE_UPPERCASE", true),
     requireLowercase: bool("AUTH_PASSWORD_REQUIRE_LOWERCASE", true),
@@ -235,6 +248,9 @@ export function assertAuthConfigSane(): void {
     }
     if (!authConfig.session.secure) warn.push("AUTH_COOKIE_SECURE=false in production — session cookies will be sent over plain HTTP.");
     if (!authConfig.enforce) fatal.push("AUTH_ENFORCE=false in production — route authorisation is disabled.");
+    // Without a required session every GET is answered anonymously, ahead of the
+    // deny-by-default rule table, which exposes users, API clients and telemetry.
+    if (!authConfig.sessionRequired) fatal.push("AUTH_SESSION_REQUIRED=false in production — every read would be answered without signing in.");
     if (authConfig.publicUrl.startsWith("http://")) warn.push(`AUTH_PUBLIC_URL is plain HTTP (${authConfig.publicUrl}) — activation links will not be TLS-protected.`);
   }
 

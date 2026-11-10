@@ -25,7 +25,13 @@ export type SecurityEventType =
   | "authz.denied" | "csrf.failed" | "email.failed" | "access.updated"
   // `event_type` is a text column and the Security Center falls back to showing
   // the raw name, so adding a type needs no migration and no frontend change.
-  | "ratelimit.tripped" | "auth.spray_detected" | "input.rejected";
+  | "ratelimit.tripped" | "auth.spray_detected" | "input.rejected"
+  // A presented API key or ingest URL that did not authenticate.
+  | "apikey.invalid"
+  // Changes to a machine credential. These are privilege changes as much as a
+  // role change is, and were previously only in the Activity Log.
+  | "api_client.created" | "api_client.updated" | "api_client.secret_rotated"
+  | "api_client.revoked" | "api_client.restored" | "api_client.deleted";
 
 export interface SecurityEventInput {
   type: SecurityEventType;
@@ -79,6 +85,9 @@ const COALESCED_TYPES = new Set<SecurityEventType>([
   "authz.denied",
   "csrf.failed",
   "input.rejected",
+  // A gateway left running with a revoked key retries forever; one row a minute
+  // with a count is the useful record of that.
+  "apikey.invalid",
 ]);
 
 const COALESCE_WINDOW_MS = Number(process.env.SECURITY_EVENT_COALESCE_MS ?? 60_000);

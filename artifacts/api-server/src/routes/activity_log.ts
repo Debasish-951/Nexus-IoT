@@ -2,10 +2,11 @@ import { Router, type IRouter } from "express";
 import { z } from "zod";
 import { validate } from "../middleware/validate";
 import { ActivityLogQuery } from "../schemas/common";
-import { desc, eq, and, count } from "drizzle-orm";
+import { desc, eq, and, count, inArray } from "drizzle-orm";
 import { db, activityLogsTable } from "@workspace/db";
 import type { Request } from "express";
 import { broadcast } from "../lib/ws-broadcast";
+import { assetScope } from "../lib/project-access";
 
 const router: IRouter = Router();
 
@@ -42,9 +43,16 @@ export async function logActivity(
 router.get("/activity-log", validate({ query: ActivityLogQuery }), async (req, res): Promise<void> => {
   const { limit = 100, offset = 0, category, actorName } = req.query as z.infer<typeof ActivityLogQuery>;
 
+  // A project-restricted user sees only entries about assets in their projects,
+  // the same rule the live feed applies (lib/ws-broadcast.ts). Entries about
+  // users, brokers or API clients carry no project and are withheld from them.
+  const scope = await assetScope(req);
+  if (scope && scope.assetIds.size === 0) { res.json({ entries: [], total: 0 }); return; }
+
   const conditions = [
     ...(category ? [eq(activityLogsTable.category, category)] : []),
     ...(actorName ? [eq(activityLogsTable.actorName, actorName)] : []),
+    ...(scope ? [inArray(activityLogsTable.targetId, [...scope.assetIds])] : []),
   ];
 
   const where = conditions.length > 0 ? and(...conditions) : undefined;

@@ -287,6 +287,11 @@
   .border.active-elevate-2:not(.no-active-interaction-elevate)::after { inset: -1px; }
 }
 
+/* Radix injects a style that hides the Select viewport's scrollbar, which leaves
+   long lists with no sign that more options exist. !important beats that style. */
+[data-radix-select-viewport] { scrollbar-width: thin !important; }
+[data-radix-select-viewport]::-webkit-scrollbar { display: block !important; }
+
 /* Sidebar scrollbar. Hardcoded because the thumb is injected by the scroll-area
    primitive and never receives the theme tokens. */
 .sidebar-scroll .scroll-thumb { background-color: #232B3A !important; }

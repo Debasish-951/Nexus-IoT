@@ -17,9 +17,10 @@ import { WidgetPanel } from "./WidgetPanel";
 import { WidgetConfigPanel } from "./WidgetConfigPanel";
 import { widgetDef, migrateLegacyWidget } from "./registry";
 import type { Widget } from "./types";
+import { nearestFreeSpot } from "./layout";
 import { useWsEvents } from "@/hooks/useWsEvents";
 import { newId } from "./useDashboards";
-import { useVizNodes, useVizNodeActions } from "./vizStore";
+import { useVizNodes, useVizNodeActions, VizConflictError } from "./vizStore";
 import { RANGES, REFRESH_INTERVALS, type TimeCfg } from "./timeRange";
 import { STALE_AFTER_MS } from "@/pages/assetShared";
 
@@ -86,8 +87,19 @@ function readClipboard(): Widget | null {
 // or metrics of their own, so nothing is pre-bound here. Each widget picks its
 // own asset + metric in the config panel, where the asset's attribute names and
 // units are surfaced alongside the raw telemetry tag.
-export function AssetVizPanel({ nodeId, nodeName, reloadKey, futuristic, toolbarTarget }: {
+// New dashboards (and nodes with no saved preference) refresh no faster than
+// this. A 1 s default meant every open dashboard polled every bound series once
+// a second, which hit the API's rate limit and blanked charts. Saved choices are
+// kept as they are.
+const DEFAULT_DASH_REFRESH_MS = 20_000;
+
+export function AssetVizPanel({ nodeId, nodeName, reloadKey, futuristic, toolbarTarget, readOnly, onDirtyChange }: {
   nodeId: string | null; nodeName?: string; reloadKey?: number; futuristic?: boolean;
+  /** Told whenever unsaved edits appear or go away, so the page can warn before
+   *  switching node. */
+  onDirtyChange?: (dirty: boolean) => void;
+  /** The user has view-only access to this dashboard. */
+  readOnly?: boolean;
   /** Element in the page header to render the toolbar into, so it shares a row
    *  with "← Back / Visualization" instead of costing the canvas its own strip. */
   toolbarTarget?: HTMLElement | null;
@@ -101,6 +113,7 @@ export function AssetVizPanel({ nodeId, nodeName, reloadKey, futuristic, toolbar
   const [draftWidgetId, setDraftWidgetId] = useState<string | null>(null);
   const editSnapshot = useRef<Widget | null>(null);
   const [showLibrary, setShowLibrary] = useState(false);
+  // undefined = closed, null = whole dashboard, a widget = that widget only.
   const [fullscreen, setFullscreen] = useState(false);
   // Anchored to the calendar button beside the range selector — a date range belongs
   // next to the control it changes, not in a modal in the middle of the canvas.
@@ -121,14 +134,14 @@ export function AssetVizPanel({ nodeId, nodeName, reloadKey, futuristic, toolbar
   // Dashboard-wide auto-refresh — bumps globalRefreshTick, which every
   // widget's data hook includes as a refetch dependency.
   const [dashRefreshEnabled, setDashRefreshEnabled] = useState(false);
-  const [dashRefreshInterval, setDashRefreshInterval] = useState(1_000);
+  const [dashRefreshInterval, setDashRefreshInterval] = useState(DEFAULT_DASH_REFRESH_MS);
   const [globalRefreshTick, setGlobalRefreshTick] = useState(0);
   const [widgetRefreshTick, setWidgetRefreshTick] = useState<Record<string, number>>({});
   const [widgetClipboard, setWidgetClipboard] = useState<Widget | null>(() => readClipboard());
 
   // Server-backed dashboard storage.
   const { nodes: vizNodes } = useVizNodes();
-  const { saveWidgets } = useVizNodeActions();
+  const { saveWidgets, refresh: refreshNodes } = useVizNodeActions();
   // A failed save must stay visible on the button, not just in a toast that has
   // already faded — it is cleared on the next success.
   const [saveError, setSaveError] = useState<string | null>(null);
@@ -140,6 +153,21 @@ export function AssetVizPanel({ nodeId, nodeName, reloadKey, futuristic, toolbar
   const dirty = JSON.stringify(customWidgets) !== savedSnapshot;
   const dirtyRef = useRef(false);
   dirtyRef.current = dirty;
+  const savedSnapshotRef = useRef(savedSnapshot);
+  savedSnapshotRef.current = savedSnapshot;
+
+  const onDirtyChangeRef = useRef(onDirtyChange);
+  onDirtyChangeRef.current = onDirtyChange;
+  useEffect(() => { onDirtyChangeRef.current?.(dirty); }, [dirty]);
+  useEffect(() => () => { onDirtyChangeRef.current?.(false); }, []);
+
+  // Closing or reloading the tab with unsaved edits asks first.
+  useEffect(() => {
+    if (!dirty) return;
+    const warn = (e: BeforeUnloadEvent) => { e.preventDefault(); e.returnValue = ""; };
+    window.addEventListener("beforeunload", warn);
+    return () => window.removeEventListener("beforeunload", warn);
+  }, [dirty]);
 
   function refreshAll() { setGlobalRefreshTick((t) => t + 1); }
   useEffect(() => {
@@ -162,10 +190,15 @@ export function AssetVizPanel({ nodeId, nodeName, reloadKey, futuristic, toolbar
   const liveStatus = useDashboardLiveStatus(dashboardAssetIds, globalRefreshTick);
 
   // Live WebSocket status — drives the badge. Telemetry can arrive many times a
-  // second, so nudge the dashboard at most once per 7s.
+  // second, so nudge the dashboard at most once per 7s — and only while the
+  // dashboard's auto-refresh is On. "Off" has to mean no automatic refresh at
+  // all; before, every telemetry event still refetched every widget.
   const lastWsRef = useRef(0);
+  const dashRefreshEnabledRef = useRef(dashRefreshEnabled);
+  dashRefreshEnabledRef.current = dashRefreshEnabled;
   const wsStatus = useWsEvents({
     telemetry: () => {
+      if (!dashRefreshEnabledRef.current) return;
       const now = Date.now();
       if (now - lastWsRef.current > 7000) { lastWsRef.current = now; refreshAll(); }
     },
@@ -177,28 +210,45 @@ export function AssetVizPanel({ nodeId, nodeName, reloadKey, futuristic, toolbar
   // background refetch that returns the same content does not stomp on edits in
   // progress — only a genuine change (or switching node) reloads the canvas.
   const serverNode = nodeId ? vizNodes.find((n) => n.id === nodeId) : undefined;
-  const serverStamp = serverNode ? `${serverNode.id}:${(serverNode as any).updatedAt ?? ""}` : "";
+  const serverStamp = serverNode ? `${serverNode.id}:${serverNode.updatedAt ?? ""}` : "";
   const loadedNodeRef = useRef<string | null>(null);
+  // The server version the canvas was loaded from. Sent with a save so the
+  // server can refuse it (409) if someone else saved in the meantime.
+  const loadedStampRef = useRef<string | undefined>(undefined);
+  // Bumped after a conflict to force the canvas to take the server's version.
+  const [localReload, setLocalReload] = useState(0);
+  const reloadToken = `${reloadKey ?? 0}:${localReload}`;
+  const lastReloadTokenRef = useRef(reloadToken);
   useEffect(() => {
-    if (!nodeId) { setCustomWidgets([]); setSavedSnapshot("[]"); loadedNodeRef.current = null; return; }
-    // Now that saving is explicit, a refetch arriving while the user has unsaved
-    // work would throw that work away. Staying on the same node with edits
-    // pending means keeping them; switching node still loads, because those
-    // edits were abandoned by leaving.
-    if (dirtyRef.current && loadedNodeRef.current === nodeId) return;
-    loadedNodeRef.current = nodeId;
+    if (!nodeId) { setCustomWidgets([]); setSavedSnapshot("[]"); loadedNodeRef.current = null; loadedStampRef.current = undefined; return; }
+    // A changed reload token is an explicit "show the server's copy" — after a
+    // confirmed overwrite or a save conflict — so it wins over pending edits.
+    const forced = lastReloadTokenRef.current !== reloadToken;
+    lastReloadTokenRef.current = reloadToken;
     // Upgrades any pre-existing Custom KPI / Health Score / OEE / … widget to
     // the general Card widget on load, so a dashboard saved before that
     // consolidation still renders instead of quietly breaking.
     const loaded: Widget[] = Array.isArray(serverNode?.widgets)
       ? (serverNode.widgets as Widget[]).map(migrateLegacyWidget)
       : [];
+    // Now that saving is explicit, a refetch arriving while the user has unsaved
+    // work would throw that work away. Staying on the same node with edits
+    // pending means keeping them; switching node still loads, because the page
+    // asked before leaving them.
+    if (!forced && dirtyRef.current && loadedNodeRef.current === nodeId) {
+      // A rename or project move also changes the version without touching the
+      // widgets; adopt it so the next save is not refused for no reason.
+      if (JSON.stringify(loaded) === savedSnapshotRef.current) loadedStampRef.current = serverNode?.updatedAt;
+      return;
+    }
+    loadedNodeRef.current = nodeId;
+    loadedStampRef.current = serverNode?.updatedAt;
     setCustomWidgets(loaded);
     setSavedSnapshot(JSON.stringify(loaded));
     setSelectedWidgetId(null);
     setShowLibrary(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodeId, serverStamp, reloadKey]);
+  }, [nodeId, serverStamp, reloadToken]);
 
   // Saving is EXPLICIT. Nothing is written until the user presses Save
   // (`saveNow` below) — adding, moving, resizing, configuring or deleting a
@@ -224,13 +274,13 @@ export function AssetVizPanel({ nodeId, nodeName, reloadKey, futuristic, toolbar
   // Same for the dashboard-wide refresh toggle/interval — it was pure component
   // state before, so a page reload silently turned it back off.
   useEffect(() => {
-    if (!nodeId) { setDashRefreshEnabled(false); setDashRefreshInterval(1_000); return; }
+    if (!nodeId) { setDashRefreshEnabled(false); setDashRefreshInterval(DEFAULT_DASH_REFRESH_MS); return; }
     try {
       const raw = localStorage.getItem(dashRefreshKey(nodeId));
       const saved = raw ? JSON.parse(raw) : null;
       setDashRefreshEnabled(!!saved?.enabled);
-      setDashRefreshInterval(saved?.intervalMs ?? 1_000);
-    } catch { setDashRefreshEnabled(false); setDashRefreshInterval(1_000); }
+      setDashRefreshInterval(saved?.intervalMs ?? DEFAULT_DASH_REFRESH_MS);
+    } catch { setDashRefreshEnabled(false); setDashRefreshInterval(DEFAULT_DASH_REFRESH_MS); }
   }, [nodeId, reloadKey]);
   useEffect(() => {
     if (!nodeId) return;
@@ -241,8 +291,10 @@ export function AssetVizPanel({ nodeId, nodeName, reloadKey, futuristic, toolbar
   function saveNow() {
     if (!nodeId) return;
     const snapshot = JSON.stringify(customWidgets);
-    saveWidgets(nodeId, customWidgets)
-      .then(() => {
+    const savingNode = nodeId;
+    saveWidgets(nodeId, customWidgets, loadedStampRef.current)
+      .then((updatedAt) => {
+        if (loadedNodeRef.current === savingNode) loadedStampRef.current = updatedAt;
         toast({ title: "Saved", description: `${customWidgets.length} widget(s) stored for ${nodeName ?? "this node"}.` });
         setSavedSnapshot(snapshot);
         setShowLibrary(false);
@@ -250,7 +302,21 @@ export function AssetVizPanel({ nodeId, nodeName, reloadKey, futuristic, toolbar
         saveErrorRef.current = null;
         setSaveError(null);
       })
-      .catch((e: Error) => {
+      .catch(async (e: Error) => {
+        if (e instanceof VizConflictError) {
+          // Someone else saved this dashboard after it was opened here. Saving
+          // anyway would silently erase their work, so show theirs instead.
+          toast({
+            title: "Dashboard changed elsewhere",
+            description: "It was saved in another tab or by someone else after you opened it. Their version has been loaded; your unsaved changes were not saved.",
+            variant: "destructive",
+          });
+          saveErrorRef.current = null;
+          setSaveError(null);
+          try { await refreshNodes(); } catch { /* the reload below still runs on what is cached */ }
+          setLocalReload((n) => n + 1);
+          return;
+        }
         // The dashboard stays dirty and on screen — nothing is discarded, so the
         // user can fix the connection and press Save again.
         saveErrorRef.current = e.message;
@@ -316,7 +382,9 @@ export function AssetVizPanel({ nodeId, nodeName, reloadKey, futuristic, toolbar
       if (w.id !== id) return w;
       if (w.type === type) return { ...w, config };
       const def = widgetDef(type);   // type switched → adopt the new type's default size
-      return { ...w, type, config, w: def?.w ?? w.w, h: def?.h ?? w.h };
+      const size = { w: def?.w ?? w.w, h: def?.h ?? w.h };
+      const others = prev.filter((o) => o.id !== id);
+      return { ...w, type, config, ...size, ...nearestFreeSpot(others, size.w, size.h, w.x, w.y) };
     }));
   }
 
@@ -350,7 +418,8 @@ export function AssetVizPanel({ nodeId, nodeName, reloadKey, futuristic, toolbar
   }
   function pasteWidget() {
     if (!widgetClipboard) return;
-    const pasted: Widget = { ...widgetClipboard, id: newId("w") };
+    const spot = nearestFreeSpot(customWidgets, widgetClipboard.w, widgetClipboard.h, widgetClipboard.x, widgetClipboard.y);
+    const pasted: Widget = { ...widgetClipboard, ...spot, id: newId("w") };
     setCustomWidgets((prev) => [...prev, pasted]);
     setSelectedWidgetId(pasted.id);
     toast({ title: "Widget pasted" });
@@ -483,7 +552,7 @@ export function AssetVizPanel({ nodeId, nodeName, reloadKey, futuristic, toolbar
         </div>
 
         <Button variant="outline" size="sm" onClick={() => setFullscreen((f) => !f)} title="Fullscreen">{fullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}</Button>
-        {widgetClipboard && (
+        {widgetClipboard && !readOnly && (
           <Button variant="outline" size="sm" onClick={pasteWidget} title={`Paste "${widgetClipboard.config?.title || widgetDef(widgetClipboard.type)?.label || widgetClipboard.type}"`}>
             <ClipboardPaste className="w-4 h-4 mr-1" /> Paste
           </Button>
@@ -493,7 +562,7 @@ export function AssetVizPanel({ nodeId, nodeName, reloadKey, futuristic, toolbar
             signal that nothing is pending; any edit (drag, resize, config change,
             even a single keystroke in the panel) flips `dirty` immediately since it
             diffs the full widget list against the last saved snapshot. */}
-        <Button
+        {!readOnly && <Button
           size="sm"
           variant={saveError ? "destructive" : dirty ? "default" : "outline"}
           disabled={!dirty && !saveError}
@@ -501,8 +570,8 @@ export function AssetVizPanel({ nodeId, nodeName, reloadKey, futuristic, toolbar
           title={saveError ? `Not saved: ${saveError}` : dirty ? "Save widgets" : "All changes saved"}
         >
           <Save className="w-4 h-4 mr-1" /> {saveError ? "Not saved" : dirty ? "Save" : "Saved"}
-        </Button>
-        <Button
+        </Button>}
+        {!readOnly && <Button
           size="sm"
           onClick={() => {
             if (rightPanelMode) closePanel();
@@ -512,7 +581,7 @@ export function AssetVizPanel({ nodeId, nodeName, reloadKey, futuristic, toolbar
         >
           {rightPanelMode ? <X className="w-4 h-4 mr-1" /> : <Plus className="w-4 h-4 mr-1" />}
           {rightPanelMode ? "Close" : "Add Widget"}
-        </Button>
+        </Button>}
       </div>
     </>
   );
@@ -539,6 +608,7 @@ export function AssetVizPanel({ nodeId, nodeName, reloadKey, futuristic, toolbar
             onEditWidget={startEdit}
             futuristic={futuristic}
             dashTimeCfg={dashTimeCfg}
+            readOnly={readOnly}
           />
         </div>
         {rightPanelMode && (
@@ -569,7 +639,6 @@ export function AssetVizPanel({ nodeId, nodeName, reloadKey, futuristic, toolbar
           </div>
         )}
       </div>
-
     </div>
   );
 }

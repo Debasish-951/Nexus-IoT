@@ -58,6 +58,10 @@ jobs:
       - name: Typecheck
         run: pnpm run typecheck
 
+      # Regression tests for the audit fixes (Node's built-in runner, no database).
+      - name: Unit tests
+        run: pnpm --filter @workspace/api-server run test
+
       # Not covered by the root typecheck script — see the note in CLAUDE.md.
       - name: Typecheck artifacts
         run: |

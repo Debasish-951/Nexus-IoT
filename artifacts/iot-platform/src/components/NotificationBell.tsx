@@ -1,198 +1,147 @@
-import { useState, useCallback, useRef, useEffect } from "react";
-import { Bell, AlertCircle, AlertTriangle, Info, CheckCircle2, X, Check } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Link } from "wouter";
+import { useQueryClient } from "@tanstack/react-query";
+import { AlertCircle, AlertTriangle, Bell, CheckCircle2, Info } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { useWsEvents } from "@/hooks/useWsEvents";
+import { OPEN_ALARMS_KEY, useOpenAlarms } from "@/hooks/useOpenAlarms";
+import { useProjectScope } from "@/hooks/useProjectScope";
 
-interface AlarmNotification {
-  id: string;
-  event: "triggered" | "cleared";
-  ruleName: string;
-  metric: string;
-  value: number;
-  threshold: number | null;
-  operator: string | null;
-  severity: string;
-  assetName: string;
-  timestamp: string;
-  read: boolean;
-}
-
-const SEVERITY_CONFIG: Record<string, { icon: React.ElementType; color: string; bg: string; border: string }> = {
-  critical: { icon: AlertCircle,   color: "text-red-600",    bg: "bg-red-50",    border: "border-red-200" },
-  high:     { icon: AlertTriangle, color: "text-orange-500", bg: "bg-orange-50", border: "border-orange-200" },
-  medium:   { icon: AlertTriangle, color: "text-yellow-600", bg: "bg-yellow-50", border: "border-yellow-200" },
-  low:      { icon: Info,          color: "text-blue-500",   bg: "bg-blue-50",   border: "border-blue-200" },
-  info:     { icon: Info,          color: "text-blue-400",   bg: "bg-blue-50",   border: "border-blue-100" },
+const SEVERITY_CONFIG: Record<string, { icon: React.ElementType; color: string }> = {
+  critical: { icon: AlertCircle,   color: "text-red-500" },
+  high:     { icon: AlertTriangle, color: "text-orange-500" },
+  medium:   { icon: AlertTriangle, color: "text-yellow-500" },
+  low:      { icon: Info,          color: "text-blue-500" },
+  info:     { icon: Info,          color: "text-blue-400" },
 };
 
-function formatValue(v: number) {
-  return Number.isInteger(v) ? String(v) : v.toFixed(3).replace(/\.?0+$/, "");
+/** Repeats of one rule, folded into a single line. */
+interface RecentGroup {
+  key: string;
+  label: string;
+  assetName: string;
+  raised: number;
+  cleared: number;
+  lastEvent: string;
+  lastAt: string;
 }
 
-export default function NotificationBell() {
-  const [notifications, setNotifications] = useState<AlarmNotification[]>([]);
-  const [open, setOpen] = useState(false);
-  const dropdownRef = useRef<HTMLDivElement>(null);
+const MAX_GROUPS = 20;
+/** A burst of events triggers one reload, not one each. */
+const REFRESH_DELAY_MS = 3_000;
 
-  const unreadCount = notifications.filter((n) => !n.read).length;
+export default function NotificationBell() {
+  const { enabled, alarms } = useOpenAlarms();
+  // The bell stays global across projects, so each alarm says which project it is in.
+  const { whereLabel } = useProjectScope();
+  const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [recent, setRecent] = useState<RecentGroup[]>([]);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const handleAlarm = useCallback((raw: unknown) => {
-    const ev = raw as AlarmNotification & { alarmId: string };
-    setNotifications((prev) => {
-      const n: AlarmNotification = {
-        id: ev.alarmId ?? `${Date.now()}`,
-        event: ev.event,
-        ruleName: ev.ruleName,
-        metric: ev.metric,
-        value: ev.value,
-        threshold: ev.threshold,
-        operator: ev.operator,
-        severity: ev.severity,
-        assetName: ev.assetName,
-        timestamp: ev.timestamp ?? new Date().toISOString(),
-        read: false,
+    const ev = raw as { event: string; ruleName?: string; metric?: string; assetName?: string; timestamp?: string };
+    if (!timer.current) {
+      timer.current = setTimeout(() => {
+        timer.current = null;
+        void qc.invalidateQueries({ queryKey: OPEN_ALARMS_KEY });
+      }, REFRESH_DELAY_MS);
+    }
+    if (ev.event !== "triggered" && ev.event !== "cleared") return;
+    const key = `${ev.ruleName ?? ""}|${ev.metric ?? ""}|${ev.assetName ?? ""}`;
+    setRecent((prev) => {
+      const old = prev.find((g) => g.key === key);
+      const next: RecentGroup = {
+        key,
+        label: ev.ruleName || ev.metric || "Alarm",
+        assetName: ev.assetName ?? "",
+        raised: (old?.raised ?? 0) + (ev.event === "triggered" ? 1 : 0),
+        cleared: (old?.cleared ?? 0) + (ev.event === "cleared" ? 1 : 0),
+        lastEvent: ev.event,
+        lastAt: ev.timestamp ?? new Date().toISOString(),
       };
-      return [n, ...prev].slice(0, 50);
+      return [next, ...prev.filter((g) => g.key !== key)].slice(0, MAX_GROUPS);
     });
-  }, []);
+  }, [qc]);
 
   useWsEvents({ alarm: handleAlarm });
+  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
   useEffect(() => {
-    function handleClickOutside(e: MouseEvent) {
-      if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setOpen(false);
-      }
-    }
-    if (open) document.addEventListener("mousedown", handleClickOutside);
-    return () => document.removeEventListener("mousedown", handleClickOutside);
+    if (!open) return;
+    const close = (e: MouseEvent) => {
+      if (boxRef.current && !boxRef.current.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
   }, [open]);
 
-  function markAllRead() {
-    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-  }
+  // Alarm data follows the Alarms module, the same rule as the Alarm List page.
+  if (!enabled) return null;
 
-  function dismiss(id: string) {
-    setNotifications((prev) => prev.filter((n) => n.id !== id));
-  }
-
-  function handleOpen() {
-    setOpen((o) => !o);
-    if (!open) {
-      setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
-    }
-  }
+  const needingAction = alarms.filter((a) => a.status === "active").length;
 
   return (
-    <div className="relative" ref={dropdownRef}>
+    <div className="relative" ref={boxRef}>
       <button
-        onClick={handleOpen}
-        className={cn(
-          "relative flex items-center justify-center w-8 h-8 rounded-lg hover:bg-muted transition-colors",
-          open && "bg-muted"
-        )}
-        title="Alarm notifications"
+        onClick={() => setOpen((o) => !o)}
+        className={cn("relative flex items-center justify-center w-8 h-8 rounded-lg hover:bg-muted transition-colors", open && "bg-muted")}
+        title={`${needingAction} open alarm${needingAction === 1 ? "" : "s"}`}
       >
         <Bell className="w-4 h-4 text-muted-foreground" />
-        {unreadCount > 0 && (
+        {needingAction > 0 && (
           <span className="absolute -top-0.5 -right-0.5 flex items-center justify-center w-4 h-4 rounded-full bg-red-500 text-white text-[9px] font-bold leading-none">
-            {unreadCount > 9 ? "9+" : unreadCount}
+            {needingAction > 9 ? "9+" : needingAction}
           </span>
         )}
       </button>
 
       {open && (
         <div className="absolute right-0 top-10 w-80 rounded-xl border border-border bg-popover shadow-xl z-50 overflow-hidden">
-          {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-border">
-            <h3 className="text-sm font-semibold flex items-center gap-2">
-              <Bell className="w-4 h-4 text-primary" />
-              Alarm Notifications
-            </h3>
-            {notifications.length > 0 && (
-              <button
-                onClick={markAllRead}
-                className="text-xs text-primary hover:underline flex items-center gap-1"
-              >
-                <Check className="w-3 h-3" /> Mark all read
-              </button>
-            )}
-          </div>
-
-          {/* List */}
-          <div className="max-h-96 overflow-y-auto divide-y divide-border/50">
-            {notifications.length === 0 ? (
-              <div className="px-4 py-8 text-center text-sm text-muted-foreground">
-                <Bell className="w-8 h-8 mx-auto mb-2 opacity-20" />
-                No alarm notifications yet
-              </div>
-            ) : (
-              notifications.map((n) => {
-                const cfg = n.event === "cleared"
-                  ? { icon: CheckCircle2, color: "text-green-600", bg: "bg-green-50", border: "border-green-100" }
-                  : (SEVERITY_CONFIG[n.severity] ?? SEVERITY_CONFIG.info);
-                const Icon = cfg.icon;
-
-                return (
-                  <div
-                    key={n.id}
-                    className={cn(
-                      "flex gap-3 px-4 py-3 hover:bg-muted/30 transition-colors group relative",
-                      !n.read && "bg-primary/[0.03]"
-                    )}
-                  >
-                    <div className={cn("mt-0.5 shrink-0 p-1.5 rounded-full", cfg.bg)}>
-                      <Icon className={cn("w-3.5 h-3.5", cfg.color)} />
-                    </div>
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-start justify-between gap-2">
-                        <p className="text-xs font-semibold leading-tight">
-                          {n.event === "cleared" ? "Alarm cleared" : (
-                            <span>
-                              <span className="capitalize">{n.severity}</span> alarm triggered
-                            </span>
-                          )}
-                        </p>
-                        {!n.read && (
-                          <span className="shrink-0 w-1.5 h-1.5 rounded-full bg-primary mt-1" />
-                        )}
-                      </div>
-                      <p className="text-xs text-muted-foreground font-medium mt-0.5 truncate">{n.ruleName}</p>
-                      <p className="text-[11px] text-muted-foreground mt-0.5">
-                        <span className="font-mono">{n.assetName}</span>
-                        {" · "}
-                        <span className="font-mono">{n.metric} = {formatValue(n.value)}</span>
-                        {n.threshold != null && n.event !== "cleared" && (
-                          <> (thr {n.operator} {formatValue(n.threshold)})</>
-                        )}
-                      </p>
-                      <p className="text-[10px] text-muted-foreground/70 mt-1">
-                        {formatDistanceToNow(new Date(n.timestamp), { addSuffix: true })}
-                      </p>
-                    </div>
-                    <button
-                      onClick={(e) => { e.stopPropagation(); dismiss(n.id); }}
-                      className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-foreground"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
+          <div className="max-h-96 overflow-y-auto">
+            <p className="px-4 pt-3 pb-1.5 text-xs font-semibold">Open alarms ({alarms.length})</p>
+            {alarms.length === 0 && <p className="px-4 pb-3 text-xs text-muted-foreground">No alarms are open.</p>}
+            {alarms.map((a) => {
+              const cfg = SEVERITY_CONFIG[a.severity] ?? SEVERITY_CONFIG.info!;
+              const Icon = cfg.icon;
+              return (
+                <div key={a.id} className="flex gap-2.5 px-4 py-2 border-t border-border/50">
+                  <Icon className={cn("w-3.5 h-3.5 mt-0.5 shrink-0", cfg.color)} />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-medium truncate" title={a.message ?? undefined}>{a.name || a.message || "Alarm"}</p>
+                    <p className="text-[11px] text-muted-foreground truncate">
+                      {whereLabel(a.assetId, a.assetName)} · {formatDistanceToNow(new Date(a.triggeredAt), { addSuffix: true })}
+                      {a.status === "acknowledged" && " · acknowledged"}
+                    </p>
                   </div>
-                );
-              })
+                </div>
+              );
+            })}
+
+            {recent.length > 0 && (
+              <>
+                <p className="px-4 pt-3 pb-1.5 text-xs font-semibold border-t border-border">Recent activity</p>
+                {recent.map((g) => (
+                  <div key={g.key} className="flex gap-2.5 px-4 py-2 border-t border-border/50">
+                    {g.lastEvent === "cleared"
+                      ? <CheckCircle2 className="w-3.5 h-3.5 mt-0.5 shrink-0 text-green-500" />
+                      : <AlertTriangle className="w-3.5 h-3.5 mt-0.5 shrink-0 text-orange-500" />}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-xs font-medium truncate" title={g.label}>{g.label}</p>
+                      <p className="text-[11px] text-muted-foreground truncate">
+                        {g.raised} raised · {g.cleared} cleared · {formatDistanceToNow(new Date(g.lastAt), { addSuffix: true })}
+                      </p>
+                    </div>
+                  </div>
+                ))}
+              </>
             )}
           </div>
-
-          {notifications.length > 0 && (
-            <div className="border-t border-border px-4 py-2">
-              <button
-                onClick={() => setNotifications([])}
-                className="text-xs text-muted-foreground hover:text-destructive transition-colors"
-              >
-                Clear all notifications
-              </button>
-            </div>
-          )}
+          <div className="border-t border-border px-4 py-2">
+            <Link href="/alarms" onClick={() => setOpen(false)} className="text-xs text-primary hover:underline">View all alarms</Link>
+          </div>
         </div>
       )}
     </div>

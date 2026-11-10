@@ -26,7 +26,9 @@ import { logger } from "./logger";
  *     pastes one there — the powerful credentials stay header-only and hashed.
  *   • It writes telemetry to one project. It cannot read, export, or administer.
  *   • It is attributable (every post is counted against the client), rate
- *     limited, and revocable in one click.
+ *     limited, held to the client's IP allowlist, and revocable in one click.
+ *     The limit and allowlist are applied in attachApiClient, because a URL
+ *     token never passes through the route-level apiKeyAuth.
  *
  * The remaining exposure — access logs — is a deployment concern, addressed by
  * the nginx rule in docs/operations/vm-deployment-checklist.md.
@@ -102,7 +104,10 @@ export function assertUrlTokenAllowed(client: Pick<ApiClient, "scopes">): boolea
 }
 
 export type TokenRejection =
-  | "malformed" | "unknown" | "inactive" | "expired" | "scope_too_broad";
+  | "malformed" | "unknown" | "inactive" | "expired" | "scope_too_broad"
+  // Set by attachApiClient after the token resolved: the same IP allowlist and
+  // per-client rate limit a header key meets in apiKeyAuth.
+  | "ip_not_allowed" | "rate_limited";
 
 export interface TokenResolution {
   client?: ApiClient;

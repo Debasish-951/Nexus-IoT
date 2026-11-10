@@ -18,9 +18,9 @@ X-API-Key: <clientSecret>
 
 `clientSecret` is obtained from `Security → API Clients` in the UI.
 
-**Rate limit:** 120 requests per minute per client (in-memory sliding window).
+**Rate limit:** 1200 requests per minute per client by default (`INGEST_RATE_LIMIT_RPM`; in-memory, reset on restart). Over the limit the API returns `429`. A key in the query string (`?key=`) is ignored unless `API_KEY_ALLOW_QUERY_PARAM=true`.
 
-Most endpoints are **unauthenticated** in the current implementation (designed as an internal platform API). Only ingest endpoints use `optionalApiKeyAuth` — they accept unauthenticated requests but validate credentials if provided.
+Every endpoint except the public auth routes (login, session check, activation, forgot/reset password, password policy), `/healthz`, `/readyz`, `/export/health` and `/export/schema` requires a signed-in session or an API key. The server enforces a deny-by-default route table (`middleware/authorize.ts`); cookie-authenticated writes also need the `x-csrf-token` header. The OpenAPI spec (`lib/api-spec/openapi.yaml`) describes every route.
 
 ---
 

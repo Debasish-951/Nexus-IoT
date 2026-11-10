@@ -1,5 +1,5 @@
 import { createContext, useContext, useEffect, useMemo } from "react";
-import { useListAssets } from "@workspace/api-client-react";
+import { useListAssets, getListAssetsQueryKey } from "@workspace/api-client-react";
 import { useCurrentUser } from "@/contexts/UserContext";
 
 /**
@@ -12,9 +12,9 @@ import { useCurrentUser } from "@/contexts/UserContext";
  * gives the frontend a first-class handle on it.
  *
  * Scope of this context is deliberately narrow: it resolves the id in the URL
- * to a project and decides whether that URL may be opened. It does NOT filter
- * what any page displays, and no page reads it — the existing screens behave
- * exactly as they did before the prefix existed.
+ * to a project and decides whether that URL may be opened. It does not filter
+ * what pages display itself; pages narrow their lists to the open project with
+ * hooks/useProjectScope.ts.
  *
  * Access is filtered here: a user with `restrictProjects` cannot open a project
  * outside their `allowedProjects`. That mirrors, but does not replace, the
@@ -63,8 +63,13 @@ export function ProjectProvider({
   projectId: string | null;
   children: React.ReactNode;
 }) {
-  const { data, isSuccess, isError } = useListAssets();
-  const { canProject } = useCurrentUser();
+  const { canProject, canModule } = useCurrentUser();
+  // Not asked for without the `assets` grant: the answer is a known 403, and a
+  // denied request is logged as a security event on every refetch.
+  const canReadAssets = canModule("assets");
+  const { data, isSuccess, isError } = useListAssets(undefined, {
+    query: { enabled: canReadAssets, queryKey: getListAssetsQueryKey() },
+  });
   const assets = (data as AssetLike[] | undefined) ?? [];
 
   const projects = useMemo(
@@ -95,10 +100,10 @@ export function ProjectProvider({
       currentProject,
       // Settled either way — a permanent 403 must end the loading state, not
       // leave the app spinning on a splash that will never resolve.
-      loaded: isSuccess || isError,
-      canListProjects: !isError,
+      loaded: !canReadAssets || isSuccess || isError,
+      canListProjects: canReadAssets && !isError,
     }),
-    [projects, projectId, currentProject, isSuccess, isError],
+    [projects, projectId, currentProject, isSuccess, isError, canReadAssets],
   );
 
   return <ProjectContext.Provider value={value}>{children}</ProjectContext.Provider>;

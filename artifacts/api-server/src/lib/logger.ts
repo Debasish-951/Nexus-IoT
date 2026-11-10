@@ -10,8 +10,16 @@ const isProduction = process.env.NODE_ENV === "production";
  * Stack traces, Postgres constraint names, upstream hostnames, the id of the
  * signed-in user. The whole error-handling design is to move that detail from
  * the response into this stream — which only works if the stream is protected.
- * See `docs/operations/vm-deployment-checklist.md` for the file permissions;
- * the guarantees this file can make are the ones below.
+ *
+ * ── Destination ──────────────────────────────────────────────────────────────
+ *
+ * The logger writes JSON lines to stdout (pretty-printed outside production)
+ * and never opens a file. On the VM the systemd unit leaves stdout to journald,
+ * so the journal is the one log store: read access is the `systemd-journal`
+ * (and on Debian/Ubuntu `adm`) group, and retention is journald's. The unit,
+ * the permissions and the retention settings are in
+ * `docs/operations/vm-deployment-checklist.md` (Step 5) and `.env.example`.
+ * The guarantees this file can make are the ones below.
  *
  * ── Redaction ────────────────────────────────────────────────────────────────
  *
@@ -50,6 +58,19 @@ export const REDACT_PATHS = [
   "req.body.newPassword",
   "req.body.currentPassword",
 ];
+
+/**
+ * Mask credentials that travel in the URL path before a path is logged:
+ * activation and password-reset tokens, and copy-and-paste ingest URL tokens.
+ * Anyone able to read the logs could otherwise use a pending reset link or a
+ * working ingest URL.
+ */
+export function redactPath(path: string | undefined): string | undefined {
+  if (!path) return path;
+  return path
+    .replace(/(\/auth\/(?:activation|reset)\/)[^/?#]+/i, "$1[token]")
+    .replace(/(\/ingest\/e\/)[^/?#]+/i, "$1[token]");
+}
 
 export const logger = pino({
   level: process.env.LOG_LEVEL ?? "info",

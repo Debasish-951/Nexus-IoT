@@ -3,7 +3,7 @@ import { eq, sql } from "drizzle-orm";
 import { db, destinationsTable } from "@workspace/db";
 import { logActivity } from "./activity_log";
 import { z } from "zod";
-import { checkOutboundUrl, assertSafeOutboundUrl, UnsafeUrlError } from "../lib/outbound-url";
+import { checkOutboundUrl, assertSafeOutboundUrl, safeFetch, UnsafeUrlError } from "../lib/outbound-url";
 import { validate } from "../middleware/validate";
 import { logger } from "../lib/logger";
 import { correlationIdOf } from "../lib/errors";
@@ -141,11 +141,8 @@ router.post("/destinations/:id/test", async (req, res): Promise<void> => {
     return;
   }
   try {
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (dest.authType === "bearer" && dest.token)     headers["Authorization"] = `Bearer ${dest.token}`;
-    if (dest.authType === "api_key" && dest.token)    headers[dest.apiKeyHeader ?? "X-API-Key"] = dest.token;
-    if (dest.authType === "basic" && dest.basicUser)  headers["Authorization"] = `Basic ${Buffer.from(`${dest.basicUser}:${dest.basicPass ?? ""}`).toString("base64")}`;
-    const resp = await fetch(dest.endpoint, {
+    const headers = authHeaders(dest);
+    const resp = await safeFetch(dest.endpoint, {
       method: "POST", headers,
       body: JSON.stringify({ event: "test", source: "iot-platform", timestamp: new Date().toISOString(), destinationId: dest.id }),
       signal: AbortSignal.timeout(6000),
@@ -166,42 +163,80 @@ router.post("/destinations/:id/test", async (req, res): Promise<void> => {
 });
 
 // ── Forward event to all matching destinations ─────────────────────────────
+
+/** Headers for a destination's auth type. `apikey` is the legacy spelling of `api_key`. */
+function authHeaders(dest: ReturnType<typeof withPlaintext>): Record<string, string> {
+  const headers: Record<string, string> = { "Content-Type": "application/json" };
+  const authType = dest.authType === "apikey" ? "api_key" : dest.authType;
+  if (authType === "bearer" && dest.token)     headers["Authorization"] = `Bearer ${dest.token}`;
+  if (authType === "api_key" && dest.token)    headers[dest.apiKeyHeader ?? "X-API-Key"] = dest.token;
+  if (authType === "basic" && dest.basicUser)  headers["Authorization"] = `Basic ${Buffer.from(`${dest.basicUser}:${dest.basicPass ?? ""}`).toString("base64")}`;
+  return headers;
+}
+
+/** Record a delivery outcome. Awaited inside a caught chain, so it actually runs. */
+async function recordOutcome(destId: string, set: Record<string, unknown>): Promise<void> {
+  try {
+    await db.update(destinationsTable).set(set).where(eq(destinationsTable.id, destId));
+  } catch (err) {
+    logger.warn({ destinationId: destId, err }, "could not record destination delivery outcome");
+  }
+}
+
+/**
+ * Send an event to every enabled destination subscribed to its type.
+ *
+ * Called fire-and-forget from ingest for alarm triggered/cleared events. It
+ * never throws: a failing destination, or the database being unavailable, must
+ * not stall or fail ingest.
+ *
+ * Destinations have no project column, so every destination receives alarms
+ * from every project.
+ */
 export async function forwardToDestinations(eventType: "alarm" | "telemetry", payload: Record<string, unknown>): Promise<void> {
-  const destinations = await db.select().from(destinationsTable)
-    .where(eq(destinationsTable.enabled, true));
-  for (const stored of destinations) {
-    if (!(stored.eventTypes ?? []).includes(eventType)) continue;
-    // Decrypted per send, at the moment the header is built, and never held
-    // beyond this iteration.
-    const dest = withPlaintext(stored);
+  let destinations: (typeof destinationsTable.$inferSelect)[];
+  try {
+    destinations = await db.select().from(destinationsTable)
+      .where(eq(destinationsTable.enabled, true));
+  } catch (err) {
+    logger.warn({ err }, "could not load destinations; event not forwarded");
+    return;
+  }
+  await Promise.all(destinations.map(async (stored) => {
+    if (!(stored.eventTypes ?? []).includes(eventType)) return;
+    let dest: ReturnType<typeof withPlaintext>;
+    try {
+      // Decrypted per send, at the moment the header is built, and never held
+      // beyond this call.
+      dest = withPlaintext(stored);
+    } catch (err) {
+      await recordOutcome(stored.id, { lastError: "Stored credential could not be decrypted" });
+      return;
+    }
     // Checked per send, not just on save: a row edited directly in the
     // database must not become an outbound request to a private address.
     // The reason is written to `lastError`, so it shows on the Destinations
-    // page instead of the destination just appearing to never fire.
+    // page instead of the destination just appearing to never fire. (This
+    // update used to be built and discarded without running.)
     const safe = checkOutboundUrl(dest.endpoint);
     if (!safe.ok) {
-      void db.update(destinationsTable).set({ lastError: safe.error }).where(eq(destinationsTable.id, dest.id));
-      continue;
+      await recordOutcome(dest.id, { lastError: safe.error });
+      return;
     }
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (dest.authType === "bearer" && dest.token)     headers["Authorization"] = `Bearer ${dest.token}`;
-    if (dest.authType === "api_key" && dest.token)    headers[dest.apiKeyHeader ?? "X-API-Key"] = dest.token;
-    if (dest.authType === "basic" && dest.basicUser)  headers["Authorization"] = `Basic ${Buffer.from(`${dest.basicUser}:${dest.basicPass ?? ""}`).toString("base64")}`;
-    const destId = dest.id;
-    fetch(dest.endpoint, {
-      method: "POST", headers,
-      body: JSON.stringify({ event: eventType, ...payload }),
-      signal: AbortSignal.timeout(6000),
-    }).then(async (r) => {
-      await db.update(destinationsTable)
-        .set({ lastSentAt: new Date(), lastError: r.ok ? null : `HTTP ${r.status}`, sendCount: sql`${destinationsTable.sendCount} + 1` })
-        .where(eq(destinationsTable.id, destId));
-    }).catch(async (err: any) => {
-      await db.update(destinationsTable)
-        .set({ lastError: err.message })
-        .where(eq(destinationsTable.id, destId));
-    });
-  }
+    try {
+      const r = await safeFetch(dest.endpoint, {
+        method: "POST", headers: authHeaders(dest),
+        body: JSON.stringify({ event: eventType, ...payload }),
+        signal: AbortSignal.timeout(6000),
+      });
+      await recordOutcome(dest.id, {
+        lastSentAt: new Date(), lastError: r.ok ? null : `HTTP ${r.status}`,
+        sendCount: sql`${destinationsTable.sendCount} + 1`,
+      });
+    } catch (err) {
+      await recordOutcome(dest.id, { lastError: (err as Error)?.message ?? "Delivery failed" });
+    }
+  }));
 }
 
 export default router;

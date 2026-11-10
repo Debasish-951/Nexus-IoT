@@ -1,4 +1,4 @@
-import { Router, type IRouter, type Request } from "express";
+import { Router, type IRouter, type Request, type Response } from "express";
 import { z } from "zod";
 import { validate } from "../middleware/validate";
 import { SecurityEventsQuery } from "../schemas/common";
@@ -8,6 +8,7 @@ import { rbacCatalog } from "../lib/rbac";
 import { listActiveSessions, revokeSession, revokeAllUserSessions } from "../lib/sessions";
 import { recordSecurityEvent } from "../lib/security-log";
 import { logActivity } from "./activity_log";
+import { refuseIfOutranked } from "./users";
 import { getPasswordPolicy } from "../lib/password";
 import { authConfig } from "../lib/auth-config";
 
@@ -143,22 +144,49 @@ router.get("/security/sessions", async (req, res): Promise<void> => {
   })));
 });
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * Whether the caller may end sessions belonging to `target`. Ending your own
+ * sessions is always allowed; anyone else's needs the same rank rule as every
+ * other user-administration action, so an Admin cannot sign a Super Admin out.
+ * Answers the request itself when the answer is no.
+ */
+function refuseSessionAction(req: Request, res: Response, target: { id: string; role: string }): boolean {
+  if (target.id === req.principal?.user.id) return false;
+  return refuseIfOutranked(req, res, target);
+}
+
 router.delete("/security/sessions/:id", async (req, res): Promise<void> => {
-  await revokeSession(req.params.id, "admin_revoked");
+  const id = req.params.id;
+  // A malformed id would otherwise reach Postgres as an invalid uuid.
+  if (!UUID_RE.test(id)) { res.status(404).json({ error: "Session not found", code: "not_found" }); return; }
+
+  const [target] = await db
+    .select({ sessionId: sessionsTable.id, id: usersTable.id, role: usersTable.role, username: usersTable.username, fullName: usersTable.fullName })
+    .from(sessionsTable)
+    .innerJoin(usersTable, eq(usersTable.id, sessionsTable.userId))
+    .where(eq(sessionsTable.id, id));
+  if (!target) { res.status(404).json({ error: "Session not found", code: "not_found" }); return; }
+  if (refuseSessionAction(req, res, target)) return;
+
+  await revokeSession(id, "admin_revoked");
   recordSecurityEvent({
     type: "session.revoked", outcome: "failure",
-    userId: req.principal?.user.id ?? null,
-    username: req.principal?.user.username ?? null,
-    reason: "admin_revoked", detail: { sessionId: req.params.id }, req,
+    userId: target.id,
+    username: target.username,
+    reason: "admin_revoked", detail: { sessionId: id, by: req.principal?.user.username ?? null }, req,
   });
-  void logActivity("session.revoked", "security", req.params.id, null, "revoked by administrator", req);
+  void logActivity("session.revoked", "security", id, target.fullName, "revoked by administrator", req);
   res.sendStatus(204);
 });
 
 /** "Sign out everywhere" for one user. */
 router.delete("/security/users/:id/sessions", async (req, res): Promise<void> => {
+  if (!UUID_RE.test(req.params.id)) { res.status(404).json({ error: "User not found" }); return; }
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.params.id));
   if (!user) { res.status(404).json({ error: "User not found" }); return; }
+  if (refuseSessionAction(req, res, user)) return;
 
   const revoked = await revokeAllUserSessions(user.id, "admin_revoked");
   recordSecurityEvent({

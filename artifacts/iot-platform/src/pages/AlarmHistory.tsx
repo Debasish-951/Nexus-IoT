@@ -1,5 +1,5 @@
 import { useState, useCallback, useRef } from "react";
-import { useListAlarmHistory } from "@workspace/api-client-react";
+import { useListAlarmHistory, getListAlarmsQueryKey } from "@workspace/api-client-react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,7 @@ import {
 import { format, formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { apiFetch } from "@/lib/auth-api";
+import { useProjectScope } from "@/hooks/useProjectScope";
 
 // ── Severity ──────────────────────────────────────────────────────────────────
 const SEVERITY_PRIORITY: Record<string, number> = {
@@ -82,6 +83,7 @@ export default function AlarmHistory() {
   const { toast } = useToast();
   const qc = useQueryClient();
   const { data: history, refetch } = useListAlarmHistory({ limit: 200 });
+  const { inScope } = useProjectScope();
 
   const [search, setSearch]               = useState("");
   const [filterSeverity, setFilterSeverity] = useState("all");
@@ -105,14 +107,15 @@ export default function AlarmHistory() {
     setLastEvent(ev);
     debouncedRefetch();
     // Also keep the Alarms list in sync
-    qc.invalidateQueries({ queryKey: ["listAlarms"] });
+    qc.invalidateQueries({ queryKey: getListAlarmsQueryKey() });
   }, [debouncedRefetch, qc]);
 
   const wsStatus = useWsEvents({ alarm: handleAlarmEvent });
 
   function clearLiveBadge() { setLiveCount(0); setLastEvent(null); }
 
-  const historyList = (history as any[] | undefined) ?? [];
+  // Only the open project's history.
+  const historyList = ((history as any[] | undefined) ?? []).filter((h) => inScope(h.assetId, { strict: true }));
   const filtered = historyList.filter((h) => {
     if (filterSeverity !== "all" && h.severity !== filterSeverity) return false;
     if (filterStatus   !== "all" && h.status   !== filterStatus)   return false;
@@ -132,7 +135,7 @@ export default function AlarmHistory() {
       }
       toast({ title: "Alarm acknowledged", description: name });
       await refetch();
-      qc.invalidateQueries({ queryKey: ["listAlarms"] });
+      qc.invalidateQueries({ queryKey: getListAlarmsQueryKey() });
     } catch (e: any) {
       toast({ title: "Network error", description: e.message, variant: "destructive" });
     } finally {

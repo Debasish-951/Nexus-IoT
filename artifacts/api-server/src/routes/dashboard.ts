@@ -10,8 +10,12 @@ import {
   db, assetsTable, alarmsTable, alarmRulesTable, brokersTable,
   usersTable, telemetryTable,
 } from "@workspace/db";
+import { PLANT_TIME_ZONE, startOfZoneDay, startOfZoneHour, zoneDateKey } from "../lib/plant-time";
 
 const router: IRouter = Router();
+
+/** Open = raised and not yet cleared. Acknowledged alarms are still open. */
+const OPEN_STATUSES = ["active", "acknowledged"];
 
 router.get("/dashboard/summary", async (req, res): Promise<void> => {
   const [assetCount] = await db
@@ -23,10 +27,12 @@ router.get("/dashboard/summary", async (req, res): Promise<void> => {
     .from(alarmsTable)
     .where(eq(alarmsTable.status, "active"));
 
+  // Open critical alarms only. Counting every critical alarm ever raised meant
+  // the figure could only go up.
   const [criticalAlarmCount] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(alarmsTable)
-    .where(eq(alarmsTable.severity, "critical"));
+    .where(and(eq(alarmsTable.severity, "critical"), inArray(alarmsTable.status, OPEN_STATUSES)));
 
   const [connectedBrokers] = await db
     .select({ count: sql<number>`count(*)::int` })
@@ -130,9 +136,38 @@ const MAX_ALARM_PENALTY = 60;
 const STALE_PENALTY = 20;
 /** An asset with a device id that has never reported at all. */
 const NEVER_REPORTED_PENALTY = 15;
-/** Downtime term: 2 points per hour of critical/high alarm time, capped. */
+/** Downtime term: 2 points per hour of machine fault time, capped. */
 const DOWNTIME_POINTS_PER_HOUR = 2;
 const MAX_DOWNTIME_PENALTY = 20;
+
+/**
+ * Availability and downtime come from what machines report about themselves: a
+ * telemetry tag named `status`, or ending in `.status`, one per machine.
+ *
+ * Alarms must not feed these. A rule fires because one parameter crossed a limit
+ * someone chose, while the machine keeps running. Gaps in telemetry must not feed
+ * them either: a stopped data feed says nothing about the machine, so a period
+ * with no status reading counts as unknown and is left out of the arithmetic.
+ *
+ * Any state not listed here, such as Running or Idle, counts as available.
+ */
+const DOWN_STATES = new Set(["fault", "faulted", "error", "failed", "failure", "breakdown", "down", "tripped"]);
+/** Planned stops are not downtime, and they do not count as time the machine should have run. */
+const PLANNED_STATES = new Set(["maintenance", "planned maintenance", "planned_maintenance"]);
+/** Each machine's state is sampled once per bucket, so cost does not grow with message rate. */
+const STATUS_BUCKET_SECONDS = 300;
+/** Most buckets sampled per status tag (one week of 5-minute buckets). */
+const MAX_STATUS_BUCKETS = 2016;
+
+/**
+ * Bucket size for a window: 5 minutes, widened in 5-minute steps so a long
+ * window still samples at most MAX_STATUS_BUCKETS times per machine. A 90-day
+ * window at 5 minutes was ~26,000 index seeks per status tag.
+ */
+export function statusBucketSeconds(days: number): number {
+  const needed = (days * 86_400) / MAX_STATUS_BUCKETS;
+  return Math.max(STATUS_BUCKET_SECONDS, Math.ceil(needed / STATUS_BUCKET_SECONDS) * STATUS_BUCKET_SECONDS);
+}
 
 function clampScore(n: number): number {
   return Math.max(0, Math.min(100, Math.round(n)));
@@ -189,7 +224,8 @@ router.get("/dashboard/attention", validate({ query: AttentionQuery }), async (r
     .orderBy(desc(alarmsTable.acknowledgedAt))
     .limit(20);
 
-  const midnight = new Date(); midnight.setHours(0, 0, 0, 0);
+  // "Today" in the plant's time zone, not the API host's.
+  const midnight = startOfZoneDay(new Date());
   const clearedToday = await db
     .select({
       id: alarmsTable.id, name: alarmsTable.name, assetName: alarmsTable.assetName,
@@ -233,6 +269,16 @@ router.get("/dashboard/attention", validate({ query: AttentionQuery }), async (r
     ORDER BY d.last_seen DESC
     LIMIT 20
   `);
+
+  // Counted separately: the list above stops at 200, and counting that list
+  // capped every figure at 200.
+  const activeBySeverity = await db
+    .select({ severity: alarmsTable.severity, count: sql<number>`count(*)::int` })
+    .from(alarmsTable)
+    .where(eq(alarmsTable.status, "active"))
+    .groupBy(alarmsTable.severity);
+  const severityCount = (sev: string) => activeBySeverity.find((r) => r.severity === sev)?.count ?? 0;
+  const activeAlarmTotal = activeBySeverity.reduce((sum, r) => sum + r.count, 0);
 
   const expiringKeys = await db.execute<{ id: string; name: string; expires_at: string }>(sql`
     SELECT id, name, expires_at
@@ -328,17 +374,17 @@ router.get("/dashboard/attention", validate({ query: AttentionQuery }), async (r
   res.json({
     items: items.slice(0, limit).map(({ rank: _rank, ...item }) => item),
     counts: {
-      total: items.length,
-      alarm: openAlarms.length,
+      total: items.length - openAlarms.length + activeAlarmTotal,
+      alarm: activeAlarmTotal,
       stale: stale.rows.length,
       unboundDevice: unbound.rows.length,
       apiKey: expiringKeys.rows.length,
       bySeverity: {
-        critical: openAlarms.filter((a) => a.severity === "critical").length,
-        high: openAlarms.filter((a) => a.severity === "high").length,
-        medium: openAlarms.filter((a) => a.severity === "medium").length,
-        low: openAlarms.filter((a) => a.severity === "low").length,
-        info: openAlarms.filter((a) => a.severity === "info").length,
+        critical: severityCount("critical"),
+        high: severityCount("high"),
+        medium: severityCount("medium"),
+        low: severityCount("low"),
+        info: severityCount("info"),
       },
     },
     inProgress: acknowledged.map((a) => ({
@@ -370,6 +416,7 @@ router.get("/dashboard/attention", validate({ query: AttentionQuery }), async (r
  */
 router.get("/dashboard/health-index", validate({ query: HealthIndexQuery }), async (req, res): Promise<void> => {
   const { staleMinutes = 60, days = 7 } = req.query as unknown as z.infer<typeof HealthIndexQuery>;
+  const bucketSeconds = statusBucketSeconds(days);
   const staleCutoff = new Date(Date.now() - staleMinutes * 60_000);
   const since = new Date(Date.now() - days * 86_400_000);
 
@@ -398,17 +445,39 @@ router.get("/dashboard/health-index", validate({ query: HealthIndexQuery }), asy
     ) ls ON true
   `);
 
-  // Open-alarm time for critical/high alarms, clipped to the window so an alarm
-  // that has been open for a year contributes only the days we are measuring.
-  const downtimeRows = await db.execute<{ asset_id: string; open_seconds: string }>(sql`
-    SELECT asset_id,
-           SUM(EXTRACT(EPOCH FROM (
-             LEAST(COALESCE(cleared_at, now()), now()) - GREATEST(triggered_at, ${since}::timestamptz)
-           )))::bigint AS open_seconds
-    FROM alarm_history
-    WHERE severity IN ('critical', 'high')
-      AND COALESCE(cleared_at, now()) >= ${since}
-    GROUP BY asset_id
+  // Machine state per bucket. The recursive CTE walks the distinct metrics of each
+  // asset through the (asset_id, metric, timestamp) index, because a plain DISTINCT
+  // or a LIKE over telemetry would scan every row in a table this large.
+  const statusRows = await db.execute<{ asset_id: string; metric: string; state: string; buckets: number }>(sql`
+    WITH RECURSIVE metrics AS (
+      SELECT a.id AS asset_id,
+             (SELECT t.metric FROM telemetry t WHERE t.asset_id = a.id ORDER BY t.metric LIMIT 1) AS metric
+      FROM assets a
+      UNION ALL
+      SELECT m.asset_id,
+             (SELECT t.metric FROM telemetry t
+              WHERE t.asset_id = m.asset_id AND t.metric > m.metric ORDER BY t.metric LIMIT 1)
+      FROM metrics m
+      WHERE m.metric IS NOT NULL
+    )
+    SELECT m.asset_id, m.metric, s.state, COUNT(*)::int AS buckets
+    FROM metrics m
+    CROSS JOIN generate_series(
+      ${since}::timestamptz,
+      now() - make_interval(secs => ${bucketSeconds}::double precision),
+      make_interval(secs => ${bucketSeconds}::double precision)
+    ) AS bucket
+    CROSS JOIN LATERAL (
+      SELECT lower(t.value #>> '{}') AS state
+      FROM telemetry t
+      WHERE t.asset_id = m.asset_id AND t.metric = m.metric
+        AND t.timestamp >= bucket
+        AND t.timestamp < bucket + make_interval(secs => ${bucketSeconds}::double precision)
+      ORDER BY t.timestamp DESC
+      LIMIT 1
+    ) s
+    WHERE lower(m.metric) = 'status' OR lower(m.metric) LIKE '%.status'
+    GROUP BY m.asset_id, m.metric, s.state
   `);
 
   const alarmPenaltyByAsset = new Map<string, number>();
@@ -424,10 +493,25 @@ router.get("/dashboard/health-index", validate({ query: HealthIndexQuery }), asy
   }
 
   const downtimeByAsset = new Map<string, number>();
-  for (const row of downtimeRows.rows) {
-    const seconds = Number(row.open_seconds);
-    if (Number.isFinite(seconds) && seconds > 0) downtimeByAsset.set(row.asset_id, seconds);
+  const machinesByAsset = new Map<string, Set<string>>();
+  let reportedSeconds = 0;
+  let plannedSeconds = 0;
+  let downSeconds = 0;
+  for (const row of statusRows.rows) {
+    if (!row.state) continue;
+    const seconds = row.buckets * bucketSeconds;
+    reportedSeconds += seconds;
+    if (PLANNED_STATES.has(row.state)) plannedSeconds += seconds;
+    if (DOWN_STATES.has(row.state)) {
+      downSeconds += seconds;
+      downtimeByAsset.set(row.asset_id, (downtimeByAsset.get(row.asset_id) ?? 0) + seconds);
+    }
+    const machines = machinesByAsset.get(row.asset_id) ?? new Set<string>();
+    machines.add(row.metric);
+    machinesByAsset.set(row.asset_id, machines);
   }
+  const machineCount = [...machinesByAsset.values()].reduce((sum, m) => sum + m.size, 0);
+  const expectedSeconds = reportedSeconds - plannedSeconds;
 
   interface Scored {
     id: string; name: string; parentId: string | null;
@@ -449,7 +533,8 @@ router.get("/dashboard/health-index", validate({ query: HealthIndexQuery }), asy
       else if (lastSeen < staleCutoff) staleness = STALE_PENALTY;
     }
 
-    const downtimeSeconds = downtimeByAsset.get(asset.id) ?? 0;
+    // Per machine, so an asset is not penalised for how many machines it reports.
+    const downtimeSeconds = (downtimeByAsset.get(asset.id) ?? 0) / (machinesByAsset.get(asset.id)?.size ?? 1);
     const downtime = Math.min(
       MAX_DOWNTIME_PENALTY,
       (downtimeSeconds / 3600) * DOWNTIME_POINTS_PER_HOUR,
@@ -534,6 +619,13 @@ router.get("/dashboard/health-index", validate({ query: HealthIndexQuery }), asy
     overall: clampScore(100 - factors.alarmBurden - factors.staleness - factors.downtime),
     previous: null,
     factors,
+    availability: {
+      percent: expectedSeconds > 0
+        ? Math.round(((expectedSeconds - downSeconds) / expectedSeconds) * 1000) / 10
+        : null,
+      downtimeSeconds: downSeconds,
+      machineCount,
+    },
     assetCount: all.length,
     worst: all
       .filter((a) => a.score < 100)
@@ -549,11 +641,13 @@ router.get("/dashboard/health-index", validate({ query: HealthIndexQuery }), asy
 
 router.get("/dashboard/alarm-trend", validate({ query: AlarmTrendQuery }), async (req, res): Promise<void> => {
   const { days = 30, topAssets = 5 } = req.query as unknown as z.infer<typeof AlarmTrendQuery>;
-  const since = new Date(Date.now() - days * 86_400_000);
-  since.setHours(0, 0, 0, 0);
+  // Days are plant-zone calendar days, in the query and in the keys alike.
+  const now = new Date();
+  const since = startOfZoneDay(now, days);
 
   const buckets = await db.execute<{ day: string; severity: string; n: number }>(sql`
-    SELECT date_trunc('day', triggered_at) AS day, severity, count(*)::int AS n
+    SELECT to_char(date_trunc('day', triggered_at AT TIME ZONE ${PLANT_TIME_ZONE}), 'YYYY-MM-DD') AS day,
+           severity, count(*)::int AS n
     FROM alarm_history
     WHERE triggered_at >= ${since}
     GROUP BY 1, 2
@@ -566,12 +660,11 @@ router.get("/dashboard/alarm-trend", validate({ query: AlarmTrendQuery }), async
     critical: number; high: number; medium: number; low: number; info: number; total: number;
   }
   const byDay = new Map<string, DayCounts>();
-  for (let i = 0; i <= days; i++) {
-    const d = new Date(since.getTime() + i * 86_400_000);
-    byDay.set(d.toISOString().slice(0, 10), { critical: 0, high: 0, medium: 0, low: 0, info: 0, total: 0 });
+  for (let i = days; i >= 0; i--) {
+    byDay.set(zoneDateKey(startOfZoneDay(now, i)), { critical: 0, high: 0, medium: 0, low: 0, info: 0, total: 0 });
   }
   for (const row of buckets.rows) {
-    const key = new Date(row.day).toISOString().slice(0, 10);
+    const key = row.day;
     const entry = byDay.get(key);
     if (!entry) continue;
     if (row.severity in SEVERITY_RANK) entry[row.severity as keyof Omit<DayCounts, "total">] += row.n;
@@ -661,7 +754,7 @@ router.get("/dashboard/alarm-trend", validate({ query: AlarmTrendQuery }), async
       neverFired: ruleHealth?.never_fired ?? 0,
     },
     alarmsLastHour: lastHour?.n ?? 0,
-    window: { days, since: since.toISOString() },
+    window: { days, since: since.toISOString(), timeZone: PLANT_TIME_ZONE },
   });
 });
 
@@ -689,7 +782,8 @@ router.get("/dashboard/ingest-series", validate({ query: IngestSeriesQuery }), a
 
   const matrix = await db.execute<{ device_id: string; hour: string; n: number; bound: boolean }>(sql`
     SELECT t.device_id,
-           date_trunc('hour', t.timestamp) AS hour,
+           -- Hours start on the plant-zone hour, which matters for half-hour zones.
+           date_trunc('hour', t.timestamp AT TIME ZONE ${PLANT_TIME_ZONE}) AT TIME ZONE ${PLANT_TIME_ZONE} AS hour,
            count(*)::int AS n,
            EXISTS (SELECT 1 FROM assets a WHERE a.identifier = t.device_id) AS bound
     FROM telemetry t
@@ -711,7 +805,7 @@ router.get("/dashboard/ingest-series", validate({ query: IngestSeriesQuery }), a
 
   // Hour labels, oldest first, aligned to the hour so the client can render a
   // fixed-width grid without recomputing the axis.
-  const hourStart = new Date(matrixSince); hourStart.setMinutes(0, 0, 0);
+  const hourStart = startOfZoneHour(matrixSince);
   const hourKeys: string[] = [];
   for (let i = 0; i <= 24; i++) hourKeys.push(new Date(hourStart.getTime() + i * 3600_000).toISOString());
 
@@ -737,11 +831,16 @@ router.get("/dashboard/ingest-series", validate({ query: IngestSeriesQuery }), a
     .orderBy(desc(telemetryTable.timestamp))
     .limit(1);
 
+  const series = densifyMinutes(perMinute.rows.map((r) => ({ minute: new Date(r.minute), count: r.n })), since, new Date());
+
   res.json({
-    series: perMinute.rows.map((r) => ({ minute: new Date(r.minute).toISOString(), count: r.n })),
+    // Every minute of the window, zeros included, so a gap shows as a gap.
+    series,
     peakPerMinute: counts.length ? Math.max(...counts) : 0,
     totalPoints: counts.reduce((s, n) => s + n, 0),
-    currentPerMinute: counts.length ? counts[counts.length - 1] : 0,
+    // 0 when the newest data is stale. This used to be the last minute that had
+    // any data, so a pipeline that stopped an hour ago still showed its old rate.
+    currentPerMinute: currentPerMinute(series, new Date()),
     lastIngestionAt: last?.timestamp?.toISOString() ?? null,
     quality: quality.rows.reduce<Record<string, number>>((acc, r) => {
       acc[r.quality ?? "unknown"] = r.n;
@@ -757,6 +856,29 @@ router.get("/dashboard/ingest-series", validate({ query: IngestSeriesQuery }), a
     window: { hours },
   });
 });
+
+/** One point per minute from `from` to `to`, zero where no row exists. */
+export function densifyMinutes(rows: { minute: Date; count: number }[], from: Date, to: Date): { minute: string; count: number }[] {
+  const byMinute = new Map(rows.map((r) => [Math.floor(r.minute.getTime() / 60_000), r.count]));
+  const out: { minute: string; count: number }[] = [];
+  for (let m = Math.floor(from.getTime() / 60_000); m <= Math.floor(to.getTime() / 60_000); m++) {
+    out.push({ minute: new Date(m * 60_000).toISOString(), count: byMinute.get(m) ?? 0 });
+  }
+  return out;
+}
+
+/**
+ * The newest minute's count, or 0 when that minute is stale (older than the
+ * previous minute), so a stopped pipeline reads 0 rather than its last rate.
+ */
+export function currentPerMinute(series: { minute: string; count: number }[], now: Date): number {
+  const freshFrom = (Math.floor(now.getTime() / 60_000) - 1) * 60_000;
+  for (let i = series.length - 1; i >= 0; i--) {
+    if (series[i].count === 0) continue;
+    return new Date(series[i].minute).getTime() >= freshFrom ? series[i].count : 0;
+  }
+  return 0;
+}
 
 // ── Band 3: live metric tiles ────────────────────────────────────────────────
 
@@ -786,7 +908,8 @@ router.get("/dashboard/live-metrics", validate({ query: LiveMetricsQuery }), asy
     .from(alarmsTable)
     .where(eq(alarmsTable.status, "active"));
 
-  const alarmingRuleIds = new Set(activeAlarms.map((a) => a.ruleId).filter(Boolean) as string[]);
+  // Keyed by rule AND asset: a rule can be open on one asset and normal on another.
+  const alarming = new Set(activeAlarms.filter((a) => a.ruleId).map((a) => `${a.ruleId}|${a.assetId}`));
 
   // Candidate (asset, metric) pairs, in priority order and de-duplicated.
   interface Candidate { assetId: string; metric: string; priority: number; ruleId: string | null }
@@ -801,7 +924,7 @@ router.get("/dashboard/live-metrics", validate({ query: LiveMetricsQuery }), asy
 
   for (const r of rules) {
     if (!r.assetId || !r.metric) continue;
-    push(r.assetId, r.metric, alarmingRuleIds.has(r.id) ? 0 : 1, r.id);
+    push(r.assetId, r.metric, alarming.has(`${r.id}|${r.assetId}`) ? 0 : 1, r.id);
   }
 
   // Backfill from whatever is actually flowing, so the band is populated even
@@ -865,7 +988,7 @@ router.get("/dashboard/live-metrics", validate({ query: LiveMetricsQuery }), asy
       operator: rule?.operator ?? null,
       ruleName: rule?.name ?? null,
       severity: rule?.severity ?? null,
-      inAlarm: c.ruleId ? alarmingRuleIds.has(c.ruleId) : false,
+      inAlarm: c.ruleId ? alarming.has(`${c.ruleId}|${c.assetId}`) : false,
     };
   }));
 

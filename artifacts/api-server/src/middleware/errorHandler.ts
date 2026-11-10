@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
-import { logger } from "../lib/logger";
-import { toPublicError, correlationIdOf, isExpected, logContext } from "../lib/errors";
+import { logger, redactPath } from "../lib/logger";
+import { toPublicError, correlationIdOf, isExpected, logContext, loggableError } from "../lib/errors";
 
 /**
  * Correlation id, attached before anything can fail.
@@ -51,19 +51,22 @@ export function errorHandler(err: unknown, req: Request, res: Response, _next: N
     method: req.method,
     // Query strings can carry identifiers and filters; the path alone is enough
     // to locate the route and does not risk logging a token someone appended.
-    path: req.path,
+    path: redactPath(req.path),
     status: (err as { status?: number })?.status ?? 500,
     userId: req.principal?.user.id ?? null,
     username: req.principal?.user.username ?? null,
     apiClientId: req.apiClient?.id ?? null,
     ...logContext(err),
-    err,
+    err: loggableError(err),
   };
 
   if (expected) {
     // A 4xx from a user mistake is not an incident. Logged without a stack so it
     // does not drown the entries that need attention.
-    logger.info({ ...entry, err: undefined, reason: (err as Error)?.message }, "request rejected");
+    // The reason comes from the loggable form: a wrapped query error's own message
+    // contains the SQL parameters.
+    const safe = entry.err as { message?: string } | undefined;
+    logger.info({ ...entry, err: undefined, reason: safe?.message }, "request rejected");
   } else {
     logger.error(entry, "unhandled error");
   }

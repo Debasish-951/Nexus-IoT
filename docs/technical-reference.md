@@ -44,16 +44,16 @@ scripts/                  — Utility scripts
 - `POST /api/ingest/batch` — batch ingest array
 - `GET /api/telemetry/:assetId` — query telemetry (metric, from, to, limit filters); from/to coerced from ISO strings
 - `GET /api/telemetry/:assetId/metrics` — distinct metric keys for an asset (used by widget dialog when no attributes exist)
-- `GET /api/telemetry/:assetId/export` — CSV export of telemetry
+- `GET /api/telemetry/:assetId/export` — CSV export of telemetry (cells pass through `csvCell`, so a value starting with = + - @ is written as text; numbers stay numeric)
 - `GET /api/assets/:assetId/health` — asset health score (freshness%, activeAlarms, lastSeen, keyMetrics)
-- `GET /api/alarms` — list alarms (filter by severity/status)
-- `POST /api/alarms/:id/acknowledge` — acknowledge alarm
+- `GET /api/alarms` — list alarms (filter by severity/status), newest first; `?limit` default 500, max 5000; still returns a plain array
+- `POST /api/alarms/:id/acknowledge` — acknowledge an ACTIVE alarm (409 `alarm_not_active` otherwise); also marks its open history row acknowledged and sets `alarm_history.acknowledged_at`
 - `GET /api/alarm-history` — paginated alarm history
 - `GET/POST /api/alarm-rules` — list/create alarm rules (threshold + rate_of_change + webhook fields)
 - `PUT/DELETE /api/alarm-rules/:id` — update/delete rule
 - `POST /api/alarm-rules/:id/test-webhook` — fire a test webhook POST
 - `GET/POST /api/users` — list/create users
-- `GET/POST /api/brokers` — list/create brokers
+- `GET/POST /api/brokers` — list/create brokers. Create/update persist `mqttTopic`, `mqttClientId`, `mqttUsername`, `mqttPassword` (encrypted with `lib/secret-box`, context `brokers.mqttPassword`; never returned, `hasMqttPassword` instead) and `mappingRules`, then restart that broker's MQTT subscriber without an API restart. Azure IoT Hub / Event Hub brokers are stored but not connected; responses carry a `connectionNote` saying so
 - `GET /api/brokers/:id/history` — broker connection event history (newest-first, limit up to 500)
 - `GET/POST /api/api-clients` — list/create API clients
 - `GET /api/dashboard/summary` — stat cards
@@ -66,12 +66,12 @@ scripts/                  — Utility scripts
 - `GET /api/activity-log` — paginated audit trail (category, actorName, limit, offset filters)
 - `POST /api/assets/:id/maintenance` — toggle maintenance mode (body: { enabled, note? })
 - `GET /api/system/storage` — storage stats (totalRows, tableSize, perAsset breakdown)
-- `GET /api/system/aggregate` — time-bucketed aggregation (bucket: 5m/15m/30m/1h/6h/12h/1d/1w; avg/min/max per interval)
+- `GET /api/system/aggregate` — time-bucketed aggregation (bucket: 5m/15m/30m/1h/6h/12h/1d/1w; avg/min/max per interval). Over `limit`, the NEWEST buckets are kept and `truncated: true` is returned; 1d/1w buckets start at midnight / Monday in `PLANT_TIME_ZONE`
 - `GET /api/system/retention` — list data retention policies
 - `POST /api/system/retention` — create retention policy (name, retentionDays, assetId?, metric?, enabled)
 - `PUT /api/system/retention/:id` — update retention policy
 - `DELETE /api/system/retention/:id` — delete retention policy
-- `POST /api/system/retention/run` — manually trigger pruning across all enabled policies
+- `POST /api/system/retention/run` — manually trigger pruning across all enabled policies (409 `pruning_in_progress` while a run is going)
 
 ### Activity Logging
 - `logActivity(action, category, targetId, targetName, detail, req)` — internal helper in `activity_log.ts`
@@ -135,28 +135,65 @@ cd lib/api-spec && pnpm exec orval --config ./orval.config.ts
 - All async route handlers typed as `Promise<void>`
 
 ### RBAC (Role-Based Access Control)
-- `UserContext.tsx` — `can(permission)` checks against `ROLE_PERMISSIONS` map; `setActorHeaders()` called automatically on profile switch
-- `RoleGuard` component — mode="hide" removes element, mode="disable" grays it out
-- `ReadOnlyBanner` — amber banner shown on pages where active role cannot make changes
-- Permissions: admin=all; engineer=view+assets+templates+alarms+ack+brokers+destinations; operator=view+ack; viewer=view
+- The server is authoritative. `artifacts/api-server/src/lib/rbac.ts` defines nine roles (super_admin, company_admin, admin, project_manager, team_lead, developer, engineer, operator, viewer), the permission verbs, module defaults and role rank. `middleware/authorize.ts` holds the deny-by-default `ROUTE_RULES` table; every denial is written to `security_events`
+- Permissions: super_admin, company_admin, admin = all (including `manage_users`, `manage_security`); engineer and developer = view + assets + templates + alarms + ack + brokers + destinations + api_clients (developer only on assigned projects); project_manager, team_lead, operator = view + ack; viewer = view
+- Identity comes from the session cookie or API key; `middleware/principal.ts` overwrites `X-Actor-*` headers so clients cannot forge Activity Log identity
+- Frontend: `UserContext.tsx` (`can(permission)` against the catalogue the server sends), `RoleGuard` (mode="hide" removes, mode="disable" grays out) and `ReadOnlyBanner` mirror the server rules for usability only
+
+### Authorization and company isolation (no row-level security)
+- All authorization happens in the API process: `authorize` (route rules), `lib/project-access.ts` (project scoping) and `lib/viz-access.ts` (visualization ownership and shares). PostgreSQL does not enforce any of it: there are no row-level security (RLS) policies, and the runtime role can read and write every row of every application table
+- There is no company or tenant column. Isolation between companies comes from giving each company its own installation and its own database (see [operations/new-company-installation.md](operations/new-company-installation.md)). Never point two companies at one database: nothing in the schema would keep their data apart
+- Consequences: anyone with the `DATABASE_URL` credentials, or a SQL injection in the API, reaches all data in that installation. Limit the damage with a least-privilege runtime role (DML only, no schema ownership; see the "Least privilege" block in `.env.example`) and keep direct database access to operators
+- If installations are ever shared between companies, add a tenant column and RLS policies before doing so; the application checks alone are not designed as a tenant boundary
+
+### Process-local state (single-process requirement)
+The API is designed to run as exactly one Node.js process per installation (one systemd service, no PM2 cluster, no replicas). This state lives only in that process's memory:
+
+| State | Where | Effect of a restart | Effect of running two processes |
+|---|---|---|---|
+| Rate-limit counters: sign-in, forgot-password, token, OTP, per-account, spray guard, general API, flood guard, AI | `lib/rate-limit-store.ts`, `middleware/rateLimit.ts`, `middleware/apiRateLimit.ts` | All counters start from zero (keys are HMACs under a per-process salt, so nothing carries over) | Each process allows the full limit, so the effective limit doubles |
+| API-key request buckets (`INGEST_RATE_LIMIT_RPM`) | `middleware/apiKeyAuth.ts` | Buckets reset | Each key gets double the limit |
+| MQTT broker connections | `services/mqtt.ts` (`activeClients`) | Connections reopen at startup; with QoS 1 and a persistent session (`clean: false`) the broker redelivers messages it queued meanwhile | Both connect with the same client id and knock each other off the broker in a reconnect loop |
+| Alarm On/Off delay timers (`onDelay` / `offDelay`) | `routes/ingest.ts` (`pendingOn`, `pendingOff`) | A running delay restarts, so an alarm can fire (or clear) up to one delay period late | Each process times delays from the messages it sees |
+| Enabled alarm-rule cache (5 s) | `routes/ingest.ts` | Rebuilt on first message | A rule change invalidates only one process's cache; the other is stale for up to 5 s |
+| Seen-devices cache (backed by the `seen_devices` table) | `lib/seen-devices.ts` | Reloaded from the table at startup | Each process's cache holds only the devices it received since start, so the device list differs between processes |
+| WebSocket clients for live updates | `lib/ws-broadcast.ts` | Browsers reconnect automatically | `broadcast()` reaches only the browsers connected to the same process |
+| Security-event coalescing (`SECURITY_EVENT_COALESCE_MS`) | `lib/security-log.ts` | Pending counts are flushed every 15 s; at most the last few seconds of counts are lost | Bursts are counted per process |
+| Hourly retention and pruning job | `src/index.ts` | Next run one hour after start | The job runs in both processes |
+
+Everything else (sessions, account lockouts, users, alarms, telemetry, audit and security logs) is in PostgreSQL and survives a restart. To scale out beyond one process, move the counters, delay timers and MQTT ownership to PostgreSQL (or a shared store) first and give the retention job a single owner.
 
 ### DB Schema Notes
 - `alarm_rules`: added `webhook_url TEXT`, `webhook_enabled BOOLEAN DEFAULT false`, `roc_window INTEGER DEFAULT 60`
 - `brokers`: added `mapping_rules JSONB DEFAULT '[]'`, `mqtt_username`, `mqtt_password`, `mqtt_topic`, `mqtt_client_id`
+- `alarms`: indexes on `status`, `(asset_id, status)`, `triggered_at`; `alarm_history`: `acknowledged_at` column, indexes on `alarm_id`, `triggered_at`; `attributes`: index on `asset_id`; `broker_events`: `(broker_id, timestamp)`, `timestamp`; `activity_logs`: `timestamp`. No foreign keys were added to telemetry/attributes/alarms/alarm_history (existing orphan rows would fail `db push`); asset deletion removes dependants in one transaction instead
 - `telemetry`: three composite indexes: `idx_telemetry_asset_metric_ts (asset_id, metric, timestamp)`, `idx_telemetry_ts (timestamp)`, `idx_telemetry_asset_ts (asset_id, timestamp)`
 - `data_retention_policies`: id, name, assetId (null=all), metric (null=all), retentionDays, enabled, lastPrunedAt, rowsPruned
 
 ### Data Retention / Pruning
-- Hourly background job (`setInterval` in `src/index.ts`) calls `runPruning()` from `routes/system.ts`
-- Policies evaluated per-record matching assetId+metric; deletes rows older than `retentionDays`
+- Hourly background job (`setInterval` in `src/index.ts`) calls `runPruning()` and `runOperationalPruning()` from `routes/system.ts`; each has a single-run guard
+- Telemetry: the MOST SPECIFIC enabled policy covering a row decides its retention — asset+metric over asset, asset over metric, metric over global. Two enabled policies with the same scope merge and the longer retention wins. (Previously every policy deleted independently, so a short global policy deleted data a longer asset policy should keep.)
+- Deletes run in batches of 5,000 rows by primary key, at most 200 batches per policy/table per run; the next hourly run continues
+- Operational tables are pruned by age, configurable by env (0 disables): cleared alarms `RETENTION_CLEARED_ALARMS_DAYS` (365), alarm history `RETENTION_ALARM_HISTORY_DAYS` (730), activity logs `RETENTION_ACTIVITY_LOG_DAYS` (365), broker events `RETENTION_BROKER_EVENTS_DAYS` (90), expired/redeemed/revoked auth tokens `RETENTION_AUTH_TOKENS_DAYS` (30). Open alarms and the history of open alarms are never deleted
 - `rowsPruned` counter accumulates across all runs
 
+### Ingest, alarms and destinations
+- Blank readings (`""`, whitespace, `null`) are stored with quality `bad` and are never evaluated as 0 by threshold or rate-of-change rules or runtime expressions; a rate of change also needs a numeric previous reading
+- Enabled alarm rules are cached for 5 s; `invalidateAlarmRuleCache()` (exported from `routes/ingest.ts`, also called by `forgetRuleDelays`) drops the cache after a rule change
+- Per message: one query for previous readings, one for the asset's attributes, one UPDATE for all matched attributes, one for runtime attributes, one open-alarm lookup when a rule applies
+- Alarm triggered/cleared events are sent to enabled destinations subscribed to `alarm` (`forwardToDestinations`, fire-and-forget; body `{ event: "alarm", alarmEvent: "triggered"|"cleared", alarmId, ruleName, metric, value, threshold, operator, severity, assetId, assetName, timestamp }`). Destinations have no project column, so they receive alarms from every project. `telemetry` events are not forwarded
+- Destination `authType`: `bearer` | `api_key` | `basic` | `none`; legacy `apikey` is accepted and stored as `api_key`
+- MQTT subscribers: QoS 1, persistent session (`clean: false`) with a stable client id, at most `MQTT_MAX_INFLIGHT` (4) messages processed per broker at once; `totalRequests` counts messages
+- Asset delete runs in one transaction: telemetry, attributes and alarms of the subtree are deleted, alarm rules bound to those assets are deleted, open history rows are closed (history is kept). `viz_nodes.project_id` is `ON DELETE SET NULL`, so a deleted project's dashboards become unassigned and show in every project
+- Dashboard day/hour grouping uses `PLANT_TIME_ZONE` (default UTC); `criticalAlarms` counts open alarms only; `currentPerMinute` is 0 when the newest minute is stale
+
 ### Seeded Sample Data (fixed UUIDs)
-- Fan = `bbbb0002-0000-0000-0000-000000000001`, Plant 1 = `bbbb0001-0000-0000-0000-000000000001`
-- 6 alarm rules for Fan (vibration, temperature, battery)
-- 3 users: admin, jsmith (engineer), mwilson (operator)
-- 1 MQTT broker (connected)
-- 2 API clients: Daimler_Truck, NodeRED_Client
+`pnpm --filter @workspace/db run seed` (`lib/db/src/seed.ts`) is idempotent and for local development only; do not run it on a production server.
+- Demo Plant = `00000010-0000-0000-0000-000000000001` (identifier `demo-plant-001`, a root asset, so a project) → Demo Pump = `00000011-0000-0000-0000-000000000001` (identifier `demo-pump-001`)
+- 2 alarm rules on Demo Pump: High Temperature (`temperature > 80`, high) and High Vibration (`vibration > 5`, medium)
+- 3 users in `invited` status with no password: admin (admin), jsmith (engineer), mwilson (operator). The seed prints a single-use activation link for each (`<AUTH_PUBLIC_URL>/activate?token=…`, valid `AUTH_ACTIVATION_TTL_HOURS`); re-running it revokes the old links and prints new ones
+- 1 API client `local-dev-client` (`00000030-0000-0000-0000-000000000001`) with a random secret printed once, plus a sample `curl` ingest command. Only the SHA-256 is stored; if the client already exists the secret is not shown again (rotate it in the UI)
+- No brokers are seeded
 
 ## Processes
 Two long-running processes, started separately (there is no watch on the API — re-run

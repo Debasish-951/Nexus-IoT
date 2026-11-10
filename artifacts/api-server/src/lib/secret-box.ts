@@ -114,6 +114,15 @@ export function initSecretBox(): void {
     if (key) keyRing.set(id, key);
   }
 
+  if (!currentKey && process.env.NODE_ENV === "production" && process.env.SECRETS_ALLOW_PLAINTEXT !== "true") {
+    // Refuse rather than warn: a warning in a production log is easily missed,
+    // and every broker password and destination token saved afterwards would be
+    // stored in clear.
+    throw new Error(
+      "SECRETS_ENC_KEY is not set in production, so stored credentials would be saved in clear. " +
+      "Set SECRETS_ENC_KEY (or SECRETS_ENC_KEY_FILE), or set SECRETS_ALLOW_PLAINTEXT=true to accept the risk deliberately.",
+    );
+  }
   if (!currentKey) {
     logger.warn(
       "SECRETS_ENC_KEY is not set — webhook tokens and MQTT passwords will be stored in clear. " +

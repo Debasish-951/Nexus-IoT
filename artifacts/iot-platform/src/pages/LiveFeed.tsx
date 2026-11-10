@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useLocation } from "wouter";
-import { useListAssets, useGetDashboardSummary, useGetRecentTelemetry, getGetRecentTelemetryQueryKey } from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { useListAssets, useGetRecentTelemetry, getGetRecentTelemetryQueryKey, getListAssetsQueryKey } from "@workspace/api-client-react";
 import { useWsEvents } from "@/hooks/useWsEvents";
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
@@ -10,10 +11,21 @@ import {
 } from "lucide-react";
 import { AreaChart, Area, BarChart, Bar, ResponsiveContainer } from "recharts";
 import { useThemePalette, type ThemePalette } from "@/hooks/useTheme";
+import { useToast } from "@/hooks/use-toast";
+import { apiFetch } from "@/lib/auth-api";
+import { toCsv, downloadCsvText } from "@/lib/csv";
+import { describeApiError, formatApiError } from "@/lib/validation";
+import { useCurrentUser } from "@/contexts/UserContext";
+import { useProjectScope } from "@/hooks/useProjectScope";
+import { OPEN_ALARMS_KEY, useOpenAlarms } from "@/hooks/useOpenAlarms";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const STALE_MS = 30_000;
 const MAX_EVENTS = 1000;
+/** A device counts as connected when its asset received telemetry this recently. */
+const CONNECTED_MS = 5 * 60_000;
+/** Health requests in flight at once; every asset is covered, a batch at a time. */
+const HEALTH_BATCH = 6;
 
 // Palette now comes from useThemePalette() so this page follows the app theme.
 // It was a fixed light-only object, which is why Live Feed stayed white while
@@ -22,29 +34,45 @@ const MAX_EVENTS = 1000;
 
 interface SensorRow { id: string; ts: number; assetId: string; assetName: string; sensor: string; value: number; }
 interface AssetLatest { assetId: string; assetName: string; metrics: Record<string, number>; lastSeen: number; }
-interface AlarmRow { id: string; name: string; assetName: string; severity: string; status: string; message: string; triggeredAt: string; }
+interface AlarmRow { id: string; name: string; assetId?: string; assetName: string; severity: string; status: string; message: string; triggeredAt: string; }
 interface ActivityRow { id: string; action: string; category: string; detail: string | null; targetName: string | null; timestamp: string; }
-interface Health { health: "ok" | "alarm" | "stale"; freshnessPct: number | null; activeAlarms: number; }
+interface Health { health: "ok" | "alarm" | "stale"; freshnessPct: number | null; activeAlarms: number; lastSeen: string | null; }
 
 // Takes the palette explicitly — it is module-scope, so it cannot call the hook.
 const sevColor = (C: ThemePalette, s: string) =>
   s === "critical" ? C.red : s === "high" ? C.amber : s === "medium" ? C.amber : C.blue;
 
 export default function LiveFeed() {
+  const { toast } = useToast();
   const C = useThemePalette();
+  const qc = useQueryClient();
   const [, navigate] = useLocation();
-  const { data: assetsData } = useListAssets();
-  const { data: summaryData } = useGetDashboardSummary();
-  const { data: recentData } = useGetRecentTelemetry({ limit: 100 }, { query: { queryKey: getGetRecentTelemetryQueryKey({ limit: 100 }), refetchInterval: 8000 } });
-  const allAssets = (assetsData as any[] | undefined) ?? [];
-  const summary = (summaryData as any) ?? {};
+  const { canModule, session } = useCurrentUser();
+  // Plant-wide endpoints (/dashboard/*) are refused to project-restricted users,
+  // so the stored-telemetry seed is not asked for; live events still stream in.
+  const restricted = !!session?.restrictProjects;
+  const canActivity = canModule("activity_log");
+  const canAssets = canModule("assets");
+  const canRecent = canModule("dashboard") && !restricted;
+  const { inScope } = useProjectScope();
+  const { data: assetsData } = useListAssets(undefined, { query: { enabled: canAssets, queryKey: getListAssetsQueryKey() } });
+  const { data: recentData } = useGetRecentTelemetry({ limit: 100 }, { query: { queryKey: getGetRecentTelemetryQueryKey({ limit: 100 }), refetchInterval: 8000, enabled: canRecent } });
+  // Only the open project's assets, telemetry and alarms.
+  const allAssets = useMemo(
+    () => ((assetsData as any[] | undefined) ?? []).filter((a) => inScope(a.id, { strict: true })),
+    [assetsData, inScope],
+  );
 
   const [events, setEvents] = useState<SensorRow[]>([]);
   const [latest, setLatest] = useState<Record<string, AssetLatest>>({});
-  const [alarms, setAlarms] = useState<AlarmRow[]>([]);
+  // Shared with the bell and banner; enabled only for users with the Alarms module.
+  const { alarms: openAlarms } = useOpenAlarms();
+  const alarms = useMemo(
+    () => (openAlarms as unknown as AlarmRow[]).filter((a) => inScope(a.assetId, { strict: true })),
+    [openAlarms, inScope],
+  );
   const [activities, setActivities] = useState<ActivityRow[]>([]);
   const [healthMap, setHealthMap] = useState<Record<string, Health>>({});
-  const [devices, setDevices] = useState<number>(0);
   const [wsStatus, setWsStatus] = useState("connecting");
   const [liveActive, setLiveActive] = useState(false);
   const [rateSeries, setRateSeries] = useState<{ v: number }[]>(Array.from({ length: 24 }, () => ({ v: 0 })));
@@ -53,29 +81,40 @@ export default function LiveFeed() {
   const [page, setPage] = useState(0);
 
   const tsRef = useRef<number[]>([]);
+  const healthRunning = useRef(false);
 
   // ── fetchers ──
-  const fetchAlarms = useCallback(() => {
-    fetch(`${BASE}/api/alarms?status=active`).then((r) => (r.ok ? r.json() : [])).then((d) => setAlarms(Array.isArray(d) ? d : [])).catch(() => {});
-  }, []);
+  // Alarms come from useOpenAlarms, which polls only when the Alarms module is granted.
+  const fetchAlarms = useCallback(() => { void qc.invalidateQueries({ queryKey: OPEN_ALARMS_KEY }); }, [qc]);
   const fetchActivities = useCallback(() => {
-    fetch(`${BASE}/api/activity-log?limit=8`).then((r) => (r.ok ? r.json() : { entries: [] })).then((d) => setActivities(d.entries ?? [])).catch(() => {});
-  }, []);
-  const fetchDevices = useCallback(() => {
-    fetch(`${BASE}/api/ingest/seen-devices`).then((r) => (r.ok ? r.json() : [])).then((d) => setDevices(Array.isArray(d) ? d.length : 0)).catch(() => {});
-  }, []);
-  const fetchHealth = useCallback((ids: string[]) => {
-    Promise.all(ids.slice(0, 12).map(async (id) => {
-      try { const r = await fetch(`${BASE}/api/assets/${id}/health`); return r.ok ? [id, await r.json()] as const : null; } catch { return null; }
-    })).then((es) => { const m: Record<string, Health> = {}; for (const e of es) if (e) m[e[0]] = e[1]; setHealthMap(m); });
-  }, []);
+    if (!canActivity) return;
+    apiFetch(`${BASE}/api/activity-log?limit=8`).then((r) => (r.ok ? r.json() : { entries: [] })).then((d) => setActivities(d.entries ?? [])).catch(() => {});
+  }, [canActivity]);
+  // Every asset, a few requests at a time, so a large project cannot open
+  // hundreds of requests at once. A run still in progress is not restarted.
+  const fetchHealth = useCallback(async (ids: string[]) => {
+    if (!canAssets || healthRunning.current || ids.length === 0) return;
+    healthRunning.current = true;
+    try {
+      const m: Record<string, Health> = {};
+      for (let i = 0; i < ids.length; i += HEALTH_BATCH) {
+        const batch = await Promise.all(ids.slice(i, i + HEALTH_BATCH).map(async (id) => {
+          try { const r = await apiFetch(`${BASE}/api/assets/${id}/health`); return r.ok ? [id, await r.json()] as const : null; } catch { return null; }
+        }));
+        for (const e of batch) if (e) m[e[0]] = e[1];
+      }
+      setHealthMap(m);
+    } finally { healthRunning.current = false; }
+  }, [canAssets]);
 
-  useEffect(() => { fetchAlarms(); fetchActivities(); fetchDevices(); }, [fetchAlarms, fetchActivities, fetchDevices]);
-  useEffect(() => { if (allAssets.length) fetchHealth(allAssets.map((a) => a.id)); }, [assetsData]); // eslint-disable-line
+  const assetIdsKey = allAssets.map((a) => a.id).join(",");
+  useEffect(() => { fetchActivities(); }, [fetchActivities]);
+  useEffect(() => { void fetchHealth(allAssets.map((a) => a.id)); }, [assetIdsKey, fetchHealth]); // eslint-disable-line
   useEffect(() => {
-    const iv = setInterval(() => { fetchAlarms(); fetchActivities(); if (allAssets.length) fetchHealth(allAssets.map((a) => a.id)); }, 20_000);
+    if (!canActivity && !canAssets) return;
+    const iv = setInterval(() => { fetchActivities(); void fetchHealth(allAssets.map((a) => a.id)); }, 20_000);
     return () => clearInterval(iv);
-  }, [assetsData]); // eslint-disable-line
+  }, [assetIdsKey, fetchActivities, fetchHealth, canActivity, canAssets]); // eslint-disable-line
 
   // rolling messages/sec sampler (every 1s → bucket count)
   useEffect(() => {
@@ -91,6 +130,7 @@ export default function LiveFeed() {
 
   const handleTelemetry = useCallback((data: any) => {
     if (!data?.assetId || !data?.metrics) return;
+    if (!inScope(data.assetId, { strict: true })) return;
     const now = Date.now();
     const assetName = data.assetName ?? data.assetId;
     const numeric: Record<string, number> = {};
@@ -102,7 +142,7 @@ export default function LiveFeed() {
     tsRef.current.push(now);
     setEvents((prev) => [...rows, ...prev].slice(0, MAX_EVENTS));
     setLatest((prev) => ({ ...prev, [data.assetId]: { assetId: data.assetId, assetName, metrics: { ...(prev[data.assetId]?.metrics ?? {}), ...numeric }, lastSeen: now } }));
-  }, []);
+  }, [inScope]);
   const handleAlarm = useCallback(() => fetchAlarms(), [fetchAlarms]);
   const handleActivity = useCallback(() => fetchActivities(), [fetchActivities]);
   const status = useWsEvents({ telemetry: handleTelemetry, alarm: handleAlarm, activity_log: handleActivity });
@@ -111,7 +151,7 @@ export default function LiveFeed() {
   // Seed Asset Status + Sensor Feed from stored telemetry so recent data shows
   // immediately (not just live WS events received while the page is open).
   useEffect(() => {
-    const rows = (recentData as any[] | undefined) ?? [];
+    const rows = ((recentData as any[] | undefined) ?? []).filter((r) => inScope(r.assetId, { strict: true }));
     if (!rows.length) return;
     const nameOf = (r: any) => allAssets.find((a) => a.id === r.assetId)?.name ?? r.deviceId ?? r.assetId;
     setEvents((prev) => {
@@ -136,22 +176,42 @@ export default function LiveFeed() {
   }, [recentData, assetsData]); // eslint-disable-line
 
   async function acknowledge(id: string) {
-    await fetch(`${BASE}/api/alarms/${id}/acknowledge`, { method: "POST" }).catch(() => {});
+    try {
+      const r = await apiFetch(`${BASE}/api/alarms/${id}/acknowledge`, { method: "POST" });
+      if (!r.ok) {
+        toast({ title: "Could not acknowledge alarm", description: formatApiError(await describeApiError(r)), variant: "destructive" });
+        return;
+      }
+    } catch (err) {
+      toast({ title: "Could not acknowledge alarm", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
+      return;
+    }
     fetchAlarms();
   }
 
   // ── derived ──
   const liveAssets = Object.values(latest).filter((a) => Date.now() - a.lastSeen < STALE_MS);
-  const activeAlarms = alarms.filter((a) => a.status === "active");
-  const criticalCount = activeAlarms.filter((a) => a.severity === "critical").length;
-  const warningCount = activeAlarms.filter((a) => a.severity !== "critical").length;
   const msgsPerSec = rateSeries[rateSeries.length - 1]?.v ?? 0;
   // Count only root/device-owning assets — children share the parent's device.
   const rootAssets = allAssets.filter((a) => !a.parentId);
   const totalAssets = rootAssets.length;
-  // Connected devices = distinct device ids actually linked to an asset (ignores
-  // orphan seen-devices that transmitted but were never turned into an asset).
-  const linkedDevices = new Set(allAssets.map((a) => a.identifier).filter(Boolean)).size;
+  // Newest reading known for an asset: a live event, or the server's last telemetry.
+  const lastSeenOf = (assetId: string) => {
+    const h = healthMap[assetId]?.lastSeen;
+    return Math.max(latest[assetId]?.lastSeen ?? 0, h ? new Date(h).getTime() : 0);
+  };
+  // Connected devices = distinct device ids whose asset reported recently, not
+  // every id that has merely been configured on an asset.
+  const linkedDevices = new Set(
+    allAssets.filter((a) => a.identifier && Date.now() - lastSeenOf(a.id) < CONNECTED_MS).map((a) => a.identifier),
+  ).size;
+
+  // Open alarms per asset, matched by id (names are not unique across projects).
+  const alarmLevelOf = (assetId: string): "critical" | "warning" | null => {
+    const mine = alarms.filter((a) => a.assetId === assetId);
+    if (mine.length === 0) return null;
+    return mine.some((a) => a.severity === "critical") ? "critical" : "warning";
+  };
 
   // "Live" = live WS events in last 8s, OR freshest stored telemetry within 15s
   // (covers the case where WS isn't delivering but data is actively ingesting).
@@ -164,8 +224,8 @@ export default function LiveFeed() {
 
   const statusOf = (assetId: string): { label: string; color: string } => {
     const h = healthMap[assetId];
-    const hasAlarm = activeAlarms.some((a) => a.assetName && allAssets.find((x) => x.id === assetId)?.name === a.assetName);
-    if (hasAlarm || h?.health === "alarm") return { label: criticalCount > 0 ? "Critical" : "Warning", color: criticalCount > 0 ? C.red : C.amber };
+    const level = alarmLevelOf(assetId) ?? (h?.health === "alarm" ? "warning" : null);
+    if (level) return level === "critical" ? { label: "Critical", color: C.red } : { label: "Warning", color: C.amber };
     if (h?.health === "stale" || Date.now() - (latest[assetId]?.lastSeen ?? 0) > STALE_MS) return { label: "Offline", color: C.dim };
     return { label: "Running", color: C.green };
   };
@@ -193,10 +253,8 @@ export default function LiveFeed() {
   const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE));
 
   function exportCsv() {
-    const header = "time,asset,sensor,value";
-    const rows = filtered.map((e) => `${new Date(e.ts).toISOString()},${e.assetName},${e.sensor},${e.value}`);
-    const url = URL.createObjectURL(new Blob([[header, ...rows].join("\n")], { type: "text/csv" }));
-    const a = document.createElement("a"); a.href = url; a.download = `sensor_feed_${Date.now()}.csv`; a.click(); URL.revokeObjectURL(url);
+    const rows = filtered.map((e) => [new Date(e.ts).toISOString(), e.assetName, e.sensor, e.value]);
+    downloadCsvText(toCsv(["time", "asset", "sensor", "value"], rows), `sensor_feed_${Date.now()}.csv`);
   }
 
   return (
@@ -306,7 +364,13 @@ export default function LiveFeed() {
                       <td className="px-3 py-2" style={{ color: C.text }}>{e.assetName}</td>
                       <td className="px-3 py-2" style={{ color: C.muted }}>{e.sensor}</td>
                       <td className="px-3 py-2 font-mono" style={{ color: C.cyan }}>{Math.abs(e.value) < 1 ? e.value.toFixed(3) : e.value.toFixed(2)}</td>
-                      <td className="px-3 py-2"><span className="flex items-center gap-1.5" style={{ color: C.green }}><span className="w-1.5 h-1.5 rounded-full" style={{ background: C.green }} />Normal</span></td>
+                      {(() => {
+                        const level = alarmLevelOf(e.assetId);
+                        const st = level === "critical" ? { label: "Critical", color: C.red }
+                          : level === "warning" ? { label: "Warning", color: C.amber }
+                          : { label: "Normal", color: C.green };
+                        return <td className="px-3 py-2"><span className="flex items-center gap-1.5" style={{ color: st.color }}><span className="w-1.5 h-1.5 rounded-full" style={{ background: st.color }} />{st.label}</span></td>;
+                      })()}
                     </tr>
                   ))}
                 </tbody>
@@ -341,7 +405,8 @@ export default function LiveFeed() {
               </div>
             </Panel>
 
-            <Panel title="Live Event Timeline" right={<ViewAll onClick={() => navigate("/activity-log")} />}>
+            {/* The audit trail spans every project, so a project-restricted user does not get it here. */}
+            {!restricted && <Panel title="Live Event Timeline" right={<ViewAll onClick={() => navigate("/activity-log")} />}>
               <div className="p-3 space-y-2.5">
                 {activities.length === 0 ? <Empty text="No recent events" /> : activities.slice(0, 6).map((e, i) => (
                   <div key={e.id} className="flex items-center gap-2.5 text-xs">
@@ -351,7 +416,7 @@ export default function LiveFeed() {
                   </div>
                 ))}
               </div>
-            </Panel>
+            </Panel>}
           </div>
         </div>
       </div>

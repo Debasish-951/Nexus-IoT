@@ -1,0 +1,150 @@
+/*
+ * Colour skins chosen from the palette menu. Only colour tokens change, and only
+ * under each html[data-skin="..."], so the other skins are untouched. To remove one,
+ * delete its blocks here and its entries in lib/appearance.ts and
+ * components/AppearanceMenu.tsx.
+ */
+
+/* ── Deep navy ── */
+html[data-skin="navy"] {
+  --background: 221 30% 98%;
+  --foreground: 221 35% 12%;
+  --border: 221 20% 90%;
+  --input: 221 15% 84%;
+  --ring: 221 83% 53%;
+
+  --card: 0 0% 100%;
+  --card-foreground: 221 35% 12%;
+  --card-border: 221 20% 87%;
+
+  --popover: 0 0% 100%;
+  --popover-foreground: 221 35% 12%;
+  --popover-border: 221 20% 87%;
+
+  --primary: 221 83% 53%;  /* #2563EB */
+  --primary-foreground: 0 0% 100%;
+
+  --secondary: 221 30% 96%;
+  --secondary-foreground: 221 50% 25%;
+
+  --muted: 221 30% 96%;
+  --muted-foreground: 221 10% 38%;
+
+  --accent: 221 35% 93%;
+  --accent-foreground: 221 50% 25%;
+
+  --destructive: 0 72% 42%;
+  --destructive-foreground: 0 0% 100%;
+
+  --sidebar: 221 51% 16%;  /* #14213D */
+  --sidebar-foreground: 221 30% 90%;
+  --sidebar-border: 221 51% 26%;
+  --sidebar-primary: 0 0% 100%;
+  --sidebar-primary-foreground: 221 51% 16%;
+  --sidebar-accent: 221 51% 28%;
+  --sidebar-accent-foreground: 0 0% 100%;
+  --sidebar-ring: 221 30% 90%;
+}
+
+html[data-skin="navy"].dark {
+  --background: 213 25% 6%;
+  --foreground: 213 25% 96%;
+  --border: 213 18% 20%;
+  --input: 213 18% 24%;
+  --ring: 213 94% 68%;
+
+  --card: 213 22% 10%;
+  --card-foreground: 213 25% 96%;
+  --card-border: 213 18% 24%;
+
+  --popover: 213 22% 12%;
+  --popover-foreground: 213 25% 96%;
+  --popover-border: 213 18% 24%;
+
+  --primary: 213 94% 68%;  /* #60A5FA */
+  --primary-foreground: 213 40% 8%;
+
+  --secondary: 213 18% 16%;
+  --secondary-foreground: 213 25% 96%;
+
+  --muted: 213 18% 16%;
+  --muted-foreground: 213 12% 72%;
+
+  --accent: 213 20% 18%;
+  --accent-foreground: 213 25% 96%;
+
+  --destructive: 0 72% 51%;
+  --destructive-foreground: 0 0% 100%;
+
+  --sidebar: 221 51% 12%;
+  --sidebar-foreground: 221 25% 88%;
+  --sidebar-border: 221 20% 22%;
+  --sidebar-primary: 213 94% 68%;
+  --sidebar-primary-foreground: 213 40% 8%;
+  --sidebar-accent: 221 22% 22%;
+  --sidebar-accent-foreground: 0 0% 100%;
+  --sidebar-ring: 213 94% 68%;
+}
+
+/* Page colour options. These change the page and cards and keep the Classic left bar
+   and blue accent. lib/appearance.ts fixes each one to the light theme. */
+
+/* ── Cool grey ── */
+html[data-skin="cool-grey"] {
+  --background: 214 32% 91%;  /* #E2E8F0 */
+  --foreground: 222 47% 11%;
+  --border: 214 32% 82%;
+  --input: 214 32% 78%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+  --card-border: 214 32% 80%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 11%;
+  --popover-border: 214 32% 80%;
+  --secondary: 214 32% 95%;
+  --secondary-foreground: 222 47% 20%;
+  --muted: 214 32% 95%;
+  --muted-foreground: 215 19% 35%;
+  --accent: 214 40% 93%;
+  --accent-foreground: 222 47% 20%;
+}
+
+/* ── Soft white ── */
+html[data-skin="soft-white"] {
+  --background: 210 40% 98%;  /* #F8FAFC */
+  --foreground: 222 47% 11%;
+  --border: 214 32% 91%;
+  --input: 214 32% 84%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+  --card-border: 214 32% 87%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 11%;
+  --popover-border: 214 32% 87%;
+  --secondary: 214 32% 95%;
+  --secondary-foreground: 222 47% 20%;
+  --muted: 214 32% 95%;
+  --muted-foreground: 215 19% 35%;
+  --accent: 214 40% 93%;
+  --accent-foreground: 222 47% 20%;
+}
+
+/* ── Pale blue ── */
+html[data-skin="pale-blue"] {
+  --background: 214 100% 97%;  /* #EFF6FF */
+  --foreground: 222 47% 11%;
+  --border: 214 32% 91%;
+  --input: 214 32% 84%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+  --card-border: 214 32% 87%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 11%;
+  --popover-border: 214 32% 87%;
+  --secondary: 214 32% 95%;
+  --secondary-foreground: 222 47% 20%;
+  --muted: 214 32% 95%;
+  --muted-foreground: 215 19% 35%;
+  --accent: 214 40% 93%;
+  --accent-foreground: 222 47% 20%;
+}

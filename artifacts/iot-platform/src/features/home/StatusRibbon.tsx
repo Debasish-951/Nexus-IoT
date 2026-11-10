@@ -40,7 +40,7 @@ export function StatusRibbon({ summary, attention, ingest, wsStatus }: {
   const stale = attention?.counts.stale ?? 0;
 
   return (
-    <Card className="shadow-sm">
+    <Card className="shadow-sm !border-primary/40">
       <CardContent className="px-4 py-3 flex items-center gap-5 flex-wrap">
         <div className="flex items-center gap-2.5 shrink-0">
           <span className={"w-2 h-2 rounded-full shrink-0 " + (

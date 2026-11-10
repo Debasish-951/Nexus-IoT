@@ -38,6 +38,11 @@ export interface AssetTreeCtx {
   onAssignTemplate?: (a: Asset) => void;
   onOpenBuilder?: (a: Asset) => void;   // optional — right-click → open Dashboard Builder
   dashboard?: DashboardActions;         // optional — right-click → dashboard actions
+  // Optional per-node limits on top of canManage. Omitted means no extra limit,
+  // which is what the Asset Hub tree relies on.
+  nodeAccess?: (id: string) => { write: boolean; delete: boolean };
+  onShare?: (a: Asset) => void;         // optional — right-click → Manage Access
+  onAssignProject?: (a: Asset) => void; // optional — right-click → Assign to Project
 }
 
 const Ctx = createContext<AssetTreeCtx | null>(null);

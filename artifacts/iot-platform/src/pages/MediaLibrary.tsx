@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useLocation } from "wouter";
 import { Upload, Link2, Trash2, Copy, Image, ExternalLink, Plus, Search, X, CheckCircle2, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -8,8 +8,24 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
+import { apiFetch } from "@/lib/auth-api";
+import { describeApiError, formatApiError } from "@/lib/validation";
 
+/**
+ * Uploaded images live on the server (/api/uploads). They used to be stored
+ * here as data: URLs in localStorage, where they vanished once the browser's
+ * quota filled, and where a widget pointing at one embedded the whole image in
+ * the dashboard — big enough to break the dashboard save.
+ *
+ * localStorage still holds two things: "Add by URL" entries (just a link), and
+ * any images uploaded before this change. Those older ones are shown read-only
+ * ("in this browser") so nobody loses them; they can still be copied or deleted.
+ */
 const MEDIA_KEY = "ws-media-library-v1";
+
+/** Mirrors the server's default UPLOAD_MAX_BYTES and accepted image types. */
+const MAX_UPLOAD_BYTES = 10 * 1024 * 1024;
+const ACCEPTED_TYPES = ["image/png", "image/jpeg", "image/gif", "image/webp"];
 
 interface MediaItem {
   id: string;
@@ -19,14 +35,53 @@ interface MediaItem {
   mimeType?: string;
   size?: number;
   uploadedAt: string;
+  /** Where it is kept: on the server, or only in this browser's localStorage. */
+  source: "server" | "browser";
 }
 
-function loadMedia(): MediaItem[] {
-  try { return JSON.parse(localStorage.getItem(MEDIA_KEY) ?? "[]"); }
-  catch { return []; }
+function loadLocalMedia(): MediaItem[] {
+  try {
+    const parsed = JSON.parse(localStorage.getItem(MEDIA_KEY) ?? "[]");
+    return Array.isArray(parsed) ? parsed.map((i: MediaItem) => ({ ...i, source: "browser" as const })) : [];
+  } catch { return []; }
 }
-function saveMedia(items: MediaItem[]) {
-  localStorage.setItem(MEDIA_KEY, JSON.stringify(items));
+function saveLocalMedia(items: MediaItem[]) {
+  try {
+    localStorage.setItem(MEDIA_KEY, JSON.stringify(items.map(({ source: _source, ...rest }) => rest)));
+  } catch { /* quota: these entries are only links now, so this is unlikely */ }
+}
+
+async function fetchServerMedia(): Promise<MediaItem[]> {
+  const res = await apiFetch("/api/uploads?limit=200");
+  if (!res.ok) throw new Error(formatApiError(await describeApiError(res)));
+  const rows = await res.json();
+  if (!Array.isArray(rows)) return [];
+  return rows
+    .filter((r: any) => typeof r?.mimeType === "string" && r.mimeType.startsWith("image/"))
+    .map((r: any) => ({
+      id: String(r.id), name: String(r.name ?? "image"), url: String(r.url),
+      type: "upload" as const, mimeType: r.mimeType, size: Number(r.size) || undefined,
+      uploadedAt: String(r.uploadedAt ?? new Date().toISOString()), source: "server" as const,
+    }));
+}
+
+/**
+ * One file per request, so each file gets its own success or error message.
+ *
+ * Plain fetch with the CSRF header attached by hand rather than apiFetch:
+ * apiFetch labels every body as JSON, which would replace the multipart
+ * boundary the browser must set for FormData. Credentials and the CSRF token
+ * are exactly what apiFetch would send.
+ */
+async function uploadOne(file: File): Promise<void> {
+  const form = new FormData();
+  form.append("file", file, file.name);
+  const res = await apiFetch("/api/uploads", { method: "POST", body: form });
+  if (!res.ok) throw new Error(formatApiError(await describeApiError(res)));
+  const out = await res.json().catch(() => null);
+  if (!Array.isArray(out?.uploaded) || out.uploaded.length === 0) {
+    throw new Error(out?.rejected?.[0]?.reason ?? "The upload was rejected.");
+  }
 }
 
 function formatBytes(bytes: number) {
@@ -45,7 +100,9 @@ export default function MediaLibrary() {
   const [, navigate] = useLocation();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const [items, setItems]               = useState<MediaItem[]>(loadMedia);
+  const [serverItems, setServerItems]   = useState<MediaItem[]>([]);
+  const [localItems, setLocalItems]     = useState<MediaItem[]>(loadLocalMedia);
+  const [uploading, setUploading]       = useState(false);
   const [search, setSearch]             = useState("");
   const [addUrlOpen, setAddUrlOpen]     = useState(false);
   const [urlInput, setUrlInput]         = useState("");
@@ -55,42 +112,47 @@ export default function MediaLibrary() {
   const [dragOver, setDragOver]         = useState(false);
   const [copiedId, setCopiedId]         = useState<string | null>(null);
 
-  const persist = useCallback((next: MediaItem[]) => { setItems(next); saveMedia(next); }, []);
+  const items = [...serverItems, ...localItems];
 
-  function handleFiles(files: FileList | null) {
-    if (!files || files.length === 0) return;
-    const readers: Promise<MediaItem>[] = Array.from(files).map(file =>
-      new Promise<MediaItem>((resolve, reject) => {
-        if (file.size > 5 * 1024 * 1024) {
-          reject(new Error(`"${file.name}" exceeds 5 MB limit`));
-          return;
+  const persistLocal = useCallback((next: MediaItem[]) => { setLocalItems(next); saveLocalMedia(next); }, []);
+
+  const reloadServer = useCallback(async () => {
+    try {
+      setServerItems(await fetchServerMedia());
+    } catch (e) {
+      toast({ title: "Could not load uploaded images", description: (e as Error).message, variant: "destructive" });
+    }
+  }, [toast]);
+  useEffect(() => { void reloadServer(); }, [reloadServer]);
+
+  async function handleFiles(files: FileList | File[] | null) {
+    if (!files || files.length === 0 || uploading) return;
+    setUploading(true);
+    let ok = 0;
+    try {
+      for (const file of Array.from(files)) {
+        if (!ACCEPTED_TYPES.includes(file.type)) {
+          toast({ title: "Upload failed", description: `"${file.name}" is not a PNG, JPG, GIF or WebP image.`, variant: "destructive" });
+          continue;
         }
-        const reader = new FileReader();
-        reader.onload = e => resolve({
-          id: crypto.randomUUID(),
-          name: file.name,
-          url: e.target?.result as string,
-          type: "upload",
-          mimeType: file.type,
-          size: file.size,
-          uploadedAt: new Date().toISOString(),
-        });
-        reader.onerror = () => reject(new Error(`Failed to read "${file.name}"`));
-        reader.readAsDataURL(file);
-      })
-    );
-    Promise.allSettled(readers).then(results => {
-      const succeeded: MediaItem[] = [];
-      results.forEach(r => {
-        if (r.status === "fulfilled") succeeded.push(r.value);
-        else toast({ title: "Upload failed", description: (r as any).reason?.message, variant: "destructive" });
-      });
-      if (succeeded.length > 0) {
-        const next = [...loadMedia(), ...succeeded];
-        persist(next);
-        toast({ title: `${succeeded.length} image${succeeded.length > 1 ? "s" : ""} uploaded` });
+        if (file.size > MAX_UPLOAD_BYTES) {
+          toast({ title: "Upload failed", description: `"${file.name}" exceeds the 10 MB limit.`, variant: "destructive" });
+          continue;
+        }
+        try {
+          await uploadOne(file);
+          ok++;
+        } catch (e) {
+          toast({ title: "Upload failed", description: `"${file.name}": ${(e as Error).message}`, variant: "destructive" });
+        }
       }
-    });
+    } finally {
+      setUploading(false);
+    }
+    if (ok > 0) {
+      toast({ title: `${ok} image${ok > 1 ? "s" : ""} uploaded` });
+      await reloadServer();
+    }
   }
 
   function addByUrl() {
@@ -103,9 +165,9 @@ export default function MediaLibrary() {
       url,
       type: "external",
       uploadedAt: new Date().toISOString(),
+      source: "browser",
     };
-    const next = [...loadMedia(), item];
-    persist(next);
+    persistLocal([...loadLocalMedia(), item]);
     setUrlInput(""); setUrlName(""); setAddUrlOpen(false);
     toast({ title: "Image added" });
   }
@@ -118,9 +180,17 @@ export default function MediaLibrary() {
     });
   }
 
-  function deleteItem(item: MediaItem) {
-    const next = items.filter(i => i.id !== item.id);
-    persist(next);
+  async function deleteItem(item: MediaItem) {
+    if (item.source === "server") {
+      const res = await apiFetch(`/api/uploads/${encodeURIComponent(item.id)}`, { method: "DELETE" });
+      if (!res.ok) {
+        toast({ title: "Could not delete image", description: formatApiError(await describeApiError(res)), variant: "destructive" });
+        return;
+      }
+      setServerItems((prev) => prev.filter((i) => i.id !== item.id));
+    } else {
+      persistLocal(localItems.filter(i => i.id !== item.id));
+    }
     setDeleteTarget(null);
     toast({ title: `"${item.name}" deleted` });
   }
@@ -131,7 +201,7 @@ export default function MediaLibrary() {
 
   return (
     <div className="p-6 space-y-5">
-      <button onClick={() => navigate("/asset-management")} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+      <button onClick={() => navigate("/")} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="w-4 h-4" /> Back
       </button>
       {/* Header */}
@@ -141,18 +211,18 @@ export default function MediaLibrary() {
             <Image className="w-5 h-5 text-primary" /> Media Library
           </h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Upload and manage images for use in dashboards and widgets. Stored locally in your browser.
+            Upload and manage images for use in dashboards and widgets. Uploaded images are stored on the server.
           </p>
         </div>
         <div className="flex items-center gap-2">
           <Button variant="outline" size="sm" onClick={() => setAddUrlOpen(true)}>
             <Link2 className="w-3.5 h-3.5 mr-1.5" /> Add by URL
           </Button>
-          <Button size="sm" onClick={() => fileInputRef.current?.click()}>
-            <Upload className="w-3.5 h-3.5 mr-1.5" /> Upload Images
+          <Button size="sm" onClick={() => fileInputRef.current?.click()} disabled={uploading}>
+            <Upload className="w-3.5 h-3.5 mr-1.5" /> {uploading ? "Uploading…" : "Upload Images"}
           </Button>
-          <input ref={fileInputRef} type="file" accept="image/*" multiple className="hidden"
-            onChange={e => { handleFiles(e.target.files); e.target.value = ""; }} />
+          <input ref={fileInputRef} type="file" accept={ACCEPTED_TYPES.join(",")} multiple className="hidden"
+            onChange={e => { const files = e.target.files ? Array.from(e.target.files) : []; e.target.value = ""; void handleFiles(files); }} />
         </div>
       </div>
 
@@ -192,7 +262,7 @@ export default function MediaLibrary() {
         <div
           onDragOver={e => { e.preventDefault(); setDragOver(true); }}
           onDragLeave={() => setDragOver(false)}
-          onDrop={e => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer.files); }}
+          onDrop={e => { e.preventDefault(); setDragOver(false); void handleFiles(e.dataTransfer.files); }}
           className={cn(
             "flex flex-col items-center justify-center border-2 border-dashed rounded-xl py-20 transition-colors cursor-pointer",
             dragOver ? "border-primary bg-primary/5" : "border-border hover:border-primary/50"
@@ -200,7 +270,7 @@ export default function MediaLibrary() {
           onClick={() => fileInputRef.current?.click()}>
           <Image className="w-10 h-10 mb-4 text-muted-foreground opacity-40" />
           <p className="text-sm font-medium text-muted-foreground">Drop images here or click to upload</p>
-          <p className="text-xs text-muted-foreground mt-1">PNG, JPG, GIF, SVG, WebP · Max 5 MB each</p>
+          <p className="text-xs text-muted-foreground mt-1">PNG, JPG, GIF, WebP · Max 10 MB each</p>
           <Button variant="outline" size="sm" className="mt-4">
             <Plus className="w-3.5 h-3.5 mr-1.5" /> Choose Files
           </Button>
@@ -215,7 +285,7 @@ export default function MediaLibrary() {
           <div
             onDragOver={e => { e.preventDefault(); setDragOver(true); }}
             onDragLeave={() => setDragOver(false)}
-            onDrop={e => { e.preventDefault(); setDragOver(false); handleFiles(e.dataTransfer.files); }}
+            onDrop={e => { e.preventDefault(); setDragOver(false); void handleFiles(e.dataTransfer.files); }}
             className={cn(
               "fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm transition-all pointer-events-none",
               dragOver ? "opacity-100 pointer-events-auto" : "opacity-0"
@@ -254,8 +324,9 @@ export default function MediaLibrary() {
                 <div className="p-2">
                   <p className="text-xs font-medium truncate" title={item.name}>{item.name}</p>
                   <div className="flex items-center gap-1 mt-0.5">
-                    <Badge variant="outline" className="text-[9px] h-4 px-1">
-                      {item.type === "upload" ? "upload" : "url"}
+                    <Badge variant="outline" className="text-[9px] h-4 px-1"
+                      title={item.type === "upload" && item.source === "browser" ? "Uploaded before images moved to the server; kept in this browser only" : undefined}>
+                      {item.type === "external" ? "url" : item.source === "browser" ? "in this browser" : "upload"}
                     </Badge>
                     {item.size && <span className="text-[9px] text-muted-foreground">{formatBytes(item.size)}</span>}
                   </div>
@@ -335,7 +406,7 @@ export default function MediaLibrary() {
               {preview?.name}
             </DialogTitle>
             <DialogDescription>
-              {preview?.type === "upload" ? "Uploaded image" : "External URL"} · {preview?.uploadedAt ? formatDate(preview.uploadedAt) : ""}
+              {preview?.type === "upload" ? (preview.source === "browser" ? "Uploaded image (kept in this browser only)" : "Uploaded image") : "External URL"} · {preview?.uploadedAt ? formatDate(preview.uploadedAt) : ""}
               {preview?.size ? ` · ${formatBytes(preview.size)}` : ""}
             </DialogDescription>
           </DialogHeader>
@@ -367,12 +438,14 @@ export default function MediaLibrary() {
             <DialogTitle>Delete Image</DialogTitle>
             <DialogDescription>
               Remove "{deleteTarget?.name}" from the media library? This cannot be undone.
-              {deleteTarget?.type === "upload" && " The image data will be erased from your browser storage."}
+              {deleteTarget?.type === "upload" && (deleteTarget.source === "server"
+                ? " The file will be deleted from the server, and any widget using its URL will stop showing it."
+                : " The image data will be erased from your browser storage.")}
             </DialogDescription>
           </DialogHeader>
           <DialogFooter>
             <Button variant="outline" size="sm" onClick={() => setDeleteTarget(null)}>Cancel</Button>
-            <Button variant="destructive" size="sm" onClick={() => deleteTarget && deleteItem(deleteTarget)}>Delete</Button>
+            <Button variant="destructive" size="sm" onClick={() => { if (deleteTarget) void deleteItem(deleteTarget); }}>Delete</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

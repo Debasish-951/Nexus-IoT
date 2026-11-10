@@ -7,6 +7,8 @@ import {
   useListAssets,
 } from "@workspace/api-client-react";
 import { useToast } from "@/hooks/use-toast";
+import { apiFetch } from "@/lib/auth-api";
+import { describeApiError, formatApiError } from "@/lib/validation";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -654,12 +656,14 @@ function CustomAssetSender() {
     const start = performance.now();
     setSending(true);
     try {
-      const res = await fetch("/api/ingest/payload", {
+      const res = await apiFetch("/api/ingest/payload", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       });
-      const data = await res.json();
+      if (!res.ok) {
+        toast({ title: "Payload rejected", description: formatApiError(await describeApiError(res)), variant: "destructive" });
+      }
+      const data = await res.json().catch(() => null);
       const dur = Math.round(performance.now() - start);
       const alarmEvents: AlarmEvent[] = data?.alarmEvents ?? [];
       const newlyTriggered = alarmEvents.filter((e: AlarmEvent) => e.event === "triggered");
@@ -1095,16 +1099,21 @@ function CsvUploader() {
     }
     setPushing(true); setResult(null); setProgress(0); stopRef.current = false;
     let ok = 0, fail = 0;
+    let firstError: string | null = null;
     for (let i = 0; i < rows.length; i++) {
       if (stopRef.current) break;
       const payload = buildPayload(rows[i]);
       if (!payload) { fail++; setProgress(i + 1); continue; }
       try {
-        const res = await fetch("/api/ingest/payload", {
-          method: "POST", headers: { "Content-Type": "application/json" },
+        const res = await apiFetch("/api/ingest/payload", {
+          method: "POST",
           body: JSON.stringify(payload),
         });
-        if (res.ok) ok++; else fail++;
+        if (res.ok) ok++;
+        else {
+          fail++;
+          if (!firstError) firstError = formatApiError(await describeApiError(res));
+        }
       } catch { fail++; }
       setProgress(i + 1);
       if (mode === "stream") {
@@ -1115,7 +1124,7 @@ function CsvUploader() {
     qc.invalidateQueries({ queryKey: getGetRecentTelemetryQueryKey({ limit: 12 }) });
     setResult({ ok, fail });
     setPushing(false);
-    toast({ title: `Pushed ${ok} row${ok !== 1 ? "s" : ""}${fail ? `, ${fail} failed` : ""}`, variant: fail ? "destructive" : undefined });
+    toast({ title: `Pushed ${ok} row${ok !== 1 ? "s" : ""}${fail ? `, ${fail} failed` : ""}`, description: firstError ?? undefined, variant: fail ? "destructive" : undefined });
   }
 
   return (
@@ -1331,21 +1340,23 @@ export default function IngestSimulator() {
       try {
         // Fire validate + ingest in parallel
         const [ingestRes, validateRes] = await Promise.all([
-          fetch("/api/ingest/payload", {
+          apiFetch("/api/ingest/payload", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
           }),
-          fetch("/api/ingest/validate", {
+          apiFetch("/api/ingest/validate", {
             method: "POST",
-            headers: { "Content-Type": "application/json" },
             body: JSON.stringify(payload),
           }),
         ]);
 
+        if (!ingestRes.ok) {
+          toast({ title: "Payload rejected", description: formatApiError(await describeApiError(ingestRes)), variant: "destructive" });
+        }
+
         const [data, validateData] = await Promise.all([
-          ingestRes.json(),
-          validateRes.json(),
+          ingestRes.json().catch(() => null),
+          validateRes.json().catch(() => null),
         ]);
 
         const durationMs = Math.round(performance.now() - start);

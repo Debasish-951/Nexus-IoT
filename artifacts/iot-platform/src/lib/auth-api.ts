@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { reportForbidden } from "@/lib/session-events";
 
 /**
  * Thin fetch helpers for the auth endpoints.
@@ -37,7 +38,8 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
   const headers = new Headers(init.headers);
 
   if (!headers.has("accept")) headers.set("accept", "application/json");
-  if (init.body !== undefined && !headers.has("content-type")) {
+  // FormData sets its own multipart content type, including the boundary.
+  if (init.body !== undefined && !(init.body instanceof FormData) && !headers.has("content-type")) {
     headers.set("content-type", "application/json");
   }
   if (UNSAFE_METHODS.has(method) && !headers.has("x-csrf-token")) {
@@ -45,7 +47,15 @@ export async function apiFetch(path: string, init: RequestInit = {}): Promise<Re
     if (csrf) headers.set("x-csrf-token", csrf);
   }
 
-  return fetch(path, { ...init, method, credentials: "include", headers });
+  const res = await fetch(path, { ...init, method, credentials: "include", headers });
+  // A 403 may mean our session is stale (password change forced, access changed).
+  // Read a clone so the caller still gets an unread body.
+  if (res.status === 403) {
+    void res.clone().json()
+      .then((body: { code?: unknown }) => reportForbidden(typeof body?.code === "string" ? body.code : null))
+      .catch(() => {});
+  }
+  return res;
 }
 
 export async function apiGet(path: string): Promise<Response> {

@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 240 900" width="240" height="900" fill="none" stroke="#fff" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Sensor network behind the menu: faint so menu text stays readable. -->
+  <g opacity=".3">
+    <path d="M28 70 L96 128 L190 92 L214 196 L132 244 L44 208 L28 70 M96 128 L132 244 M44 208 L70 330 L168 352 L132 244 M168 352 L216 312 L214 196 M70 330 L24 430 L108 470 L168 352 M108 470 L204 504 L216 312 M24 430 L52 560 L108 470"/>
+    <g fill="#fff" stroke="none">
+      <circle cx="28" cy="70" r="3.5"/><circle cx="96" cy="128" r="4.5"/><circle cx="190" cy="92" r="3.5"/>
+      <circle cx="214" cy="196" r="3.5"/><circle cx="132" cy="244" r="5"/><circle cx="44" cy="208" r="3.5"/>
+      <circle cx="70" cy="330" r="4"/><circle cx="168" cy="352" r="5"/><circle cx="216" cy="312" r="3.5"/>
+      <circle cx="24" cy="430" r="3.5"/><circle cx="108" cy="470" r="4.5"/><circle cx="204" cy="504" r="3.5"/>
+      <circle cx="52" cy="560" r="3.5"/>
+    </g>
+  </g>
+
+  <!-- Cloud linked to the plant gateway. -->
+  <g opacity=".75">
+    <path d="M78 640 h84 a22 22 0 0 0 3 -44 a32 32 0 0 0 -60 -11 a24 24 0 0 0 -27 55 z"/>
+    <path d="M120 640 V690" stroke-dasharray="3 6"/>
+    <circle cx="120" cy="612" r="4" fill="#fff" stroke="none"/>
+    <path d="M108 612 H96 M132 612 H146 M120 600 V590"/>
+  </g>
+
+  <!-- Gateway with wireless signal. -->
+  <g>
+    <rect x="96" y="690" width="48" height="26" rx="4"/>
+    <circle cx="108" cy="703" r="2.5" fill="#fff" stroke="none"/>
+    <circle cx="120" cy="703" r="2.5" fill="#fff" stroke="none"/>
+    <path d="M132 703 h4"/>
+    <path d="M58 680 a14 14 0 0 0 0 20 M50 672 a26 26 0 0 0 0 36 M42 664 a38 38 0 0 0 0 52"/>
+    <path d="M182 680 a14 14 0 0 1 0 20 M190 672 a26 26 0 0 1 0 36 M198 664 a38 38 0 0 1 0 52"/>
+    <path d="M120 716 V760" stroke-dasharray="3 6"/>
+  </g>
+
+  <!-- Plant: saw-tooth roof, chimneys and a gear. -->
+  <g>
+    <path d="M14 888 V790 L54 762 V790 L94 762 V790 L134 762 V790 H154 V730 H176 V790 H190 V746 H208 V790 H226 V888 Z"/>
+    <path d="M34 820 h22 v18 h-22 z M72 820 h22 v18 h-22 z M34 852 h22 v18 h-22 z M72 852 h22 v18 h-22 z"/>
+    <circle cx="165" cy="842" r="10"/>
+    <path d="M165 818 v8 M165 858 v8 M141 842 h8 M181 842 h8 M148 825 l6 6 M176 853 l6 6 M182 825 l-6 6 M154 853 l-6 6"/>
+    <path d="M6 888 H234"/>
+  </g>
+</svg>

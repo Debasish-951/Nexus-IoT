@@ -1,0 +1,21 @@
+/*
+ * Home greeting: each word jumps in, one after another, when the page opens.
+ * pages/HomeOverview.tsx sets the delay for each word.
+ */
+
+@keyframes greeting-jump {
+  0%   { opacity: 0; transform: translateY(10px); }
+  35%  { opacity: 1; transform: translateY(-12px); }
+  65%  { transform: translateY(0); }
+  82%  { transform: translateY(-4px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+.greeting-word {
+  display: inline-block;
+  animation: greeting-jump 650ms ease-out backwards;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .greeting-word { animation: none; }
+}

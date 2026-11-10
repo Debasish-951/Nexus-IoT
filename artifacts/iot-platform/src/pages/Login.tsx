@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState } from "react";
 import { useLocation } from "wouter";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { cn } from "@/lib/utils";
@@ -10,6 +10,7 @@ import {
   Eye, EyeOff, Lock, ShieldCheck, ArrowRight, ArrowLeft, User, Mail, Check, Loader2, AlertTriangle,
 } from "lucide-react";
 import { apiPost } from "@/lib/auth-api";
+import { NodeMesh } from "@/components/NodeMesh";
 
 // ── Concept B "Split Signal": animated sensor-mesh hero (left) + sign-in (right).
 // Deliberately dark, digital-twin themed. Lives outside the app Layout (no sidebar).
@@ -20,76 +21,6 @@ const CYAN = "#2dd4ff";
 const INPUT_CLASS =
   "h-11 bg-[#0a1024]/70 border-white/10 text-slate-100 placeholder:text-slate-500 " +
   "focus-visible:ring-[#8b7bff] focus-visible:ring-offset-0 focus-visible:border-[#8b7bff]";
-
-// ── Animated node mesh (canvas). Respects prefers-reduced-motion. ────────────────
-function NodeMesh() {
-  const ref = useRef<HTMLCanvasElement | null>(null);
-  useEffect(() => {
-    const cv = ref.current;
-    if (!cv) return;
-    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    const ctx = cv.getContext("2d");
-    if (!ctx) return;
-
-    let w = 0, h = 0, dpr = 1;
-    type P = { x: number; y: number; vx: number; vy: number };
-    let nodes: P[] = [];
-    let raf = 0;
-
-    const seed = () => {
-      const rect = cv.getBoundingClientRect();
-      dpr = Math.min(window.devicePixelRatio || 1, 2);
-      w = rect.width; h = rect.height;
-      cv.width = Math.max(1, w * dpr);
-      cv.height = Math.max(1, h * dpr);
-      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      const count = Math.max(16, Math.min(46, Math.round((w * h) / 9000)));
-      nodes = Array.from({ length: count }, () => ({
-        x: Math.random() * w, y: Math.random() * h,
-        vx: (Math.random() - 0.5) * 0.14, vy: (Math.random() - 0.5) * 0.14,
-      }));
-    };
-
-    const draw = () => {
-      ctx.clearRect(0, 0, w, h);
-      const linkDist = w * 0.16;
-      for (const p of nodes) {
-        p.x += p.vx; p.y += p.vy;
-        if (p.x < 0 || p.x > w) p.vx *= -1;
-        if (p.y < 0 || p.y > h) p.vy *= -1;
-      }
-      for (let i = 0; i < nodes.length; i++) {
-        for (let j = i + 1; j < nodes.length; j++) {
-          const dx = nodes[i].x - nodes[j].x, dy = nodes[i].y - nodes[j].y;
-          const d = Math.hypot(dx, dy);
-          if (d < linkDist) {
-            ctx.beginPath();
-            ctx.strokeStyle = `rgba(139,123,255,${0.5 * (1 - d / linkDist)})`;
-            ctx.lineWidth = 0.7;
-            ctx.moveTo(nodes[i].x, nodes[i].y);
-            ctx.lineTo(nodes[j].x, nodes[j].y);
-            ctx.stroke();
-          }
-        }
-      }
-      for (const p of nodes) {
-        ctx.beginPath();
-        ctx.fillStyle = "rgba(127,227,255,0.9)";
-        ctx.arc(p.x, p.y, 1.6, 0, Math.PI * 2);
-        ctx.fill();
-      }
-      if (!reduce) raf = requestAnimationFrame(draw);
-    };
-
-    seed();
-    draw();
-    const onResize = () => { seed(); if (reduce) draw(); };
-    window.addEventListener("resize", onResize);
-    return () => { cancelAnimationFrame(raf); window.removeEventListener("resize", onResize); };
-  }, []);
-
-  return <canvas ref={ref} className="absolute inset-0 h-full w-full" aria-hidden />;
-}
 
 // Hexagon brand mark (CSP-safe, no image needed).
 function LogoMark({ className }: { className?: string }) {
@@ -110,9 +41,9 @@ function Brand() {
   if (imgOk) {
     return (
       <div className="flex flex-col gap-3">
-        <span className="inline-flex w-fit items-center rounded-xl bg-white px-8 py-6 shadow-lg shadow-black/30">
-          <img src="/web-synergies-logo.png" alt="Web Synergies" draggable={false}
-            className="h-24 w-auto select-none object-contain" onError={() => setImgOk(false)} />
+        <span className="inline-flex w-fit items-center rounded-xl bg-white px-6 py-4 shadow-lg shadow-black/30">
+          <img src="/web-synergies-logo-login.png" alt="Web Synergies" draggable={false}
+            className="h-28 w-auto select-none object-contain" onError={() => setImgOk(false)} />
         </span>
         <span className="font-mono text-base font-bold uppercase tracking-[0.22em] text-slate-300">
           Integrated Suite (IS)
@@ -426,8 +357,9 @@ export default function Login() {
         <div className="flex flex-col items-center justify-between gap-2 border-t border-white/5 px-6 py-4 text-xs text-slate-500 sm:flex-row">
           <span>Version 1.0.0 · © 2026 Web Synergies Pvt Ltd</span>
           <span className="flex items-center gap-3">
-            <a href="#" className="hover:text-slate-300">Privacy Policy</a>
-            <a href="#" className="hover:text-slate-300">Terms</a>
+            {/* Plain text until real policy URLs exist; they were dead href="#" links. */}
+            <span>Privacy Policy</span>
+            <span>Terms</span>
           </span>
         </div>
       </div>

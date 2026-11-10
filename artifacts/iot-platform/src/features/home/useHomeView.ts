@@ -13,18 +13,20 @@ import { useCallback, useEffect, useState } from "react";
  * rule and a migration to answer "which of two layouts do I like".
  */
 
-export type HomeView = "overview" | "classic";
+export type HomeView = "projects" | "overview" | "classic";
 
-const KEY = "nexus.home.view";
+// Renamed when Projects became the default, so an old saved view does not hide it.
+const KEY = "nexus.home.view.v2";
 const EVENT = "nexus:home-view";
 
 function read(): HomeView {
   try {
-    return localStorage.getItem(KEY) === "classic" ? "classic" : "overview";
+    const stored = localStorage.getItem(KEY);
+    return stored === "classic" || stored === "overview" ? stored : "projects";
   } catch {
     // Private browsing or a blocked storage partition. Fall back rather than
     // taking the page down over a preference.
-    return "overview";
+    return "projects";
   }
 }
 

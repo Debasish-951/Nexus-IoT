@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useLocation } from "wouter";
-import { RefreshCw, Maximize2, Bell } from "lucide-react";
+import { RefreshCw, Maximize2 } from "lucide-react";
 import {
   useGetDashboardSummary, useGetDashboardAttention, useGetDashboardHealthIndex,
   useGetDashboardAlarmTrend, useGetDashboardIngestSeries, useGetDashboardLiveMetrics,
@@ -10,7 +9,7 @@ import {
   useListAssets,
 } from "@workspace/api-client-react";
 import { useWsEvents } from "@/hooks/useWsEvents";
-import { useCurrentUser } from "@/contexts/UserContext";
+import { Greeting } from "@/features/home/Greeting";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { StatusRibbon } from "@/features/home/StatusRibbon";
@@ -40,13 +39,6 @@ interface TelemetryEvent {
   metric?: string; value?: unknown; timestamp?: string;
 }
 
-function greeting(): string {
-  const h = new Date().getHours();
-  if (h < 12) return "Good morning";
-  if (h < 18) return "Good afternoon";
-  return "Good evening";
-}
-
 /**
  * The banded Home page — A + B + C from the approved mockup.
  *
@@ -56,8 +48,6 @@ function greeting(): string {
  * role-specific dashboards is four things to keep working.
  */
 export default function HomeOverview() {
-  const [, navigate] = useLocation();
-  const { currentUser } = useCurrentUser();
 
   // `queryKey` is passed explicitly because the generated options type requires
   // it. The hook would default it, but the type does not know that, and casting
@@ -164,37 +154,20 @@ export default function HomeOverview() {
 
       {/* ── Header ── */}
       <div className="flex items-start justify-between gap-4 flex-wrap mb-4">
-        <div>
-          <h1 className="text-[21px] font-bold tracking-tight">
-            {greeting()}{currentUser?.fullName ? `, ${currentUser.fullName.split(" ")[0]}` : ""}
-          </h1>
-          <p className="text-[12.5px] text-muted-foreground mt-0.5">
-            {openAlarms > 0
-              ? <>Plant overview · <span className="text-orange-500 font-medium">
-                  {attention.data?.counts.total} item{attention.data?.counts.total === 1 ? "" : "s"} need attention
-                </span></>
-              : "Plant overview · nothing is waiting on you"}
-          </p>
-        </div>
+        <Greeting subtitle={openAlarms > 0
+          ? <>Plant overview · <span className="text-orange-500 font-medium">
+              {attention.data?.counts.total} item{attention.data?.counts.total === 1 ? "" : "s"} need attention
+            </span></>
+          : "Plant overview · nothing is waiting on you"} />
         <div className="flex items-center gap-2.5">
           <ViewSwitch />
-          <Button variant="outline" size="icon" className="h-9 w-9" title="Refresh now"
+          <Button variant="outline" size="icon" className="h-9 w-9 !border-primary/40" title="Refresh now"
                   onClick={refetchAll}>
-            <RefreshCw className={cn("w-4 h-4", attention.isFetching && "animate-spin")} />
+            <RefreshCw className={cn("w-4 h-4 text-primary", attention.isFetching && "animate-spin")} />
           </Button>
-          <Button variant="outline" size="icon" className="h-9 w-9" title="Toggle fullscreen"
+          <Button variant="outline" size="icon" className="h-9 w-9 !border-primary/40" title="Toggle fullscreen"
                   onClick={toggleFullscreen}>
-            <Maximize2 className="w-4 h-4" />
-          </Button>
-          <Button variant="outline" size="icon" className="h-9 w-9 relative" title="Active alarms"
-                  onClick={() => navigate("/alarms")}>
-            <Bell className="w-4 h-4" />
-            {openAlarms > 0 && (
-              <span className="absolute -top-1.5 -right-1.5 min-w-[18px] h-[18px] px-1 flex items-center
-                               justify-center rounded-full bg-red-500 text-white text-[10px] font-bold">
-                {openAlarms}
-              </span>
-            )}
+            <Maximize2 className="w-4 h-4 text-primary" />
           </Button>
         </div>
       </div>
@@ -213,8 +186,7 @@ export default function HomeOverview() {
 
           <BandAttention data={attention.data} activities={activities} loading={loading} />
 
-          <BandLiveSignals live={live.data} ingest={ingest.data} feed={feed}
-                           loading={live.isLoading} />
+          <BandLiveSignals ingest={ingest.data} feed={feed} />
 
           <BandTrends trend={trend.data} ingest={ingest.data} loading={trend.isLoading} />
         </>

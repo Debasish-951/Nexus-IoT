@@ -17,7 +17,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useForm } from "react-hook-form";
 import { Form, FormField, FormItem, FormLabel, FormControl } from "@/components/ui/form";
 import { useToast } from "@/hooks/use-toast";
-import {
+import { MonitorSmartphone,
   Users as UsersIcon, Plus, Trash2, Pencil,
   ShieldCheck, RotateCcw, FolderOpen, LayoutDashboard, BarChart3, Settings2,
   ChevronRight, Mail, MailWarning, KeyRound, Unlock, Save, Loader2, Info, LogOut, Timer, Clock,
@@ -25,15 +25,19 @@ import {
 import { format } from "date-fns";
 import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/contexts/UserContext";
+import { canGrantRole } from "@/lib/roleRank";
 import { ReadOnlyBanner } from "@/components/RoleGuard";
-import { apiGet, apiPost, apiFetch } from "@/lib/auth-api";
+import { apiGet, apiPost, apiPut, apiFetch } from "@/lib/auth-api";
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 
 const ROLE_STYLES: Record<string, string> = {
   super_admin:    "bg-purple-100 text-purple-800 dark:bg-purple-900/40 dark:text-purple-300",
+  company_admin:  "bg-violet-100 text-violet-800 dark:bg-violet-900/40 dark:text-violet-300",
   admin:          "bg-amber-100  text-amber-800  dark:bg-amber-900/40  dark:text-amber-300",
-  customer_admin: "bg-orange-100 text-orange-800 dark:bg-orange-900/40 dark:text-orange-300",
+  project_manager: "bg-cyan-100  text-cyan-800   dark:bg-cyan-900/40   dark:text-cyan-300",
+  team_lead:      "bg-teal-100   text-teal-800   dark:bg-teal-900/40   dark:text-teal-300",
+  developer:      "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/40 dark:text-indigo-300",
   engineer:       "bg-blue-100   text-blue-700   dark:bg-blue-900/40   dark:text-blue-300",
   operator:       "bg-green-100  text-green-700  dark:bg-green-900/40  dark:text-green-300",
   viewer:         "bg-slate-100  text-slate-600  dark:bg-slate-800     dark:text-slate-300",
@@ -54,6 +58,8 @@ type ModuleDef = { key: string; label: string; type: "simple" | "granular" };
 interface RbacCatalog {
   roles: {
     key: string; label: string; permissions: string[];
+    /** Absent from a server that predates role-based project access. */
+    projectAccess?: "all" | "assigned" | "per_user";
     moduleDefaults: Record<string, ModuleAccess>;
     /** Optional: absent from a server that predates grantable API scopes. */
     apiScopeDefaults?: string[];
@@ -195,7 +201,7 @@ function Section({ icon, title, children }: { icon: React.ReactNode; title: stri
 
 function ResourceSection({
   icon, title, allItems, restricted, allowedIds, canEdit,
-  onToggleRestrict, onToggleItem, emptyText, allLabel,
+  onToggleRestrict, onToggleItem, emptyText, allLabel, fixed,
 }: {
   icon: React.ReactNode; title: string;
   allItems: { id: string; name: string }[];
@@ -204,15 +210,20 @@ function ResourceSection({
   onToggleRestrict: (v: boolean) => void;
   onToggleItem: (id: string, checked: boolean) => void;
   emptyText: string; allLabel: string;
+  /** The role decides this, so the Restrict switch is hidden. */
+  fixed?: "all" | "assigned";
 }) {
+  const showList = fixed ? fixed === "assigned" : restricted;
   return (
     <Section icon={icon} title={title}>
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <p className="text-xs text-muted-foreground">
-            {restricted ? `Choose which ${title.toLowerCase()} this user can access.` : allLabel}
+            {fixed === "assigned" ? "This role sees only the projects ticked below."
+              : fixed === "all" ? "This role can see all projects."
+              : restricted ? `Choose which ${title.toLowerCase()} this user can access.` : allLabel}
           </p>
-          {canEdit && (
+          {canEdit && !fixed && (
             <div className="flex items-center gap-2 shrink-0 ml-4">
               <span className="text-xs text-muted-foreground">Restrict access</span>
               <Switch checked={restricted} onCheckedChange={onToggleRestrict} />
@@ -220,7 +231,7 @@ function ResourceSection({
           )}
         </div>
 
-        {restricted && (
+        {showList && (
           allItems.length === 0 ? (
             <p className="text-sm text-muted-foreground italic">{emptyText}</p>
           ) : (
@@ -266,6 +277,7 @@ function UserDetailPanel({
   projects: { id: string; name: string }[];
   dashboards: { id: string; name: string }[];
 }) {
+  const projectRule = catalog.roles.find((r) => r.key === user.role)?.projectAccess;
   const hasOverrides = !!(config.modules && Object.keys(config.modules).length > 0);
   const isRestricted = !!(
     config.restrictProjects || config.restrictDashboards || config.restrictAnalytics
@@ -428,6 +440,7 @@ function UserDetailPanel({
           allowedIds={config.allowedProjects ?? []}
           canEdit={canEdit}
           allLabel="This user can see all projects based on their role."
+          fixed={projectRule === "all" || projectRule === "assigned" ? projectRule : undefined}
           emptyText="No projects found. Projects appear when assets with no parent are created."
           onToggleRestrict={(v) => onUpdateConfig({ restrictProjects: v, allowedProjects: v ? (config.allowedProjects ?? []) : [] })}
           onToggleItem={(id, checked) => {
@@ -831,8 +844,55 @@ function TemporaryPasswordDialog({ result, onClose }: { result: any; onClose: ()
   );
 }
 
+/** Simultaneous logins allowed for one user. Offered to a Super Admin or Company Admin only. */
+function LoginLimitDialog({ user, onClose, onDone }: { user: any; onClose: () => void; onDone: () => void }) {
+  const { toast } = useToast();
+  const [value, setValue] = useState(String(user.maxSessions ?? 3));
+  const [saving, setSaving] = useState(false);
+
+  async function save() {
+    setSaving(true);
+    try {
+      const res = await apiPut(`/api/users/${user.id}/session-limit`, { maxSessions: Number(value) });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        toast({ title: body.error ?? "Could not change the login limit", variant: "destructive" });
+        return;
+      }
+      toast({ title: "Login limit changed", description: `${user.fullName} can now be signed in on ${value} device(s) at once.` });
+      onDone();
+      onClose();
+    } catch {
+      toast({ title: "Network error", variant: "destructive" });
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={(v) => { if (!v) onClose(); }}>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Login limit for {user.fullName}</DialogTitle>
+          <DialogDescription>
+            How many browsers or systems this user can be signed in on at once. Each browser counts as one.
+            Lowering the limit does not sign out anyone already signed in.
+          </DialogDescription>
+        </DialogHeader>
+        <Input type="number" min={1} max={20} value={value} onChange={(e) => setValue(e.target.value)} aria-label="Login limit" />
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Cancel</Button>
+          <Button onClick={save} disabled={saving}>Save</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function UserRowActions({ user, onDone }: { user: any; onDone: () => void }) {
   const { toast } = useToast();
+  const { currentUser } = useCurrentUser();
+  const [limitOpen, setLimitOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [tempResult, setTempResult] = useState<any>(null);
   const [tempAskOpen, setTempAskOpen] = useState(false);
@@ -914,6 +974,12 @@ function UserRowActions({ user, onDone }: { user: any; onDone: () => void }) {
       )}
       <Btn action="temporary-password" title="Issue a temporary password" icon={Timer}
         className="hover:text-amber-600" onClick={() => setTempAskOpen(true)} />
+      {(currentUser?.role === "super_admin" || currentUser?.role === "company_admin")
+        && user.role !== "super_admin" && user.role !== "company_admin" && (
+        <Btn action="session-limit" title={`Login limit: ${user.maxSessions ?? 3}`} icon={MonitorSmartphone}
+          className="hover:text-primary" onClick={() => setLimitOpen(true)} />
+      )}
+      {limitOpen && <LoginLimitDialog user={user} onClose={() => setLimitOpen(false)} onDone={onDone} />}
       {tempAskOpen && (
         <TemporaryPasswordExpiryDialog user={user} onCancel={() => setTempAskOpen(false)} onIssue={issueTemporary} />
       )}
@@ -930,7 +996,7 @@ export default function Users() {
   const [createOpen, setCreateOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [editingUser, setEditingUser] = useState<any>(null);
-  const { can } = useCurrentUser();
+  const { can, currentUser: actor } = useCurrentUser();
   const { data: catalog } = useRbacCatalog();
 
   const { data: users } = useListUsers();
@@ -947,11 +1013,21 @@ export default function Users() {
 
   const invalidate = () => qc.invalidateQueries({ queryKey: getListUsersQueryKey() });
 
+  // Only roles this user may hand out — the API refuses the rest (canGrantRole).
   const roleOptions = useMemo(
-    () => catalog?.roles.map(r => ({ value: r.key, label: r.label }))
-      ?? [{ value: "viewer", label: "Viewer" }],
-    [catalog],
+    () => (catalog?.roles.map(r => ({ value: r.key, label: r.label }))
+      ?? [{ value: "viewer", label: "Viewer" }])
+      .filter((r) => canGrantRole(actor?.role, r.value)),
+    [catalog, actor?.role],
   );
+  // The edited user's current role stays listed so the select shows it, even
+  // when it is not one this user could grant.
+  const editRoleOptions = useMemo(() => {
+    const current = editingUser?.role as string | undefined;
+    if (!current || roleOptions.some((r) => r.value === current)) return roleOptions;
+    const label = catalog?.roles.find((r) => r.key === current)?.label ?? current;
+    return [{ value: current, label }, ...roleOptions];
+  }, [roleOptions, editingUser, catalog]);
 
   function onCreateSubmit(data: any) {
     createUser.mutate({ data }, {
@@ -1232,7 +1308,7 @@ export default function Users() {
                     <Select value={field.value} onValueChange={field.onChange}>
                       <FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl>
                       <SelectContent>
-                        {roleOptions.map(r => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}
+                        {editRoleOptions.map(r => <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>)}
                       </SelectContent>
                     </Select>
                   </FormItem>

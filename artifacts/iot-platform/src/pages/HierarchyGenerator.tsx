@@ -10,6 +10,8 @@ import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { useCurrentUser } from "@/contexts/UserContext";
+import { apiFetch } from "@/lib/auth-api";
+import { describeApiError, formatApiError } from "@/lib/validation";
 import { cn } from "@/lib/utils";
 import {
   ArrowLeft, Workflow, Sparkles, Plus, Trash2, ChevronRight, ChevronDown,
@@ -498,13 +500,20 @@ export default function HierarchyGenerator() {
     if (validation.errors.length) { toast({ title: "Fix validation errors first", variant: "destructive" }); return; }
     setGenerating(true);
     let created = 0, failed = 0;
+    // First server error, shown in the toast so a refusal (403, CSRF, validation)
+    // is reported as what it was rather than as "name may already exist".
+    let firstError: string | null = null;
+    const noteError = async (res: Response | null) => {
+      if (firstError) return;
+      firstError = res ? formatApiError(await describeApiError(res)) : "Network error";
+    };
     try {
       for (const t of templatePlan) {
-        const res = await fetch(`${BASE}/api/asset-templates`, {
-          method: "POST", headers: { "Content-Type": "application/json" },
+        const res = await apiFetch(`${BASE}/api/asset-templates`, {
+          method: "POST",
           body: JSON.stringify({ name: t.name, tags: [t.kind] }),
         }).catch(() => null);
-        if (!res || !res.ok) { failed++; continue; }
+        if (!res || !res.ok) { failed++; await noteError(res); continue; }
         const tpl = await res.json().catch(() => null);
         created++;
         // Attach telemetry tags as attribute definitions (second call — create route
@@ -514,15 +523,24 @@ export default function HierarchyGenerator() {
             name: tag, type: "dynamic", dataType: meta.dataType,
             tagName: tag.toLowerCase().replace(/\s+/g, "_"), uom: meta.uom,
           }));
-          await fetch(`${BASE}/api/asset-templates/${tpl.id}`, {
-            method: "PUT", headers: { "Content-Type": "application/json" },
+          const putRes = await apiFetch(`${BASE}/api/asset-templates/${tpl.id}`, {
+            method: "PUT",
             body: JSON.stringify({ attributeDefinitions: defs }),
-          }).catch(() => {});
+          }).catch(() => null);
+          if (!putRes || !putRes.ok) { failed++; await noteError(putRes); }
         }
       }
       qc.invalidateQueries({ queryKey: getListAssetTemplatesQueryKey() });
-      toast({ title: `Generated ${created} template${created !== 1 ? "s" : ""}`, description: failed ? `${failed} failed (name may already exist).` : "Reused duplicates automatically." });
-      if (created) navigate("/asset-templates");
+      if (!created) {
+        toast({ title: "No templates generated", description: firstError ?? "Every request failed.", variant: "destructive" });
+        return;
+      }
+      if (failed) {
+        toast({ title: `Generated ${created} template${created !== 1 ? "s" : ""}, ${failed} failed`, description: firstError ?? undefined, variant: "destructive" });
+      } else {
+        toast({ title: `Generated ${created} template${created !== 1 ? "s" : ""}`, description: "Reused duplicates automatically." });
+      }
+      navigate("/asset-templates");
     } finally { setGenerating(false); }
   }
 
@@ -541,29 +559,36 @@ export default function HierarchyGenerator() {
     setGenProgress("");
     const tmplByName = new Map(templates.map((t) => [String(t.name).toLowerCase(), t]));
     let created = 0, failed = 0;
+    let firstError: string | null = null;
+    const noteError = async (res: Response | null) => {
+      if (firstError) return;
+      firstError = res ? formatApiError(await describeApiError(res)) : "Network error";
+    };
 
     async function makeAsset(name: string, parentId: string | null, identifier: string): Promise<string | null> {
       const t = tmplByName.get(name.toLowerCase());
       // A machine device id must be a known device — register it before create.
       if (identifier) {
-        await fetch(`${BASE}/api/ingest/register-device`, {
-          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ deviceId: identifier }),
-        }).catch(() => {});
+        const regRes = await apiFetch(`${BASE}/api/ingest/register-device`, {
+          method: "POST", body: JSON.stringify({ deviceId: identifier }),
+        }).catch(() => null);
+        if (!regRes || !regRes.ok) await noteError(regRes);
       }
       const body: any = { name, parentId, identifier };
       if (t) { body.templateId = t.id; body.templateName = t.name; }
-      const res = await fetch(`${BASE}/api/assets`, {
-        method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+      const res = await apiFetch(`${BASE}/api/assets`, {
+        method: "POST", body: JSON.stringify(body),
       }).catch(() => null);
-      if (!res || !res.ok) { failed++; return null; }
+      if (!res || !res.ok) { failed++; await noteError(res); return null; }
       const a = await res.json().catch(() => null);
       if (!a?.id) { failed++; return null; }
       created++;
       setGenProgress(`Created ${created} assets…`);
       if (t?.id) {
-        await fetch(`${BASE}/api/assets/${a.id}/apply-template`, {
-          method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ templateId: t.id }),
-        }).catch(() => {});
+        const applyRes = await apiFetch(`${BASE}/api/assets/${a.id}/apply-template`, {
+          method: "POST", body: JSON.stringify({ templateId: t.id }),
+        }).catch(() => null);
+        if (!applyRes || !applyRes.ok) { failed++; await noteError(applyRes); }
       }
       return a.id;
     }
@@ -583,7 +608,7 @@ export default function HierarchyGenerator() {
       // Wrapper root owns the device id (must be a known, free device).
       const rootId = await makeAsset(rootName.trim() || "Site", null, rootDevice);
       if (!rootId) {
-        toast({ title: "Root creation failed", description: `Device id "${rootDevice}" may already be used by another asset.`, variant: "destructive" });
+        toast({ title: "Root creation failed", description: firstError ?? `Device id "${rootDevice}" may already be used by another asset.`, variant: "destructive" });
         return;
       }
       for (const r of tree) {
@@ -591,14 +616,18 @@ export default function HierarchyGenerator() {
         await walk(r, rootId, [rootName]);
       }
       qc.invalidateQueries({ queryKey: getListAssetsQueryKey() });
-      toast({ title: `Created ${created} assets`, description: failed ? `${failed} failed.` : "Full hierarchy built." });
+      if (failed) {
+        toast({ title: `Created ${created} assets, ${failed} failed`, description: firstError ?? undefined, variant: "destructive" });
+      } else {
+        toast({ title: `Created ${created} assets`, description: "Full hierarchy built." });
+      }
       navigate("/assets");
     } finally { setGenAssets(false); setGenProgress(""); }
   }
 
   return (
     <div className="p-6 max-w-7xl mx-auto space-y-4">
-      <button onClick={() => navigate("/asset-management")} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
+      <button onClick={() => navigate("/")} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground">
         <ArrowLeft className="w-4 h-4" /> Back
       </button>
       <div className="flex items-center gap-2">

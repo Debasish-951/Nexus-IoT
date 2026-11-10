@@ -62,18 +62,13 @@ export async function scanBuffer(data: Buffer): Promise<ScanResult> {
 
   try {
     const reply = await instream(data);
-
-    // clamd replies "stream: OK" or "stream: <Signature> FOUND" or "... ERROR".
-    if (/\bOK\s*$/.test(reply)) return { status: "clean" };
-
-    const found = /:\s*(.+?)\s+FOUND/.exec(reply);
-    if (found) {
-      logger.error({ signature: found[1] }, "upload rejected: malware detected");
-      return { status: "infected", signature: found[1] };
+    const verdict = parseClamdReply(reply);
+    if (verdict.status === "infected") {
+      logger.error({ signature: verdict.signature }, "upload rejected: malware detected");
+    } else if (verdict.status === "error") {
+      logger.error({ reply: cleanClamdReply(reply) }, "clamd returned an unrecognised reply");
     }
-
-    logger.error({ reply }, "clamd returned an unrecognised reply");
-    return { status: "error" };
+    return verdict;
   } catch (err) {
     // Unreachable, timed out, refused. The MODE decides what that means.
     logger.error(
@@ -82,6 +77,25 @@ export async function scanBuffer(data: Buffer): Promise<ScanResult> {
     );
     return { status: "error" };
   }
+}
+
+/**
+ * clamd ends every reply to a `z`-prefixed command with a NUL byte, which
+ * String.prototype.trim() keeps. Left in place it defeated the `OK$` match, so a
+ * clean file read as an unrecognised reply: rejected in `required` mode and
+ * flagged `error` in `optional` mode.
+ */
+export function cleanClamdReply(reply: string): string {
+  return reply.replace(/\0/g, "").trim();
+}
+
+/** Interpret one clamd INSTREAM reply: "stream: OK", "stream: <Sig> FOUND" or "... ERROR". */
+export function parseClamdReply(raw: string): ScanResult {
+  const reply = cleanClamdReply(raw);
+  if (/\bOK$/.test(reply)) return { status: "clean" };
+  const found = /:\s*(.+?)\s+FOUND$/.exec(reply);
+  if (found) return { status: "infected", signature: found[1] };
+  return { status: "error" };
 }
 
 function instream(data: Buffer): Promise<string> {
@@ -101,7 +115,7 @@ function instream(data: Buffer): Promise<string> {
     socket.on("timeout", () => finish(() => reject(new Error("clamd timed out"))));
     socket.on("error", (err) => finish(() => reject(err)));
     socket.on("data", (chunk) => { reply += chunk.toString("utf8"); });
-    socket.on("end", () => finish(() => resolve(reply.trim())));
+    socket.on("end", () => finish(() => resolve(cleanClamdReply(reply))));
 
     socket.on("connect", () => {
       socket.write("zINSTREAM\0");
@@ -136,6 +150,21 @@ export function verdictAllowsStorage(result: ScanResult): boolean {
   return scanConfig.mode !== "required";
 }
 
+/**
+ * Whether a stored file may be downloaded, given its recorded scan status.
+ *
+ * `infected` is never served, in any mode. In `required` mode only `clean` is
+ * served: a file stored as `skipped` or `error` (uploaded while scanning was
+ * off or optional, or before this check existed) was never shown to be safe,
+ * and `required` is the operator saying that matters. `optional` and `off` keep
+ * serving them, as they always have.
+ */
+export function verdictAllowsDownload(status: string | null | undefined, mode: ScanMode = scanConfig.mode): boolean {
+  if (status === "infected") return false;
+  if (mode === "required") return status === "clean";
+  return true;
+}
+
 /** Reports the scanner's state at boot, so a misconfiguration is visible then. */
 export async function reportScannerStatus(): Promise<void> {
   if (scanConfig.mode === "off") {
@@ -168,7 +197,7 @@ function ping(): Promise<string> {
     socket.on("timeout", () => finish(() => reject(new Error("timeout"))));
     socket.on("error", (err) => finish(() => reject(err)));
     socket.on("data", (c) => { reply += c.toString("utf8"); });
-    socket.on("end", () => finish(() => resolve(reply.trim())));
+    socket.on("end", () => finish(() => resolve(cleanClamdReply(reply))));
     socket.on("connect", () => socket.write("zPING\0"));
   });
 }

@@ -1,4 +1,5 @@
 import net from "node:net";
+import { lookup } from "node:dns/promises";
 import { authConfig } from "./auth-config";
 
 /**
@@ -26,7 +27,10 @@ import { authConfig } from "./auth-config";
  */
 
 /** RFC1918, loopback, link-local (incl. cloud metadata), CGNAT, and IPv6 equivalents. */
-function isPrivateAddress(host: string): boolean {
+export function isPrivateAddress(rawHost: string): boolean {
+  // URL.hostname keeps the brackets around an IPv6 literal ("[::1]"), and
+  // net.isIP("[::1]") is 0, so IPv6 literals used to skip every check below.
+  const host = rawHost.replace(/^\[|\]$/g, "");
   const v = net.isIP(host);
 
   if (v === 4) {
@@ -49,6 +53,13 @@ function isPrivateAddress(host: string): boolean {
     // ::ffff:10.0.0.1 — an IPv4 address wearing an IPv6 hat.
     const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(h);
     if (mapped) return isPrivateAddress(mapped[1]);
+    // The URL parser rewrites ::ffff:127.0.0.1 as ::ffff:7f00:1.
+    const mappedHex = /^::ffff:([0-9a-f]{1,4}):([0-9a-f]{1,4})$/.exec(h);
+    if (mappedHex) {
+      const hi = parseInt(mappedHex[1]!, 16), lo = parseInt(mappedHex[2]!, 16);
+      return isPrivateAddress(`${hi >> 8}.${hi & 255}.${lo >> 8}.${lo & 255}`);
+    }
+    if (h.startsWith("64:ff9b:")) return true;                     // NAT64, can reach IPv4 ranges
     return false;
   }
 
@@ -92,6 +103,39 @@ export function assertSafeOutboundUrl(raw: string): URL {
   }
 
   return url;
+}
+
+/**
+ * Fetch a user-supplied URL from the server, with the same guard applied to
+ * where it really goes:
+ *
+ * - the hostname is resolved, and every address it resolves to is checked, so
+ *   a DNS name pointing at 127.0.0.1 or 169.254.169.254 is refused;
+ * - redirects are not followed, so a public URL cannot bounce the request to
+ *   a private address.
+ *
+ * A DNS answer that changes between this check and the connection (DNS
+ * rebinding) is not covered; that needs the connection pinned to the checked
+ * address.
+ */
+export async function safeFetch(raw: string, init: RequestInit): Promise<Response> {
+  const url = assertSafeOutboundUrl(raw);
+  if (!authConfig.allowPrivateWebhookTargets && net.isIP(url.hostname.replace(/^\[|\]$/g, "")) === 0) {
+    let addresses: { address: string }[];
+    try {
+      addresses = await lookup(url.hostname, { all: true });
+    } catch {
+      throw new UnsafeUrlError(`Could not resolve ${url.hostname}.`);
+    }
+    const blocked = addresses.find((a) => isPrivateAddress(a.address));
+    if (blocked) {
+      throw new UnsafeUrlError(
+        `Refusing to call ${url.hostname}: it resolves to a loopback, link-local or private-network address. ` +
+        "Set ALLOW_PRIVATE_WEBHOOK_TARGETS=true if this deployment must reach hosts on its own network.",
+      );
+    }
+  }
+  return fetch(url, { ...init, redirect: "manual" });
 }
 
 /** Non-throwing form, for validating user input before it is saved. */

@@ -13,6 +13,7 @@ import {
   Save, Maximize2, Minimize2, MousePointerClick, X, Pencil,
 } from "lucide-react";
 import { useListAssets } from "@workspace/api-client-react";
+import { useProjectScope } from "@/hooks/useProjectScope";
 import { useTelemetrySeries, useMetricChoices, aggregate } from "@/features/dashboards/useWidgetData";
 import { REFRESH_INTERVALS } from "@/features/dashboards/timeRange";
 import { ColorField } from "@/features/dashboards/ColorField";
@@ -64,7 +65,9 @@ export default function LiveTwin() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const { data: assetsData } = useListAssets();
-  const assets = (assetsData as any[] | undefined) ?? [];
+  const { inScope } = useProjectScope();
+  // Only the open project's assets are offered for binding.
+  const assets = ((assetsData as any[] | undefined) ?? []).filter((a: any) => inScope(a.id, { strict: true }));
 
   const [twins, setTwins] = useState<Twin[]>(() => readTwins());
   const [currentId, setCurrentId] = useState<string | null>(() => readTwins()[0]?.id ?? null);

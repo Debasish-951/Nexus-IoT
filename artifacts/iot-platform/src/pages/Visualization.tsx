@@ -1,4 +1,4 @@
-import { useState, useMemo, useRef, useCallback } from "react";
+import { useState, useMemo, useRef, useCallback, useEffect } from "react";
 import { useLocation } from "wouter";
 import { Card } from "@/components/ui/card";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "@/components/ui/resizable";
@@ -6,6 +6,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, LayoutDashboard, FolderPlus, ChevronLeft, ChevronRight, Search } from "lucide-react";
 import type { ImperativePanelHandle } from "react-resizable-panels";
@@ -14,7 +15,10 @@ import { AssetTreeProvider, type DashboardActions } from "@/components/asset-tre
 import { AssetTree } from "@/components/asset-tree/AssetTree";
 import { newId } from "@/features/dashboards/useDashboards";
 import { useVizHierarchy, type VizNode } from "@/features/dashboards/vizHierarchy";
-import { useVizNodes, useVizNodeActions } from "@/features/dashboards/vizStore";
+import { ShareDashboardDialog } from "@/features/dashboards/ShareDashboardDialog";
+import { useCurrentUser } from "@/contexts/UserContext";
+import { useProject } from "@/contexts/ProjectContext";
+import { useVizNodes, useVizNodeActions, VizConflictError } from "@/features/dashboards/vizStore";
 import type { Asset } from "@/pages/assetShared";
 import { validateName, LIMITS } from "@/lib/validation";
 
@@ -44,13 +48,24 @@ export default function Visualization() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
 
-  const viz = useVizHierarchy();
+  // Unassigned dashboards show in every project, so nothing disappears until assigned.
+  const { currentProjectId, projects } = useProject();
+  const viz = useVizHierarchy(currentProjectId);
+  const { currentUser, canModule } = useCurrentUser();
+  const canManageAccess = currentUser?.role === "super_admin" || currentUser?.role === "company_admin";
+  const [shareTarget, setShareTarget] = useState<{ id: string; name: string } | null>(null);
+
+  useEffect(() => {
+    if (!viz.migrationError) return;
+    toast({ title: "Some dashboards were not uploaded", description: viz.migrationError.message, variant: "destructive" });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [viz.migrationError]);
 
   // Dashboards come from the same server-backed cache the hierarchy does, so a
   // read here is synchronous against already-loaded data — which is what lets
   // the right-click actions below keep their original shape.
   const { nodes: vizRows } = useVizNodes();
-  const { saveWidgets } = useVizNodeActions();
+  const { saveWidgets, invalidate } = useVizNodeActions();
   const readWidgets = useCallback(
     (id: string): any[] => {
       const w = vizRows.find((n) => n.id === id)?.widgets;
@@ -60,16 +75,40 @@ export default function Visualization() {
   );
   // Fire-and-report, not fire-and-forget: a clone or import that fails to reach
   // the server has to say so, or the user believes work was saved that was not.
+  // Resolves true only once the server has the change, so callers reload after
+  // the save rather than before it. Sends the version this page last read, so a
+  // dashboard someone else changed in the meantime is not overwritten.
   const writeWidgets = useCallback(
-    (id: string, widgets: any[]) => {
-      saveWidgets(id, widgets).catch((e: Error) => {
-        toast({ title: "Could not save dashboard", description: e.message || "The server rejected the change.", variant: "destructive" });
-      });
+    async (id: string, widgets: any[]): Promise<boolean> => {
+      const expected = vizRows.find((n) => n.id === id)?.updatedAt;
+      try {
+        await saveWidgets(id, widgets, expected);
+        return true;
+      } catch (e) {
+        if (e instanceof VizConflictError) {
+          invalidate();
+          toast({ title: "Dashboard changed elsewhere", description: "It was changed in another tab or by someone else. The latest version has been loaded; try again.", variant: "destructive" });
+        } else {
+          toast({ title: "Could not save dashboard", description: (e as Error).message || "The server rejected the change.", variant: "destructive" });
+        }
+        return false;
+      }
     },
-    [saveWidgets, toast],
+    [saveWidgets, invalidate, toast, vizRows],
   );
 
   const [selId, setSelId] = useState<string | null>(null);
+  // Whether the open dashboard has unsaved edits (reported by AssetVizPanel).
+  const panelDirtyRef = useRef(false);
+  const onPanelDirtyChange = useCallback((d: boolean) => { panelDirtyRef.current = d; }, []);
+  // Every way of opening a different node goes through here, so unsaved edits
+  // are never dropped without asking.
+  const selectNode = useCallback((id: string | null) => {
+    if (id === selId) return;
+    if (panelDirtyRef.current && !confirm("This dashboard has unsaved changes. Discard them and open another dashboard?")) return;
+    panelDirtyRef.current = false;
+    setSelId(id);
+  }, [selId]);
   const [expanded, setExpanded] = useState<Set<string>>(new Set()); // empty = all collapsed
   const [search, setSearch] = useState("");
   const [bookmarks, setBookmarks] = useState<Set<string>>(() => {
@@ -102,6 +141,8 @@ export default function Visualization() {
   const [renameNode, setRenameNode] = useState<VizNode | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [renameIssue, setRenameIssue] = useState<string | null>(null);
+  const [assignNode, setAssignNode] = useState<VizNode | null>(null);
+  const [assignValue, setAssignValue] = useState("none");
 
   const allParentIds = useMemo(
     () => Object.keys(viz.childrenByParent).filter((k) => k !== "root"),
@@ -166,7 +207,7 @@ export default function Visualization() {
     const name = createName.trim();
     const id = viz.addNode(name, createParent);
     if (createParent) setExpanded((p) => new Set(p).add(createParent));
-    setSelId(id);
+    selectNode(id);
     setCreateOpen(false);
     toast({ title: "Created", description: `"${name}" added to the Visualization hierarchy.` });
   }
@@ -190,6 +231,25 @@ export default function Visualization() {
     toast({ title: "Deleted", description: `"${a.name}" removed.` });
   }
 
+  function openAssign(a: Asset) {
+    const node = viz.nodes.find((n) => n.id === a.id);
+    if (!node) return;
+    setAssignNode(node); setAssignValue(node.projectId ?? "none");
+  }
+  function submitAssign() {
+    if (!assignNode) return;
+    const target = assignNode;
+    const projectId = assignValue === "none" ? null : assignValue;
+    setAssignNode(null);
+    viz.assignProject(target.id, projectId).then(() => {
+      // Leaves this view when moved to another project.
+      if (projectId && projectId !== currentProjectId && selId && viz.subtreeIds(target.id).has(selId)) setSelId(null);
+      toast({ title: projectId ? `Assigned to ${projects.find((p) => p.id === projectId)?.name ?? "project"}` : "Now unassigned" });
+    }).catch((e: Error) => {
+      toast({ title: "Could not assign project", description: e.message, variant: "destructive" });
+    });
+  }
+
   function handleImportFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     const target = importTargetRef.current;
@@ -201,9 +261,12 @@ export default function Visualization() {
         const parsed = JSON.parse(String(reader.result));
         const widgets = Array.isArray(parsed) ? parsed : parsed?.widgets;
         if (!Array.isArray(widgets)) throw new Error("invalid");
-        writeWidgets(target, withFreshIds(widgets));
-        if (selId === target) bumpReload();
-        toast({ title: "Dashboard imported", description: `${widgets.length} widget(s) loaded from file.` });
+        if (!confirmOverwrite([target])) return;
+        void writeWidgets(target, withFreshIds(widgets)).then((ok) => {
+          if (!ok) return;
+          if (selId === target) bumpReload();
+          toast({ title: "Dashboard imported", description: `${widgets.length} widget(s) loaded from file.` });
+        });
       } catch {
         toast({ title: "Import failed", description: "That file isn't a valid dashboard JSON.", variant: "destructive" });
       }
@@ -211,8 +274,24 @@ export default function Visualization() {
     reader.readAsText(file);
   }
 
+  // Importing replaces a dashboard wholesale, so ask first whenever that would
+  // throw away widgets — saved ones, or unsaved edits on the open dashboard.
+  function confirmOverwrite(ids: string[]): boolean {
+    const nodeName = (id: string) => viz.nodes.find((n) => n.id === id)?.name ?? "this node";
+    const affected = ids.filter((id) => readWidgets(id).length > 0 || (id === selId && panelDirtyRef.current));
+    if (affected.length === 0) return true;
+    const unsaved = selId != null && affected.includes(selId) && panelDirtyRef.current;
+    const msg = affected.length === 1
+      ? `Replace the dashboard on "${nodeName(affected[0])}"? Its current widgets${unsaved ? ", including unsaved changes," : ""} will be overwritten.`
+      : `Replace the dashboards on ${affected.length} nodes? Their current widgets${unsaved ? ", including unsaved changes," : ""} will be overwritten.`;
+    return confirm(msg);
+  }
+  function clearDashClipboard() {
+    try { localStorage.removeItem(DASH_CLIP); } catch { /* storage unavailable */ }
+  }
+
   const dashboardActions: DashboardActions = {
-    edit: (a) => setSelId(a.id),
+    edit: (a) => selectNode(a.id),
     clone: (a) => {
       const widgets = readWidgets(a.id);
       if (!widgets.length) { toast({ title: "Nothing to clone", description: `"${a.name}" has no dashboard widgets yet.` }); return; }
@@ -242,9 +321,11 @@ export default function Visualization() {
       // Clears the node's dashboard; the node itself stays. An empty widget list
       // IS the delete, so it goes through the same save path and reports the same
       // failures as any other write.
-      writeWidgets(a.id, []);
-      if (selId === a.id) bumpReload();
-      toast({ title: "Dashboard deleted", description: `"${a.name}" dashboard cleared.` });
+      void writeWidgets(a.id, []).then((ok) => {
+        if (!ok) return;
+        if (selId === a.id) bumpReload();
+        toast({ title: "Dashboard deleted", description: `"${a.name}" dashboard cleared.` });
+      });
     },
     toggleBookmark: (a) => {
       const wasBookmarked = bookmarks.has(a.id);
@@ -260,16 +341,28 @@ export default function Visualization() {
     importDashboard: (a) => {
       let clip: any = null;
       try { const r = localStorage.getItem(DASH_CLIP); clip = r ? JSON.parse(r) : null; } catch { clip = null; }
+      // A copied dashboard is pasted once, then the clipboard is cleared — it
+      // used to stay forever, so every later Import pasted the same stale copy
+      // and the file picker could never be reached again.
       if (clip?.kind === "single" && Array.isArray(clip.widgets)) {
-        writeWidgets(a.id, withFreshIds(clip.widgets));
-        if (selId === a.id) bumpReload();
-        toast({ title: "Dashboard pasted", description: `Cloned dashboard applied to "${a.name}".` });
+        if (!confirmOverwrite([a.id])) return;
+        void writeWidgets(a.id, withFreshIds(clip.widgets)).then((ok) => {
+          if (!ok) return;
+          clearDashClipboard();
+          if (selId === a.id) bumpReload();
+          toast({ title: "Dashboard pasted", description: `Cloned dashboard applied to "${a.name}".` });
+        });
         return;
       }
       if (clip?.kind === "subtree" && Array.isArray(clip.items)) {
-        for (const item of clip.items) writeWidgets(item.assetId, withFreshIds(item.widgets));
-        bumpReload();
-        toast({ title: "Dashboards restored", description: `${clip.items.length} dashboard(s) applied to their original nodes.` });
+        const items: { assetId: string; widgets: any[] }[] = clip.items.filter((it: any) => it && typeof it.assetId === "string" && Array.isArray(it.widgets));
+        if (!confirmOverwrite(items.map((it) => it.assetId))) return;
+        void Promise.all(items.map((item) => writeWidgets(item.assetId, withFreshIds(item.widgets)))).then((results) => {
+          const saved = results.filter(Boolean).length;
+          if (saved === items.length) clearDashClipboard();
+          if (selId && items.some((it, i) => it.assetId === selId && results[i])) bumpReload();
+          if (saved > 0) toast({ title: "Dashboards restored", description: `${saved} of ${items.length} dashboard(s) applied to their original nodes.` });
+        });
         return;
       }
       importTargetRef.current = a.id;
@@ -281,7 +374,7 @@ export default function Visualization() {
       toast({ title: "Dashboard exported", description: `${widgets.length} widget(s) downloaded as JSON.` });
     },
     futuristic: (a) => {
-      setSelId(a.id);
+      selectNode(a.id);
       const wasOn = futuristicIds.has(a.id);
       setFuturisticIds((prev) => { const next = new Set(prev); if (wasOn) next.delete(a.id); else next.add(a.id); return next; });
       toast({ title: wasOn ? "Futuristic mode off" : "Futuristic mode on", description: a.name });
@@ -293,9 +386,11 @@ export default function Visualization() {
       {/* Wraps rather than squeezing: this pane can be dragged down to ~11% of the
           window, where the search field would otherwise be crushed to its icon. */}
       <div className="flex flex-wrap items-center gap-1.5 px-3 py-2">
-        <Button size="sm" className="h-7 px-2 text-xs whitespace-nowrap shrink-0" onClick={() => openCreate(null)} title="Create a top-level dashboard">
-          <FolderPlus className="w-3.5 h-3.5 mr-1" /> Create Dashboard
-        </Button>
+        {canModule("visualization", "write") && (
+          <Button size="sm" className="h-7 px-2 text-xs whitespace-nowrap shrink-0" onClick={() => openCreate(null)} title="Create a top-level dashboard">
+            <FolderPlus className="w-3.5 h-3.5 mr-1" /> Create Dashboard
+          </Button>
+        )}
         <div className="relative flex-1 min-w-[110px]">
           <Search className="absolute left-2 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-muted-foreground pointer-events-none" />
           <Input
@@ -319,13 +414,19 @@ export default function Visualization() {
   const assetTreeCtx = {
     childrenByParent,
     selectedId: selId,
-    setSelectedId: setSelId,
+    setSelectedId: selectNode,
     isExpanded,
     toggle: (id: string) => setExpanded((p) => { const n = new Set(p); n.has(id) ? n.delete(id) : n.add(id); return n; }),
     visibleIds,
     canManage: true,
     onAddChild: (parentId: string) => openCreate(parentId),
-    onAddRoot: () => openCreate(null),
+    onAddRoot: canModule("visualization", "write") ? () => openCreate(null) : undefined,
+    nodeAccess: (id: string) => {
+      const access = viz.nodes.find((n) => n.id === id)?.access;
+      return { write: !!access?.write, delete: !!access?.delete };
+    },
+    onShare: canManageAccess ? (a: Asset) => setShareTarget({ id: a.id, name: a.name }) : undefined,
+    onAssignProject: projects.length > 0 ? openAssign : undefined,
     onRename: openRename,
     onDelete: handleDeleteNode,
     dashboard: dashboardActions,
@@ -378,7 +479,9 @@ export default function Visualization() {
                     </div>
                   ) : (
                     <AssetTreeProvider value={assetTreeCtx}>
-                      <AssetTree emptyMessage='No dashboards yet — click "Create Dashboard" to start building your hierarchy.' />
+                      <AssetTree emptyMessage={viz.failed
+                        ? "Dashboards could not be loaded. Reload the page, and contact your administrator if this continues."
+                        : 'No dashboards yet — click "Create Dashboard" to start building your hierarchy.'} />
                     </AssetTreeProvider>
                   )}
                 </div>
@@ -406,6 +509,8 @@ export default function Visualization() {
                 reloadKey={dashReloadNonce}
                 futuristic={selId ? futuristicIds.has(selId) : false}
                 toolbarTarget={toolbarSlot}
+                readOnly={!!selectedNode && !selectedNode.access.write}
+                onDirtyChange={onPanelDirtyChange}
               />
               {/* Only reachable route back once the pane has no width of its own. */}
               {treeCollapsed && (
@@ -422,6 +527,8 @@ export default function Visualization() {
           </ResizablePanel>
         </ResizablePanelGroup>
       </Card>
+
+      {shareTarget && <ShareDashboardDialog node={shareTarget} onClose={() => setShareTarget(null)} />}
 
       <input ref={importInputRef} type="file" accept="application/json,.json" className="hidden" onChange={handleImportFile} />
 
@@ -448,6 +555,32 @@ export default function Visualization() {
           <DialogFooter>
             <Button variant="outline" onClick={() => setCreateOpen(false)}>Cancel</Button>
             <Button onClick={submitCreate} disabled={!createName.trim()}>Create</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Assign a top-level dashboard to a project */}
+      <Dialog open={!!assignNode} onOpenChange={(v) => { if (!v) setAssignNode(null); }}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Assign to Project</DialogTitle>
+            <DialogDescription>
+              <strong>{assignNode?.name}</strong> and everything nested under it will show in this project. Unassigned dashboards show in every project.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-1.5 py-1">
+            <Label className="text-sm">Project</Label>
+            <Select value={assignValue} onValueChange={setAssignValue}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">Unassigned</SelectItem>
+                {projects.map((p) => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setAssignNode(null)}>Cancel</Button>
+            <Button onClick={submitAssign}>Save</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

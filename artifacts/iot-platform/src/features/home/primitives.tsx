@@ -118,7 +118,7 @@ export function Panel({ title, sub, badge, action, className, bodyClassName, chi
   className?: string; bodyClassName?: string; children: React.ReactNode;
 }) {
   return (
-    <Card className={cn("shadow-sm overflow-hidden flex flex-col", className)}>
+    <Card className={cn("shadow-sm !border-primary/40 overflow-hidden flex flex-col", className)}>
       <CardContent className="p-0 flex flex-col flex-1 min-h-0">
         <div className="flex items-center justify-between gap-3 px-4 py-3 border-b border-border shrink-0">
           <div className="min-w-0">
@@ -160,19 +160,27 @@ export function Track({ value, className, barClassName }: {
   );
 }
 
-export function KpiTile({ label, value, unit, badge, footLeft, footRight, children, className }: {
+export function KpiTile({ label, value, unit, badge, icon: Icon, iconClassName, footLeft, footRight, children, className }: {
   label: string; value: React.ReactNode; unit?: string; badge?: React.ReactNode;
+  icon?: React.ComponentType<{ className?: string }>; iconClassName?: string;
   footLeft?: React.ReactNode; footRight?: React.ReactNode;
   children?: React.ReactNode; className?: string;
 }) {
   return (
-    <Card className={cn("shadow-sm", className)}>
+    <Card className={cn("shadow-sm !border-primary/40", className)}>
       <CardContent className="p-3.5">
         <div className="flex items-center justify-between gap-2">
           <span className="text-[10.5px] font-semibold uppercase tracking-[0.07em] text-muted-foreground truncate">
             {label}
           </span>
-          {badge}
+          <div className="flex items-center gap-2 shrink-0">
+            {badge}
+            {Icon && (
+              <span className={cn("w-7 h-7 rounded-lg flex items-center justify-center", iconClassName)}>
+                <Icon className="w-3.5 h-3.5" />
+              </span>
+            )}
+          </div>
         </div>
         <div className="text-[22px] font-semibold tracking-tight tabular-nums mt-1.5 leading-none">
           {value}

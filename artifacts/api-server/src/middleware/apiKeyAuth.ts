@@ -1,9 +1,12 @@
 import { Request, Response, NextFunction } from "express";
-import { eq, or, sql } from "drizzle-orm";
+import { BlockList, isIP } from "node:net";
+import { eq, or, sql, isNotNull } from "drizzle-orm";
 import { db, apiClientsTable } from "@workspace/db";
 import { logger } from "../lib/logger";
 import { authConfig } from "../lib/auth-config";
 import { hashToken } from "../lib/tokens";
+import { clientAddress } from "../lib/client-ip";
+import { recordSecurityEvent } from "../lib/security-log";
 
 declare global {
   namespace Express {
@@ -62,6 +65,131 @@ function isRateLimited(clientId: string, maxRpm: number): boolean {
   }
   entry.count += 1;
   return entry.count > maxRpm;
+}
+
+// ── IP allowlist ──────────────────────────────────────────────────────────────
+//
+// The allowlist used to compare the first raw X-Forwarded-For value with each
+// entry by string prefix. All three parts were wrong: the header is whatever the
+// caller sends, so anyone reaching port 8080 directly chose their own address;
+// "10.0.0.1" admitted "10.0.0.10" through "10.0.0.199"; and an empty entry was a
+// prefix of every address, so it allowed everyone while looking like a rule.
+//
+// Now: the address is the one Express vouches for under TRUST_PROXY
+// (clientAddress), and each entry is an exact address or a CIDR block, matched
+// with Node's own BlockList so IPv4, IPv6 and IPv4-mapped IPv6 behave alike.
+
+export interface AllowlistEntry {
+  address: string;
+  prefix: number;
+  family: "ipv4" | "ipv6";
+}
+
+/** Parse one allowlist entry: an address, or address/prefix. Null when invalid. */
+export function parseAllowlistEntry(raw: unknown): AllowlistEntry | null {
+  if (typeof raw !== "string") return null;
+  const text = raw.trim().toLowerCase();
+  if (!text || text.length > 64) return null;
+  const parts = text.split("/");
+  if (parts.length > 2) return null;
+  let address = parts[0]!;
+  if (address.startsWith("::ffff:") && isIP(address.slice(7)) === 4) address = address.slice(7);
+  const version = isIP(address);
+  if (version === 0) return null;
+  const max = version === 4 ? 32 : 128;
+  let prefix = max;
+  if (parts.length === 2) {
+    if (!/^\d{1,3}$/.test(parts[1]!)) return null;
+    prefix = Number(parts[1]);
+    // A /0 admits every address, which is what an empty list already means. As
+    // an entry it would read like a restriction while being none.
+    if (prefix < 1 || prefix > max) return null;
+  }
+  return { address, prefix, family: version === 4 ? "ipv4" : "ipv6" };
+}
+
+/**
+ * Validate a submitted allowlist. Returns the cleaned list, or the entries that
+ * are not valid so the caller can be told which ones to fix.
+ */
+export function normaliseAllowlist(input: unknown): { ok: true; entries: string[] } | { ok: false; invalid: string[] } {
+  if (!Array.isArray(input)) return { ok: true, entries: [] };
+  const entries: string[] = [];
+  const invalid: string[] = [];
+  for (const item of input) {
+    if (!parseAllowlistEntry(item)) { invalid.push(String(item).slice(0, 64)); continue; }
+    const cleaned = (item as string).trim();
+    if (!entries.includes(cleaned)) entries.push(cleaned);
+  }
+  return invalid.length > 0 ? { ok: false, invalid } : { ok: true, entries };
+}
+
+/**
+ * Whether `ip` is admitted by `entries`. An entry that does not parse matches
+ * nothing, so a list holding only legacy prefix-style entries admits nobody:
+ * the failure is a visible 403, not an unintended open door.
+ */
+export function ipAllowed(ip: string, entries: readonly string[]): boolean {
+  let address = ip.trim().toLowerCase();
+  if (address.startsWith("::ffff:") && isIP(address.slice(7)) === 4) address = address.slice(7);
+  const version = isIP(address);
+  if (version === 0) return false;
+  const list = new BlockList();
+  for (const raw of entries) {
+    const entry = parseAllowlistEntry(raw);
+    if (entry) list.addSubnet(entry.address, entry.prefix, entry.family);
+  }
+  return list.check(address, version === 4 ? "ipv4" : "ipv6");
+}
+
+/** True when the client has an allowlist and this request's address is not on it. */
+function blockedByAllowlist(req: Request, client: typeof apiClientsTable.$inferSelect): boolean {
+  if (client.allowedIps.length === 0) return false;
+  if (ipAllowed(clientAddress(req), client.allowedIps)) return false;
+  recordSecurityEvent({
+    type: "authz.denied",
+    outcome: "failure",
+    reason: "api_key_ip_not_allowed",
+    detail: { method: req.method, path: req.path, apiClientId: client.id, clientId: client.clientId },
+    req,
+  });
+  return true;
+}
+
+/**
+ * Record a presented credential that did not authenticate. Coalesced in
+ * security-log, so a gateway retrying a revoked key every second produces one
+ * row a minute with a count, not thousands. The secret itself is never recorded.
+ */
+function recordInvalidKey(req: Request, reason: string, client?: { id: string; clientId: string } | null): void {
+  recordSecurityEvent({
+    type: "apikey.invalid",
+    outcome: "failure",
+    reason,
+    detail: { method: req.method, path: req.path, apiClientId: client?.id ?? null, clientId: client?.clientId ?? null },
+    req,
+  });
+}
+
+/**
+ * Warn once per legacy client at startup. Those rows still hold their secret
+ * in plaintext, which `secretMatches` accepts until the migration runs. The
+ * operator runs it, not the server: hashing makes the secret unreadable on the
+ * API Clients page, and the team should be told first.
+ */
+export async function warnLegacyPlaintextSecrets(): Promise<number> {
+  const rows = await db
+    .select({ id: apiClientsTable.id, name: apiClientsTable.name, clientId: apiClientsTable.clientId })
+    .from(apiClientsTable)
+    .where(isNotNull(apiClientsTable.clientSecret));
+  for (const row of rows) {
+    logger.warn(
+      { apiClientId: row.id, clientId: row.clientId, name: row.name },
+      "API client still has a legacy plaintext secret in the database. Run " +
+      "`pnpm --filter @workspace/db run hash-api-secrets` to store it as a hash; the key itself keeps working.",
+    );
+  }
+  return rows.length;
 }
 
 /**
@@ -160,11 +288,23 @@ export async function attachApiClient(req: Request, _res: Response, next: NextFu
     try {
       const { resolveIngestToken } = await import("../lib/ingest-token");
       const { client, rejected } = await resolveIngestToken(urlToken);
-      if (client) {
+      if (!client) {
+        req.ingestTokenFailure = rejected;
+        recordInvalidKey(req, `ingest_url_${rejected ?? "unknown"}`);
+      } else if (blockedByAllowlist(req, client)) {
+        // A URL token never reaches apiKeyAuth, so the allowlist and the per-client
+        // limit are applied here. Without this, a leaked ingest URL worked from any
+        // address and was limited only by the flood guard.
+        req.ingestTokenFailure = "ip_not_allowed";
+      } else if (isRateLimited(client.id, authConfig.apiKey.rateLimitRpm)) {
+        req.ingestTokenFailure = "rate_limited";
+        logger.warn(
+          { clientId: client.clientId, name: client.name, maxRpm: authConfig.apiKey.rateLimitRpm },
+          "api client rate limited (ingest URL) — ingest data may have been dropped",
+        );
+      } else {
         req.apiClient = client;
         req.viaIngestUrlToken = true;
-      } else {
-        req.ingestTokenFailure = rejected;
       }
     } catch (err) {
       logger.error({ err }, "ingest URL token lookup failed");
@@ -186,6 +326,8 @@ export async function attachApiClient(req: Request, _res: Response, next: NextFu
     // through to `authorize`'s 401 rather than being treated as authenticated.
     if (client && client.status === "active" && !(client.expiresAt && new Date() > client.expiresAt)) {
       req.apiClient = client;
+    } else {
+      recordInvalidKey(req, !client ? "unknown_key" : client.status !== "active" ? `key_${client.status}` : "key_expired", client);
     }
   } catch {
     /* a lookup failure is simply "no client" — authorize will reject */
@@ -234,20 +376,15 @@ export function apiKeyAuth(requiredScope?: string) {
       return;
     }
 
-    // IP allowlist check (empty list = allow all)
-    if (client.allowedIps.length > 0) {
-      const remoteIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim()
-        ?? req.socket.remoteAddress
-        ?? "";
-      const allowed = client.allowedIps.some((ip) => remoteIp === ip || remoteIp.startsWith(ip));
-      if (!allowed) {
-        res.status(403).json({
-          error: "Request IP not in allowlist",
-          remoteIp,
-          allowedIps: client.allowedIps,
-        });
-        return;
-      }
+    // IP allowlist check (empty list = allow all). The list itself is not sent
+    // back: it would tell a caller holding a stolen key which addresses to use.
+    if (blockedByAllowlist(req, client)) {
+      res.status(403).json({
+        error: "Request IP not in allowlist",
+        code: "ip_not_allowed",
+        remoteIp: clientAddress(req),
+      });
+      return;
     }
 
     // Scope check — empty scopes array = all scopes (super-key)

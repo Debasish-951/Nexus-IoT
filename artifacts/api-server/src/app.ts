@@ -3,12 +3,13 @@ import cors from "cors";
 import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
 import router from "./routes";
-import { logger, REDACT_PATHS } from "./lib/logger";
+import { logger, REDACT_PATHS, redactPath } from "./lib/logger";
 import { authConfig } from "./lib/auth-config";
 import { attachPrincipal, stripForgedActorHeaders } from "./middleware/principal";
 import { attachApiClient } from "./middleware/apiKeyAuth";
 import { csrfGuard } from "./middleware/csrf";
 import { authorize } from "./middleware/authorize";
+import { projectScopeGuard } from "./lib/project-access";
 import { floodGuard, apiRateLimit } from "./middleware/apiRateLimit";
 import { requestGuard } from "./middleware/requestGuard";
 import { correlationId, errorHandler, notFoundHandler } from "./middleware/errorHandler";
@@ -45,7 +46,7 @@ app.use(
         return {
           id: req.id,
           method: req.method,
-          url: req.url?.split("?")[0],
+          url: redactPath(req.url?.split("?")[0]),
         };
       },
       res(res) {
@@ -142,7 +143,7 @@ app.use(requestGuard);
 //
 // Mounted on /api as a whole so no route file can forget its guard.
 app.use("/api", floodGuard);
-app.use("/api", attachPrincipal, attachApiClient, stripForgedActorHeaders, csrfGuard, authorize);
+app.use("/api", attachPrincipal, attachApiClient, stripForgedActorHeaders, csrfGuard, authorize, projectScopeGuard);
 app.use("/api", apiRateLimit);
 
 app.use("/api", router);

@@ -230,16 +230,35 @@ function setLimitHeaders(res: Response, d: Decision): void {
  * Clear a caller's counters for one limiter after a genuine success.
  *
  * Failed attempts are what we are limiting; a user who mistypes twice and then
- * signs in correctly should not spend the next 5 minutes near the ceiling. The
- * account and IP dimensions are cleared together because a successful sign-in
- * is evidence about the pair, not about either alone.
+ * signs in correctly should not spend the next 5 minutes near the ceiling.
+ *
+ * Only the counters that belong to the proven identity are cleared: the account
+ * that just signed in and the signed-in user. The IP and subnet counters are
+ * left alone. Clearing them too (as this once did) let anyone holding ONE valid
+ * account reset their source's budget at will — sign in, guess at other
+ * accounts, sign in again — so the per-source limit never bit.
  */
 export function resetLimiter(name: string, req: Request, account?: string | null): void {
+  for (const key of identityKeysToReset(account, req.principal?.user.id)) {
+    stores.get(`${name}:${key.dim}`)?.reset(key.key);
+  }
+  // The successful request itself is refunded on the shared source counters, so
+  // successes never add up there: an office of operators signing in behind one
+  // NAT address must not hit the per-IP limit. Earlier failures stay counted.
   const ip = clientAddress(req);
-  stores.get(`${name}:ip`)?.reset(ip);
-  stores.get(`${name}:subnet`)?.reset(subnetKey(ip));
-  if (account?.trim()) stores.get(`${name}:account`)?.reset(account.trim().toLowerCase().slice(0, 320));
-  if (req.principal?.user.id) stores.get(`${name}:user`)?.reset(req.principal.user.id);
+  stores.get(`${name}:ip`)?.refund(ip);
+  stores.get(`${name}:subnet`)?.refund(subnetKey(ip));
+}
+
+/** Which counters a success clears. Exported for the regression tests. */
+export function identityKeysToReset(
+  account: string | null | undefined,
+  userId: string | null | undefined,
+): Array<{ dim: Dimension; key: string }> {
+  const keys: Array<{ dim: Dimension; key: string }> = [];
+  if (account?.trim()) keys.push({ dim: "account", key: account.trim().toLowerCase().slice(0, 320) });
+  if (userId) keys.push({ dim: "user", key: userId });
+  return keys;
 }
 
 // ── Backwards-compatible shim ────────────────────────────────────────────────

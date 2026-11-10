@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, uuid, jsonb, integer, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, uuid, jsonb, integer, boolean, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -24,7 +24,10 @@ export const attributesTable = pgTable("attributes", {
   // Assigned as (current max for the asset) + 1 on every insert path, so new
   // attributes always append after whatever's already there.
   sortOrder: integer("sort_order").notNull().default(0),
-});
+}, (table) => [
+  // Every ingest message reads and updates attributes by asset.
+  index("attributes_asset_id_idx").on(table.assetId),
+]);
 
 export const insertAttributeSchema = createInsertSchema(attributesTable).omit({ id: true, updatedAt: true });
 export type InsertAttribute = z.infer<typeof insertAttributeSchema>;

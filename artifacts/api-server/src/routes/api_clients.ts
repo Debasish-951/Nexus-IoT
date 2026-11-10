@@ -11,7 +11,8 @@ import {
 import { randomUUID } from "crypto";
 import { hashToken } from "../lib/tokens";
 import { logActivity } from "./activity_log";
-import { recordSecurityEvent } from "../lib/security-log";
+import { recordSecurityEvent, type SecurityEventType } from "../lib/security-log";
+import { normaliseAllowlist } from "../middleware/apiKeyAuth";
 import { ungrantableScopes, canCreateApiClients } from "../lib/rbac";
 import {
   issueIngestToken, revealIngestToken, assertUrlTokenAllowed, INGEST_SCOPE,
@@ -84,19 +85,59 @@ async function refuseIfOutOfScope(req: Request, res: Response, id: string): Prom
 }
 
 /**
- * Strip the stored secret hash from anything sent to a client.
+ * Strip stored credentials from anything sent to a client.
  *
  * The hash is not directly usable as a credential, but publishing it would let
  * anyone holding a candidate secret confirm it offline — and there is no reason
  * for the browser to have it at all.
  *
- * `clientSecret` is left as-is: it is null for everything issued since hashing
- * began, and non-null only for legacy rows the migration script has not yet
- * converted, where the UI's reveal button still depends on it.
+ * `clientSecret` is always sent as null. It is non-null only on legacy rows the
+ * hash-api-secrets script has not converted yet, and for those it is a working
+ * key in plaintext: returning it put every legacy credential in every list
+ * response, browser cache and proxy log that saw one. The UI then shows the
+ * secret as unavailable, as it does for every hashed client; anyone who has lost
+ * it rotates. The only plaintext secret ever sent is the new one in the create
+ * and rotate responses, added after this function runs.
  */
-function redactSecret<T extends { clientSecretHash?: string | null }>(row: T): Omit<T, "clientSecretHash"> {
-  const { clientSecretHash: _omit, ...rest } = row;
-  return rest;
+function redactSecret<T extends { clientSecret?: string | null; clientSecretHash?: string | null; ingestTokenHash?: string | null; ingestTokenEnc?: string | null }>(
+  row: T,
+): Omit<T, "clientSecret" | "clientSecretHash" | "ingestTokenHash" | "ingestTokenEnc"> & { clientSecret: null } {
+  // The ingest URL token's hash and ciphertext are stripped too. Only decorate()
+  // used to remove them, so create, update, rotate, revoke and restore responses
+  // sent both to the browser.
+  const { clientSecret: _p, clientSecretHash: _s, ingestTokenHash: _h, ingestTokenEnc: _e, ...rest } = row;
+  return { ...rest, clientSecret: null };
+}
+
+/**
+ * A change to a machine credential, recorded in the Security Center as well as
+ * the Activity Log. Who minted, widened, re-pointed or revoked a key is the
+ * first question after a key is abused, and the Activity Log is the wrong place
+ * to have to answer it from.
+ */
+function auditClient(
+  req: Request,
+  type: SecurityEventType,
+  client: { id: string; clientId: string; name: string },
+  detail: Record<string, unknown> = {},
+): void {
+  recordSecurityEvent({
+    type,
+    outcome: "success",
+    userId: req.principal?.user.id ?? null,
+    username: req.principal?.user.username ?? null,
+    detail: { apiClientId: client.id, clientId: client.clientId, name: client.name, ...detail },
+    req,
+  });
+}
+
+/** 400 for an allowlist with entries that are not an address or CIDR block. */
+function refuseInvalidAllowlist(res: Response, invalid: string[]): void {
+  res.status(400).json({
+    error: `These IP allowlist entries are not valid: ${invalid.join(", ")}. Use an address (203.0.113.7) or a CIDR block (203.0.113.0/24).`,
+    code: "invalid_allowed_ips",
+    invalid,
+  });
 }
 
 /**
@@ -179,8 +220,12 @@ router.post("/api-clients", async (req, res): Promise<void> => {
   // Parse expiresAt and allowedIps from body manually (not in generated Zod yet)
   const body = req.body as Record<string, unknown>;
   const expiresAt   = body.expiresAt   ? new Date(body.expiresAt as string)   : null;
-  const allowedIps  = Array.isArray(body.allowedIps) ? (body.allowedIps as string[]) : [];
   const description = typeof body.description === "string" ? body.description : null;
+  // Validated on save: an entry that is empty or not an address used to be
+  // stored as-is, and the old prefix match read "" as "allow every address".
+  const allowlist = normaliseAllowlist(body.allowedIps);
+  if (!allowlist.ok) { refuseInvalidAllowlist(res, allowlist.invalid); return; }
+  const allowedIps = allowlist.entries;
 
   // ── Scope ceiling ──────────────────────────────────────────────────────────
   //
@@ -284,6 +329,7 @@ router.post("/api-clients", async (req, res): Promise<void> => {
     .returning();
 
   void logActivity("api_client.created", "api_client", client.id, client.name, null, req);
+  auditClient(req, "api_client.created", client, { scopes: client.scopes, projectId: client.projectId, allowedIps: client.allowedIps });
   // The ONLY time the plaintext secret is ever sent. The stored row carries just
   // its hash, so a caller that does not copy it now must rotate to get another.
   res.status(201).json({ ...redactSecret(client), clientSecret: rawSecret });
@@ -297,6 +343,50 @@ router.put("/api-clients/:id", async (req, res): Promise<void> => {
   const parsed = UpdateApiClientBody.safeParse(req.body);
   if (!parsed.success) { respondInvalid(req, res, parsed.error); return; }
 
+  // Same object-level check as rotate, revoke and delete: a project-restricted
+  // user may only edit credentials that belong to one of their projects.
+  if (await refuseIfOutOfScope(req, res, params.data.id)) return;
+
+  // Same scope ceiling as create. Without it, a user allowed to grant only
+  // `ingest:write` could edit their own key to `["*"]`, or to `[]`, which
+  // apiKeyAuth reads as "all scopes".
+  const access = req.principal?.access;
+  if (access && parsed.data.scopes !== undefined) {
+    if (parsed.data.scopes.length === 0) {
+      res.status(400).json({
+        error: "At least one scope is required. A credential with no scopes would have full access.",
+        code: "scopes_required",
+      });
+      return;
+    }
+    const [current] = await db
+      .select({ scopes: apiClientsTable.scopes })
+      .from(apiClientsTable)
+      .where(eq(apiClientsTable.id, params.data.id));
+    // Only scopes being ADDED are checked, so an engineer can still rename or
+    // narrow a key an administrator created with wider scopes.
+    const added = parsed.data.scopes.filter((s) => !(current?.scopes ?? []).includes(s));
+    const denied = ungrantableScopes(access, added);
+    if (denied.length > 0) {
+      recordSecurityEvent({
+        type: "authz.denied",
+        outcome: "failure",
+        userId: req.principal!.user.id,
+        username: req.principal!.user.username,
+        reason: "api_client_scope_forbidden",
+        detail: { apiClientId: params.data.id, deniedScopes: denied },
+        req,
+      });
+      res.status(403).json({
+        error: `You are not permitted to grant: ${denied.join(", ")}.`,
+        code: "scope_forbidden",
+        deniedScopes: denied,
+        grantableScopes: access.apiScopes,
+      });
+      return;
+    }
+  }
+
   const body = req.body as Record<string, unknown>;
   const updateData: Record<string, unknown> = {};
 
@@ -307,7 +397,11 @@ router.put("/api-clients/:id", async (req, res): Promise<void> => {
 
   // Extra fields not yet in generated Zod
   if (typeof body.description === "string") updateData.description = body.description;
-  if (Array.isArray(body.allowedIps))       updateData.allowedIps  = body.allowedIps;
+  if (Array.isArray(body.allowedIps)) {
+    const allowlist = normaliseAllowlist(body.allowedIps);
+    if (!allowlist.ok) { refuseInvalidAllowlist(res, allowlist.invalid); return; }
+    updateData.allowedIps = allowlist.entries;
+  }
   if (body.expiresAt !== undefined) {
     updateData.expiresAt = body.expiresAt ? new Date(body.expiresAt as string) : null;
   }
@@ -344,6 +438,18 @@ router.put("/api-clients/:id", async (req, res): Promise<void> => {
     .returning();
 
   if (!client) { res.status(404).json({ error: "API client not found" }); return; }
+
+  // Only the fields that change what the key can do are security events; a
+  // rename or new tag is in the Activity Log below and nowhere else.
+  const sensitive = ["scopes", "projectId", "status", "allowedIps", "expiresAt"].filter((k) => k in updateData);
+  if (sensitive.length > 0) {
+    auditClient(req, "api_client.updated", client, {
+      changed: sensitive,
+      scopes: client.scopes, projectId: client.projectId, status: client.status, allowedIps: client.allowedIps,
+    });
+  }
+  void logActivity("api_client.updated", "api_client", client.id, client.name,
+    `fields=${Object.keys(updateData).join(",")}`, req);
   res.json(redactSecret(client));
 });
 
@@ -366,6 +472,7 @@ router.post("/api-clients/:id/rotate-secret", async (req, res): Promise<void> =>
   if (!client) { res.status(404).json({ error: "API client not found" }); return; }
 
   void logActivity("api_client.secret_rotated", "api_client", client.id, client.name, null, req);
+  auditClient(req, "api_client.secret_rotated", client);
   // Return the new secret plaintext ONCE — caller must store it
   res.json({ ...redactSecret(client), clientSecret: newSecret });
 });
@@ -448,6 +555,7 @@ router.post("/api-clients/:id/revoke", async (req, res): Promise<void> => {
 
   if (!client) { res.status(404).json({ error: "API client not found" }); return; }
   void logActivity("api_client.revoked", "api_client", client.id, client.name, null, req);
+  auditClient(req, "api_client.revoked", client);
   res.json(redactSecret(client));
 });
 
@@ -465,6 +573,7 @@ router.post("/api-clients/:id/restore", async (req, res): Promise<void> => {
 
   if (!client) { res.status(404).json({ error: "API client not found" }); return; }
   void logActivity("api_client.restored", "api_client", client.id, client.name, null, req);
+  auditClient(req, "api_client.restored", client);
   res.json(redactSecret(client));
 });
 
@@ -481,6 +590,7 @@ router.delete("/api-clients/:id", async (req, res): Promise<void> => {
 
   if (!client) { res.status(404).json({ error: "API client not found" }); return; }
   void logActivity("api_client.deleted", "api_client", client.id, client.name, null, req);
+  auditClient(req, "api_client.deleted", client);
   res.sendStatus(204);
 });
 

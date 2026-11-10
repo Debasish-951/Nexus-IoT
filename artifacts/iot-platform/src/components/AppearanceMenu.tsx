@@ -29,6 +29,10 @@ import { useAppearance, type Skin, type Theme } from "@/lib/appearance";
 const SKINS: { value: Skin; label: string; hint: string }[] = [
   { value: "slate", label: "Slate", hint: "Quiet precision — hairlines, flat surfaces, teal accent" },
   { value: "classic", label: "Classic", hint: "The original Electric Blue design" },
+  { value: "navy", label: "Deep navy", hint: "Navy navigation, blue actions on white" },
+  { value: "cool-grey", label: "Cool grey", hint: "Light grey page, white cards, dark left bar" },
+  { value: "soft-white", label: "Soft white", hint: "Off-white page, white cards, dark left bar" },
+  { value: "pale-blue", label: "Pale blue", hint: "Pale blue page, white cards, dark left bar" },
 ];
 
 const THEMES: { value: Theme; label: string; icon: typeof Sun }[] = [

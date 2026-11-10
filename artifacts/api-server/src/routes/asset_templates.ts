@@ -9,15 +9,39 @@ import {
   UpdateAssetTemplateParams,
   DeleteAssetTemplateParams,
 } from "@workspace/api-zod";
+import { logActivity } from "./activity_log";
+import { AttributeDefinitionsSchema } from "../schemas/common";
 
 const router: IRouter = Router();
+
+/**
+ * Read `attribute_definitions` whatever shape the row was saved in.
+ *
+ * The PUT route used to `JSON.stringify` the list before handing it to a jsonb
+ * column, so older rows hold a JSON *string* scalar instead of an array. New
+ * writes store the array itself. Old rows are decoded here so responses always
+ * carry an array; they become real arrays the next time the template is saved.
+ */
+export function readAttributeDefinitions(raw: unknown): unknown[] {
+  let value = raw;
+  // Two rounds at most: one for the double encoding, one for a driver that
+  // hands jsonb back as text.
+  for (let i = 0; i < 2 && typeof value === "string"; i++) {
+    try { value = JSON.parse(value); } catch { return []; }
+  }
+  return Array.isArray(value) ? value : [];
+}
+
+function toClient<T extends { attributeDefinitions: unknown }>(template: T): T {
+  return { ...template, attributeDefinitions: readAttributeDefinitions(template.attributeDefinitions) } as T;
+}
 
 router.get("/asset-templates", async (req, res): Promise<void> => {
   const templates = await db
     .select()
     .from(assetTemplatesTable)
     .orderBy(assetTemplatesTable.name);
-  res.json(templates);
+  res.json(templates.map(toClient));
 });
 
 router.post("/asset-templates", async (req, res): Promise<void> => {
@@ -33,7 +57,9 @@ router.post("/asset-templates", async (req, res): Promise<void> => {
     .values({ name: parsed.data.name, deviceId, tags: parsed.data.tags ?? [] })
     .returning();
 
-  res.status(201).json(template);
+  // Templates were the one write path in Asset Management with no audit entry.
+  void logActivity("template.created", "template", template.id, template.name, null, req);
+  res.status(201).json(toClient(template));
 });
 
 router.get("/asset-templates/:id", async (req, res): Promise<void> => {
@@ -46,7 +72,7 @@ router.get("/asset-templates/:id", async (req, res): Promise<void> => {
     .where(eq(assetTemplatesTable.id, params.data.id));
 
   if (!template) { res.status(404).json({ error: "Template not found" }); return; }
-  res.json(template);
+  res.json(toClient(template));
 });
 
 router.put("/asset-templates/:id", async (req, res): Promise<void> => {
@@ -56,8 +82,16 @@ router.put("/asset-templates/:id", async (req, res): Promise<void> => {
   const parsed = UpdateAssetTemplateBody.safeParse(req.body);
   if (!parsed.success) { respondInvalid(req, res, parsed.error); return; }
 
-  // attributeDefinitions comes through as raw JSON (not in Zod schema — accept directly from body)
-  const attributeDefinitions = (req.body as any)?.attributeDefinitions;
+  // attributeDefinitions is not in the generated body schema, so it is checked
+  // against the hand-written one here. It was stored unchecked before, including
+  // the runtime expressions that ingest later evaluates.
+  const rawDefinitions = (req.body as any)?.attributeDefinitions;
+  let attributeDefinitions: unknown[] | undefined;
+  if (rawDefinitions !== undefined) {
+    const defs = AttributeDefinitionsSchema.safeParse(rawDefinitions);
+    if (!defs.success) { respondInvalid(req, res, defs.error); return; }
+    attributeDefinitions = defs.data;
+  }
   const rawDeviceId = (req.body as any)?.deviceId;
 
   const updatePayload: Record<string, unknown> = {};
@@ -69,13 +103,16 @@ router.put("/asset-templates/:id", async (req, res): Promise<void> => {
     updatePayload.deviceId = typeof rawDeviceId === "string" && rawDeviceId.trim() ? rawDeviceId.trim() : null;
   }
   if (attributeDefinitions !== undefined) {
-    updatePayload.attributeDefinitions = JSON.stringify(attributeDefinitions);
-    updatePayload.attributeCount = Array.isArray(attributeDefinitions) ? attributeDefinitions.length : 0;
+    // The array itself, not JSON.stringify of it: a stringified value lands in
+    // jsonb as one string scalar, which SQL and reports cannot look inside.
+    updatePayload.attributeDefinitions = attributeDefinitions;
+    updatePayload.attributeCount = attributeDefinitions.length;
   }
 
   if (Object.keys(updatePayload).length === 0) {
     const [tmpl] = await db.select().from(assetTemplatesTable).where(eq(assetTemplatesTable.id, params.data.id));
-    res.json(tmpl);
+    if (!tmpl) { res.status(404).json({ error: "Template not found" }); return; }
+    res.json(toClient(tmpl));
     return;
   }
 
@@ -86,7 +123,9 @@ router.put("/asset-templates/:id", async (req, res): Promise<void> => {
     .returning();
 
   if (!template) { res.status(404).json({ error: "Template not found" }); return; }
-  res.json(template);
+  void logActivity("template.updated", "template", template.id, template.name,
+    `fields=${Object.keys(updatePayload).join(",")}`, req);
+  res.json(toClient(template));
 });
 
 router.delete("/asset-templates/:id", async (req, res): Promise<void> => {
@@ -99,6 +138,7 @@ router.delete("/asset-templates/:id", async (req, res): Promise<void> => {
     .returning();
 
   if (!template) { res.status(404).json({ error: "Template not found" }); return; }
+  void logActivity("template.deleted", "template", template.id, template.name, null, req);
   res.sendStatus(204);
 });
 

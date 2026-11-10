@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { effectiveRangeMinutes, getFromTo, gapFill, tickLabel, GRANULARITY_STEP_MAP, type TimeCfg } from "./timeRange";
+import { onUserReset } from "@/lib/user-scoped-state";
 
 export interface Point { t: string; v: number; ts: number }
 
@@ -17,6 +18,12 @@ export interface Point { t: string; v: number; ts: number }
  */
 function sameSeries(a: unknown, b: unknown): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
+}
+
+/** A series request that failed (network error = status 0). Callers keep the last data. */
+class SeriesFetchError extends Error {
+  readonly status: number;
+  constructor(status: number) { super(`series fetch failed (${status})`); this.status = status; }
 }
 
 // Fetch one tag's raw or server-bucketed series for the given time config —
@@ -42,11 +49,19 @@ async function fetchSeriesRaw(assetId: string, tag: string, timeCfg: TimeCfg): P
   // ranges 400'd while long ranges used a different, unaffected endpoint) went unnoticed.
   // Logging the response keeps the next such break visible in the console instead of
   // looking identical to a genuinely empty range.
+  //
+  // A failed request THROWS rather than returning an empty series: the callers
+  // keep whatever they last showed. Treating a 429 or a 5xx as "no rows" blanked
+  // every chart on the dashboard the moment the API pushed back.
   if (useAgg) {
     const p = new URLSearchParams({ assetId, metric: tag, from, to, bucket, limit: "2000" });
     const res = await fetch(`/api/system/aggregate?${p}`).catch((e) => { console.warn("[widget] aggregate fetch failed", e); return null; });
-    if (res && !res.ok) console.warn(`[widget] /api/system/aggregate?${p} → ${res.status}`, await res.text().catch(() => ""));
-    const json = res?.ok ? await res.json() : { data: [] };
+    if (!res) throw new SeriesFetchError(0);
+    if (!res.ok) {
+      console.warn(`[widget] /api/system/aggregate?${p} → ${res.status}`, await res.text().catch(() => ""));
+      throw new SeriesFetchError(res.status);
+    }
+    const json = await res.json();
     const mapped = (json.data ?? []).map((d: any) => {
       const raw = d[aggField] ?? d.avg_val ?? d.max_val ?? d.min_val ?? null;
       return { timestamp: d.bucket, value: raw !== null ? parseFloat(String(raw)) : null };
@@ -55,8 +70,13 @@ async function fetchSeriesRaw(assetId: string, tag: string, timeCfg: TimeCfg): P
   }
   const p = new URLSearchParams({ metric: tag, from, to, limit: "500" });
   const res = await fetch(`/api/telemetry/${assetId}?${p}`).catch((e) => { console.warn("[widget] telemetry fetch failed", e); return null; });
-  if (res && !res.ok) console.warn(`[widget] /api/telemetry/${assetId}?${p} → ${res.status}`, await res.text().catch(() => ""));
-  const rows: any[] = res?.ok ? await res.json() : [];
+  if (!res) throw new SeriesFetchError(0);
+  if (!res.ok) {
+    console.warn(`[widget] /api/telemetry/${assetId}?${p} → ${res.status}`, await res.text().catch(() => ""));
+    throw new SeriesFetchError(res.status);
+  }
+  const json = await res.json();
+  const rows: any[] = Array.isArray(json) ? json : [];
   return rows.map((r) => ({ timestamp: r.timestamp, value: r.value != null ? parseFloat(String(r.value)) : null }));
 }
 
@@ -67,8 +87,12 @@ export function useTelemetrySeries(assetId?: string, tag?: string, timeCfg: Time
   const cfgKey = JSON.stringify(timeCfg);
 
   const lastRef = useRef<Point[]>([]);
+  // Which binding the data on screen belongs to: a failed refresh keeps it, but a
+  // failed first load for a NEW binding must not keep showing the old one's data.
+  const shownKeyRef = useRef("");
   useEffect(() => {
-    if (!assetId || !tag) { setData([]); lastRef.current = []; return; }
+    if (!assetId || !tag) { setData([]); lastRef.current = []; shownKeyRef.current = ""; return; }
+    const key = `${assetId}|${tag}|${cfgKey}`;
     let cancelled = false;
     const minutes = effectiveRangeMinutes(timeCfg);
     const load = async () => {
@@ -80,7 +104,11 @@ export function useTelemetrySeries(assetId?: string, tag?: string, timeCfg: Time
           const ts = new Date(r.timestamp).getTime();
           return { ts, t: tickLabel(r.timestamp, minutes), v: Number(r.value) };
         }).filter((r) => !isNaN(r.v)).sort((a, b) => a.ts - b.ts);
+        shownKeyRef.current = key;
         if (!sameSeries(next, lastRef.current)) { lastRef.current = next; setData(next); }
+      } catch {
+        // Keep the last series on screen; the next poll tries again.
+        if (!cancelled && shownKeyRef.current !== key) { lastRef.current = []; setData([]); }
       } finally { if (!cancelled) setLoading(false); }
     };
     load();
@@ -98,13 +126,17 @@ export function useMultiSeries(assetId: string | undefined, tags: string[], time
   const tagKey = tags.join("|");
   const cfgKey = JSON.stringify(timeCfg);
   const lastRef2 = useRef<Record<string, any>[]>([]);
+  const shownKeyRef2 = useRef("");
   useEffect(() => {
-    if (!assetId || tags.length === 0) { setRows([]); lastRef2.current = []; return; }
+    if (!assetId || tags.length === 0) { setRows([]); lastRef2.current = []; shownKeyRef2.current = ""; return; }
+    const key = `${assetId}|${tagKey}|${cfgKey}`;
     let cancelled = false;
     const minutes = effectiveRangeMinutes(timeCfg);
     const load = async () => {
       const byTs: Record<number, any> = {};
-      await Promise.all(tags.map(async (tag) => {
+      // One failed tag keeps the whole previous set rather than showing a
+      // partial chart that looks like a series went to zero.
+      try { await Promise.all(tags.map(async (tag) => {
         const series = await fetchSeriesRaw(assetId, tag, timeCfg);
         for (const row of series) {
           const ts = new Date(row.timestamp).getTime(); const v = row.value;
@@ -112,8 +144,12 @@ export function useMultiSeries(assetId: string | undefined, tags: string[], time
           if (!byTs[ts]) byTs[ts] = { ts, t: tickLabel(row.timestamp, minutes) };
           byTs[ts][tag] = v;
         }
-      }));
+      })); } catch {
+        if (!cancelled && shownKeyRef2.current !== key) { lastRef2.current = []; setRows([]); }
+        return;
+      }
       if (cancelled) return;
+      shownKeyRef2.current = key;
       const next = Object.values(byTs).sort((a, b) => a.ts - b.ts);
       if (!sameSeries(next, lastRef2.current)) { lastRef2.current = next; setRows(next); }
     };
@@ -134,14 +170,16 @@ export function useSeriesSet(series: SeriesSpec[], timeCfg: TimeCfg = {}, refres
   const specKey = series.map((s) => `${s.key}=${s.assetId ?? ""}:${s.tag ?? ""}`).join("|");
   const cfgKey = JSON.stringify(timeCfg);
   const lastRef3 = useRef<Record<string, any>[]>([]);
+  const shownKeyRef3 = useRef("");
   useEffect(() => {
     const valid = series.filter((s) => s.assetId && s.tag);
-    if (valid.length === 0) { setRows([]); lastRef3.current = []; return; }
+    if (valid.length === 0) { setRows([]); lastRef3.current = []; shownKeyRef3.current = ""; return; }
+    const key = `${specKey}|${cfgKey}`;
     let cancelled = false;
     const minutes = effectiveRangeMinutes(timeCfg);
     const load = async () => {
       const byTs: Record<number, any> = {};
-      await Promise.all(valid.map(async (s) => {
+      try { await Promise.all(valid.map(async (s) => {
         const rawSeries = await fetchSeriesRaw(s.assetId!, s.tag!, timeCfg);
         for (const row of rawSeries) {
           const ts = new Date(row.timestamp).getTime(); const v = row.value;
@@ -149,8 +187,12 @@ export function useSeriesSet(series: SeriesSpec[], timeCfg: TimeCfg = {}, refres
           if (!byTs[ts]) byTs[ts] = { ts, t: tickLabel(row.timestamp, minutes) };
           byTs[ts][s.key] = v;
         }
-      }));
+      })); } catch {
+        if (!cancelled && shownKeyRef3.current !== key) { lastRef3.current = []; setRows([]); }
+        return;
+      }
       if (cancelled) return;
+      shownKeyRef3.current = key;
       const next = Object.values(byTs).sort((a, b) => a.ts - b.ts);
       if (!sameSeries(next, lastRef3.current)) { lastRef3.current = next; setRows(next); }
     };
@@ -184,6 +226,8 @@ export interface MetricChoice { key: string; label: string }
 interface AssetMetricMeta { metrics: string[]; attrs: any[] }
 const META_TTL_MS = 30_000;
 const metaCache = new Map<string, { at: number; p: Promise<AssetMetricMeta> }>();
+// Per-user data: emptied on sign-out so the next user starts cold.
+onUserReset(() => metaCache.clear());
 
 function fetchAssetMeta(assetId: string): Promise<AssetMetricMeta> {
   const hit = metaCache.get(assetId);

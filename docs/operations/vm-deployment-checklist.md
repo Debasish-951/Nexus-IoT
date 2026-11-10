@@ -3,6 +3,9 @@
 Plain-language, step-by-step. Written for a single Linux VM (Ubuntu/RHEL) serving one
 site. Follow it in order — each step is verifiable before you move on.
 
+> **Installing for a company?** Each company needs its own server and database. Start with
+> [new-company-installation.md](new-company-installation.md).
+
 > **Why this exists:** the API server serves only `/api` — it has no static-file
 > handling at all. Something in front has to serve the built web interface and
 > forward `/api` to the backend, and on a plain VM that something is yours to set up
@@ -40,11 +43,13 @@ Create `/opt/nexus-iot/.env`. These are the values that **must** be set:
 | `DATABASE_URL` | `postgres://user:pass@host:5432/dbname` | Server refuses to start |
 | `NODE_ENV` | `production` | Login breaks behind a web server; visitor IPs all show as the proxy |
 | `PORT` | `8080` | Defaults to 8080 anyway |
+| `HOST` | `127.0.0.1` | The API listens on every network interface, so anyone who can reach port 8080 skips nginx: no TLS, and a forged `X-Forwarded-For` is believed |
 | `AUTH_PUBLIC_URL` | `https://iot.yourcompany.com` | Password-reset emails link to `localhost` |
 | `CORS_ORIGINS` | `https://iot.yourcompany.com` | Browser calls rejected |
 | `AUTH_EMAIL_TRANSPORT` | `smtp` | **Server refuses to start** (see below) |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` | your mail server | Invitations and resets never arrive |
 | `AUTH_EMAIL_FROM` | `Integrated Suite <no-reply@yourcompany.com>` | Uses a `localhost` sender |
+| `SECRETS_ENC_KEY` | 32 random bytes, base64: `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"` | **Server refuses to start.** It encrypts broker passwords, destination tokens and ingest URLs. Keep a copy outside the server (see [backup-restore.md](backup-restore.md)); without it a restored database cannot decrypt them. |
 
 **About `AUTH_EMAIL_TRANSPORT`:** in production the app deliberately refuses to boot
 with the default (`console`), because that would print account-activation links into
@@ -58,18 +63,22 @@ Change it back to `true` once TLS is in place.
 
 ## Step 3 — Set up the database
 
-```bash
-# Creates/updates all tables. Safe to re-run.
-pnpm --filter @workspace/db run push
-```
+Choose one:
 
-Then either:
-
-- **Moving an existing system:** restore your current database with `pg_dump`/`psql`.
-  Your assets, templates, dashboards **and API keys** come across, so your gateway
-  keeps working with the key it already has.
-- **Starting fresh:** run `pnpm --filter @workspace/db run seed` to create the initial
-  users, then create your own API key in the app (Admin Center → API Clients).
+- **Moving an existing system:** follow the restore steps in
+  [backup-restore.md](backup-restore.md#4-restore). Restore into an empty database
+  first, then run `push`. Your assets, templates, dashboards **and API keys** come
+  across, so your gateway keeps working with the key it already has. Bring the same
+  `SECRETS_ENC_KEY`, or stored broker and destination credentials cannot be decrypted.
+- **Starting fresh:** create the tables, then create the first administrator:
+  ```bash
+  # Creates/updates all tables. Back up first on a live system (backup-restore.md).
+  pnpm --filter @workspace/db run push
+  ```
+  Then create the first owner account as described in
+  [new-company-installation.md](new-company-installation.md). Do not run `seed` on a
+  production server: it creates demo assets, demo users and a demo API key. Create
+  your own API key in the app (Admin Center → API Clients).
 
 > Never run `push-force` on this database — it is destructive.
 
@@ -100,6 +109,8 @@ ExecStart=/usr/bin/node --enable-source-maps ./dist/index.mjs
 Restart=always
 RestartSec=5
 User=nexus
+# Logs go to the journal (stdout). The identifier lets rsyslog filters match.
+SyslogIdentifier=nexus-api
 
 [Install]
 WantedBy=multi-user.target
@@ -117,6 +128,39 @@ Two things matter here:
   the app finding `.env` on its own; it looks for it at a fixed relative path
   (`../../.env` from the working directory) and will fail confusingly if that is wrong.
 - **`Restart=always`** — a crash otherwise takes ingestion down until someone notices.
+
+### Logs: journald
+
+The API writes JSON lines to stdout and never opens a log file. The unit above leaves
+stdout to systemd, so the journal is the only log store. Do not add
+`StandardOutput=append:...` or a logrotate rule; one destination keeps the
+permissions and retention below in one place.
+
+The log contains stack traces, user ids, usernames and client IPs, so treat it like a
+credential store:
+
+1. **Who can read it.** Root and members of the `systemd-journal` group, and on
+   Debian/Ubuntu also the `adm` group. Keep both to the people who operate the server:
+   ```bash
+   getent group systemd-journal adm
+   ```
+2. **The syslog copy (Ubuntu).** rsyslog copies the journal into `/var/log/syslog`,
+   readable by `adm`. Keep `adm` equally tight, or stop the copy for this service:
+   ```bash
+   echo ':programname, isequal, "nexus-api" stop' | sudo tee /etc/rsyslog.d/10-nexus.conf
+   sudo systemctl restart rsyslog
+   ```
+3. **How long it is kept.** journald retention applies to the whole machine. Keep the
+   journal on disk and cap it, for example 30 days or 2 GB, whichever comes first:
+   ```bash
+   sudo mkdir -p /etc/systemd/journald.conf.d
+   printf '[Journal]\nStorage=persistent\nSystemMaxUse=2G\nMaxRetentionSec=30day\n' \
+     | sudo tee /etc/systemd/journald.conf.d/retention.conf
+   sudo systemctl restart systemd-journald
+   ```
+
+Useful commands: `journalctl -u nexus-api -f` (follow), `journalctl -u nexus-api
+--since "1 hour ago" -p err` (recent errors), `journalctl --disk-usage`.
 
 ## Step 6 — Put a web server in front
 
@@ -162,18 +206,46 @@ server {                       # redirect plain HTTP
 ```
 
 > ⚠️ **Use `X-Forwarded-For $remote_addr`, not the usual
-> `$proxy_add_x_forwarded_for`.** The API-key IP allowlist reads the *first* value of
-> that header to decide whether to accept a request. The common `$proxy_add_...` form
-> *appends* to whatever the caller sent, leaving a caller-supplied value first — which
-> would let someone spoof their way past an IP allowlist. Overwriting closes that.
+> `$proxy_add_x_forwarded_for`.** The API decides who the caller is (for rate limits,
+> the security log and API-key IP allowlists) from that header, trusting `TRUST_PROXY`
+> hops of it. The common `$proxy_add_...` form *appends* to whatever the caller sent,
+> so a forged value can end up in the position the API trusts. Overwriting closes that.
 
-> ⚠️ **Run only one copy of the backend.** No PM2 cluster mode, no replicas. Four
-> things are held in the process's own memory: API-key rate-limit counters, the
-> seen-devices list, live-update fan-out to browsers, and the hourly data-retention
-> job. With two copies you would get double the effective rate limit, live updates
-> reaching only half your browsers, and the retention job running twice.
+> ⚠️ **Set `HOST=127.0.0.1`** when nginx runs on the same machine. Without it the API
+> also answers on port 8080 from the network, where a caller talks to it directly and
+> chooses its own `X-Forwarded-For`. With it, port 8080 is reachable only through nginx.
+> Leaving `HOST` unset keeps the old behaviour (all interfaces); use that only if nginx
+> runs on a different machine, and then firewall port 8080 to that machine alone.
+>
+> Check: `ss -ltnp | grep 8080` should show `127.0.0.1:8080`, not `0.0.0.0:8080` or `*:8080`.
 
-If you keep using the `?key=` URL form, also stop nginx logging the key:
+> **API-key IP allowlists** take exact addresses (`203.0.113.7`) or CIDR blocks
+> (`203.0.113.0/24`, `2001:db8::/32`). Entries are checked when saved. An entry saved
+> before November 2026 in the old prefix style (`10.0.0.`) no longer matches anything,
+> so a client whose list holds only such entries is refused until the list is corrected.
+
+> ⚠️ **Run only one copy of the backend.** No PM2 cluster mode, no replicas. Several
+> things live in the process's own memory: all rate-limit counters (sign-in, API,
+> API-key), the MQTT broker connections, alarm On/Off delay timers, the seen-devices
+> cache, live-update fan-out to browsers, and the hourly retention job. With two copies
+> you would get double the effective rate limits, two MQTT connections with the same
+> client id knocking each other off the broker in a reconnect loop, live updates
+> reaching only half your browsers,
+> and the retention job running twice.
+>
+> A restart clears that memory. Rate-limit counters start from zero, a running alarm
+> On/Off delay starts again (an alarm can fire up to one delay period late), MQTT
+> connections reopen, and browsers reconnect their live feed. Sessions, lockouts, alarms and data are in PostgreSQL and survive. See
+> [technical-reference.md](../technical-reference.md#process-local-state-single-process-requirement).
+
+**Keys in URLs.** Gateways should send the key in a header (`X-API-Key: <secret>` or
+`Authorization: Bearer <secret>`). A key in the query string (`?key=`, `?apiKey=` or
+`?api_key=`) is **ignored** unless you set `API_KEY_ALLOW_QUERY_PARAM=true`: the
+request then gets `401` and the server logs a warning at most once a minute. Turn it on
+only for devices that can set a URL but no header. The API's own log masks secrets in
+URLs, but nginx's access log records the full request line. If you enable the query
+form, or use the copy-and-paste ingest URLs (`/api/ingest/e/<token>/...`, where the
+token is the credential), stop nginx logging those URLs:
 
 ```nginx
 location /api/ingest/ {
@@ -207,8 +279,10 @@ This is the most common first-post failure after a move.
 1. **Backend is up** — from the VM:
    ```bash
    curl http://127.0.0.1:8080/api/healthz     # expect {"status":"ok"}
+   curl http://127.0.0.1:8080/api/readyz      # expect {"status":"ok","database":"ok"}
    ```
-   This endpoint needs no login, so it also works as your monitoring check.
+   Neither needs a login. Point monitoring at `/api/readyz`: it returns 503 when the
+   database is unreachable, while `/api/healthz` only shows the process is running.
 2. **Site loads** — open `https://iot.yourcompany.com` and log in.
 3. **Live badge** — the dashboard header should read **Live** (green). If it says
    *Reconnecting*, the WebSocket lines in step 6 are wrong.
@@ -238,15 +312,18 @@ This is the most common first-post failure after a move.
 | Dashboard says "Reconnecting" forever | Missing `Upgrade`/`Connection` headers for `/api/ws` |
 | Gateway gets `401` | Key not sent, or wrong key for that endpoint |
 | Gateway gets `403 client_mismatch` | Posting to another client's `/k/<id>/` endpoint |
-| Gateway gets `429` | Over 120 requests/minute on that key — batch, or use a second key |
-| Data posts fine but no chart | Tag not declared on the asset — undeclared tags are **dropped**. Use the Payload Simulator's validate step to see which |
+| Gateway gets `429` | Over 1200 requests/minute on that key (`INGEST_RATE_LIMIT_RPM`) — batch readings, use a second key, or raise the limit |
+| Data posts fine but no chart | Tag not declared on the asset — undeclared tags are **dropped**. Post the same payload to `/api/ingest/validate` to see which tags are dropped |
 | Password-reset links point at localhost | `AUTH_PUBLIC_URL` not set |
+| Sign-in fails with `origin_not_allowed` | The browser's address is not in `AUTH_PUBLIC_URL`/`CORS_ORIGINS` and nginx is not passing the original `Host` (`proxy_set_header Host $host;`) |
 
 ---
 
 ## After it is live
 
-- Take a `pg_dump` on a schedule — all your configuration and history is in Postgres.
+- Set up nightly encrypted backups of the database **and** the uploads folder, and keep
+  `SECRETS_ENC_KEY` safe and separate: see [backup-restore.md](backup-restore.md).
+  The database alone is not enough to restore.
 - Watch `journalctl -u nexus-api` for restarts.
 - Keep an eye on the request counts in Broker Management; they are your simplest
   "is data still flowing" indicator.

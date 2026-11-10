@@ -5,11 +5,12 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useListAssets } from "@workspace/api-client-react";
-import { WIDGET_CATEGORIES, PALETTE, SERIES_COLORS, widgetDef, CARD_ICONS, CARD_ICON_KEYS, GROUPED_TYPES, MULTI_SERIES_TYPES, GAUGE_STYLES } from "./registry";
+import { WIDGET_CATEGORIES, PALETTE, SERIES_COLORS, widgetDef, CARD_ICONS, CARD_ICON_KEYS, GROUPED_TYPES, MULTI_SERIES_TYPES, GAUGE_STYLES, isWidgetTypeEnabled } from "./registry";
 import { useMetricChoices } from "./useWidgetData";
 import { ColorField } from "./ColorField";
 import { AssetPickerDialog } from "./AssetPickerDialog";
 import { AttributeSelect } from "./AttributeSelect";
+import { CombinedFields } from "./CombinedFields";
 
 // Gauge/Thermometer/Tank/Progress/Battery moved from single assetId+tag binding
 // to the grouped `metrics` model (same as Card) — their editor lives in the
@@ -18,7 +19,10 @@ import { AttributeSelect } from "./AttributeSelect";
 // Sourced from the registry rather than restated, so a chart type added to the
 // catalogue cannot end up rendering correctly while offering no way to bind data
 // to it — which is what a second hand-maintained copy of this list invites.
-const BINDABLE = new Set([...MULTI_SERIES_TYPES, "table", "alarms", "events"]);
+// Sparkline and Heatmap read the single primary attribute; Scatter reads its
+// X/Y pair (both editors live in the Data block below). The Alarm Table is not
+// here: it lists alarms, not an attribute, and has its own asset filter below.
+const BINDABLE = new Set([...MULTI_SERIES_TYPES, "table", "events", "sparkline", "scatter", "heatmap"]);
 const MULTI_SERIES = new Set(MULTI_SERIES_TYPES);
 // Control limits are drawn against a vertical value axis, so they are offered
 // only where one exists. Horizontal Bar has its value axis on the bottom, and
@@ -126,12 +130,11 @@ function OverlaySeriesRow({ overlay, index, assets, defaultAssetId, onChange, on
           onClose={() => setPickerOpen(false)}
           onSelect={(id) => onChange({ assetId: id, tag: "" })}
         />
-        <div className="flex-1 min-w-0">
-          <AttributeSelect size="sm" value={overlay.tag ?? ""} options={metrics} disabled={!assetId}
-            placeholder="Attribute…" onChange={(key) => onChange({ tag: key })} />
-        </div>
         <button onClick={onRemove} title="Remove series" className="text-muted-foreground hover:text-destructive shrink-0"><Trash2 className="w-3.5 h-3.5" /></button>
       </div>
+      {/* On its own line: the dropdown is as wide as this field, and attribute names are long. */}
+      <AttributeSelect size="sm" value={overlay.tag ?? ""} options={metrics} disabled={!assetId}
+        placeholder="Attribute…" onChange={(key) => onChange({ tag: key })} />
       <div className="flex items-center gap-1.5">
         <span className="text-[10px] w-10 shrink-0 text-muted-foreground">Color</span>
         <div className="flex-1 min-w-0">
@@ -377,12 +380,16 @@ export function WidgetConfigPanel({
                 {cat.items.map((it) => <option key={it.type} value={it.type}>{it.label}</option>)}
               </optgroup>
             ))}
+            {/* A saved widget of a type that is now switched off still needs its
+                own entry, or the dropdown would show some other type. */}
+            {!isWidgetTypeEnabled(type) && <option value={type}>{widgetDef(type)?.label ?? type} (not available)</option>}
           </select>
         </Field>
 
         {/* Left empty on purpose — widget types carry no default title, so this is the
             user's to fill. Blank means a blank widget header; it does NOT fall back to
             the Label (that names the series in the legend) or to the widget type. */}
+        {type === "combined" && <CombinedFields config={draft} onChange={set} />}
         <Field label="Widget Title"><Input value={draft.title ?? ""} onChange={(e) => set({ title: e.target.value })} className="h-8 text-sm" placeholder="Shown in the widget header — blank for none" /></Field>
 
         {type === "text" && (
@@ -397,9 +404,9 @@ export function WidgetConfigPanel({
               <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Metrics</p>
               <button
                 onClick={() => set({ metrics: [...(Array.isArray(draft.metrics) ? draft.metrics : []), {}] })}
-                className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded border border-primary/40 text-primary hover:bg-primary/5"
+                className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded bg-orange-300 text-black hover:bg-orange-400"
               >
-                <Plus className="w-2.5 h-2.5" /> Add Metric
+                <Plus className="w-2.5 h-2.5" /> <span className="font-bold">Add Metric</span>
               </button>
             </div>
             <p className="text-[11px] text-muted-foreground -mt-1.5">One metric for a single value, or several to group readings into one grid.</p>
@@ -458,6 +465,34 @@ export function WidgetConfigPanel({
                 <Field label="Value Size"><Input type="number" min={8} value={draft.valueFontSize ?? 20} onChange={(e) => set({ valueFontSize: Number(e.target.value) || 20 })} className="h-8 text-sm" /></Field>
               </div>
             </div>
+          </div>
+        )}
+
+        {type === "alarms" && (
+          <div className="pt-2 mt-1 border-t border-border space-y-2">
+            <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Data</p>
+            <Field label="Data Source">
+              <button type="button" onClick={() => setAssetPickerOpen(true)}
+                className={cn(selCls, "flex items-center justify-between gap-2 text-left")}>
+                <span className={cn("truncate", !draft.assetId && "text-muted-foreground")}>
+                  {selectedAssetPath || "— all assets —"}
+                </span>
+                <Layers className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+              </button>
+            </Field>
+            {draft.assetId && (
+              <button type="button" onClick={() => set({ assetId: "" })} className="text-[11px] text-muted-foreground hover:text-foreground underline">
+                Show alarms from all assets
+              </button>
+            )}
+            <p className="text-[11px] text-muted-foreground">Lists open (active and acknowledged) alarms. With a data source, only alarms on that asset or anything below it.</p>
+            <AssetPickerDialog
+              open={assetPickerOpen}
+              assets={assets}
+              value={draft.assetId ?? ""}
+              onClose={() => setAssetPickerOpen(false)}
+              onSelect={(assetId) => set({ assetId })}
+            />
           </div>
         )}
 
@@ -523,7 +558,7 @@ export function WidgetConfigPanel({
                       <Label className="text-xs font-medium">Overlay Attributes (multi-series)</Label>
                       <button
                         onClick={() => set({ overlays: [...overlays, { assetId: draft.assetId, tag: "" }] })}
-                        className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded border border-primary/40 text-primary hover:bg-primary/5"
+                        className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded bg-orange-300 text-black hover:bg-orange-400"
                       >
                         <Plus className="w-2.5 h-2.5" /> Add Series
                       </button>
@@ -571,7 +606,7 @@ export function WidgetConfigPanel({
         )}
 
         <div className="pt-2 mt-1 border-t border-border space-y-1">
-          <Label className="text-xs flex items-center gap-1.5"><ImageIcon className="w-3.5 h-3.5" /> Widget Image (optional)</Label>
+          <Label className="text-xs flex items-center gap-1.5"><ImageIcon className="w-3.5 h-3.5" /> {type === "image" ? "Image URL" : "Widget Image (optional)"}</Label>
           <Input value={draft.imageUrl ?? ""} onChange={(e) => set({ imageUrl: e.target.value })} className="h-8 text-sm font-mono" placeholder="Paste image URL or copy from Media Library" />
           <p className="text-[11px] text-muted-foreground">Upload images first in <strong>Asset Hub → Media Library</strong>, then copy the URL here.</p>
         </div>

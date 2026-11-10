@@ -41,6 +41,47 @@ export const FEATURES = {
   hierarchyGenerator: envOn(import.meta.env.VITE_ENABLE_HIERARCHY_GENERATOR),
 
   /**
+   * Alarm notification channels: the Email / WhatsApp / SMS toggles and the
+   * recipients picker on Alarm Rules (pages/AlarmRules.tsx), and the
+   * Notification Groups page (`/notification-groups`,
+   * pages/NotificationGroups.tsx) with its nav entry.
+   *
+   * Off because nothing on the server delivers these channels yet — the
+   * toggles saved a flag that no code acted on. Webhooks on alarm rules are
+   * real and stay visible regardless. Turn back on once delivery exists:
+   *
+   *   VITE_ENABLE_NOTIFICATION_CHANNELS=true pnpm --filter @workspace/iot-platform build
+   */
+  notificationChannels: envOn(import.meta.env.VITE_ENABLE_NOTIFICATION_CHANNELS),
+
+  /**
+   * Alarm rule options the server saves but does not evaluate yet, on Alarm
+   * Rules (pages/AlarmRules.tsx): the Deviation and Heartbeat rule types, the
+   * rate-of-change Window, Scan Rate and Require Acknowledge.
+   *
+   * Off so nobody relies on a setting that does nothing. Existing rules keep
+   * their stored values: they still open, show their type, and save them back
+   * unchanged. Turn back on once routes/ingest.ts evaluates them:
+   *
+   *   VITE_ENABLE_ADVANCED_ALARM_OPTIONS=true pnpm --filter @workspace/iot-platform build
+   */
+  advancedAlarmOptions: envOn(import.meta.env.VITE_ENABLE_ADVANCED_ALARM_OPTIONS),
+
+  /**
+   * "Events" widget in the Visualization widget library
+   * (features/dashboards/registry.tsx).
+   *
+   * Off because it has no event source behind it — it rendered the bound
+   * telemetry series (or sample rows) under an "Events" heading, which reads as
+   * a real event log on an operator screen. The renderer is kept; dashboards
+   * that already hold one show a "not available" placeholder instead of the
+   * misleading rows. Turn back on once it is wired to a real event feed:
+   *
+   *   VITE_ENABLE_EVENTS_WIDGET=true pnpm --filter @workspace/iot-platform build
+   */
+  dashboardEventsWidget: envOn(import.meta.env.VITE_ENABLE_EVENTS_WIDGET),
+
+  /**
    * Opaque address-bar tokens (lib/routeSlugs.ts).
    *
    * ON by default, unlike everything else here — this one was asked for, and

@@ -51,7 +51,6 @@ C4Component
         Component(query_hooks, "API Hooks", "@workspace/api-client-react", "Generated TanStack Query hooks for all endpoints")
         Component(ui_lib, "UI Library", "components/ui/*.tsx", "shadcn/ui component wrappers (Button, Dialog, Table, etc.)")
         Component(role_guard, "RoleGuard", "components/RoleGuard.tsx", "Hides or disables elements based on active user permissions")
-        Component(alarm_toast, "AlarmToastListener", "components/AlarmToastListener.tsx", "Subscribes to WS alarm events, renders sonner toast notifications")
     }
 
     Rel(app, layout, "Wraps all routes")
@@ -60,7 +59,6 @@ C4Component
     Rel(pages, query_hooks, "Data fetching and mutations")
     Rel(pages, role_guard, "Wraps write actions")
     Rel(pages, ui_lib, "Renders UI primitives")
-    Rel(alarm_toast, ws_hook, "Subscribes to alarm events")
 ```
 
 ---

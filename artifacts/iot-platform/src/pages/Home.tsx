@@ -1,20 +1,11 @@
-import Dashboard from "@/pages/Dashboard";
-import HomeOverview from "@/pages/HomeOverview";
-import { useHomeView } from "@/features/home/useHomeView";
+import ProjectsHome from "@/pages/ProjectsHome";
 
 /**
- * The `/` route.
+ * The `/` route. Home has one job: pick a project and go.
  *
- * Both home pages exist and both stay working: `HomeOverview` is the banded
- * A+B+C layout, `Dashboard` is the original, unchanged apart from a switch
- * added to its header. Neither is deleted, and flipping between them is one
- * click with no reload.
- *
- * Both are imported eagerly rather than lazily. They are the first screen after
- * sign-in, and a `Suspense` flash on the landing page to save a chunk that will
- * be fetched seconds later is a poor trade.
+ * HomeOverview and Dashboard are no longer reachable. Their files are kept until
+ * it is confirmed nobody misses them.
  */
 export default function Home() {
-  const [view] = useHomeView();
-  return view === "classic" ? <Dashboard /> : <HomeOverview />;
+  return <ProjectsHome />;
 }

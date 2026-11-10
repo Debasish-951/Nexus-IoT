@@ -13,13 +13,13 @@ An enterprise-grade industrial IoT data acquisition, monitoring, and analytics p
 | **Alarm engine** | Threshold and rate-of-change rules; webhook delivery; acknowledge workflow; full history |
 | **Visualisation** | Analytics workspace, tab-per-graph, 20 chart types (11 Recharts + 9 ECharts: heatmap, boxplot, correlation, treemap, sankey, pareto, control, calendar, FFT), real + demo overlays |
 | **Live feed** | Live Operations Center — live sensor feed, asset status, health ranking, event timeline; freshness-based live badge |
-| **Authentication** | Split-screen login page + logout; client-side session gate (`localStorage`) redirects unauthenticated users to `/login` |
+| **Authentication** | Server-side sessions (HttpOnly cookie + CSRF token), invitation and activation links, password reset, lockout, rate limits; API keys for gateways |
 | **Data management** | Storage analytics, configurable retention policies, on-demand pruning |
 | **Reports** | Telemetry summary, alarm report, asset snapshot; CSV and JSON export |
 | **Brokers** | MQTT / REST / Azure IoT with payload mapping rules and connection history |
 | **API clients** | OAuth-style client credentials with scopes, IP allowlist, and usage tracking |
 | **Activity log** | Full audit trail with actor identity, category filtering, and pagination |
-| **RBAC** | Four roles: admin, engineer, operator, viewer |
+| **RBAC** | Nine roles (Super Admin, Company Admin, Admin, Project Manager, Team Lead, Developer, Engineer, Operator, Viewer), enforced by the API server |
 
 ---
 
@@ -30,15 +30,15 @@ You need PostgreSQL 16, Node 20+ and pnpm. Full steps are in
 
 ```bash
 pnpm install
-cp .env.example .env          # set DATABASE_URL and SESSION_SECRET
+cp .env.example .env          # set DATABASE_URL
 pnpm --filter @workspace/db run push
 pnpm --filter @workspace/db run seed    # required — the UI is unusable without it
 pnpm dev:api                  # terminal 1 → http://localhost:8080/api
 pnpm dev:web                  # terminal 2 → http://localhost:5173
 ```
 
-Open `http://localhost:5173`. You land on the login page — sign in with a seeded
-account, then use the profile menu to sign out.
+Open one of the activation links that `seed` printed, choose a password, and sign in
+at `http://localhost:5173`. There are no default passwords.
 
 > The API server's `dev` script is a one-shot build-and-start with **no watch**.
 > Re-run `pnpm dev:api` after any server-side edit.
@@ -67,7 +67,7 @@ pnpm install
 
 # 3. Configure environment
 cp .env.example .env
-# Edit .env — fill in DATABASE_URL and SESSION_SECRET
+# Edit .env — fill in DATABASE_URL
 # Special characters in passwords must be percent-encoded  (@→%40, #→%23)
 
 # 4. Create database tables
@@ -83,15 +83,17 @@ pnpm --filter @workspace/iot-platform run dev  # UI   →  http://localhost:5173
 
 The Vite dev server proxies all `/api` requests to `localhost:8080` automatically in local mode — no CORS configuration required.
 
-> **Why the seed step is required:** The platform's role switcher loads users from the database on startup.
-> With an empty database, `currentUser` stays `null` and all permission-gated UI elements (create,
-> edit, delete buttons, forms, action menus) are hidden by the role guard — making it look like
-> half the app is broken. The seed script creates three users (admin, engineer, operator) and a
-> sample asset hierarchy so the platform is immediately usable.
+> **Why the seed step is required:** there are no default credentials, so an empty database has
+> nobody who can sign in. The seed creates three invited users (admin, jsmith as engineer, mwilson
+> as operator) without passwords and prints a single-use activation link for each; open one to set
+> a password. It also creates a Demo Plant → Demo Pump hierarchy with two alarm rules, and an API
+> client `local-dev-client` whose random secret is printed once with a sample `curl` ingest
+> command. Re-running it is safe and prints fresh activation links. Do not run it on a production
+> server; see [docs/operations/vm-deployment-checklist.md](docs/operations/vm-deployment-checklist.md).
 
 ### Regenerating API client code
 
-Run this after any change to the OpenAPI spec (`lib/api-spec/`):
+Run this after any change to the OpenAPI spec (`lib/api-spec/openapi.yaml`):
 
 ```bash
 pnpm --filter @workspace/api-spec run codegen
@@ -161,12 +163,13 @@ pnpm-workspace.yaml  Workspace config, catalog pins, dependency overrides
 
 ## Authentication
 
-The UI has a **split-screen login page** at `/login` (Web Synergies branding, industrial hero, feature checklist).
+The UI has a login page at `/login`, plus `/activate` and `/reset-password` for the links sent by email.
 
-- **No auth backend** — login is mocked. Any email + password signs you in.
-- On successful login the client sets `localStorage.ws_authed = "1"`; a route gate in `App.tsx` redirects any unauthenticated request to `/login`.
-- **Sign Out** (top-right profile menu) clears the flag and returns to `/login`.
-- RBAC (admin / engineer / operator / viewer) is still enforced separately by the frontend role guard — see below.
+- **Sessions are server-side.** Signing in creates a session in PostgreSQL, identified by an HttpOnly `is_session` cookie. Cookie-authenticated writes must send the `x-csrf-token` header (the generated API client and `apiFetch` do this).
+- **Accounts start as invitations.** An administrator creates the user without a password; the user sets one through a single-use activation link. Failed sign-ins lock the account after `AUTH_LOCKOUT_THRESHOLD` attempts.
+- **Machine clients** (gateways, integrations) use API keys: `X-API-Key: <secret>` or `Authorization: Bearer <secret>`.
+- **RBAC is enforced by the API server** (`artifacts/api-server/src/middleware/authorize.ts`, deny by default). The frontend role guard mirrors the same rules for usability.
+- All settings are environment variables; see `.env.example` and [docs/security/auth-upgrade.md](docs/security/auth-upgrade.md).
 - Real logo: drop `web-synergies-logo.png` into `artifacts/iot-platform/public/`. Real hero photo: drop `hero.jpg` there and enable the photo block in `pages/Login.tsx`.
 
 ---
@@ -177,7 +180,7 @@ The UI has a **split-screen login page** at `/login` (Web Synergies branding, in
 |------|----------------|
 | DB schema | `lib/db/src/schema/` + run `pnpm --filter @workspace/db run push` |
 | API routes | `artifacts/api-server/src/routes/` + update `lib/api-spec/` |
-| RBAC permissions | `artifacts/iot-platform/src/contexts/UserContext.tsx` |
+| RBAC permissions | `artifacts/api-server/src/lib/rbac.ts` (roles, permissions) and `middleware/authorize.ts` (route rules); the frontend reads the catalogue from the server |
 | Alarm rules | UI → `/alarm-rules` or `POST /api/alarm-rules` |
 | Broker config | UI → `/brokers` |
 | Retention policies | UI → `/data-management` |
@@ -197,7 +200,7 @@ The UI has a **split-screen login page** at `/login` (Web Synergies branding, in
 | Alarms not firing | Asset is in maintenance mode | Toggle off maintenance in the asset detail panel |
 | Dashboard shows stale data | WebSocket disconnected | Reload the page; verify `/api/ws` is reachable |
 | API returns 401 | Missing or expired API key | Check API client status at `/api-clients` |
-| Login page never shows (app opens straight to dashboard) | `ws_authed` flag still set from a prior session | DevTools → Console → `localStorage.removeItem("ws_authed")`, then hard reload (Ctrl+Shift+R) |
+| Nobody can sign in on a new database | Seed not run, or activation links expired | Run `pnpm --filter @workspace/db run seed` again; it prints fresh activation links |
 
 ---
 
@@ -212,7 +215,7 @@ Full architecture, data, API, security, and operations documentation lives in [`
 | [`docs/api/api-reference.md`](docs/api/api-reference.md) | Full endpoint reference |
 | [`docs/security/security-architecture.md`](docs/security/security-architecture.md) | Auth, RBAC, secrets, known gaps |
 | [`docs/review/architecture-review-report.md`](docs/review/architecture-review-report.md) | Strengths, risks, roadmap |
-| [`DOCUMENTATION_STATUS.md`](DOCUMENTATION_STATUS.md) | Coverage, confidence, gaps |
+| [`docs/DOCUMENTATION_STATUS.md`](docs/DOCUMENTATION_STATUS.md) | Coverage, confidence, gaps |
 
 ---
 

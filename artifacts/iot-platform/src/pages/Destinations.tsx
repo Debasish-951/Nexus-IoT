@@ -45,7 +45,7 @@ export default function Destinations() {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [testing, setTesting] = useState<string | null>(null);
-  const { can } = useCurrentUser();
+  const { canAction } = useCurrentUser();
 
   const { data: destinations, isLoading } = useQuery({ queryKey: DEST_QUERY_KEY, queryFn: fetchDestinations });
 
@@ -109,7 +109,7 @@ export default function Destinations() {
           </h1>
           <p className="text-sm text-muted-foreground">Forward alarm and telemetry events to external systems via HTTP POST</p>
         </div>
-        {can("manage_destinations") && <Button size="sm" onClick={() => setOpen(true)}><Plus className="w-4 h-4 mr-1.5" /> Add Destination</Button>}
+        {canAction("manage_destinations", "brokers") && <Button size="sm" onClick={() => setOpen(true)}><Plus className="w-4 h-4 mr-1.5" /> Add Destination</Button>}
       </div>
       <ReadOnlyBanner permission="manage_destinations" message="cannot add, edit, or delete data destinations." />
 
@@ -160,9 +160,9 @@ export default function Destinations() {
                   {testing === d.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Webhook className="w-3 h-3" />}
                   Test
                 </button>
-                <Switch checked={d.enabled} disabled={!can("manage_destinations")}
+                <Switch checked={d.enabled} disabled={!canAction("manage_destinations", "brokers")}
                   onCheckedChange={(enabled) => toggleDest.mutate({ id: d.id, enabled })} />
-                {can("manage_destinations") && (
+                {canAction("manage_destinations", "brokers") && (
                   <button className="text-muted-foreground hover:text-destructive transition-colors"
                     onClick={() => deleteDest.mutate(d.id)}>
                     <Trash2 className="w-4 h-4" />

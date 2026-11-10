@@ -8,12 +8,13 @@ import { useToast } from "@/hooks/use-toast";
 import { ArrowLeft, LayoutTemplate, Trash2, Search, Pencil, Check, X } from "lucide-react";
 import { newId } from "@/features/dashboards/useDashboards";
 import { useVizHierarchy } from "@/features/dashboards/vizHierarchy";
+import { useVizNodes, useVizNodeActions, VizConflictError } from "@/features/dashboards/vizStore";
 
 // Dashboard templates saved from Visualization (right-click a node → Create
-// Template). They live in localStorage and can be applied onto any node of the
-// Visualization hierarchy, which is how a layout gets reused across assets.
+// Template). The templates themselves live in localStorage; applying one saves
+// it as that node's dashboard on the server (vizStore), the same place
+// Visualization reads it from.
 const TEMPLATES_KEY = "viz_templates";
-const WKEY = (id: string) => `wsviz:widgets:${id}`;
 
 interface DashTemplate { id: string; name: string; widgets: any[] }
 
@@ -29,6 +30,9 @@ export default function DashboardTemplates() {
   const [, navigate] = useLocation();
   const { toast } = useToast();
   const viz = useVizHierarchy();
+  const { nodes: vizRows } = useVizNodes();
+  const { saveWidgets, invalidate } = useVizNodeActions();
+  const [applying, setApplying] = useState(false);
 
   const [templates, setTemplates] = useState<DashTemplate[]>(() => readTemplates());
   const [search, setSearch] = useState("");
@@ -56,11 +60,23 @@ export default function DashboardTemplates() {
     return q ? templates.filter((t) => t.name.toLowerCase().includes(q)) : templates;
   }, [templates, search]);
 
-  function applyTemplate(tpl: DashTemplate) {
-    if (!target) return;
-    try { localStorage.setItem(WKEY(target), JSON.stringify(withFreshIds(tpl.widgets))); } catch { /* quota */ }
+  async function applyTemplate(tpl: DashTemplate) {
+    if (!target || applying) return;
     const name = nodeOptions.find((n) => n.id === target)?.name ?? "the selected dashboard";
-    toast({ title: "Template applied", description: `"${tpl.name}" (${tpl.widgets.length} widget(s)) applied to "${name}". Open it in Visualization to see it.` });
+    setApplying(true);
+    try {
+      await saveWidgets(target, withFreshIds(tpl.widgets), vizRows.find((n) => n.id === target)?.updatedAt);
+      toast({ title: "Template applied", description: `"${tpl.name}" (${tpl.widgets.length} widget(s)) applied to "${name}". Open it in Visualization to see it.` });
+    } catch (e) {
+      if (e instanceof VizConflictError) {
+        invalidate();
+        toast({ title: "Template not applied", description: `"${name}" was changed somewhere else just now. The latest version has been loaded; try again.`, variant: "destructive" });
+      } else {
+        toast({ title: "Template not applied", description: (e as Error).message || "The server rejected the change.", variant: "destructive" });
+      }
+    } finally {
+      setApplying(false);
+    }
   }
   function removeTemplate(id: string) {
     const tpl = templates.find((t) => t.id === id);
@@ -150,7 +166,7 @@ export default function DashboardTemplates() {
                     <p className="text-sm font-medium truncate">{tpl.name}</p>
                     <p className="text-xs text-muted-foreground">{tpl.widgets.length} widget{tpl.widgets.length !== 1 ? "s" : ""}</p>
                   </div>
-                  <Button size="sm" variant="outline" className="h-8 text-xs" disabled={!target} onClick={() => applyTemplate(tpl)}
+                  <Button size="sm" variant="outline" className="h-8 text-xs" disabled={!target || applying} onClick={() => { void applyTemplate(tpl); }}
                     title={target ? "Apply this layout to the selected dashboard" : "Pick a target dashboard first"}>
                     Apply
                   </Button>

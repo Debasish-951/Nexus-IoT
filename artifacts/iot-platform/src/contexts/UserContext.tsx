@@ -1,5 +1,17 @@
 import { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { setActorHeaders, setCsrfToken, setUnauthorizedHandler } from "@workspace/api-client-react";
+import { useQueryClient } from "@tanstack/react-query";
+import { setSessionStaleListener } from "@/lib/session-events";
+import { claimUserStorage, releaseUserStorage, runUserResets } from "@/lib/user-scoped-state";
+
+/**
+ * Modules with r/w/d levels (type "granular" in api-server/src/lib/rbac.ts MODULES).
+ * Keep in step with the server.
+ */
+const GRANULAR_MODULES = new Set(["assets", "visualization", "analytics"]);
+
+/** Least time between two background session re-reads (focus, stale-session 403s). */
+const REVALIDATE_MIN_MS = 15_000;
 
 /**
  * Authenticated identity + effective permissions.
@@ -102,8 +114,22 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<SessionPayload | null>(null);
   const [loading, setLoading] = useState(true);
   const mounted = useRef(true);
+  const queryClient = useQueryClient();
+  /** Last user whose session was applied; survives clear() so a different user signing in after an expiry is noticed. */
+  const lastUserId = useRef<string | null>(null);
+
+  /**
+   * Drop everything cached for the previous user: React Query data, module
+   * caches (widget metadata, …). Without this the next user in the same tab
+   * briefly saw the previous user's projects and alarms.
+   */
+  const dropUserCaches = useCallback(() => {
+    queryClient.clear();
+    runUserResets();
+  }, [queryClient]);
 
   const clear = useCallback(() => {
+    lastJson.current = null;
     setSession(null);
     setCsrfToken(null);
     setActorHeaders(null, null);
@@ -113,11 +139,24 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     localStorage.removeItem("iot_current_user");
   }, []);
 
+  // Last payload applied, so a background re-read that changes nothing does not
+  // re-render every permission consumer in the app.
+  const lastJson = useRef<string | null>(null);
+
   const apply = useCallback((payload: SessionPayload) => {
+    const json = JSON.stringify(payload);
+    if (json === lastJson.current) return;
+    lastJson.current = json;
+    // A different user than last time (e.g. after a session expired without a
+    // sign-out): nothing cached for the previous one may show.
+    if (lastUserId.current && lastUserId.current !== payload.id) dropUserCaches();
+    lastUserId.current = payload.id;
+    // Before setSession, so pages mounting for this user read their own keys.
+    claimUserStorage(payload.id);
     setSession(payload);
     setCsrfToken(payload.csrfToken);
     setActorHeaders(payload.fullName, payload.role, payload.username);
-  }, []);
+  }, [dropUserCaches]);
 
   const refresh = useCallback(async () => {
     try {
@@ -152,6 +191,31 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
     return () => setUnauthorizedHandler(null);
   }, [clear]);
 
+  // The session used to be read once, on mount, so an admin's change (a project
+  // assigned or withdrawn, a role change, a forced password change) only showed
+  // after a reload. Re-read it when the tab regains focus and when the API
+  // answers 403 with a code meaning our picture of this user is out of date.
+  const lastRevalidate = useRef(0);
+  const revalidate = useCallback(() => {
+    if (!lastJson.current) return; // signed out — nothing to refresh
+    const now = Date.now();
+    if (now - lastRevalidate.current < REVALIDATE_MIN_MS) return;
+    lastRevalidate.current = now;
+    void refresh();
+  }, [refresh]);
+
+  useEffect(() => {
+    const onVisible = () => { if (document.visibilityState === "visible") revalidate(); };
+    window.addEventListener("focus", revalidate);
+    document.addEventListener("visibilitychange", onVisible);
+    setSessionStaleListener(revalidate);
+    return () => {
+      window.removeEventListener("focus", revalidate);
+      document.removeEventListener("visibilitychange", onVisible);
+      setSessionStaleListener(null);
+    };
+  }, [revalidate]);
+
   const logout = useCallback(async () => {
     try {
       await fetch("/api/auth/logout", {
@@ -163,7 +227,13 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       /* revoke best-effort — clear locally regardless */
     }
     clear();
-  }, [clear, session]);
+    // Leave nothing of this user for the next one in the same tab: cached
+    // queries, in-memory caches and user-scoped localStorage (moved aside for
+    // this user, restored when they sign in again; theme/skin stay).
+    dropUserCaches();
+    releaseUserStorage();
+    lastUserId.current = null;
+  }, [clear, session, dropUserCaches]);
 
   const value = useMemo<UserContextValue>(() => {
     const currentUser: CurrentUser | null = session
@@ -188,7 +258,8 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
 
     /**
      * Mirrors `grants()` in api-server/src/middleware/authorize.ts. An explicit
-     * per-user module override wins over the role verb; otherwise both apply.
+     * override on a GRANULAR module (r/w/d) wins over the role verb; otherwise,
+     * including an overridden simple module, both the verb and the module apply.
      * Keeping the two in step is why the payload ships `overriddenModules`.
      */
     const isOverridden = (moduleKey: string) =>
@@ -201,7 +272,9 @@ export function UserProvider({ children }: { children: React.ReactNode }) {
       can,
       canModule,
       canAction: (permission, moduleKey, level = "read") => {
-        if (moduleKey && isOverridden(moduleKey)) return canModule(moduleKey, level);
+        // Only a GRANULAR module's override decides alone; a simple module turned
+        // on still needs the role verb (same as grants() on the server).
+        if (moduleKey && GRANULAR_MODULES.has(moduleKey) && isOverridden(moduleKey)) return canModule(moduleKey, level);
         if (!can(permission)) return false;
         return moduleKey ? canModule(moduleKey, level) : true;
       },

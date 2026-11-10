@@ -107,7 +107,7 @@ function GroupDialog({ open, onOpenChange, initial, users, onSave }: GroupDialog
   }
 
   const filteredUsers = users.filter(u =>
-    !userSearch || u.name?.toLowerCase().includes(userSearch.toLowerCase()) || u.username?.toLowerCase().includes(userSearch.toLowerCase())
+    !userSearch || (u.fullName ?? u.name)?.toLowerCase().includes(userSearch.toLowerCase()) || u.username?.toLowerCase().includes(userSearch.toLowerCase())
   );
 
   function handleSave() {
@@ -179,7 +179,7 @@ function GroupDialog({ open, onOpenChange, initial, users, onSave }: GroupDialog
                     {memberIds.includes(u.id) && <div className="w-1.5 h-1.5 rounded-full bg-white" />}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <span className="text-xs font-medium">{u.name}</span>
+                    <span className="text-xs font-medium">{u.fullName ?? u.name}</span>
                     {u.username && <span className="text-[10px] text-muted-foreground ml-1.5">@{u.username}</span>}
                   </div>
                   <Badge className={`text-[9px] h-4 capitalize ${ROLE_COLORS[u.role] ?? ROLE_COLORS.viewer}`} variant="outline">
@@ -252,7 +252,9 @@ export default function NotificationGroups() {
   }
 
   function getUserName(id: string) {
-    return users.find((u: any) => u.id === id)?.name ?? id;
+    // The users API returns `fullName`; `name` kept as a fallback.
+    const u = users.find((u: any) => u.id === id);
+    return u?.fullName ?? u?.name ?? id;
   }
 
   const filtered = groups.filter(g =>

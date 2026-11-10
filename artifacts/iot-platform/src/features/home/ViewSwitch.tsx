@@ -1,4 +1,4 @@
-import { LayoutGrid, Rows3 } from "lucide-react";
+import { FolderOpen, LayoutGrid, Rows3 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useHomeView, type HomeView } from "./useHomeView";
 
@@ -12,6 +12,8 @@ import { useHomeView, type HomeView } from "./useHomeView";
  */
 
 const OPTIONS: Array<{ value: HomeView; label: string; icon: React.ElementType; title: string }> = [
+  { value: "projects", label: "Projects", icon: FolderOpen,
+    title: "The projects you can open" },
   { value: "overview", label: "Overview", icon: Rows3,
     title: "Banded overview — health, attention queue, live signals, trends" },
   { value: "classic", label: "Classic", icon: LayoutGrid,
@@ -22,7 +24,7 @@ export function ViewSwitch() {
   const [view, setView] = useHomeView();
 
   return (
-    <div className="inline-flex items-center rounded-md border border-border bg-card p-0.5" role="group"
+    <div className="inline-flex items-center rounded-md border !border-primary/40 bg-card p-0.5" role="group"
          aria-label="Home page layout">
       {OPTIONS.map((opt) => {
         const active = view === opt.value;
@@ -38,7 +40,7 @@ export function ViewSwitch() {
               active ? "bg-muted text-foreground" : "text-muted-foreground hover:text-foreground",
             )}
           >
-            <opt.icon className="w-3.5 h-3.5" />
+            <opt.icon className="w-3.5 h-3.5 text-primary" />
             <span className="hidden sm:inline">{opt.label}</span>
           </button>
         );

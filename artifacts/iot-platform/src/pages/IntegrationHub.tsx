@@ -60,7 +60,8 @@ export default function IntegrationHub() {
 
   const connectedBrokers = brokers.filter((b: any) => b.status === "connected");
   const enabledDests     = destinations.filter((d: any) => d.enabled);
-  const activeClients    = apiClients.filter((c: any) => !c.expiresAt || new Date(c.expiresAt) > new Date());
+  // Revoked or deactivated keys are not active, whatever their expiry says.
+  const activeClients    = apiClients.filter((c: any) => (c.status ?? "active") === "active" && (!c.expiresAt || new Date(c.expiresAt) > new Date()));
 
   return (
     <div className="p-6 space-y-6 max-w-5xl">
@@ -129,7 +130,7 @@ export default function IntegrationHub() {
                     ? <CheckCircle2 className="w-3 h-3 text-green-500 shrink-0" />
                     : <XCircle className="w-3 h-3 text-muted-foreground/40 shrink-0" />}
                   <span className="flex-1 truncate font-medium">{d.name}</span>
-                  <span className="text-muted-foreground text-[10px] truncate max-w-[80px]">{d.url?.replace(/^https?:\/\//, "").split("/")[0]}</span>
+                  <span className="text-muted-foreground text-[10px] truncate max-w-[80px]">{(d.endpoint ?? d.url)?.replace(/^https?:\/\//, "").split("/")[0]}</span>
                 </div>
               ))}
               {destinations.length > 5 && (

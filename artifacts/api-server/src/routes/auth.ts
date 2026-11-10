@@ -4,14 +4,14 @@ import { db, usersTable, type User } from "@workspace/db";
 import { authConfig } from "../lib/auth-config";
 import {
   hashPassword, verifyPassword, dummyVerify, isLegacyHash, isPasswordExpired,
-  validatePassword, getPasswordPolicy,
+  validatePassword, getPasswordPolicy, legacyCredentialMatches,
 } from "../lib/password";
 import {
   issueAuthToken, consumeAuthToken, lookupAuthToken, revokeAuthTokens,
   buildActivationUrl, buildResetUrl,
 } from "../lib/tokens";
 import {
-  createSession, setSessionCookies, clearSessionCookies,
+  createSessionWithinLimit, SessionLimitError, setSessionCookies, clearSessionCookies,
   revokeSession, revokeAllUserSessions,
 } from "../lib/sessions";
 import { resolveAccess } from "../lib/rbac";
@@ -74,6 +74,19 @@ function policyError(errors: string[]) {
   };
 }
 
+/**
+ * Column updates that activate an `invited` account and leave any other status
+ * alone, evaluated by Postgres against the current row. Credential writes run a
+ * ~64 MiB scrypt between reading the user and writing, so a status taken from
+ * that earlier read can be stale and must never be written back.
+ */
+export function activateIfInvited() {
+  return {
+    status: sql<string>`CASE WHEN ${usersTable.status} = 'invited' THEN 'active' ELSE ${usersTable.status} END`,
+    activatedAt: sql<Date>`COALESCE(${usersTable.activatedAt}, now())`,
+  };
+}
+
 async function findUserByIdentifier(identifier: string): Promise<User | undefined> {
   const value = identifier.trim();
   const [user] = await db
@@ -122,7 +135,75 @@ const loginLimiter = rateLimit({
   message: "Too many sign-in attempts. Please wait and try again.",
 });
 
-router.post("/auth/login", loginLimiter, async (req, res): Promise<void> => {
+/**
+ * Login CSRF guard.
+ *
+ * The CSRF check covers signed-in writes only, and a sign-in has no session yet.
+ * Without this, a page on any site could auto-submit a form to /auth/login and
+ * sign the victim's browser into the ATTACKER's account. Whatever the victim
+ * then entered (notes, uploads, settings) would land where the attacker can read it.
+ *
+ * Browsers send `Origin` on a cross-site POST. A request with neither `Origin`
+ * nor `Referer` is a non-browser client (curl, a script, a test) and is let
+ * through. A browser cannot be made to drop both headers on a cross-site form post.
+ */
+export function loginOriginAllowed(input: {
+  origin?: string | null;
+  referer?: string | null;
+  host?: string | null;
+  allowed: readonly string[];
+}): boolean {
+  const toOrigin = (value: string): string | null => {
+    try {
+      const u = new URL(value);
+      return u.protocol === "http:" || u.protocol === "https:" ? u.origin.toLowerCase() : null;
+    } catch {
+      return null;
+    }
+  };
+
+  let source: string | null;
+  if (input.origin) {
+    // "null" is what sandboxed frames and some redirects send. It cannot be
+    // matched to anything, so it is refused.
+    source = input.origin === "null" ? null : toOrigin(input.origin);
+  } else if (input.referer) {
+    source = toOrigin(input.referer);
+  } else {
+    return true;
+  }
+  if (!source) return false;
+
+  const allowed = new Set(input.allowed.map(toOrigin).filter((o): o is string => !!o));
+  if (allowed.has(source)) return true;
+
+  // Same host as the request itself: the SPA served by the same nginx. nginx's
+  // `$host` drops the port, so the port is compared only when the Host has one.
+  const host = (input.host ?? "").trim().toLowerCase();
+  if (!host) return false;
+  const src = new URL(source);
+  return /:\d+$/.test(host) ? src.host === host : src.hostname === host;
+}
+
+function loginOriginGuard(req: Request, res: Response, next: () => void): void {
+  const origin = typeof req.headers.origin === "string" ? req.headers.origin : undefined;
+  const referer = typeof req.headers.referer === "string" ? req.headers.referer : undefined;
+  if (loginOriginAllowed({
+    origin, referer, host: req.headers.host,
+    allowed: [...authConfig.corsOrigins, authConfig.publicUrl],
+  })) { next(); return; }
+
+  recordSecurityEvent({
+    type: "csrf.failed", outcome: "failure", reason: "login_cross_origin",
+    detail: { origin: origin ?? null, referer: referer ? "present" : null }, req,
+  });
+  res.status(403).json({
+    error: "Sign-in requests from this site are not accepted.",
+    code: "origin_not_allowed",
+  });
+}
+
+router.post("/auth/login", loginOriginGuard, loginLimiter, async (req, res): Promise<void> => {
   const body = req.body as Record<string, unknown>;
   // `username` is the historical field name; `identifier` and `email` are
   // accepted too so the field can be renamed in the UI without a break.
@@ -154,9 +235,49 @@ router.post("/auth/login", loginLimiter, async (req, res): Promise<void> => {
     return;
   }
 
-  // Lockout is checked before the password so a locked account cannot be used
-  // as an oracle for whether a guess was correct.
-  if (user.lockedUntil && user.lockedUntil.getTime() > Date.now()) {
+  // The password is checked BEFORE anything about the account is disclosed.
+  // Lockout, suspension, a pending invitation and a pre-upgrade credential each
+  // have their own message, and answering with them first told anyone who knew
+  // a username what state that account was in. Until the password is proven,
+  // every outcome is the same generic 401.
+  const legacy = isLegacyHash(user.passwordHash);
+  let valid: boolean;
+  if (legacy) {
+    // A cleartext value never authenticates. It is compared (in constant time,
+    // after a full scrypt so the timing matches) only to decide whether this
+    // caller may be told the account needs re-activating.
+    await dummyVerify();
+    valid = legacyCredentialMatches(password, user.passwordHash);
+  } else if (!user.passwordHash) {
+    // An invited account has no password yet. Without the scrypt it answered
+    // measurably faster than an account with one.
+    await dummyVerify();
+    valid = false;
+  } else {
+    valid = await verifyPassword(password, user.passwordHash);
+  }
+
+  const locked = !!(user.lockedUntil && user.lockedUntil.getTime() > Date.now());
+
+  if (!valid) {
+    if (locked || user.status !== "active" || legacy) {
+      // Counted towards spray detection and logged, but not towards the account's
+      // lockout: a locked account is already locked (re-locking would re-send the
+      // lockout email on every guess), and the others cannot sign in anyway.
+      recordAuthFailure(req);
+      await logSecurityEvent({
+        type: "login.failure", outcome: "failure", userId: user.id, username: user.username,
+        reason: locked ? "bad_password_while_locked" : legacy ? "bad_password_legacy" : `bad_password_status_${user.status}`,
+        req,
+      });
+    } else {
+      await registerFailedLogin(user, req);
+    }
+    res.status(401).json(GENERIC);
+    return;
+  }
+
+  if (locked && user.lockedUntil) {
     const minutes = Math.ceil((user.lockedUntil.getTime() - Date.now()) / 60_000);
     await logSecurityEvent({
       type: "login.blocked", outcome: "failure", userId: user.id, username: user.username,
@@ -185,10 +306,10 @@ router.post("/auth/login", loginLimiter, async (req, res): Promise<void> => {
     return;
   }
 
-  // A pre-upgrade cleartext value must never authenticate. verifyPassword
-  // already rejects it (no scrypt$ prefix); this branch just gives the user an
-  // actionable message instead of a bare "invalid credentials".
-  if (isLegacyHash(user.passwordHash)) {
+  // A pre-upgrade cleartext value must never authenticate. Reaching here means
+  // the caller typed that old password, so they get an actionable message
+  // instead of a bare "invalid credentials".
+  if (legacy) {
     await logSecurityEvent({
       type: "login.blocked", outcome: "failure", userId: user.id, username: user.username,
       reason: "legacy_credential", req,
@@ -197,14 +318,6 @@ router.post("/auth/login", loginLimiter, async (req, res): Promise<void> => {
       error: "Your account must be re-activated before you can sign in. Use \"Forgot password?\" or ask your administrator to resend your invitation.",
       code: "credential_upgrade_required",
     });
-    return;
-  }
-
-  const valid = await verifyPassword(password, user.passwordHash);
-
-  if (!valid) {
-    await registerFailedLogin(user, req);
-    res.status(401).json(GENERIC);
     return;
   }
 
@@ -232,6 +345,22 @@ router.post("/auth/login", loginLimiter, async (req, res): Promise<void> => {
   // the rest of the window one attempt from a lockout.
   resetLimiter("auth:login", req, identifier);
 
+  let created;
+  try {
+    created = await createSessionWithinLimit(user, req, { rememberMe });
+  } catch (err) {
+    if (!(err instanceof SessionLimitError)) throw err;
+    recordSecurityEvent({
+      type: "login.blocked", outcome: "failure", userId: user.id, username: user.username,
+      reason: "session_limit_reached", detail: { limit: err.limit }, req,
+    });
+    res.status(403).json({
+      error: `This account is already signed in on ${err.limit} device(s), the maximum allowed. Sign out on another device, or ask your administrator to raise the limit.`,
+      code: "session_limit_reached",
+    });
+    return;
+  }
+
   const [refreshed] = await db
     .update(usersTable)
     .set({
@@ -243,8 +372,7 @@ router.post("/auth/login", loginLimiter, async (req, res): Promise<void> => {
     .where(eq(usersTable.id, user.id))
     .returning();
 
-  const created = await createSession(user.id, req, { rememberMe });
-  setSessionCookies(res, created);
+  setSessionCookies(res, created, { rememberMe });
 
   recordSecurityEvent({
     type: "login.success", userId: user.id, username: user.username,
@@ -458,8 +586,9 @@ router.post("/auth/activate", tokenLimiter, async (req, res): Promise<void> => {
     passwordUpdatedAt: new Date(),
     mustChangePassword: false,
     passwordExpiresAt: null,
-    status: "active",
-    activatedAt: new Date(),
+    // Not a plain "active": an administrator who suspends the invitation while
+    // this request is hashing must not be overruled by it.
+    ...activateIfInvited(),
     failedLoginAttempts: 0,
     lockedUntil: null,
   }).where(eq(usersTable.id, user.id));
@@ -604,8 +733,10 @@ router.post("/auth/reset-password", tokenLimiter, async (req, res): Promise<void
     failedLoginAttempts: 0,
     lockedUntil: null,
     // If the account was still `invited`, completing a reset activates it.
-    status: user.status === "invited" ? "active" : user.status,
-    activatedAt: user.activatedAt ?? new Date(),
+    // Decided in SQL against the row as it is NOW: `user` was read before the
+    // scrypt, and writing its status back could undo a suspension an
+    // administrator made in the meantime.
+    ...activateIfInvited(),
   }).where(eq(usersTable.id, user.id));
 
   // Whoever knew the old password (or hijacked a session) is signed out.
@@ -632,8 +763,23 @@ router.post("/auth/reset-password", tokenLimiter, async (req, res): Promise<void
  * target user from the URL and checked nothing — any anonymous caller could
  * change any user's password. There is no `:id` here by design: you can only
  * ever change your own.
+ *
+ * Limited per user (the route needs a session, so the user is always known),
+ * with the IP as a backstop. `/auth/*` is skipped by the general API limiter, so
+ * without this a stolen session could guess the current password indefinitely,
+ * each guess costing the server a 64 MiB scrypt.
  */
-router.post("/auth/change-password", async (req, res): Promise<void> => {
+const changePasswordLimiter = rateLimit({
+  name: "auth:change-password",
+  limits: {
+    user: authConfig.rateLimit.changePassword,
+    ip: { max: authConfig.rateLimit.changePassword.max * 4, windowMs: authConfig.rateLimit.changePassword.windowMs },
+  },
+  eventType: "ratelimit.tripped",
+  message: "Too many password change attempts. Please wait and try again.",
+});
+
+router.post("/auth/change-password", changePasswordLimiter, async (req, res): Promise<void> => {
   if (!req.principal) {
     res.status(401).json({ error: "Authentication required", code: "authentication_required" });
     return;
@@ -694,6 +840,8 @@ router.post("/auth/change-password", async (req, res): Promise<void> => {
     mustChangePassword: false,
     passwordExpiresAt: null,
   }).where(eq(usersTable.id, user.id));
+
+  resetLimiter("auth:change-password", req);
 
   // Sign out every *other* device; the one you changed it from stays in.
   const revoked = await revokeAllUserSessions(user.id, "password_changed", {

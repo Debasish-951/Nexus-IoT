@@ -28,7 +28,7 @@ pnpm --filter @workspace/iot-platform run dev   # UI   → http://localhost:5173
 pnpm --filter @workspace/api-spec run codegen
 ```
 
-No test runner is configured — `typecheck` is the gate. To typecheck one package: `pnpm --filter @workspace/<name> run typecheck`.
+`typecheck` is the main gate. The API also has regression tests on Node's built-in runner (no database needed): `pnpm --filter @workspace/api-server run test`; CI runs both. To typecheck one package: `pnpm --filter @workspace/<name> run typecheck`.
 
 Note: `api-server`'s `dev` does a full esbuild rebuild + start (no watch) — re-run it after server-side edits.
 
@@ -42,7 +42,12 @@ pnpm --filter @workspace/mockup-sandbox run typecheck
 
 ## Why seed is mandatory
 
-The role switcher loads users from the DB on startup. With an empty DB `currentUser` stays `null`, so the RBAC `RoleGuard` hides every create/edit/delete control — the app looks half-broken. `seed` creates 3 users (admin/jsmith-engineer/mwilson-operator) + a sample asset hierarchy with fixed UUIDs (Fan = `bbbb0002-...0001`, Plant 1 = `bbbb0001-...0001`).
+There are no default credentials, so an empty database has nobody who can sign in. `seed` (`lib/db/src/seed.ts`, idempotent) creates:
+
+- 3 users in `invited` status with **no password**: `admin` (admin), `jsmith` (engineer), `mwilson` (operator). For each account still without a password it prints a single-use activation link (`<AUTH_PUBLIC_URL>/activate?token=…`, default `http://localhost:5173`, valid `AUTH_ACTIVATION_TTL_HOURS`, default 72). Open a link to set the password; re-running `seed` issues fresh links and revokes the old ones. Legacy cleartext passwords from older seeds are cleared.
+- A sample hierarchy with fixed ids: Demo Plant `00000010-0000-0000-0000-000000000001` (identifier `demo-plant-001`, a root asset and therefore a project) → Demo Pump `00000011-0000-0000-0000-000000000001` (identifier `demo-pump-001`).
+- 2 alarm rules on Demo Pump: High Temperature (`temperature > 80`) and High Vibration (`vibration > 5`).
+- API client `local-dev-client` with a **random** secret that is printed once, together with a sample `curl` ingest command. Only its SHA-256 is stored. If the client already exists the secret is not shown again; rotate it in Integration Hub → API Client.
 
 ## Architecture
 
@@ -50,7 +55,7 @@ The role switcher loads users from the DB on startup. With an empty DB `currentU
 artifacts/api-server/    Express 5 REST + WebSocket API (port 8080, path /api)
 artifacts/iot-platform/  React 19 + Vite SPA (path /)
 artifacts/mockup-sandbox/ UI prototyping sandbox
-lib/api-spec/            OpenAPI 3.1 spec (src/openapi.yaml) + Orval codegen config
+lib/api-spec/            OpenAPI 3.1 spec (openapi.yaml) + Orval codegen config
 lib/api-client-react/    GENERATED TanStack Query hooks + fetch client
 lib/api-zod/             GENERATED Zod schemas
 lib/db/                  Drizzle ORM schema (src/schema/, one file per table) + seed
@@ -60,7 +65,7 @@ docs/                    extensive architecture/api/security/ops docs (treated a
 
 **Dependency rule:** `artifacts/*` are leaf nodes — they never import each other. The codegen chain is `lib/db` → `lib/api-spec` → `lib/api-zod` + `lib/api-client-react`. The API server imports `lib/db` and `lib/api-zod`; the frontend imports `lib/api-client-react`.
 
-**Codegen is the source of truth for the API contract.** Editing a route means editing `lib/api-spec/src/openapi.yaml` then running codegen. Never hand-edit `src/generated/` files. `lib/api-zod/src/index.ts` must contain ONLY `export * from "./generated/api";`.
+**Codegen is the source of truth for the API contract.** Editing a route means editing `lib/api-spec/openapi.yaml` then running codegen. Never hand-edit `src/generated/` files. `lib/api-zod/src/index.ts` must contain ONLY `export * from "./generated/api";` (the codegen script now restores it and formats the output). Orval is pinned to zod 3 output in `orval.config.ts`; change that only together with a zod 4 upgrade.
 
 ## Conventions that bite
 
@@ -79,8 +84,12 @@ The MQTT subscriber (`services/mqtt.ts`) and the hourly retention pruner both st
 
 ## Visualization owns its own hierarchy
 
-`Visualization.tsx` does **not** mirror the asset tree. It has its own user-created hierarchy stored in `localStorage` (`wsviz:hierarchy`, via `features/dashboards/vizHierarchy.ts` / `useVizHierarchy()`) — assets created in Asset Management don't appear there, and users freely create/rename/delete viz nodes. Each viz node keeps one dashboard at `wsviz:widgets:<nodeId>`. The link to real assets survives only per-widget: `WidgetConfigPanel` has an asset dropdown plus a metric dropdown (`useMetricChoices(assetId)`) unioning live telemetry tags with asset attributes. Don't reintroduce asset→viz tree mirroring — the shared `AssetTree`/`TreeNode` components are also used by `Assets.tsx` for the real hierarchy, so changes to those components affect both screens.
+`Visualization.tsx` does **not** mirror the asset tree. It has its own user-created hierarchy stored on the server in `viz_nodes` (via `features/dashboards/vizStore.ts` / `useVizHierarchy()`) — assets created in Asset Management don't appear there, and users freely create/rename/delete viz nodes. Each viz node keeps one dashboard in its `widgets` column. Each node has an owner: users see only what they own or were granted in `viz_node_shares` by a Super Admin or Company Admin, and access is inherited by nested nodes (`lib/viz-access.ts` in the API decides, in the route rather than in `ROUTE_RULES`). Older browsers upload their `wsviz:*` localStorage once via `migrateLocalDashboards`. The link to real assets survives only per-widget: `WidgetConfigPanel` has an asset dropdown plus a metric dropdown (`useMetricChoices(assetId)`) unioning live telemetry tags with asset attributes. Don't reintroduce asset→viz tree mirroring — the shared `AssetTree`/`TreeNode` components are also used by `Assets.tsx` for the real hierarchy, so changes to those components affect both screens.
+
+## Projects and Home
+
+A **project is a root-level asset**, nothing else; don't add a second project table. Home (`pages/ProjectsHome.tsx`) lists the projects a user may open. Project Managers see all, Team Leads and Developers only `users.access_overrides.allowedProjects`, and other roles follow their per-user setting (`projectRule` in `lib/rbac.ts`). `lib/project-access.ts` enforces this on the server after `authorize` (direct ids, filtered lists, and a refusal on plant-wide endpoints such as `/dashboard/*`). A top-level Visualization node can carry `project_id`; unassigned nodes show in every project. See `docs/features/project-home.md`.
 
 ## Docs
 
-`docs/` is comprehensive and kept current — consult it before large changes. `docs/technical-reference.md` has the most detailed per-table / per-route reference. `docs/operations/vm-deployment-checklist.md` is the deployment guide. ADRs in `docs/adr/` explain key choices (Express 5, Drizzle, OpenAPI codegen, frontend RBAC, cohosted WebSocket, pnpm monorepo) — note that ADR-004 and ADR-007 are historical records written when the platform ran on a hosted preview environment, and describe behaviour that has since changed.
+`docs/` is comprehensive and kept current — consult it before large changes. `docs/technical-reference.md` has the most detailed per-table / per-route reference. `docs/operations/vm-deployment-checklist.md` is the deployment guide, and `docs/operations/new-company-installation.md` covers giving each company its own installation (the app has no separation between companies inside one database, so never share one). `docs/operations/database-migrations.md` describes the prepared (not yet default) migration workflow. `docs/operations/backup-restore.md` is the backup and restore procedure (database, uploads folder and `SECRETS_ENC_KEY` together). ADRs in `docs/adr/` explain key choices (Express 5, Drizzle, OpenAPI codegen, frontend RBAC, cohosted WebSocket, pnpm monorepo) — note that ADR-004 and ADR-007 are historical records written when the platform ran on a hosted preview environment, and describe behaviour that has since changed.

@@ -53,7 +53,6 @@ ws-integrated-suite/
 │       │   ├── components/
 │       │   │   ├── Layout.tsx        — Sidebar nav + notification bell + broker bar
 │       │   │   ├── RoleGuard.tsx     — Permission-gated wrapper
-│       │   │   ├── AlarmToastListener.tsx
 │       │   │   ├── BrokerStatusBar.tsx
 │       │   │   ├── BrokerHistoryTimeline.tsx
 │       │   │   └── ui/               — shadcn/ui component wrappers
@@ -79,7 +78,7 @@ ws-integrated-suite/
 │
 ├── lib/
 │   ├── api-spec/
-│   │   ├── src/openapi.yaml          — OpenAPI 3.1 specification
+│   │   ├── openapi.yaml              — OpenAPI 3.1 specification
 │   │   └── orval.config.ts           — Codegen config (hooks + zod targets)
 │   ├── api-client-react/
 │   │   └── src/generated/            — Generated TanStack Query hooks + fetch client

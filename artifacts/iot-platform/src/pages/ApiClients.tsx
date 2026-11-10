@@ -28,6 +28,7 @@ import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { ReadOnlyBanner } from "@/components/RoleGuard";
 import { apiGet, apiFetch } from "@/lib/auth-api";
+import { describeApiError, formatApiError } from "@/lib/validation";
 
 // ── Scope definitions ─────────────────────────────────────────────────────────
 const SCOPES = [
@@ -268,28 +269,43 @@ function IntegrationGuide({ client }: { client: Record<string, unknown> }) {
 
 // ── Rotate secret dialog ──────────────────────────────────────────────────────
 function RotateDialog({
-  client, open, onClose, onRefresh,
-}: { client: Record<string, unknown> | null; open: boolean; onClose: () => void; onRefresh: () => void }) {
+  client, open, onClose, onRefresh, issuedSecret = null,
+}: {
+  client: Record<string, unknown> | null; open: boolean; onClose: () => void; onRefresh: () => void;
+  /**
+   * A secret the server has just issued elsewhere (on create). When set, the
+   * dialog opens straight on the reveal pane — the same one used after a
+   * rotation — because the server returns a new secret exactly once.
+   */
+  issuedSecret?: string | null;
+}) {
   const { toast } = useToast();
-  const [newSecret, setNewSecret] = useState<string | null>(null);
+  const [rotatedSecret, setRotatedSecret] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const newSecret = issuedSecret ?? rotatedSecret;
 
-  function handleRotate() {
+  async function handleRotate() {
     if (!client) return;
     setLoading(true);
-    apiFetch(`/api/api-clients/${client.id}/rotate-secret`, { method: "POST" })
-      .then((r) => r.json())
-      .then((data: Record<string, unknown>) => {
-        setNewSecret(data.clientSecret as string);
-        onRefresh();
-        toast({ title: "Secret rotated", description: "Copy and store the new token — it won't be shown again." });
-      })
-      .catch(() => toast({ title: "Rotation failed", variant: "destructive" }))
-      .finally(() => setLoading(false));
+    try {
+      const r = await apiFetch(`/api/api-clients/${client.id}/rotate-secret`, { method: "POST" });
+      if (!r.ok) {
+        toast({ title: "Rotation failed", description: formatApiError(await describeApiError(r)), variant: "destructive" });
+        return;
+      }
+      const data = (await r.json()) as Record<string, unknown>;
+      setRotatedSecret(data.clientSecret as string);
+      onRefresh();
+      toast({ title: "Secret rotated", description: "Copy and store the new token — it won't be shown again." });
+    } catch (err) {
+      toast({ title: "Rotation failed", description: err instanceof Error ? err.message : undefined, variant: "destructive" });
+    } finally {
+      setLoading(false);
+    }
   }
 
   function handleClose() {
-    setNewSecret(null);
+    setRotatedSecret(null);
     onClose();
   }
 
@@ -298,10 +314,12 @@ function RotateDialog({
       <DialogContent className="max-w-md">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <RefreshCw className="w-4 h-4 text-orange-500" /> Rotate API Secret
+            <RefreshCw className="w-4 h-4 text-orange-500" /> {issuedSecret ? "API Secret" : "Rotate API Secret"}
           </DialogTitle>
           <DialogDescription>
-            Generate a new secret for <strong>{client?.name as string}</strong>. The old secret will stop working immediately.
+            {issuedSecret
+              ? <>The secret for <strong>{client?.name as string}</strong>.</>
+              : <>Generate a new secret for <strong>{client?.name as string}</strong>. The old secret will stop working immediately.</>}
           </DialogDescription>
         </DialogHeader>
 
@@ -325,7 +343,7 @@ function RotateDialog({
         ) : (
           <div className="space-y-4">
             <div className="rounded-md bg-green-50 dark:bg-green-950/30 border border-green-200 dark:border-green-800 px-4 py-3 text-sm text-green-800 dark:text-green-300">
-              <p className="font-semibold mb-2 flex items-center gap-1.5"><CheckCircle2 className="w-4 h-4" /> Secret rotated successfully</p>
+              <p className="font-semibold mb-2 flex items-center gap-1.5"><CheckCircle2 className="w-4 h-4" /> {issuedSecret ? "Endpoint created" : "Secret rotated successfully"}</p>
               <p className="text-xs mb-3">Copy this now — it will <strong>not be shown again</strong> after closing this dialog.</p>
               <div className="flex items-center gap-2 bg-white dark:bg-black/40 rounded border px-3 py-2">
                 <code className="font-mono text-xs text-foreground flex-1 break-all">{newSecret}</code>
@@ -379,6 +397,11 @@ function CreateDialog({
   const grantableScopes = SCOPES.filter((s) => canGrantAll || grantable.includes(s.id));
   /** Write-only user: nothing to choose, so don't render a chooser. */
   const writeOnly = grantableScopes.length === 1 && grantableScopes[0]?.id === WRITE_SCOPE_ID;
+  /**
+   * A project-restricted user can neither hold a platform-wide client nor create
+   * a root asset, and the API refuses both. So they must pick one of their projects.
+   */
+  const restricted = !!session?.restrictProjects;
 
   const form = useForm<CreateForm>({
     // `ingest:write` is pre-selected because posting telemetry is what this
@@ -449,6 +472,10 @@ function CreateDialog({
      * Asset Management, which is correct and is what makes the endpoint bindable.
      */
     let projectId: string | null = data.projectId || null;
+    if (restricted && (!projectId || creatingProject)) {
+      toast({ title: "Select a project", description: "Endpoints you create must belong to one of your projects.", variant: "destructive" });
+      return;
+    }
     if (creatingProject) {
       const projectName = data.newProjectName.trim();
       if (!projectName) {
@@ -501,7 +528,7 @@ function CreateDialog({
           onCreated(created as unknown as Record<string, unknown>);
           form.reset();
         },
-        onError: () => toast({ title: "Failed to create client", variant: "destructive" }),
+        onError: (err) => toast({ title: "Failed to create client", description: err instanceof Error ? err.message : undefined, variant: "destructive" }),
       }
     );
   }
@@ -544,18 +571,22 @@ function CreateDialog({
                     {...field}
                     className="w-full h-9 rounded-md border border-input bg-background px-3 text-sm"
                   >
-                    <option value="">No project — platform-wide (admins only)</option>
+                    {restricted
+                      ? <option value="" disabled>Select a project…</option>
+                      : <option value="">No project — platform-wide (admins only)</option>}
                     {projects.map((p) => (
                       <option key={p.id} value={p.id}>{p.name}</option>
                     ))}
-                    <option value={NEW_PROJECT}>＋ Create a new project…</option>
+                    {!restricted && <option value={NEW_PROJECT}>＋ Create a new project…</option>}
                   </select>
                 </FormControl>
                 <FormDescription>
                   {creatingProject
                     ? "The project is created as a top-level asset, then this endpoint is bound to it."
                     : projects.length === 0
-                      ? "No projects yet — choose “Create a new project” to make one here."
+                      ? restricted
+                        ? "No projects are assigned to you, so you cannot create an endpoint."
+                        : "No projects yet — choose “Create a new project” to make one here."
                       : "Everyone assigned to this project shares this endpoint."}
                 </FormDescription>
               </FormItem>
@@ -706,7 +737,9 @@ export default function ApiClients() {
   const [createOpen, setCreateOpen] = useState(false);
   const [expandedId, setExpandedId] = useState<string | null>(null);
   const [rotateClient, setRotateClient] = useState<Record<string, unknown> | null>(null);
-  const { can } = useCurrentUser();
+  // The just-created client and its one-time secret, revealed through RotateDialog.
+  const [createdClient, setCreatedClient] = useState<Record<string, unknown> | null>(null);
+  const { canAction } = useCurrentUser();
 
   const { data: clients } = useListApiClients();
   const deleteClient = useDeleteApiClient();
@@ -714,16 +747,27 @@ export default function ApiClients() {
 
   function invalidate() { qc.invalidateQueries({ queryKey: getListApiClientsQueryKey() }); }
 
+  /** POST an action; toast success only when the server accepted it. */
+  async function postAction(path: string, okTitle: string, failTitle: string) {
+    try {
+      const r = await apiFetch(path, { method: "POST" });
+      if (!r.ok) {
+        toast({ title: failTitle, description: formatApiError(await describeApiError(r)), variant: "destructive" });
+        return;
+      }
+      toast({ title: okTitle });
+      invalidate();
+    } catch (err) {
+      toast({ title: failTitle, description: err instanceof Error ? err.message : undefined, variant: "destructive" });
+    }
+  }
+
   function handleRevoke(client: Record<string, unknown>) {
-    apiFetch(`/api/api-clients/${client.id}/revoke`, { method: "POST" })
-      .then(() => { toast({ title: `"${client.name}" revoked` }); invalidate(); })
-      .catch(() => toast({ title: "Failed", variant: "destructive" }));
+    void postAction(`/api/api-clients/${client.id}/revoke`, `"${client.name}" revoked`, "Revoke failed");
   }
 
   function handleRestore(client: Record<string, unknown>) {
-    apiFetch(`/api/api-clients/${client.id}/restore`, { method: "POST" })
-      .then(() => { toast({ title: `"${client.name}" restored` }); invalidate(); })
-      .catch(() => toast({ title: "Failed", variant: "destructive" }));
+    void postAction(`/api/api-clients/${client.id}/restore`, `"${client.name}" restored`, "Restore failed");
   }
 
   const clientList = (clients as unknown as Record<string, unknown>[] | undefined) ?? [];
@@ -740,7 +784,7 @@ export default function ApiClients() {
             Issue bearer tokens for external applications to securely ingest data and export analytics
           </p>
         </div>
-        {can("manage_api_clients") && (
+        {canAction("manage_api_clients", "api_clients") && (
           <Button onClick={() => setCreateOpen(true)} size="sm" data-testid="add-client-btn">
             <Plus className="w-4 h-4 mr-1.5" /> Create API End Point
           </Button>
@@ -940,7 +984,7 @@ export default function ApiClients() {
                           <ChevronDown className={cn("w-3 h-3 transition-transform", isExpanded && "rotate-180")} />
                         </button>
 
-                        {can("manage_api_clients") && (
+                        {canAction("manage_api_clients", "api_clients") && (
                           <>
                             {/* Rotate */}
                             <button
@@ -980,6 +1024,7 @@ export default function ApiClients() {
                                   invalidate();
                                   if (expandedId === client.id) setExpandedId(null);
                                 },
+                                onError: (err) => toast({ title: "Delete failed", description: err instanceof Error ? err.message : undefined, variant: "destructive" }),
                               })}
                               title="Permanently delete"
                             >
@@ -1024,6 +1069,8 @@ export default function ApiClients() {
           invalidate();
           setCreateOpen(false);
           setExpandedId(created.id as string);
+          // The server returns the secret exactly once; show it now or it is lost.
+          if (typeof created.clientSecret === "string" && created.clientSecret) setCreatedClient(created);
         }}
       />
 
@@ -1032,6 +1079,14 @@ export default function ApiClients() {
         open={rotateClient !== null}
         onClose={() => setRotateClient(null)}
         onRefresh={invalidate}
+      />
+
+      <RotateDialog
+        client={createdClient}
+        open={createdClient !== null}
+        onClose={() => setCreatedClient(null)}
+        onRefresh={invalidate}
+        issuedSecret={(createdClient?.clientSecret as string | undefined) ?? null}
       />
     </div>
   );

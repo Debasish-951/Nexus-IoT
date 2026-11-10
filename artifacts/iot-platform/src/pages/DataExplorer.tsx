@@ -13,6 +13,7 @@ import { BarChart2, Download, RefreshCw, Plus, X, TrendingUp } from "lucide-reac
 import { format, subMinutes, subHours, subDays } from "date-fns";
 import { cn } from "@/lib/utils";
 import { SERIES } from "@/lib/chartColors";
+import { toCsv, downloadCsvText } from "@/lib/csv";
 
 function bucketForRange(hours: number): string {
   if (hours <= 1)        return "5m";
@@ -164,12 +165,11 @@ export default function DataExplorer() {
   function exportCsv() {
     if (chartData.length === 0) return;
     const keys = series.map((s) => `${s.assetId}::${s.metric}`);
-    const header = ["time", ...keys].join(",");
-    const rows = chartData.map((row) => [row.time, ...keys.map((k) => row[k] ?? "")].join(","));
-    const blob = new Blob([[header, ...rows].join("\n")], { type: "text/csv" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = `explorer_${Date.now()}.csv`; a.click();
-    URL.revokeObjectURL(url);
+    // toCsv escapes cells that a spreadsheet would run as formulas.
+    downloadCsvText(
+      toCsv(["time", ...keys], chartData.map((row) => [row.time, ...keys.map((k) => row[k] ?? "")])),
+      `explorer_${Date.now()}.csv`,
+    );
   }
 
   return (

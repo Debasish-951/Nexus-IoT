@@ -139,7 +139,7 @@ export default function AssetTemplateDetails() {
   const search = useSearch();
   const { toast } = useToast();
   const qc = useQueryClient();
-  const { can } = useCurrentUser();
+  const { can, session } = useCurrentUser();
 
   const [template, setTemplate] = useState<any | null>(null);
   const [loading, setLoading] = useState(true);
@@ -263,7 +263,8 @@ export default function AssetTemplateDetails() {
     const did = rowDeviceId ?? detectedDeviceId;
     if (did) setDeviceId(did);
     closeImport();
-    if (did) {
+    // Project-restricted users are refused device registration by the server.
+    if (did && !session?.restrictProjects) {
       // Register the payload's deviceId so it is also selectable elsewhere.
       void apiFetch("/api/ingest/register-device", {
         method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ deviceId: did }),

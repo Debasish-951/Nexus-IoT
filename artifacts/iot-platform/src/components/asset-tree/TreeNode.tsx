@@ -1,5 +1,5 @@
 import { memo } from "react";
-import {
+import { FolderInput, Share2,
   ChevronRight, Folder, Factory, Building2, Boxes, Cpu, MonitorCog, Tag,
   Plus, Pencil, Trash2, LayoutTemplate, LayoutDashboard,
   SquarePen, Copy, CopyPlus, CircleMinus, Star, Download, Upload, Rocket, CornerDownRight, Rows3,
@@ -47,6 +47,9 @@ export const TreeNode = memo(function TreeNode({ asset, depth, verticals = [], i
   asset: Asset; depth: number; verticals?: boolean[]; isLast?: boolean;
 }) {
   const t = useAssetTree();
+  const nodeLimits = t.nodeAccess?.(asset.id);
+  const canWriteNode = nodeLimits?.write ?? true;
+  const canDeleteNode = nodeLimits?.delete ?? true;
   if (t.visibleIds && !t.visibleIds.has(asset.id)) return null;
 
   const kids = t.childrenByParent[asset.id] ?? [];
@@ -97,12 +100,12 @@ export const TreeNode = memo(function TreeNode({ asset, depth, verticals = [], i
       )}
       <Icon className={cn("relative w-4 h-4 shrink-0", color)} />
       <span className="relative truncate flex-1">{asset.name}</span>
-      {t.canManage && (
+      {t.canManage && (canWriteNode || canDeleteNode) && (
         <div
           className="flex items-center gap-0.5 ml-1 shrink-0 opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 transition-opacity"
           onClick={(e) => e.stopPropagation()}
         >
-          <DropdownMenu>
+          {canWriteNode && <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <button
                 type="button"
@@ -142,8 +145,8 @@ export const TreeNode = memo(function TreeNode({ asset, depth, verticals = [], i
                 </DropdownMenuItem>
               )}
             </DropdownMenuContent>
-          </DropdownMenu>
-          <button
+          </DropdownMenu>}
+          {canWriteNode && <button
             type="button"
             className="p-0.5 rounded text-cyan-500 hover:bg-cyan-500/10"
             title="Edit asset"
@@ -151,8 +154,8 @@ export const TreeNode = memo(function TreeNode({ asset, depth, verticals = [], i
             onClick={() => t.onRename?.(asset)}
           >
             <Pencil className="w-3 h-3" />
-          </button>
-          <button
+          </button>}
+          {canDeleteNode && <button
             type="button"
             className="p-0.5 rounded text-destructive hover:bg-destructive/10"
             title="Delete asset"
@@ -160,7 +163,7 @@ export const TreeNode = memo(function TreeNode({ asset, depth, verticals = [], i
             onClick={() => t.onDelete?.(asset)}
           >
             <Trash2 className="w-3 h-3" />
-          </button>
+          </button>}
         </div>
       )}
     </div>
@@ -176,15 +179,17 @@ export const TreeNode = memo(function TreeNode({ asset, depth, verticals = [], i
           <ContextMenuItem onSelect={() => t.onOpenBuilder!(asset)}><LayoutDashboard className="w-4 h-4 mr-2" /> Dashboard Builder</ContextMenuItem>
         )}
         {d && <>
-          <ContextMenuItem onSelect={() => d.edit(asset)}><SquarePen className="w-4 h-4 mr-2" /> Edit Dashboard</ContextMenuItem>
+          {canWriteNode && <ContextMenuItem onSelect={() => d.edit(asset)}><SquarePen className="w-4 h-4 mr-2" /> Edit Dashboard</ContextMenuItem>}
           <ContextMenuItem onSelect={() => d.clone(asset)}><Copy className="w-4 h-4 mr-2" /> Clone Dashboard</ContextMenuItem>
           <ContextMenuItem onSelect={() => d.cloneWithChildren(asset)}><CopyPlus className="w-4 h-4 mr-2" /> Clone Dashboard &amp; Children</ContextMenuItem>
           <ContextMenuItem onSelect={() => d.createTemplate(asset)}><LayoutTemplate className="w-4 h-4 mr-2" /> Create Template</ContextMenuItem>
-          <ContextMenuItem onSelect={() => d.remove(asset)} className="text-destructive focus:text-destructive"><CircleMinus className="w-4 h-4 mr-2" /> Delete Dashboard</ContextMenuItem>
+          {canWriteNode && <ContextMenuItem onSelect={() => d.remove(asset)} className="text-destructive focus:text-destructive"><CircleMinus className="w-4 h-4 mr-2" /> Delete Dashboard</ContextMenuItem>}
           <ContextMenuItem onSelect={() => d.toggleBookmark(asset)}>
             <Star className={cn("w-4 h-4 mr-2", d.isBookmarked(asset.id) && "fill-current text-amber-500")} /> {d.isBookmarked(asset.id) ? "Remove Bookmark" : "Bookmark"}
           </ContextMenuItem>
-          <ContextMenuItem onSelect={() => d.importDashboard(asset)}><Download className="w-4 h-4 mr-2" /> Import Dashboard</ContextMenuItem>
+          {canWriteNode && <ContextMenuItem onSelect={() => d.importDashboard(asset)}><Download className="w-4 h-4 mr-2" /> Import Dashboard</ContextMenuItem>}
+          {t.onShare && <ContextMenuItem onSelect={() => t.onShare!(asset)}><Share2 className="w-4 h-4 mr-2" /> Manage Access</ContextMenuItem>}
+          {t.onAssignProject && canWriteNode && !asset.parentId && <ContextMenuItem onSelect={() => t.onAssignProject!(asset)}><FolderInput className="w-4 h-4 mr-2" /> Assign to Project</ContextMenuItem>}
           <ContextMenuItem onSelect={() => d.exportDashboard(asset)}><Upload className="w-4 h-4 mr-2" /> Export Dashboard</ContextMenuItem>
           <ContextMenuItem onSelect={() => d.futuristic(asset)}><Rocket className="w-4 h-4 mr-2" /> Futuristic Dashboard</ContextMenuItem>
         </>}

@@ -62,7 +62,7 @@ pnpm --filter @workspace/api-spec run codegen
 ```
 - Regenerates `lib/api-client-react/src/generated/`
 - Regenerates `lib/api-zod/src/generated/api.ts`
-- Must be run after any change to `lib/api-spec/src/openapi.yaml`
+- Must be run after any change to `lib/api-spec/openapi.yaml`
 
 ### Type Checking
 ```bash

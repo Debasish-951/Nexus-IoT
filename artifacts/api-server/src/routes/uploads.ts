@@ -13,7 +13,7 @@ import { IdParams } from "../schemas/common";
 import { z } from "zod";
 import { detectType, DETECTION_HEAD_BYTES } from "../lib/upload/file-types";
 import { checkImage } from "../lib/upload/image-info";
-import { scanBuffer, verdictAllowsStorage, scanConfig, type ScanResult } from "../lib/upload/scanner";
+import { scanBuffer, verdictAllowsStorage, verdictAllowsDownload, scanConfig, type ScanResult } from "../lib/upload/scanner";
 import {
   uploadStorage, allocate, openForWrite, resolveStoredPath, removeFile,
 } from "../lib/upload/storage";
@@ -307,6 +307,11 @@ router.get("/uploads/:id/content", validate({ params: IdParams }), async (req, r
   // this endpoint the delivery mechanism for whatever it is.
   if (row.scanStatus === "infected") {
     throw new AppError(403, "malware_detected", "That file was quarantined and cannot be downloaded.");
+  }
+  // In `required` mode a file must have scanned clean to be served at all.
+  if (!verdictAllowsDownload(row.scanStatus)) {
+    throw new AppError(403, "scan_not_clean",
+      "That file has not passed a malware scan, so it cannot be downloaded. Upload it again once scanning is available.");
   }
 
   let stat;

@@ -10,7 +10,7 @@ import {
   DeleteUserParams,
 } from "@workspace/api-zod";
 import { logActivity } from "./activity_log";
-import {
+import { isTopAdminRole,
   isRole, resolveAccess, sanitiseAccessOverrides, ROLES,
   canActOnRole, canGrantRole, SELF_ROLE_CHANGE_MESSAGE,
 } from "../lib/rbac";
@@ -18,6 +18,8 @@ import { getPasswordPolicy, generateTemporaryPassword, hashPassword } from "../l
 import { issueAuthToken, revokeAuthTokens, buildActivationUrl, buildResetUrl } from "../lib/tokens";
 import { revokeAllUserSessions } from "../lib/sessions";
 import { logSecurityEvent, recordSecurityEvent, clientIp } from "../lib/security-log";
+import { closeSockets } from "../lib/ws-broadcast";
+import { activateIfInvited } from "./auth";
 import {
   sendEmail, renderActivationEmail, renderPasswordResetEmail,
 } from "../lib/email";
@@ -64,7 +66,7 @@ async function pendingInvitationMap(userIds: string[]): Promise<Map<string, Date
  *
  * Returns true when the request has been answered and the caller must stop.
  */
-function refuseIfOutranked(req: Request, res: Response, target: User): boolean {
+export function refuseIfOutranked(req: Request, res: Response, target: Pick<User, "id" | "role">): boolean {
   const actorRole = req.principal?.user.role;
   if (canActOnRole(actorRole, target.role)) return false;
 
@@ -87,6 +89,12 @@ function refuseIfOutranked(req: Request, res: Response, target: User): boolean {
   return true;
 }
 
+/** Did a PUT change the address? Compared case-insensitively, as login does. */
+export function emailChanged(before: string | null | undefined, next: unknown): boolean {
+  if (typeof next !== "string") return false;
+  return next.trim().toLowerCase() !== (before ?? "").trim().toLowerCase();
+}
+
 function actorId(req: Request): string | null {
   return req.principal?.user.id ?? null;
 }
@@ -97,7 +105,7 @@ async function isLastActiveAdmin(userId: string): Promise<boolean> {
     .select({ count: sql<number>`count(*)::int` })
     .from(usersTable)
     .where(and(
-      sql`${usersTable.role} IN ('admin','super_admin')`,
+      sql`${usersTable.role} IN ('admin','company_admin','super_admin')`,
       eq(usersTable.status, "active"),
       sql`${usersTable.id} <> ${userId}`,
     ));
@@ -158,7 +166,7 @@ router.post("/users", async (req, res): Promise<void> => {
   }
   // Without this, `manage_users` was enough to create a super admin — the role
   // list was checked for EXISTENCE and never for whether the caller may hand it
-  // out. A customer admin could bootstrap themselves a platform-wide account.
+  // out. An admin could bootstrap themselves a platform-wide account.
   if (!canGrantRole(req.principal?.user.role, role)) {
     recordSecurityEvent({
       type: "authz.denied", outcome: "failure", reason: "role_escalation_attempt",
@@ -279,8 +287,8 @@ router.put("/users/:id", async (req, res): Promise<void> => {
       return;
     }
     // Demoting the last admin would leave nobody able to manage users.
-    const losingAdmin = ["admin", "super_admin"].includes(existing.role)
-      && !["admin", "super_admin"].includes(parsed.data.role);
+    const losingAdmin = ["admin", "company_admin", "super_admin"].includes(existing.role)
+      && !["admin", "company_admin", "super_admin"].includes(parsed.data.role);
     if (losingAdmin && await isLastActiveAdmin(existing.id)) {
       res.status(409).json({
         error: "This is the last active administrator. Promote another user first.",
@@ -306,7 +314,7 @@ router.put("/users/:id", async (req, res): Promise<void> => {
       });
       return;
     }
-    if (next !== "active" && ["admin", "super_admin"].includes(existing.role) && await isLastActiveAdmin(existing.id)) {
+    if (next !== "active" && ["admin", "company_admin", "super_admin"].includes(existing.role) && await isLastActiveAdmin(existing.id)) {
       res.status(409).json({
         error: "This is the last active administrator. Promote another user first.",
         code: "last_admin",
@@ -321,6 +329,19 @@ router.put("/users/:id", async (req, res): Promise<void> => {
   }
 
   const [user] = await db.update(usersTable).set(updateData).where(eq(usersTable.id, params.data.id)).returning();
+
+  // A reset or activation link already mailed to the OLD address must stop
+  // working: the address was changed because it is wrong, or no longer the
+  // user's, and whoever reads that mailbox could otherwise still set the password.
+  if (emailChanged(existing.email, updateData.email)) {
+    await revokeAuthTokens(user.id, "password_reset");
+    await revokeAuthTokens(user.id, "activation");
+    recordSecurityEvent({
+      type: "account.status_changed", userId: user.id, username: user.username,
+      reason: "email_changed",
+      detail: { by: req.principal?.user.username, linksRevoked: true }, req,
+    });
+  }
 
   // A status change that removes access must take effect immediately, not at
   // the end of the target's current session.
@@ -338,6 +359,20 @@ router.put("/users/:id", async (req, res): Promise<void> => {
       detail: { by: req.principal?.user.username, role: user.role, status: user.status }, req,
     });
   }
+
+  // The same audit row PUT /users/:id/access writes. Overrides arriving through
+  // this route (the Users form sends them) were applied with only an Activity Log
+  // entry, so a grant made here never reached the Security Center.
+  if (updateData.accessOverrides) {
+    recordSecurityEvent({
+      type: "access.updated", userId: user.id, username: user.username,
+      detail: { by: req.principal?.user.username, overrides: updateData.accessOverrides, via: "PUT /users/:id" }, req,
+    });
+  }
+
+  // A new role or access setting applies to live connections at once: they are
+  // closed, and the client reconnects with the new access.
+  if (updateData.role || updateData.accessOverrides) closeSockets({ userId: user.id }, "access_changed");
 
   const changed = Object.keys(updateData).join(",");
   void logActivity("user.updated", "user", user.id, user.fullName, `fields=${changed}`, req);
@@ -401,6 +436,7 @@ router.put("/users/:id/access", async (req, res): Promise<void> => {
     type: "access.updated", userId: user.id, username: user.username,
     detail: { by: req.principal?.user.username, overrides }, req,
   });
+  closeSockets({ userId: user.id }, "access_changed");
   void logActivity("user.access_updated", "user", user.id, user.fullName,
     `modules=${Object.keys(overrides.modules ?? {}).length} overridden`, req);
 
@@ -539,8 +575,9 @@ router.post("/users/:id/temporary-password", async (req, res): Promise<void> => 
     passwordExpiresAt: expiresAt,
     // A temporary password also activates an invited account and clears any
     // lockout — it is a deliberate administrative reset of the credential.
-    status: user.status === "invited" ? "active" : user.status,
-    activatedAt: user.activatedAt ?? new Date(),
+    // Decided in SQL on the current row, not from `user`, which was read before
+    // the scrypt and could write back a status changed in the meantime.
+    ...activateIfInvited(),
     failedLoginAttempts: 0,
     lockedUntil: null,
   }).where(eq(usersTable.id, user.id));
@@ -576,13 +613,17 @@ router.post("/users/:id/temporary-password", async (req, res): Promise<void> => 
 });
 
 router.post("/users/:id/unlock", async (req, res): Promise<void> => {
+  // Rank is checked BEFORE the write, as in require-password-change.
+  const [target] = await db.select().from(usersTable).where(eq(usersTable.id, req.params.id));
+  if (!target) { res.status(404).json({ error: "User not found" }); return; }
+  if (refuseIfOutranked(req, res, target)) return;
+
   const [user] = await db
     .update(usersTable)
     .set({ failedLoginAttempts: 0, lockedUntil: null })
-    .where(eq(usersTable.id, req.params.id))
+    .where(eq(usersTable.id, target.id))
     .returning();
   if (!user) { res.status(404).json({ error: "User not found" }); return; }
-  if (refuseIfOutranked(req, res, user)) return;
 
   await logSecurityEvent({
     type: "account.unlocked", userId: user.id, username: user.username,
@@ -593,15 +634,70 @@ router.post("/users/:id/unlock", async (req, res): Promise<void> => {
   res.json(sanitizeUser(user));
 });
 
+/** Simultaneous logins allowed for one user. Super Admin or Company Admin only. */
+router.put("/users/:id/session-limit", async (req, res): Promise<void> => {
+  if (!isTopAdminRole(req.principal?.user.role)) {
+    recordSecurityEvent({
+      type: "authz.denied", outcome: "failure", reason: "session_limit_not_top_admin",
+      userId: req.principal?.user.id ?? null, username: req.principal?.user.username ?? null,
+      detail: { targetUserId: req.params.id }, req,
+    });
+    res.status(403).json({ error: "Only a Super Admin or Company Admin can change the login limit.", code: "top_admin_required" });
+    return;
+  }
+  const limit = (req.body as { maxSessions?: unknown } | undefined)?.maxSessions;
+  if (typeof limit !== "number" || !Number.isInteger(limit) || limit < 1 || limit > 20) {
+    res.status(400).json({ error: "The login limit must be a whole number from 1 to 20.", code: "invalid_session_limit" });
+    return;
+  }
+  const params = UpdateUserParams.safeParse(req.params);
+  if (!params.success) { respondInvalid(req, res, params.error); return; }
+
+  const [target] = await db.select().from(usersTable).where(eq(usersTable.id, params.data.id));
+  if (!target) { res.status(404).json({ error: "User not found" }); return; }
+  if (refuseIfOutranked(req, res, target)) return;
+
+  const [user] = await db.update(usersTable).set({ maxSessions: limit }).where(eq(usersTable.id, target.id)).returning();
+  if (!user) { res.status(404).json({ error: "User not found" }); return; }
+
+  await logSecurityEvent({
+    type: "access.updated", userId: user.id, username: user.username,
+    detail: { by: req.principal?.user.username, maxSessions: limit }, req,
+  });
+  void logActivity("user.session_limit_changed", "user", user.id, user.fullName, `limit=${limit}`, req);
+  res.json(sanitizeUser(user));
+});
+
 /** Force a rotation at next login without disclosing or setting a password. */
 router.post("/users/:id/require-password-change", async (req, res): Promise<void> => {
+  // Rank is checked BEFORE the write. Checking afterwards answered 403 while the
+  // change had already been saved, so a lower admin could lock out a Super Admin.
+  const [target] = await db.select().from(usersTable).where(eq(usersTable.id, req.params.id));
+  if (!target) { res.status(404).json({ error: "User not found" }); return; }
+  if (refuseIfOutranked(req, res, target)) return;
+
   const [user] = await db
     .update(usersTable)
     .set({ mustChangePassword: true })
-    .where(eq(usersTable.id, req.params.id))
+    .where(eq(usersTable.id, target.id))
     .returning();
   if (!user) { res.status(404).json({ error: "User not found" }); return; }
-  if (refuseIfOutranked(req, res, user)) return;
+
+  // Forcing a change is usually the response to a suspected compromise. The flag
+  // alone left every existing session alive, and a session in the forced-change
+  // state may set a new password WITHOUT the current one (see
+  // /auth/change-password): whoever held a stolen session could finish the
+  // "rotation" themselves and keep the account. Every session is ended, so the
+  // change happens after a fresh sign-in with the real password. The
+  // administrator's own session survives if they flagged themselves.
+  const revoked = await revokeAllUserSessions(user.id, "password_change_required", {
+    exceptSessionId: user.id === req.principal?.user.id ? req.principal.session.id : undefined,
+  });
+  recordSecurityEvent({
+    type: "session.revoked", userId: user.id, username: user.username,
+    reason: "password_change_required",
+    detail: { by: req.principal?.user.username, sessionsRevoked: revoked }, req,
+  });
 
   void logActivity("user.password_change_required", "user", user.id, user.fullName, null, req);
   res.json(sanitizeUser(user));
@@ -622,7 +718,7 @@ router.delete("/users/:id", async (req, res): Promise<void> => {
   if (!target) { res.status(404).json({ error: "User not found" }); return; }
   if (refuseIfOutranked(req, res, target)) return;
 
-  if (["admin", "super_admin"].includes(target.role) && await isLastActiveAdmin(target.id)) {
+  if (["admin", "company_admin", "super_admin"].includes(target.role) && await isLastActiveAdmin(target.id)) {
     res.status(409).json({
       error: "This is the last active administrator. Promote another user first.",
       code: "last_admin",

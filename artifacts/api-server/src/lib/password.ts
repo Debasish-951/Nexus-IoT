@@ -104,6 +104,22 @@ export function isLegacyHash(stored: string | null): boolean {
 }
 
 /**
+ * Does `password` equal a pre-upgrade cleartext value?
+ *
+ * NEVER an authentication check: a legacy value cannot sign anyone in. Login
+ * uses it only to decide whether the caller may be told the account must be
+ * re-activated, which is account state that must not reach someone who does
+ * not hold the credential. Both sides are hashed first so the comparison is
+ * constant-time whatever their lengths.
+ */
+export function legacyCredentialMatches(password: string, stored: string | null): boolean {
+  if (!stored || !isLegacyHash(stored)) return false;
+  const a = crypto.createHash("sha256").update(password, "utf8").digest();
+  const b = crypto.createHash("sha256").update(stored, "utf8").digest();
+  return crypto.timingSafeEqual(a, b);
+}
+
+/**
  * Generate a temporary password for an administrator to hand to a user.
  *
  * Shape: `Xkm7-Rpq2-Vwd9` — four-character groups separated by hyphens.

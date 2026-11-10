@@ -229,6 +229,14 @@ Enforcement points:
 | SPA — nav | `Layout.tsx` filters nav items by module access. |
 | SPA — control | Existing `RoleGuard permission="…"` — **unchanged call sites**, now fed by server truth. |
 
+**Overrides narrow or widen the module, never the verb.** A request passes only when the role holds
+the rule's permission verb *and* the module grant (role default or override) allows the rule's level.
+An override can switch a module off, or switch on a module the role's verbs already cover; it cannot
+make an Operator a user administrator. Before the November 2026 audit (SEC-15) an overridden module
+skipped the verb check, so turning on User Management or API Clients for an Operator gave full
+administration of that area. Write rules now also carry an explicit `level: "write"`/`"delete"`.
+Note that the Access Control editor in the SPA may still show such a toggle as granting writes.
+
 `update` is not a distinct grant: the existing matrix is R/W/D and every write path in the codebase
 treats create and update identically. `write` therefore covers create + update; this is documented
 rather than invented, to avoid a second permission vocabulary.
@@ -668,7 +676,7 @@ Executed against a live server (port 8099) on the real PostgreSQL database, afte
 | F16 admin unlock | counters cleared, login restored |
 | S11/F12 enumeration | identical responses; `unknown_user` recorded internally only |
 | F15 access overrides | persisted to the row; visible to a *fresh login in a new cookie jar* — proves the `localStorage` gap is closed |
-| Override precedence | operator granted `assets.w`: `PUT` 200, `DELETE` 403, `reports` 403 |
+| Override precedence | operator granted `assets.w`: `PUT` 200, `DELETE` 403, `reports` 403 (historical: since SEC-15 the `PUT` is 403, because Operators lack `manage_assets`) |
 | F17 suspend | live sessions revoked within one request; login → 403 `account_suspended` |
 | F10 logout | session revoked; `/auth/session` → 401 |
 | S16 response headers | nosniff, DENY, no-referrer, Permissions-Policy, no-store |

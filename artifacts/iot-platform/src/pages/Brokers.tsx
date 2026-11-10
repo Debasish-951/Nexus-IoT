@@ -281,7 +281,7 @@ export default function Brokers() {
   const { toast } = useToast();
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
-  const { can } = useCurrentUser();
+  const { canAction } = useCurrentUser();
 
   const { data: brokers } = useListBrokers();
   const createBroker = useCreateBroker();
@@ -308,8 +308,23 @@ export default function Brokers() {
 
   function onSubmit(data: any) {
     createBroker.mutate(
-      { data: { name: data.name, type: data.type, endpoint: data.endpoint || null } },
       {
+        data: {
+          name: data.name, type: data.type, endpoint: data.endpoint || null,
+          // The MQTT fields were shown in the form but never sent, so a broker
+          // created here had no topic and the subscriber skipped it.
+          ...(data.type === "mqtt" && {
+            mqttTopic: data.mqttTopic || null,
+            mqttClientId: data.mqttClientId || null,
+            mqttUsername: data.mqttUsername || null,
+            ...(data.mqttPassword ? { mqttPassword: data.mqttPassword } : {}),
+          }),
+        } as any,
+      },
+      {
+        onError: (err: unknown) => {
+          toast({ title: "Broker not created", description: (err as Error)?.message ?? "The server refused the request.", variant: "destructive" });
+        },
         onSuccess: () => {
           toast({ title: "Broker created" });
           qc.invalidateQueries({ queryKey: getListBrokersQueryKey() });
@@ -335,7 +350,7 @@ export default function Brokers() {
         </div>
         <div className="flex gap-2">
           <Button size="sm" variant="outline">Refresh</Button>
-          {can("manage_brokers") && (
+          {canAction("manage_brokers", "brokers") && (
             <Button size="sm" onClick={() => setOpen(true)} data-testid="add-broker-btn">
               <Plus className="w-4 h-4 mr-1.5" /> Add
             </Button>
@@ -439,7 +454,7 @@ export default function Brokers() {
                           <History className="w-3.5 h-3.5" />
                           <ChevronDown className={cn("w-3 h-3 transition-transform", isExpanded && "rotate-180")} />
                         </button>
-                        {can("manage_brokers") && (
+                        {canAction("manage_brokers", "brokers") && (
                           <button className="text-muted-foreground hover:text-destructive transition-colors"
                             onClick={() => deleteBroker.mutate({ id: broker.id }, {
                               onSuccess: () => { toast({ title: "Broker deleted" }); qc.invalidateQueries({ queryKey: getListBrokersQueryKey() }); },

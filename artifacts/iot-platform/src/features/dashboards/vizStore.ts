@@ -18,11 +18,36 @@ import { apiFetch } from "@/lib/auth-api";
  * `x-csrf-token` header, and apiFetch is what attaches it.
  */
 
+/** What the signed-in user may do to one node. Decided by the server. */
+export interface VizNodeAccess {
+  read: boolean;
+  write: boolean;
+  delete: boolean;
+  owner: boolean;
+}
+
 export interface VizNode {
   id: string;
   name: string;
   parentId: string | null;
+  /** Project this node belongs to, inherited from its top-level node. Null = every project. */
+  projectId: string | null;
   widgets: any[];
+  access: VizNodeAccess;
+  /** Server timestamp of the last write; sent back on a save to detect a conflicting edit. */
+  updatedAt?: string;
+}
+
+/**
+ * The dashboard was saved somewhere else (another tab, another person) after
+ * the copy being saved was loaded. The server refused the write rather than
+ * overwrite the newer version.
+ */
+export class VizConflictError extends Error {
+  constructor(message = "This dashboard was changed somewhere else after you opened it.") {
+    super(message);
+    this.name = "VizConflictError";
+  }
 }
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
@@ -46,7 +71,11 @@ async function readJson(res: Response): Promise<any> {
 async function fetchNodes(): Promise<VizNode[]> {
   const res = await apiFetch(`${BASE}/api/viz-nodes`);
   const rows = await readJson(res);
-  return Array.isArray(rows) ? rows : [];
+  if (!Array.isArray(rows)) return [];
+  // An API older than this page sends no `access`, which happens while an update
+  // is being rolled out. The page must still render, and the server still decides
+  // what each request may do.
+  return rows.map((n) => ({ ...n, projectId: n.projectId ?? null, access: n.access ?? { read: true, write: true, delete: true, owner: false } }));
 }
 
 /**
@@ -83,14 +112,17 @@ export function useVizNodeActions() {
   const invalidate = useCallback(() => { void qc.invalidateQueries({ queryKey: KEY }); }, [qc]);
 
   /** Optimistic: the node appears at once, then the server confirms it. */
-  const createNode = useCallback((name: string, parentId: string | null): string => {
+  const createNode = useCallback((name: string, parentId: string | null, projectId: string | null = null): string => {
     const id = newNodeId();
-    const node: VizNode = { id, name: name.trim() || "Untitled", parentId, widgets: [] };
+    const node: VizNode = {
+      id, name: name.trim() || "Untitled", parentId, projectId, widgets: [],
+      access: { read: true, write: true, delete: true, owner: true },
+    };
     patchCache(qc, (prev) => [...prev, node]);
     apiFetch(`${BASE}/api/viz-nodes`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id, name: node.name, parentId }),
+      body: JSON.stringify({ id, name: node.name, parentId, projectId: parentId ? null : projectId }),
     })
       .then(readJson)
       // Refetch either way: on success to pick up server-side normalisation, on
@@ -120,22 +152,54 @@ export function useVizNodeActions() {
   /**
    * Save a node's dashboard.
    *
+   * Resolves with the node's new `updatedAt`. Rejects with VizConflictError on
+   * a 409 (changed elsewhere since `expectedUpdatedAt`).
+   *
    * Returns a promise and rejects on failure, unlike everything above — the
    * canvas has an explicit Save button with a dirty indicator, so a failed save
    * has somewhere to be reported. Silently dropping this one is the exact
    * failure mode being fixed.
    */
-  const saveWidgets = useCallback(async (id: string, widgets: any[]): Promise<void> => {
+  const saveWidgets = useCallback(async (id: string, widgets: any[], expectedUpdatedAt?: string): Promise<string | undefined> => {
     const res = await apiFetch(`${BASE}/api/viz-nodes/${encodeURIComponent(id)}`, {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ widgets }),
+      // `expectedUpdatedAt` is the version this copy was loaded from. Left out
+      // when unknown, which keeps the old last-write-wins behaviour.
+      body: JSON.stringify(expectedUpdatedAt ? { widgets, expectedUpdatedAt } : { widgets }),
     });
-    await readJson(res);
-    patchCache(qc, (prev) => prev.map((n) => (n.id === id ? { ...n, widgets } : n)));
+    if (res.status === 409) {
+      const info = await describeApiError(res);
+      throw new VizConflictError(info.message || undefined);
+    }
+    const out = await readJson(res);
+    const updatedAt: string | undefined = typeof out?.updatedAt === "string" ? out.updatedAt : undefined;
+    patchCache(qc, (prev) => prev.map((n) => (n.id === id ? { ...n, widgets, ...(updatedAt ? { updatedAt } : {}) } : n)));
+    return updatedAt;
   }, [qc]);
 
-  return { createNode, renameNode, deleteNode, saveWidgets, invalidate };
+  /** Refetch the hierarchy and wait for it, so the caller can read fresh data. */
+  const refresh = useCallback(async (): Promise<void> => {
+    await qc.invalidateQueries({ queryKey: KEY });
+  }, [qc]);
+
+  /** Synchronous read of one node from the cache. */
+  const getNode = useCallback((id: string): VizNode | undefined => {
+    return qc.getQueryData<VizNode[]>(KEY)?.find((n) => n.id === id);
+  }, [qc]);
+
+  /** Rejects on failure so the caller can report it. Refetches for nested nodes. */
+  const assignProject = useCallback(async (id: string, projectId: string | null): Promise<void> => {
+    const res = await apiFetch(`${BASE}/api/viz-nodes/${encodeURIComponent(id)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ projectId }),
+    });
+    await readJson(res);
+    invalidate();
+  }, [invalidate]);
+
+  return { createNode, renameNode, deleteNode, saveWidgets, assignProject, invalidate, refresh, getNode };
 }
 
 // ── One-time migration out of localStorage ───────────────────────────────────
@@ -183,14 +247,33 @@ export async function migrateLocalDashboards(): Promise<number> {
     return { id: n.id, name: n.name, parentId: n.parentId ?? null, widgets };
   });
 
-  const res = await apiFetch(`${BASE}/api/viz-nodes/import`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ nodes: payload }),
-  });
-  const out = await readJson(res);
-  // Only flagged once the server has confirmed. A failed import throws before
-  // this line, so the next page load tries again.
+  // One request per node: the API caps a request body, so a single oversized
+  // dashboard must not stop the others from coming across.
+  let imported = 0;
+  const notUploaded: string[] = [];
+  for (const node of payload) {
+    try {
+      const res = await apiFetch(`${BASE}/api/viz-nodes/import`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ nodes: [node] }),
+      });
+      const out = await readJson(res);
+      imported += Number(out?.imported) || 0;
+      if (Number(out?.rejected) > 0) notUploaded.push(node.name);
+    } catch {
+      notUploaded.push(node.name);
+    }
+  }
+
+  // Only flagged once every node is on the server. Anything else tries again on
+  // the next page load, and nodes already uploaded are skipped by the server.
+  if (notUploaded.length > 0) {
+    throw Object.assign(
+      new Error(`Not uploaded: ${notUploaded.join(", ")}. They are still saved in this browser and will be retried on the next page load.`),
+      { imported },
+    );
+  }
   window.localStorage.setItem(MIGRATED_FLAG, "1");
-  return Number(out?.imported) || 0;
+  return imported;
 }

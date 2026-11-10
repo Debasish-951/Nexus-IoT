@@ -147,7 +147,7 @@ graph LR
     C[MQTT Subscriber] -->|broadcast| WS
     WS -->|push| D[Dashboard WidgetCards]
     WS -->|push| E[Live Feed Page]
-    WS -->|push| F[Alarm Toast Listener]
+    WS -->|push| F[Notification Bell]
     WS -->|push| G[Broker Status Bar]
 ```
 

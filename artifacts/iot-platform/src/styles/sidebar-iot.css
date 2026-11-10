@@ -1,0 +1,22 @@
+/*
+ * IoT line drawing behind the expanded sidebar.
+ *
+ * The drawing is used as a mask and filled with the sidebar's text colour, so it
+ * stays visible in every skin, including skins with a white sidebar. To remove it,
+ * delete this file, its import in main.tsx, and the `sidebar-iot` class in Layout.tsx.
+ */
+
+.sidebar-iot { position: relative; }
+
+.sidebar-iot > * { position: relative; z-index: 1; }
+
+.sidebar-iot::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background-color: hsl(var(--sidebar-foreground));
+  opacity: 0.22;
+  -webkit-mask: url("../assets/sidebar-iot.svg") no-repeat left bottom / 100% auto;
+  mask: url("../assets/sidebar-iot.svg") no-repeat left bottom / 100% auto;
+}

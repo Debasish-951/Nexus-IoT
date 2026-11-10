@@ -1,11 +1,17 @@
-import { Router, type IRouter } from "express";
-import { eq, inArray } from "drizzle-orm";
-import { db, vizNodesTable } from "@workspace/db";
+import { Router, type IRouter, type Request, type Response } from "express";
+import { and, eq, inArray } from "drizzle-orm";
+import { db, assetsTable, usersTable, vizNodesTable, vizNodeSharesTable } from "@workspace/db";
 import { z } from "zod";
 import { logActivity } from "./activity_log";
 import { validate } from "../middleware/validate";
+import { recordSecurityEvent } from "../lib/security-log";
+import { hasModuleAccess } from "../lib/rbac";
+import { isSuperAdmin, loadVizAccess, NO_ACCESS, type VizNodeAccess } from "../lib/viz-access";
+import { assetScope } from "../lib/project-access";
+import { tagsForViewer } from "../lib/viz-tags";
 import {
   CreateVizNodeBody, UpdateVizNodeBody, VizNodeParams, ImportVizNodesBody, ImportVizNode,
+  VizNodeShareParams, PutVizNodeShareBody,
 } from "../schemas/common";
 
 /**
@@ -24,14 +30,39 @@ const router: IRouter = Router();
 
 type NodeRow = typeof vizNodesTable.$inferSelect;
 
-function toClient(row: NodeRow) {
+/**
+ * A parent this user cannot see is reported as null. The tree only renders nodes
+ * it can reach from the top level, so a dashboard shared out of the middle of
+ * someone's tree would otherwise disappear.
+ */
+function toClient(row: NodeRow, access: VizNodeAccess, parentVisible: boolean, projectId: string | null = row.projectId ?? null) {
   return {
     id: row.id,
     name: row.name,
-    parentId: row.parentId ?? null,
+    parentId: parentVisible ? row.parentId ?? null : null,
+    projectId,
     widgets: Array.isArray(row.widgets) ? row.widgets : [],
     updatedAt: row.updatedAt,
+    access,
   };
+}
+
+/** Recorded because this replaces the check `authorize` would otherwise have logged. */
+function deny(req: Request, res: Response, reason: string, message: string): void {
+  recordSecurityEvent({
+    type: "authz.denied", outcome: "failure", reason,
+    userId: req.principal?.user.id ?? null, username: req.principal?.user.username ?? null,
+    detail: { method: req.method, path: req.path }, req,
+  });
+  res.status(403).json({ error: message, code: "dashboard_access_denied" });
+}
+
+/** A node may name only a real project that this user is allowed to open. */
+async function canUseProject(req: Request, projectId: string): Promise<boolean> {
+  const [project] = await db.select({ parentId: assetsTable.parentId }).from(assetsTable).where(eq(assetsTable.id, projectId));
+  if (!project || project.parentId) return false;
+  const scope = await assetScope(req);
+  return !scope || scope.roots.has(projectId);
 }
 
 // Id and name rules live in schemas/common.ts and are enforced by `validate`
@@ -41,9 +72,32 @@ function toClient(row: NodeRow) {
 // would silently store a different name than the one the schema rejected.
 
 // ── Read ─────────────────────────────────────────────────────────────────────
-router.get("/viz-nodes", async (_req, res): Promise<void> => {
-  const rows = await db.select().from(vizNodesTable).orderBy(vizNodesTable.name);
-  res.json(rows.map(toClient));
+router.get("/viz-nodes", async (req, res): Promise<void> => {
+  const [rows, access] = await Promise.all([
+    db.select().from(vizNodesTable).orderBy(vizNodesTable.name),
+    loadVizAccess(req.principal!),
+  ]);
+  const canRead = (id: string | null) => !!id && !!access.get(id)?.read;
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  // Nested nodes follow their top-level node. `seen` guards against a cycle,
+  // since parentId carries no foreign key.
+  const projectOf = (row: NodeRow): string | null => {
+    let cur = row;
+    const seen = new Set([cur.id]);
+    while (cur.parentId && byId.has(cur.parentId) && !seen.has(cur.parentId)) {
+      cur = byId.get(cur.parentId)!;
+      seen.add(cur.id);
+    }
+    return cur.projectId ?? null;
+  };
+  res.json(rows
+    .filter((r) => canRead(r.id))
+    .map((r) => toClient(r, access.get(r.id)!, canRead(r.parentId), projectOf(r))));
+});
+
+// ── Tags the Combined Value widget can add together ──────────────────────────
+router.get("/viz-tags", async (req, res): Promise<void> => {
+  res.json(await tagsForViewer(await assetScope(req)));
 });
 
 // ── Create ───────────────────────────────────────────────────────────────────
@@ -55,31 +109,62 @@ router.post("/viz-nodes", validate({ body: CreateVizNodeBody }), async (req, res
   const id = body.id ?? `vn-${crypto.randomUUID()}`;
   const parentId = body.parentId ?? null;
 
+  const access = await loadVizAccess(req.principal!);
+  const allowed = parentId
+    ? !!access.get(parentId)?.write
+    : isSuperAdmin(req.principal) || hasModuleAccess(req.principal!.access, "visualization", "write");
+  if (!allowed) {
+    deny(req, res, "viz_create_denied", "You do not have permission to create a dashboard here.");
+    return;
+  }
+  const projectId = parentId ? null : body.projectId ?? null;
+  if (projectId && !(await canUseProject(req, projectId))) {
+    deny(req, res, "viz_project_denied", "You cannot add a dashboard to that project.");
+    return;
+  }
+
   const [row] = await db.insert(vizNodesTable)
-    .values({ id, name: body.name, parentId, widgets: body.widgets ?? [] })
+    .values({ id, name: body.name, parentId, projectId, widgets: body.widgets ?? [], ownerId: req.principal!.user.id })
     // Creating a node that already exists is not an error worth failing a UI
     // over — it means a retry or a double-submit. Keep what is there.
     .onConflictDoNothing()
     .returning();
 
   if (!row) {
+    // Ids are client-supplied, so this must not hand back a dashboard the caller
+    // cannot read just because they guessed its id.
+    const existingAccess = access.get(id);
+    if (!existingAccess?.read) {
+      res.status(409).json({ error: "That id is already in use.", code: "id_conflict" });
+      return;
+    }
     const [existing] = await db.select().from(vizNodesTable).where(eq(vizNodesTable.id, id));
-    res.status(200).json(toClient(existing));
+    res.status(200).json(toClient(existing, existingAccess, !!existing.parentId && !!access.get(existing.parentId)?.read));
     return;
   }
   await logActivity("viz.node.created", "visualization", row.id, row.name, null, req);
-  res.status(201).json(toClient(row));
+  res.status(201).json(toClient(row, { read: true, write: true, delete: true, owner: true }, !!parentId && !!access.get(parentId)?.read));
 });
 
 // ── Update (rename, re-parent, or save the dashboard) ────────────────────────
-router.put("/viz-nodes/:id", validate({ params: VizNodeParams, body: UpdateVizNodeBody }), async (req, res): Promise<void> => {
+//
+// Optimistic concurrency: a client may send the `updatedAt` it last read as
+// `expectedUpdatedAt`. If the row has changed since, the write is refused with
+// 409 instead of silently replacing a colleague's newer dashboard with a stale
+// copy. Optional, so a client that does not send it keeps last-write-wins.
+const UpdateVizNodeBodyWithVersion = UpdateVizNodeBody.extend({
+  expectedUpdatedAt: z.string().max(64).refine((s) => !Number.isNaN(Date.parse(s)), "must be a timestamp").optional(),
+});
+
+router.put("/viz-nodes/:id", validate({ params: VizNodeParams, body: UpdateVizNodeBodyWithVersion }), async (req, res): Promise<void> => {
   const { id } = req.params as z.infer<typeof VizNodeParams>;
-  const body = req.body as z.infer<typeof UpdateVizNodeBody>;
+  const { expectedUpdatedAt, ...body } = req.body as z.infer<typeof UpdateVizNodeBodyWithVersion>;
   const update: Partial<typeof vizNodesTable.$inferInsert> = {};
 
   if (body.name !== undefined) update.name = body.name;
   if ("parentId" in body) update.parentId = body.parentId ?? null;
   if (body.widgets !== undefined) update.widgets = body.widgets;
+  if (body.projectId !== undefined) update.projectId = body.projectId;
 
   if (Object.keys(update).length === 0) { res.status(400).json({ error: "nothing to update" }); return; }
 
@@ -87,15 +172,61 @@ router.put("/viz-nodes/:id", validate({ params: VizNodeParams, body: UpdateVizNo
   // which only offers ancestors that are not in the moved node's own subtree.
   if (update.parentId === id) { res.status(400).json({ error: "a node cannot be its own parent" }); return; }
 
-  const [row] = await db.update(vizNodesTable).set(update).where(eq(vizNodesTable.id, id)).returning();
+  const access = await loadVizAccess(req.principal!);
+  const current = access.get(id) ?? NO_ACCESS;
+  // The same answer as a missing node: no way to discover what others have built.
+  if (!current.read) { res.status(404).json({ error: "Node not found" }); return; }
+  if (!current.write) {
+    deny(req, res, "viz_write_denied", "You have read-only access to this dashboard.");
+    return;
+  }
+  if (update.parentId && !access.get(update.parentId)?.write) {
+    deny(req, res, "viz_move_denied", "You do not have permission to move a dashboard there.");
+    return;
+  }
+  if (update.projectId !== undefined) {
+    const [node] = await db.select({ parentId: vizNodesTable.parentId }).from(vizNodesTable).where(eq(vizNodesTable.id, id));
+    if (node?.parentId) { res.status(400).json({ error: "Only a top-level dashboard can be assigned to a project." }); return; }
+    if (update.projectId && !(await canUseProject(req, update.projectId))) {
+      deny(req, res, "viz_project_denied", "You cannot assign a dashboard to that project.");
+      return;
+    }
+  }
+
+  let row: NodeRow | undefined;
+  if (expectedUpdatedAt === undefined) {
+    [row] = await db.update(vizNodesTable).set(update).where(eq(vizNodesTable.id, id)).returning();
+  } else {
+    // The row is locked between the check and the write, so two saves racing
+    // each other cannot both pass the check. Compared as JS dates on both sides:
+    // the client's value is the server's own earlier serialisation of this column.
+    const expected = new Date(expectedUpdatedAt).getTime();
+    const outcome = await db.transaction(async (tx) => {
+      const [cur] = await tx.select({ updatedAt: vizNodesTable.updatedAt }).from(vizNodesTable)
+        .where(eq(vizNodesTable.id, id)).for("update");
+      if (!cur) return { conflict: false as const, row: undefined };
+      if (cur.updatedAt.getTime() !== expected) return { conflict: true as const, updatedAt: cur.updatedAt };
+      const [updated] = await tx.update(vizNodesTable).set(update).where(eq(vizNodesTable.id, id)).returning();
+      return { conflict: false as const, row: updated };
+    });
+    if (outcome.conflict) {
+      res.status(409).json({
+        error: "This dashboard was changed somewhere else after you opened it.",
+        code: "viz_node_conflict",
+        updatedAt: outcome.updatedAt,
+      });
+      return;
+    }
+    row = outcome.row;
+  }
   if (!row) { res.status(404).json({ error: "Node not found" }); return; }
 
   // Only structural edits are logged. A dashboard save happens on every layout
   // tweak, and logging those would bury every other entry in the activity feed.
-  if (update.name !== undefined || "parentId" in update) {
+  if (update.name !== undefined || "parentId" in update || "projectId" in update) {
     await logActivity("viz.node.updated", "visualization", row.id, row.name, null, req);
   }
-  res.json(toClient(row));
+  res.json(toClient(row, current, !!row.parentId && !!access.get(row.parentId)?.read));
 });
 
 // ── Delete (node + its whole subtree) ────────────────────────────────────────
@@ -104,7 +235,13 @@ router.delete("/viz-nodes/:id", validate({ params: VizNodeParams }), async (req,
   const all = await db.select({ id: vizNodesTable.id, parentId: vizNodesTable.parentId, name: vizNodesTable.name }).from(vizNodesTable);
 
   const [target] = all.filter((n) => n.id === id);
-  if (!target) { res.status(404).json({ error: "Node not found" }); return; }
+  const access = (await loadVizAccess(req.principal!)).get(id) ?? NO_ACCESS;
+  if (!target || !access.read) { res.status(404).json({ error: "Node not found" }); return; }
+  // Access is inherited, so permission on this node covers its whole subtree.
+  if (!access.delete) {
+    deny(req, res, "viz_delete_denied", "You do not have permission to delete this dashboard.");
+    return;
+  }
 
   // Collect the subtree iteratively. `seen` doubles as the cycle guard: a
   // corrupted parent chain must not spin here.
@@ -136,8 +273,9 @@ router.post("/viz-nodes/import", validate({ body: ImportVizNodesBody }), async (
   // failing the batch — see the note on ImportVizNodesBody for why an import is
   // the one place where all-or-nothing is the wrong answer.
   const existing = new Set((await db.select({ id: vizNodesTable.id }).from(vizNodesTable)).map((r) => r.id));
+  const access = await loadVizAccess(req.principal!);
 
-  const values: Array<{ id: string; name: string; parentId: string | null; widgets: unknown[] }> = [];
+  const values: Array<{ id: string; name: string; parentId: string | null; widgets: unknown[]; ownerId: string }> = [];
   const rejected: Array<{ index: number; reason: string }> = [];
 
   incoming.forEach((raw, index) => {
@@ -150,8 +288,13 @@ router.post("/viz-nodes/import", validate({ body: ImportVizNodesBody }), async (
     values.push({
       id: parsed.data.id,
       name: parsed.data.name,
-      parentId: parsed.data.parentId ?? null,
+      // An imported node must not attach itself to a tree this user cannot edit.
+      // A parent that does not exist yet is kept: browsers upload nodes one at a time.
+      parentId: parsed.data.parentId && (!existing.has(parsed.data.parentId) || access.get(parsed.data.parentId)?.write)
+        ? parsed.data.parentId
+        : null,
       widgets: parsed.data.widgets ?? [],
+      ownerId: req.principal!.user.id,
     });
   });
 
@@ -167,6 +310,72 @@ router.post("/viz-nodes/import", validate({ body: ImportVizNodesBody }), async (
     rejected: rejected.length,
     ...(rejected.length > 0 ? { rejectedDetail: rejected.slice(0, 20) } : {}),
   });
+});
+
+// ── Sharing (Super Admin or Company Admin only) ───────────────────────────────────────────────
+function refuseUnlessSuperAdmin(req: Request, res: Response): boolean {
+  if (isSuperAdmin(req.principal)) return false;
+  deny(req, res, "viz_share_not_super_admin", "Only a Super Admin or Company Admin can manage dashboard access.");
+  return true;
+}
+
+router.get("/viz-nodes/:id/shares", validate({ params: VizNodeParams }), async (req, res): Promise<void> => {
+  if (refuseUnlessSuperAdmin(req, res)) return;
+  const { id } = req.params as z.infer<typeof VizNodeParams>;
+  const [node] = await db
+    .select({ ownerId: vizNodesTable.ownerId, ownerName: usersTable.fullName })
+    .from(vizNodesTable)
+    .leftJoin(usersTable, eq(usersTable.id, vizNodesTable.ownerId))
+    .where(eq(vizNodesTable.id, id));
+  if (!node) { res.status(404).json({ error: "Node not found" }); return; }
+
+  const shares = await db.select().from(vizNodeSharesTable).where(eq(vizNodeSharesTable.nodeId, id));
+  res.json({
+    ownerId: node.ownerId,
+    ownerName: node.ownerName,
+    shares: shares.map((s) => ({ userId: s.userId, read: s.canRead, write: s.canWrite, delete: s.canDelete })),
+  });
+});
+
+router.put(
+  "/viz-nodes/:id/shares/:userId",
+  validate({ params: VizNodeShareParams, body: PutVizNodeShareBody }),
+  async (req, res): Promise<void> => {
+    if (refuseUnlessSuperAdmin(req, res)) return;
+    const { id, userId } = req.params as z.infer<typeof VizNodeShareParams>;
+    const body = req.body as z.infer<typeof PutVizNodeShareBody>;
+
+    const [node] = await db.select({ name: vizNodesTable.name }).from(vizNodesTable).where(eq(vizNodesTable.id, id));
+    if (!node) { res.status(404).json({ error: "Node not found" }); return; }
+    const [user] = await db.select({ id: usersTable.id }).from(usersTable).where(eq(usersTable.id, userId));
+    if (!user) { res.status(404).json({ error: "User not found" }); return; }
+
+    // Writing or deleting something you cannot see makes no sense, so both imply read.
+    const grant = {
+      canRead: body.read || body.write || body.delete,
+      canWrite: body.write,
+      canDelete: body.delete,
+      grantedBy: req.principal!.user.id,
+    };
+    if (!grant.canRead) {
+      await db.delete(vizNodeSharesTable).where(and(eq(vizNodeSharesTable.nodeId, id), eq(vizNodeSharesTable.userId, userId)));
+    } else {
+      await db.insert(vizNodeSharesTable)
+        .values({ nodeId: id, userId, ...grant })
+        .onConflictDoUpdate({ target: [vizNodeSharesTable.nodeId, vizNodeSharesTable.userId], set: grant });
+    }
+    await logActivity("viz.node.shared", "visualization", id, node.name,
+      `user=${userId} read=${grant.canRead} write=${grant.canWrite} delete=${grant.canDelete}`, req);
+    res.json({ userId, read: grant.canRead, write: grant.canWrite, delete: grant.canDelete });
+  },
+);
+
+router.delete("/viz-nodes/:id/shares/:userId", validate({ params: VizNodeShareParams }), async (req, res): Promise<void> => {
+  if (refuseUnlessSuperAdmin(req, res)) return;
+  const { id, userId } = req.params as z.infer<typeof VizNodeShareParams>;
+  await db.delete(vizNodeSharesTable).where(and(eq(vizNodeSharesTable.nodeId, id), eq(vizNodeSharesTable.userId, userId)));
+  await logActivity("viz.node.unshared", "visualization", id, null, `user=${userId}`, req);
+  res.json({ success: true });
 });
 
 export default router;

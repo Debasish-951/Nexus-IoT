@@ -18,8 +18,11 @@ import type { UserAccessOverrides } from "@workspace/db";
 
 export const ROLES = [
   "super_admin",
+  "company_admin",
   "admin",
-  "customer_admin",
+  "project_manager",
+  "team_lead",
+  "developer",
   "engineer",
   "operator",
   "viewer",
@@ -28,8 +31,11 @@ export type Role = (typeof ROLES)[number];
 
 export const ROLE_LABELS: Record<Role, string> = {
   super_admin: "Super Admin",
+  company_admin: "Company Admin",
   admin: "Admin",
-  customer_admin: "Customer Admin",
+  project_manager: "Project Manager",
+  team_lead: "Team Lead",
+  developer: "Developer",
   engineer: "Engineer",
   operator: "Operator",
   viewer: "Viewer",
@@ -47,8 +53,8 @@ export const PERMISSIONS = [
   "manage_brokers",
   "manage_destinations",
   "manage_api_clients",
-  // Added: previously implied by `manage_users`, split out so a Customer Admin
-  // can manage their own users without seeing platform-wide security telemetry.
+  // Added: previously implied by `manage_users`, split out so a role
+  // can manage users without seeing platform-wide security telemetry.
   "manage_security",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
@@ -62,17 +68,17 @@ export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {
   // Reserved for platform operators. Identical grants to admin today; exists so
   // tenant-scoping can be added later without re-labelling existing admins.
   super_admin: ADMIN_PERMISSIONS,
+  // The customer's own top administrator on their deployment. Created by a Super
+  // Admin, and holds the same power, except over Super Admins and other Company
+  // Admins (see ROLE_RANK).
+  company_admin: ADMIN_PERMISSIONS,
   admin: ADMIN_PERMISSIONS,
-  // Manages people and dashboards inside one customer, but not brokers or
-  // platform security configuration.
-  //
-  // `manage_api_clients` is granted so they can stand up an ingest endpoint for
-  // their own project without waiting on an administrator. What that endpoint may
-  // DO is bounded separately by ROLE_API_SCOPE_DEFAULTS — write-only — so this is
-  // "can commission a gateway", not "can mint a key that reads everything".
-  customer_admin: [
-    "view", "manage_assets", "manage_alarms", "acknowledge_alarms", "manage_users",
-    "manage_api_clients",
+  project_manager: ["view", "acknowledge_alarms"],
+  team_lead: ["view", "acknowledge_alarms"],
+  // Same rights as Engineer, but only on the projects assigned to them.
+  developer: [
+    "view", "manage_assets", "manage_templates", "manage_alarms", "acknowledge_alarms",
+    "manage_brokers", "manage_destinations", "manage_api_clients",
   ],
   engineer: [
     "view", "manage_assets", "manage_templates", "manage_alarms", "acknowledge_alarms",
@@ -127,15 +133,30 @@ export const ROLE_MODULE_DEFAULTS: Record<Role, Record<string, ModuleAccess>> = 
     live: true, explorer: true, users: true, security: true, activity_log: true,
     assets: ALL, visualization: ALL, analytics: ALL,
   },
+  company_admin: {
+    dashboard: true, alarms: true, brokers: true, api_clients: true, reports: true,
+    live: true, explorer: true, users: true, security: true, activity_log: true,
+    assets: ALL, visualization: ALL, analytics: ALL,
+  },
   admin: {
     dashboard: true, alarms: true, brokers: true, api_clients: true, reports: true,
     live: true, explorer: true, users: true, security: true, activity_log: true,
     assets: ALL, visualization: ALL, analytics: ALL,
   },
-  customer_admin: {
-    dashboard: true, alarms: true, brokers: false, api_clients: true, reports: true,
-    live: true, explorer: true, users: true, security: false, activity_log: true,
-    assets: RW, visualization: ALL, analytics: RO,
+  project_manager: {
+    dashboard: true, alarms: true, brokers: false, api_clients: false, reports: true,
+    live: true, explorer: true, users: false, security: false, activity_log: false,
+    assets: RO, visualization: RW, analytics: RO,
+  },
+  team_lead: {
+    dashboard: true, alarms: true, brokers: false, api_clients: false, reports: true,
+    live: true, explorer: true, users: false, security: false, activity_log: false,
+    assets: RO, visualization: RW, analytics: RO,
+  },
+  developer: {
+    dashboard: true, alarms: true, brokers: true, api_clients: true, reports: true,
+    live: true, explorer: true, users: false, security: false, activity_log: true,
+    assets: RW, visualization: RW, analytics: RO,
   },
   engineer: {
     dashboard: true, alarms: true, brokers: true, api_clients: true, reports: true,
@@ -176,7 +197,7 @@ export const API_SCOPE_ALL = "*";
 /**
  * Who may grant what, by role.
  *
- * Engineers and customer admins commission gateways, so they get write — that is
+ * Engineers commission gateways, so they get write — that is
  * the whole job. Read scopes expose asset, telemetry and alarm data across the
  * platform through a credential that outlives any session, so they stay with the
  * administrators. Operators and viewers mint nothing.
@@ -185,8 +206,11 @@ export const API_SCOPE_ALL = "*";
  */
 export const ROLE_API_SCOPE_DEFAULTS: Record<Role, string[]> = {
   super_admin:    [API_SCOPE_ALL, ...API_SCOPE_IDS],
+  company_admin:  [API_SCOPE_ALL, ...API_SCOPE_IDS],
   admin:          [API_SCOPE_ALL, ...API_SCOPE_IDS],
-  customer_admin: ["ingest:write"],
+  project_manager: [],
+  team_lead:      [],
+  developer:      ["ingest:write"],
   engineer:       ["ingest:write"],
   operator:       [],
   viewer:         [],
@@ -229,6 +253,18 @@ export interface EffectiveAccess {
   apiScopes: string[];
 }
 
+/**
+ * How a role reaches projects. Project Managers see all of them. Team Leads and
+ * Developers see only what they are assigned, so an empty list means no projects.
+ * Every other role follows the per-user Project Access setting.
+ */
+export type ProjectRule = "all" | "assigned" | "per_user";
+
+export function projectRule(role: Role): ProjectRule {
+  if (role === "project_manager") return "all";
+  return role === "team_lead" || role === "developer" ? "assigned" : "per_user";
+}
+
 export function isRole(value: string): value is Role {
   return (ROLES as readonly string[]).includes(value);
 }
@@ -258,6 +294,7 @@ export function resolveAccess(
   const role = normaliseRole(roleValue);
   const modules: Record<string, ModuleAccess> = {};
   const overriddenModules: string[] = [];
+  const projects = projectRule(role);
 
   for (const mod of MODULES) {
     const base = defaultForModule(role, mod.key);
@@ -285,7 +322,7 @@ export function resolveAccess(
     permissions: [...(ROLE_PERMISSIONS[role] ?? ROLE_PERMISSIONS.viewer)],
     modules,
     overriddenModules,
-    restrictProjects: !!overrides?.restrictProjects,
+    restrictProjects: projects === "per_user" ? !!overrides?.restrictProjects : projects === "assigned",
     allowedProjects: overrides?.allowedProjects ?? [],
     restrictDashboards: !!overrides?.restrictDashboards,
     allowedDashboards: overrides?.allowedDashboards ?? [],
@@ -360,6 +397,7 @@ export function rbacCatalog() {
       permissions: ROLE_PERMISSIONS[r],
       moduleDefaults: ROLE_MODULE_DEFAULTS[r],
       apiScopeDefaults: ROLE_API_SCOPE_DEFAULTS[r],
+      projectAccess: projectRule(r),
     })),
     permissions: PERMISSIONS,
     modules: MODULES,
@@ -427,7 +465,7 @@ export function sanitiseAccessOverrides(input: unknown): UserAccessOverrides {
 // second question was never asked — so anyone holding `manage_users` could
 // assign any role in the list, including one above their own.
 //
-// Concretely: `customer_admin` carries `manage_users`, so a customer admin could
+// Concretely: `admin` carries `manage_users`, so an admin could
 // POST a new `super_admin`, or PUT their own record with `role: "super_admin"`.
 // The existing guards around this code are all AVAILABILITY guards — do not
 // demote the last admin, do not delete yourself — and none of them look at
@@ -437,12 +475,23 @@ export function sanitiseAccessOverrides(input: unknown): UserAccessOverrides {
 
 const ROLE_RANK: Record<Role, number> = {
   super_admin: 100,
+  // Above every role a company manages for itself, and below Super Admin. Because
+  // rank must be strictly greater, only a Super Admin can create or change a
+  // Company Admin, and a Company Admin can never edit or remove a Super Admin.
+  company_admin: 90,
   admin: 80,
-  customer_admin: 60,
+  project_manager: 60,
+  team_lead: 50,
+  developer: 40,
   engineer: 40,
   operator: 20,
   viewer: 10,
 };
+
+/** Super Admin and Company Admin: full reach, including what no permission verb covers. */
+export function isTopAdminRole(role: string | null | undefined): boolean {
+  return role === "super_admin" || role === "company_admin";
+}
 
 export function roleRank(role: string | null | undefined): number {
   const r = normaliseRole(role);
@@ -468,7 +517,7 @@ export function canActOnRole(actorRole: string | null | undefined, targetRole: s
  *
  * Same rule, applied to the role being handed out rather than the user being
  * edited. Both checks are needed and neither implies the other: promoting an
- * `operator` to `admin` passes the target check for a customer admin (an
+ * `operator` to `admin` passes the target check for an admin (an
  * operator is below them) and must still fail on the role being granted.
  */
 export function canGrantRole(actorRole: string | null | undefined, roleToGrant: string | null | undefined): boolean {

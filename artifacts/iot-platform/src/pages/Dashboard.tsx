@@ -11,6 +11,8 @@ import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { useWsEvents } from "@/hooks/useWsEvents";
 import { ViewSwitch } from "@/features/home/ViewSwitch";
+import { Greeting } from "@/features/home/Greeting";
+import { FEATURES } from "@/lib/features";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -24,7 +26,8 @@ const PAGES: { label: string; path: string }[] = [
   { label: "Alarm Rules", path: "/alarm-rules" }, { label: "Brokers", path: "/brokers" },
   { label: "Destinations", path: "/destinations" }, { label: "Connections", path: "/integrations" },
   { label: "Users", path: "/users" }, { label: "API Clients", path: "/api-clients" },
-  { label: "Notification Groups", path: "/notification-groups" }, { label: "Reports", path: "/reports" },
+  ...(FEATURES.notificationChannels ? [{ label: "Notification Groups", path: "/notification-groups" }] : []),
+  { label: "Reports", path: "/reports" },
   { label: "Data Management", path: "/data-management" }, { label: "Audit Log", path: "/activity-log" },
   { label: "Settings", path: "/settings" },
 ];
@@ -240,10 +243,11 @@ export default function Dashboard() {
 
       {/* ── Header ── */}
       <div className="flex items-center justify-between gap-4 flex-wrap">
-        <div>
-          <h1 className="text-2xl font-bold">Dashboard</h1>
-          <p className="text-sm text-muted-foreground">Overview of Plant Health</p>
-        </div>
+        <Greeting subtitle={alarms.length > 0
+          ? <>Plant overview · <span className="text-orange-500 font-medium">
+              {alarms.length} active alarm{alarms.length === 1 ? "" : "s"}
+            </span></>
+          : "Plant overview · nothing is waiting on you"} />
         <div className="flex items-center gap-3">
           {/* The way back to the banded Overview. This page is otherwise
               unchanged — the switch is the only addition. */}
