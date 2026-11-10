@@ -132,6 +132,30 @@ export function originAllowed(
  */
 const MAX_PAYLOAD_BYTES = 64 * 1024;
 
+/**
+ * Heartbeat. A laptop that sleeps, a dropped Wi-Fi link or a frozen tab often
+ * leaves a connection open on the server with nobody at the other end; every
+ * broadcast was then buffered for it in server memory, indefinitely. Each
+ * socket is pinged on this interval and closed if the previous ping was not
+ * answered, so a dead connection lasts at most two intervals.
+ */
+const HEARTBEAT_MS = Math.max(5_000, Number(process.env.WS_HEARTBEAT_MS) || 30_000);
+
+/**
+ * Backpressure. A client that cannot keep up (slow link, busy tab) builds a
+ * queue of unsent messages on the server. Above SOFT the routine telemetry
+ * stream is skipped for that client until it drains: the next reading replaces
+ * it anyway. Alarms and other events are still sent. Above HARD the connection
+ * is closed; the client reconnects and resynchronises.
+ */
+const BUFFER_SOFT_BYTES = 1 * 1024 * 1024;
+const BUFFER_HARD_BYTES = 8 * 1024 * 1024;
+/** Channels that may be skipped for a slow client: a newer message supersedes them. */
+const DROPPABLE_CHANNELS = new Set(["telemetry"]);
+
+const alive = new WeakMap<WebSocket, boolean>();
+let heartbeat: NodeJS.Timeout | null = null;
+
 export function initWebSocketServer(server: Server): void {
   // `noServer` so the handshake can be rejected before the socket is upgraded —
   // an unauthenticated client never reaches the connection handler at all.
@@ -178,14 +202,27 @@ export function initWebSocketServer(server: Server): void {
 
   wss.on("connection", (ws) => {
     ws.on("error", () => {});
+    alive.set(ws, true);
+    ws.on("pong", () => alive.set(ws, true));
     ws.send(JSON.stringify({ type: "connected" }));
   });
+
+  heartbeat = setInterval(() => {
+    for (const ws of wss?.clients ?? []) {
+      if (alive.get(ws) === false) { ws.terminate(); continue; }
+      alive.set(ws, false);
+      try { ws.ping(); } catch { ws.terminate(); }
+    }
+  }, HEARTBEAT_MS);
+  // The timer alone must not keep the process alive during shutdown.
+  heartbeat.unref();
 
   logger.info("WebSocket server attached at /api/ws (session-authenticated)");
 }
 
 /** Close every live connection, for shutdown. */
 export function closeWebSocketServer(): void {
+  if (heartbeat) { clearInterval(heartbeat); heartbeat = null; }
   if (!wss) return;
   for (const ws of wss.clients) ws.close(1001, "server_shutdown");
   wss.close();
@@ -256,6 +293,13 @@ const PROJECT_SCOPED_CHANNELS: Record<string, string> = {
   activity_log: "targetId",
 };
 
+/** What to do with a message for a client whose send queue holds `buffered` bytes. Exported for tests. */
+export function sendDecision(buffered: number, type: string): "send" | "skip" | "close" {
+  if (buffered > BUFFER_HARD_BYTES) return "close";
+  if (buffered > BUFFER_SOFT_BYTES && DROPPABLE_CHANNELS.has(type)) return "skip";
+  return "send";
+}
+
 export function broadcast(type: string, data: unknown, options: BroadcastOptions = {}): void {
   if (!wss) return;
 
@@ -278,6 +322,9 @@ export function broadcast(type: string, data: unknown, options: BroadcastOptions
       if (typeof assetId !== "string" || !context.allowedAssets.has(assetId)) continue;
     }
 
+    const backlog = sendDecision(client.bufferedAmount, type);
+    if (backlog === "close") { client.terminate(); continue; }
+    if (backlog === "skip") continue;
     client.send(msg);
   }
 }

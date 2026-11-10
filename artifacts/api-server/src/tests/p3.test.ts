@@ -127,3 +127,11 @@ test("SEC-33 follow-up: a successful sign-in is refunded on shared counters, fai
   for (let i = 0; i < 10; i++) store.hit("10.0.0.1", max, windowMs);
   assert.equal(store.peek("10.0.0.1", max, windowMs).allowed, false);
 });
+
+test("PERF-04: slow WebSocket clients skip telemetry, then are closed; alarms still go out", async () => {
+  const { sendDecision } = await import("../lib/ws-broadcast");
+  assert.equal(sendDecision(0, "telemetry"), "send");
+  assert.equal(sendDecision(2 * 1024 * 1024, "telemetry"), "skip");
+  assert.equal(sendDecision(2 * 1024 * 1024, "alarm"), "send");
+  assert.equal(sendDecision(9 * 1024 * 1024, "alarm"), "close");
+});
