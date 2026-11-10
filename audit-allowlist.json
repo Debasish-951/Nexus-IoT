@@ -13,8 +13,15 @@
     "",
     "Match on 'ghsa' (preferred), 'id', or 'module' (broadest — avoid).",
     "",
-    "The list is currently empty: as of the last audit the workspace has zero",
-    "known advisories, so nothing needs accepting."
+    "One entry, added 2026-11-10: zod 3 memory advisory, pending the zod 4 upgrade.",
+    "It expires on 2026-12-10; the build goes red again then unless zod 4 is in."
   ],
-  "allow": []
+  "allow": [
+    {
+      "ghsa": "GHSA-mrhx-c7xc-m3w5",
+      "module": "zod",
+      "expires": "2026-12-10",
+      "reason": "Impact is bounded here, not absent. The advisory is memory growth while zod validates oversized collections that carry size constraints. Every request body passes express.json and urlencoded with a 1 MB limit (artifacts/api-server/src/app.ts) and requestGuard, which refuses bodies with more than 20,000 keys, arrays longer than 20,000 items or nesting deeper than 20 (artifacts/api-server/src/middleware/requestGuard.ts) before any zod schema runs, so the input an attacker controls is capped. The fix exists only in zod 4 (>=4.6.6), a major upgrade that also changes the generated schemas (orval.config.ts pins zod 3 output) and drizzle-zod; it is scheduled before this entry expires."
+    }
+  ]
 }
