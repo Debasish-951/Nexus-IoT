@@ -20,6 +20,7 @@ import { SERIES, STATUS } from "@/lib/chartColors";
 import { FEATURES } from "@/lib/features";
 import { useOpenAlarms } from "@/hooks/useOpenAlarms";
 import { useListAssets } from "@workspace/api-client-react";
+import { PRO_CATEGORIES, PRO_TYPES, PRO_MULTI_TYPES, ProWidgetView } from "./pro";
 
 /**
  * Widget colours. Status colours come from the shared STATUS set; `primary` is the
@@ -113,6 +114,9 @@ export const MULTI_SERIES_TYPES = [
   // Pie and Donut collapse each series to its current value rather than plotting
   // history, but they bind the same way — one series per slice.
   "pie", "donut",
+  // The expanded ("Pro") widgets that bind a primary metric + overlays — listed
+  // here so the config panel offers them the same Data Source / Overlays editor.
+  ...PRO_MULTI_TYPES,
 ];
 
 // ── Catalog (Phase 1 core set + full list of names) ──
@@ -193,6 +197,13 @@ const ALL_WIDGET_CATEGORIES: { name: string; items: WidgetDef[] }[] = [
     { type: "assetsel",label: "Asset Selector",  icon: Boxes,      category: "Media & Controls", w: 3, h: 2 },
     { type: "button",  label: "Button",          icon: ToggleLeft, category: "Media & Controls", w: 2, h: 2, defaults: { label: "Button" } },
   ]},
+  // The expanded widget set (features/dashboards/pro). New types only: every
+  // widget above keeps its type, config and look, so saved dashboards are
+  // unaffected. Switchable as a group with FEATURES.proWidgets.
+  ...PRO_CATEGORIES.map((c) => ({
+    name: c.name,
+    items: c.items.map((it): WidgetDef => ({ type: it.type, label: it.label, icon: it.icon, category: it.category, w: it.w, h: it.h, defaults: it.defaults })),
+  })),
 ];
 
 /**
@@ -201,6 +212,7 @@ const ALL_WIDGET_CATEGORIES: { name: string; items: WidgetDef[] }[] = [
  */
 const HIDDEN_TYPES = new Set<string>([
   ...(FEATURES.dashboardEventsWidget ? [] : ["events"]),
+  ...(FEATURES.proWidgets ? [] : PRO_TYPES),
 ]);
 export function isWidgetTypeEnabled(type: string): boolean { return !HIDDEN_TYPES.has(type); }
 
@@ -366,6 +378,9 @@ function contrastText(hex?: string): string | undefined {
   const luma = (r * 299 + g * 587 + b * 114) / 1000;
   return luma >= 150 ? "#111827" : "#ffffff";
 }
+
+const PRO_SET = new Set(PRO_TYPES);
+const PRO_SELF_FETCH = new Set(["todayvs", "calheat", "goldenbatch"]);
 
 // ── Renderer ──
 // Wrapped in memo(): dragging or resizing ANY widget replaces the whole
@@ -542,6 +557,19 @@ export const WidgetView = memo(function WidgetView({ widget, refreshNonce, dashT
     );
   }
   if (t === "alarms") return <AlarmTableView assetId={c.assetId} />;
+  if (PRO_SET.has(t)) {
+    // Widgets that load their own history (a fixed window or a reference batch)
+    // must not be blanked by the widget-range "no data" check below.
+    if (wantsData && !bound && !PRO_SELF_FETCH.has(t)) {
+      return <div className="h-full w-full flex items-center justify-center text-muted-foreground text-xs">No data in selected range</div>;
+    }
+    const proMeta: Record<string, { label?: string; unit?: string; color?: string; assetId?: string }> = {};
+    for (const [key, src] of Object.entries(seriesSrc)) proMeta[key] = { ...seriesMeta[key], assetId: src.assetId };
+    return (
+      <ProWidgetView type={t} c={c} rows={rows} keys={seriesList.filter((s) => s.assetId && s.tag).map((s) => s.key)} meta={proMeta}
+        bound={bound} timeCfg={timeCfg} refreshSec={refreshSec} refreshNonce={refreshNonce} />
+    );
+  }
   if (t === "image") {
     // imageUrl is what the edit panel's image field writes (an /api/uploads
     // link from the Media Library, or any URL); src is the old default key.

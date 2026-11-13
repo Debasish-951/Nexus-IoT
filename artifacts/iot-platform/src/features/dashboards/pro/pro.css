@@ -1,0 +1,35 @@
+/* Animations for the Pro widget set (features/dashboards/pro).
+   Every animation is decorative and stops for people who ask for less motion. */
+
+@keyframes pro-spin { to { transform: rotate(360deg); } }
+@keyframes pro-dash { to { stroke-dashoffset: -40; } }
+@keyframes pro-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .35; } }
+@keyframes pro-ping { 0% { transform: scale(.6); opacity: .7; } 100% { transform: scale(1.8); opacity: 0; } }
+@keyframes pro-wave { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+@keyframes pro-scroll { from { transform: translateX(0); } to { transform: translateX(-50%); } }
+@keyframes pro-rise { 0% { transform: translateY(0); opacity: 0; } 20% { opacity: .8; } 100% { transform: translateY(-60px); opacity: 0; } }
+@keyframes pro-slide-in { from { transform: translateY(-6px); opacity: 0; } to { transform: none; opacity: 1; } }
+@keyframes pro-flip { 0% { transform: rotateX(90deg); opacity: .2; } 100% { transform: none; opacity: 1; } }
+@keyframes pro-glow { 0%, 100% { filter: drop-shadow(0 0 0 transparent); } 50% { filter: drop-shadow(0 0 4px currentColor); } }
+
+.pro-spin   { animation: pro-spin var(--pro-dur, 2s) linear infinite; transform-box: fill-box; transform-origin: center; }
+.pro-dash   { animation: pro-dash var(--pro-dur, 1.5s) linear infinite; }
+.pro-pulse  { animation: pro-pulse 1.2s ease-in-out infinite; }
+.pro-ping   { animation: pro-ping 1.6s ease-out infinite; transform-box: fill-box; transform-origin: center; }
+.pro-wave   { animation: pro-wave var(--pro-dur, 4s) linear infinite; }
+.pro-scroll { animation: pro-scroll var(--pro-dur, 30s) linear infinite; }
+.pro-scroll:hover { animation-play-state: paused; }
+.pro-rise   { animation: pro-rise 3s ease-in infinite; }
+.pro-slide-in { animation: pro-slide-in .35s ease-out both; }
+.pro-flip   { animation: pro-flip .4s ease-out both; display: inline-block; }
+.pro-glow   { animation: pro-glow 2s ease-in-out infinite; }
+
+/* Smooth value changes on marks drawn with plain SVG/HTML. */
+.pro-ease   { transition: all .7s cubic-bezier(.2, .8, .2, 1); }
+
+.pro-led { font-family: "DSEG7 Classic", "Share Tech Mono", ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: .06em; }
+
+@media (prefers-reduced-motion: reduce) {
+  .pro-spin, .pro-dash, .pro-pulse, .pro-ping, .pro-wave, .pro-scroll, .pro-rise, .pro-slide-in, .pro-flip, .pro-glow { animation: none !important; }
+  .pro-ease { transition: none !important; }
+}

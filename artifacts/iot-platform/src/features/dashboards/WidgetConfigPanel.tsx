@@ -11,6 +11,7 @@ import { ColorField } from "./ColorField";
 import { AssetPickerDialog } from "./AssetPickerDialog";
 import { AttributeSelect } from "./AttributeSelect";
 import { CombinedFields } from "./CombinedFields";
+import { ProFields, PRO_SINGLE_TYPES, PRO_SCOPE_TYPES, proDef } from "./pro";
 
 // Gauge/Thermometer/Tank/Progress/Battery moved from single assetId+tag binding
 // to the grouped `metrics` model (same as Card) — their editor lives in the
@@ -22,7 +23,12 @@ import { CombinedFields } from "./CombinedFields";
 // Sparkline and Heatmap read the single primary attribute; Scatter reads its
 // X/Y pair (both editors live in the Data block below). The Alarm Table is not
 // here: it lists alarms, not an attribute, and has its own asset filter below.
-const BINDABLE = new Set([...MULTI_SERIES_TYPES, "table", "events", "sparkline", "scatter", "heatmap"]);
+// Pro widgets with one Data Source + Attribute join the same editor; their
+// multi-series siblings are already in MULTI_SERIES_TYPES.
+const BINDABLE = new Set([...MULTI_SERIES_TYPES, "table", "events", "sparkline", "scatter", "heatmap", ...PRO_SINGLE_TYPES]);
+// Pro widgets that take an optional asset (that asset and everything below it),
+// like the Alarm Table, rather than an attribute.
+const SCOPE_TYPES = new Set(PRO_SCOPE_TYPES);
 const MULTI_SERIES = new Set(MULTI_SERIES_TYPES);
 // Control limits are drawn against a vertical value axis, so they are offered
 // only where one exists. Horizontal Bar has its value axis on the bottom, and
@@ -102,9 +108,11 @@ function SpcRow({ label, valueKey, colorKey, styleKey, draft, set }: {
 
 // One overlay series row — its own asset + metric (cross-asset overlays), color,
 // label and UoM. Fetches metric options for whichever asset the row points at.
-function OverlaySeriesRow({ overlay, index, assets, defaultAssetId, onChange, onRemove }: {
+function OverlaySeriesRow({ overlay, index, assets, defaultAssetId, onChange, onRemove, role }: {
   overlay: Overlay; index: number; assets: any[]; defaultAssetId?: string;
   onChange: (patch: Partial<Overlay>) => void; onRemove: () => void;
+  /** What this input means, for equipment widgets with named inputs. */
+  role?: string;
 }) {
   const assetId = overlay.assetId ?? defaultAssetId ?? "";
   const metrics = useMetricChoices(assetId);
@@ -117,6 +125,7 @@ function OverlaySeriesRow({ overlay, index, assets, defaultAssetId, onChange, on
   const assetName = assets.find((a) => a.id === assetId)?.name;
   return (
     <div className="rounded-md border border-border p-2 space-y-1.5">
+      {role && <p className="text-[11px] font-medium">{index + 2}. {role}</p>}
       <div className="flex items-center gap-1.5">
         <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ background: color }} />
         {/* Same hierarchy picker as the primary source — an overlay may point at a
@@ -334,6 +343,8 @@ export function WidgetConfigPanel({
 
   const bindable = BINDABLE.has(type);
   const multiSeries = MULTI_SERIES.has(type);
+  // Equipment widgets name each input (primary = input 1, overlay i = input i + 1).
+  const roles = proDef(type)?.roles;
   const isScatter = type === "scatter";
   const showSpc = SPC_TYPES.has(type);
 
@@ -468,7 +479,7 @@ export function WidgetConfigPanel({
           </div>
         )}
 
-        {type === "alarms" && (
+        {(type === "alarms" || SCOPE_TYPES.has(type)) && (
           <div className="pt-2 mt-1 border-t border-border space-y-2">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Data</p>
             <Field label="Data Source">
@@ -482,10 +493,10 @@ export function WidgetConfigPanel({
             </Field>
             {draft.assetId && (
               <button type="button" onClick={() => set({ assetId: "" })} className="text-[11px] text-muted-foreground hover:text-foreground underline">
-                Show alarms from all assets
+                {type === "alarms" ? "Show alarms from all assets" : "Clear data source"}
               </button>
             )}
-            <p className="text-[11px] text-muted-foreground">Lists open (active and acknowledged) alarms. With a data source, only alarms on that asset or anything below it.</p>
+            {type === "alarms" && <p className="text-[11px] text-muted-foreground">Lists open (active and acknowledged) alarms. With a data source, only alarms on that asset or anything below it.</p>}
             <AssetPickerDialog
               open={assetPickerOpen}
               assets={assets}
@@ -534,7 +545,7 @@ export function WidgetConfigPanel({
             ) : (
               <>
                 <div className="space-y-1">
-                  <Label className="text-xs">Attribute</Label>
+                  <Label className="text-xs">{roles ? `1. ${roles[0]}` : "Attribute"}</Label>
                   <AttributeSelect value={draft.tag ?? ""} options={metrics} disabled={!draft.assetId}
                     placeholder={draft.assetId ? "— select attribute —" : "pick a data source first"}
                     onChange={(key) => set({ tag: key })} />
@@ -555,12 +566,12 @@ export function WidgetConfigPanel({
                 {multiSeries && (
                   <div className="space-y-1.5">
                     <div className="flex items-center justify-between">
-                      <Label className="text-xs font-medium">Overlay Attributes (multi-series)</Label>
+                      <Label className="text-xs font-medium">{roles ? "Further inputs, in order" : "Overlay Attributes (multi-series)"}</Label>
                       <button
                         onClick={() => set({ overlays: [...overlays, { assetId: draft.assetId, tag: "" }] })}
                         className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded bg-orange-300 text-black hover:bg-orange-400"
                       >
-                        <Plus className="w-2.5 h-2.5" /> Add Series
+                        <Plus className="w-2.5 h-2.5" /> {roles && roles[overlays.length + 1] ? `Add: ${roles[overlays.length + 1].replace(/ \(.*$/, "")}` : "Add Series"}
                       </button>
                     </div>
                     {overlays.map((ov, i) => (
@@ -568,6 +579,7 @@ export function WidgetConfigPanel({
                         key={i} overlay={ov} index={i} assets={assets} defaultAssetId={draft.assetId}
                         onChange={(patch) => set({ overlays: overlays.map((o, idx) => (idx === i ? { ...o, ...patch } : o)) })}
                         onRemove={() => set({ overlays: overlays.filter((_, idx) => idx !== i) })}
+                        role={roles ? (roles[i + 1] ?? roles[roles.length - 1]) : undefined}
                       />
                     ))}
                     {overlays.length === 0 && (
@@ -579,6 +591,8 @@ export function WidgetConfigPanel({
             )}
           </div>
         )}
+
+        <ProFields type={type} draft={draft} set={set} />
 
         <Note icon={Clock}>
           Time range, granularity, and aggregation are configured per-widget via the <strong>clock icon</strong> in the widget header after saving. WTD, MTD, YTD and custom date ranges are also available there.
