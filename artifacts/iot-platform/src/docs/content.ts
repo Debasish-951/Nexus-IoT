@@ -150,7 +150,7 @@ export function buildDocumentContent(): ContentItem[] {
         ["AI Advisor", "Natural-language questions, health insights, recommendations"],
         ["Event Manager", "Active Alarms, Alarm History, Alarm Rules"],
         ["Integration Hub", "Broker configuration, API Clients, Destinations, Connections, Integration Guide"],
-        ["Governance", "User Management, Security Center (Notification Groups appears only when notification channels are switched on)"],
+        ["Governance", "User Management, Security Center, Notification Groups"],
         ["System", "Data Management, Reports"],
         ["Audit Log", "Audit trail of all platform actions"],
         ["Payload Simulator", "Browser-based device payload tester (shown only when the payload simulator is switched on)"],
@@ -482,7 +482,7 @@ export function buildDocumentContent(): ContentItem[] {
 
     h3("6.7.4 Deviation Rules (not evaluated yet)"),
     p("Intended to raise an alarm when a metric drifts from an expected value. Like heartbeat rules, the server stores this type but does not evaluate it, and the option is hidden behind the advanced alarm options switch."),
-    note("The rate-of-change Window, Scan Rate and Require Acknowledge options are also stored but not evaluated, and are hidden behind the same switch. Existing rules keep their stored values. Email, WhatsApp and SMS notification toggles and Notification Groups are hidden behind the notification channels switch (VITE_ENABLE_NOTIFICATION_CHANNELS) because the server does not deliver those channels yet. Webhooks are delivered and always visible."),
+    note("The rate-of-change Window, Scan Rate and Require Acknowledge options are also stored but not evaluated, and are hidden behind the same switch. Existing rules keep their stored values. Email, WhatsApp and SMS notification toggles and Notification Groups are shown so they can be set up in advance, but the server does not deliver those channels yet. Webhooks are delivered today. Building with VITE_DISABLE_NOTIFICATION_CHANNELS=true hides them."),
 
     h3("6.7.5 Rule Configuration Fields"),
     table(

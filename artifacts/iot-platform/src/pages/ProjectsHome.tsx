@@ -6,6 +6,7 @@ import { useCurrentUser } from "@/contexts/UserContext";
 import { useProject } from "@/contexts/ProjectContext";
 import { Greeting } from "@/features/home/Greeting";
 import { HomeBackground } from "@/features/home/HomeBackground";
+import { FEATURES } from "@/lib/features";
 
 const APP_BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -29,7 +30,8 @@ export default function ProjectsHome() {
 
   return (
     <div className="relative min-h-full overflow-hidden">
-      <HomeBackground />
+      {/* With the app-wide background on, Layout already draws it behind every page. */}
+      {!FEATURES.appBackground && <HomeBackground />}
       <div className="relative p-8 space-y-6">
         <Greeting subtitle="Your projects" />
 

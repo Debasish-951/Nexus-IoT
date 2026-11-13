@@ -17,6 +17,7 @@ import UserProfileTopMenu from "@/components/UserProfileTopMenu";
 import BrokerStatusBar from "@/components/BrokerStatusBar";
 import AppearanceMenu from "@/components/AppearanceMenu";
 import { FEATURES, type FeatureKey } from "@/lib/features";
+import { HomeBackground } from "@/features/home/HomeBackground";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -174,15 +175,21 @@ function visibleNav(
 }
 
 function NavGroup({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
-  const [location] = useLocation();
+  const [location, navigate] = useLocation();
+  // A group without its own page opens an empty main window, so the previous
+  // page (often the Home project list) does not stay on screen.
+  const sectionHref = `/section/${item.label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`;
   const [open, setOpen] = useState(() => {
     if (!item.children) return false;
+    // Also open on this group's own empty window: the sidebar is re-created
+    // after that navigation, so the submenu must open from the address alone.
+    if (location === sectionHref) return true;
     return item.children.some((c) => location === c.href || location.startsWith(c.href + "/"));
   });
 
   const isActive = item.href
     ? location === item.href
-    : item.children?.some((c) => location === c.href);
+    : location === sectionHref || item.children?.some((c) => location === c.href);
 
   if (!item.children) {
     return (
@@ -240,7 +247,16 @@ function NavGroup({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
           )}
         </div>
       ) : (
-        <button onClick={() => setOpen((o) => !o)} data-testid={testId} className={cn(headerClasses, "w-full")}>
+        <button
+          onClick={() => {
+            // Leaving another page: open the submenu and show the empty window.
+            // Already on this group's empty window: toggle the submenu only.
+            if (location !== sectionHref) { setOpen(true); navigate(sectionHref); }
+            else setOpen((o) => !o);
+          }}
+          data-testid={testId}
+          className={cn(headerClasses, "w-full")}
+        >
           <item.icon className="w-[18px] h-[18px] shrink-0" />
           {!collapsed && (
             <>
@@ -356,9 +372,14 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         <CriticalAlarmBanner />
 
         {/* Page content */}
-        <main className="flex-1 overflow-auto">
-          {children}
-        </main>
+        {/* The background sits in a non-scrolling wrapper so it fills the window
+            on long pages instead of scrolling away with the content. */}
+        <div className="relative flex-1 min-h-0 overflow-hidden">
+          {FEATURES.appBackground && <HomeBackground />}
+          <main className="relative h-full overflow-auto">
+            {children}
+          </main>
+        </div>
       </div>
     </div>
   );

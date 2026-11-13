@@ -22,6 +22,14 @@ function envOn(value: unknown): boolean {
 
 export const FEATURES = {
   /**
+   * Animated network background (features/home/HomeBackground.tsx) behind every
+   * page instead of only Home. Off: tried app-wide and the owner preferred it on
+   * Home only, with the plain background elsewhere. To show it on every page:
+   *
+   *   VITE_ENABLE_APP_BACKGROUND=true pnpm --filter @workspace/iot-platform build
+   */
+  appBackground: envOn(import.meta.env.VITE_ENABLE_APP_BACKGROUND),
+  /**
    * Payload Simulator (`/simulator`, pages/IngestSimulator.tsx).
    *
    * Turned off on request — the platform now has real gateways posting to the
@@ -46,13 +54,14 @@ export const FEATURES = {
    * Notification Groups page (`/notification-groups`,
    * pages/NotificationGroups.tsx) with its nav entry.
    *
-   * Off because nothing on the server delivers these channels yet — the
-   * toggles saved a flag that no code acted on. Webhooks on alarm rules are
-   * real and stay visible regardless. Turn back on once delivery exists:
+   * Shown by default at the owner's request, so people can see these features
+   * and configure them ahead of time. Note: the server does not deliver Email,
+   * WhatsApp or SMS yet; the settings are saved for when it does. Webhooks on
+   * alarm rules are delivered today. To hide the channels:
    *
-   *   VITE_ENABLE_NOTIFICATION_CHANNELS=true pnpm --filter @workspace/iot-platform build
+   *   VITE_DISABLE_NOTIFICATION_CHANNELS=true pnpm --filter @workspace/iot-platform build
    */
-  notificationChannels: envOn(import.meta.env.VITE_ENABLE_NOTIFICATION_CHANNELS),
+  notificationChannels: import.meta.env.VITE_DISABLE_NOTIFICATION_CHANNELS !== "true",
 
   /**
    * Alarm rule options the server saves but does not evaluate yet, on Alarm
@@ -80,6 +89,20 @@ export const FEATURES = {
    *   VITE_ENABLE_EVENTS_WIDGET=true pnpm --filter @workspace/iot-platform build
    */
   dashboardEventsWidget: envOn(import.meta.env.VITE_ENABLE_EVENTS_WIDGET),
+
+  /**
+   * The expanded widget set in the Visualization widget library
+   * (features/dashboards/pro): 52 animated widgets across Charts Pro,
+   * Instruments, Equipment, Plant Status, Alarms & Operations, Analytics, Energy
+   * and Process. The original widgets are unchanged; these sit beside them.
+   *
+   * ON by default. Turning it off removes them from the library and the type
+   * dropdown; a dashboard that already holds one shows a "not available"
+   * placeholder, and turning it back on restores it as it was:
+   *
+   *   VITE_DISABLE_PRO_WIDGETS=true pnpm --filter @workspace/iot-platform build
+   */
+  proWidgets: import.meta.env.VITE_DISABLE_PRO_WIDGETS !== "true",
 
   /**
    * Opaque address-bar tokens (lib/routeSlugs.ts).

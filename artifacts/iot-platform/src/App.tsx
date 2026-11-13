@@ -40,6 +40,7 @@ const Alarms = lazy(() => import("@/pages/Alarms"));
 const ApiClients = lazy(() => import("@/pages/ApiClients"));
 const AssetDetails = lazy(() => import("@/pages/AssetDetails"));
 const AssetManagement = lazy(() => import("@/pages/AssetManagement"));
+const SectionPlaceholder = lazy(() => import("@/pages/SectionPlaceholder"));
 const AssetTemplateDetails = lazy(() => import("@/pages/AssetTemplateDetails"));
 const AssetTemplates = lazy(() => import("@/pages/AssetTemplates"));
 const Assets = lazy(() => import("@/pages/Assets"));
@@ -122,6 +123,8 @@ const ROUTES: {
 }[] = [
   { path: "/",                     component: Home,                 module: "dashboard" },
   { path: "/asset-management",     component: AssetManagement,      module: "assets" },
+  // Empty main window for a sidebar group header; shows no data.
+  { path: "/section/:key",         component: SectionPlaceholder },
   { path: "/hierarchy-generator",  component: HierarchyGenerator,   module: "assets", feature: "hierarchyGenerator" },
   { path: "/assets",               component: Assets,               module: "assets" },
   { path: "/assets/:id",           component: AssetDetails,         module: "assets" },
