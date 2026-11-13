@@ -7,7 +7,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { GRID_COLS, ROW_H, MIN_W, MIN_H, type Widget } from "./types";
 import { WidgetView, widgetDef } from "./registry";
-import { largestFreeSize, nearestFreeSpot } from "./layout";
+import { nearestFreeSpot, placeWithPush, compactUp } from "./layout";
 import { WidgetTimePopover } from "./WidgetTimePopover";
 import { newId } from "./useDashboards";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
@@ -57,7 +57,15 @@ export function DashboardCanvas({
   }, []);
   const [cellW, setCellW] = useState(90);
   const [fullscreenId, setFullscreenId] = useState<string | null>(null);
-  const drag = useRef<null | { id: string; mode: "move" | "resize"; sx: number; sy: number; orig: Widget }>(null);
+  const drag = useRef<null | { id: string; mode: "move" | "resize"; sx: number; sy: number; scroll0: number; orig: Widget; layout: Widget[] }>(null);
+  // While dragging: the layout being previewed (other widgets make room live) and
+  // the pointer offset in pixels, so the dragged widget follows the pointer freely.
+  // Nothing is written to the dashboard until the pointer is released.
+  const [preview, setPreview] = useState<Widget[] | null>(null);
+  const previewRef = useRef<Widget[] | null>(null);
+  const [dragView, setDragView] = useState<null | { id: string; mode: "move" | "resize"; dx: number; dy: number }>(null);
+  const cellWRef = useRef(cellW);
+  cellWRef.current = cellW;
 
   useEffect(() => {
     if (!ref.current) return;
@@ -68,31 +76,84 @@ export function DashboardCanvas({
     return () => ro.disconnect();
   }, []);
 
+  // Moving: the widget follows the pointer, and the widgets where it would land
+  // make room (a same-size neighbour swaps, others are pushed down), so a widget
+  // can be dropped anywhere, not only into empty space. Resizing pushes the
+  // widgets below it down instead of stopping at them.
   const onMove = useCallback((e: PointerEvent) => {
     const d = drag.current; if (!d) return;
-    const dx = Math.round((e.clientX - d.sx) / cellW);
-    const dy = Math.round((e.clientY - d.sy) / ROW_H);
-    setWidgets((prev) => prev.map((w) => {
-      if (w.id !== d.id) return w;
-      const others = prev.filter((o) => o.id !== d.id);
-      if (d.mode === "move") return { ...w, ...nearestFreeSpot(others, w.w, w.h, d.orig.x + dx, d.orig.y + dy) };
-      return { ...w, ...largestFreeSize(others, w, Math.max(MIN_W, Math.min(GRID_COLS - w.x, d.orig.w + dx)), Math.max(MIN_H, d.orig.h + dy)) };
-    }));
-  }, [cellW, setWidgets]);
+    const el = ref.current;
+    // Scroll the canvas when the pointer nears its top or bottom edge, so a widget
+    // can be taken further than the visible area.
+    if (el) {
+      const r = el.getBoundingClientRect();
+      if (e.clientY > r.bottom - 40) el.scrollTop += 14;
+      else if (e.clientY < r.top + 40) el.scrollTop -= 14;
+    }
+    const dxPx = e.clientX - d.sx;
+    const dyPx = e.clientY - d.sy + ((el?.scrollTop ?? 0) - d.scroll0);
+    const dx = Math.round(dxPx / cellWRef.current), dy = Math.round(dyPx / ROW_H);
+    const o = d.orig;
+    const target = d.mode === "move"
+      ? { x: Math.max(0, Math.min(GRID_COLS - o.w, o.x + dx)), y: Math.max(0, o.y + dy), w: o.w, h: o.h }
+      : { x: o.x, y: o.y, w: Math.max(MIN_W, Math.min(GRID_COLS - o.x, o.w + dx)), h: Math.max(MIN_H, o.h + dy) };
+    // Then everything floats up, so no gap is left where a widget used to be.
+    const next = compactUp(placeWithPush(d.layout, d.id, target, d.mode === "move"));
+    previewRef.current = next;
+    setPreview(next);
+    setDragView({ id: d.id, mode: d.mode, dx: dxPx, dy: dyPx });
+  }, []);
 
-  const onUp = useCallback(() => {
+  // Listeners live in a ref so add/remove always use the same functions.
+  const listeners = useRef<{ move: (e: PointerEvent) => void; up: () => void; key: (e: KeyboardEvent) => void } | null>(null);
+
+  const endDrag = useCallback((commit: boolean) => {
+    const l = listeners.current;
+    if (l) {
+      window.removeEventListener("pointermove", l.move);
+      window.removeEventListener("pointerup", l.up);
+      window.removeEventListener("keydown", l.key);
+      listeners.current = null;
+    }
+    const next = previewRef.current;
     drag.current = null;
-    window.removeEventListener("pointermove", onMove);
-    window.removeEventListener("pointerup", onUp);
-  }, [onMove]);
+    previewRef.current = null;
+    setPreview(null);
+    setDragView(null);
+    if (commit && next) {
+      const pos = new Map(next.map((w) => [w.id, w]));
+      setWidgets((prev) => prev.map((w) => {
+        const n = pos.get(w.id);
+        return n && (n.x !== w.x || n.y !== w.y || n.w !== w.w || n.h !== w.h) ? { ...w, x: n.x, y: n.y, w: n.w, h: n.h } : w;
+      }));
+    }
+  }, [setWidgets]);
 
   function startDrag(e: React.PointerEvent, w: Widget, mode: "move" | "resize") {
+    if (e.button !== 0) return;
     e.preventDefault(); e.stopPropagation();
     onSelect(w.id);
-    drag.current = { id: w.id, mode, sx: e.clientX, sy: e.clientY, orig: { ...w } };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp);
+    drag.current = { id: w.id, mode, sx: e.clientX, sy: e.clientY, scroll0: ref.current?.scrollTop ?? 0, orig: { ...w }, layout: widgets };
+    const l = {
+      move: onMove,
+      up: () => endDrag(true),
+      // Escape puts everything back where it was.
+      key: (ev: KeyboardEvent) => { if (ev.key === "Escape") endDrag(false); },
+    };
+    listeners.current = l;
+    window.addEventListener("pointermove", l.move);
+    window.addEventListener("pointerup", l.up);
+    window.addEventListener("keydown", l.key);
   }
+
+  // Remove listeners if the canvas unmounts mid-drag.
+  useEffect(() => () => {
+    const l = listeners.current;
+    if (!l) return;
+    window.removeEventListener("pointermove", l.move);
+    window.removeEventListener("pointerup", l.up);
+    window.removeEventListener("keydown", l.key);
+  }, []);
 
   function onDrop(e: React.DragEvent) {
     e.preventDefault();
@@ -106,10 +167,12 @@ export function DashboardCanvas({
     onDropWidget(type, spot.x, spot.y);
   }
 
-  const removeWidget = (id: string) => { setWidgets((prev) => prev.filter((w) => w.id !== id)); onSelect(null); };
-  const dupWidget = (w: Widget) => { const c = { ...w, id: newId("w"), ...nearestFreeSpot(widgets, w.w, w.h, w.x, w.y + w.h) }; setWidgets((prev) => [...prev, c]); onSelect(c.id); };
+  // Widgets below a removed one move up into its place.
+  const removeWidget = (id: string) => { setWidgets((prev) => compactUp(prev.filter((w) => w.id !== id))); onSelect(null); };
+  const dupWidget = (w: Widget) => { const c = { ...w, id: newId("w"), ...nearestFreeSpot(widgets, w.w, w.h, w.x, w.y + w.h) }; setWidgets((prev) => compactUp([...prev, c])); onSelect(c.id); };
 
-  const maxRow = widgets.reduce((m, w) => Math.max(m, w.y + w.h), 0);
+  const shown = preview ?? widgets;
+  const maxRow = shown.reduce((m, w) => Math.max(m, w.y + w.h), 0);
   const canvasRows = Math.max(maxRow + 4, 16);
   const fullscreenWidget = fullscreenId ? widgets.find((w) => w.id === fullscreenId) ?? null : null;
 
@@ -136,29 +199,44 @@ export function DashboardCanvas({
             {readOnly ? "This dashboard has no widgets yet" : 'Click "Add Widget" above, then drag a widget onto the canvas'}
           </div>
         )}
-        {widgets.map((w) => {
+        {/* Where the dragged widget will land. */}
+        {dragView && (() => {
+          const t = shown.find((x) => x.id === dragView.id);
+          return t ? (
+            <div className="absolute rounded-lg border-2 border-dashed border-primary bg-primary/10 pointer-events-none"
+              style={{ left: PAD + t.x * cellW + GAP / 2, top: PAD + t.y * ROW_H + GAP / 2, width: t.w * cellW - GAP, height: t.h * ROW_H - GAP }} />
+          ) : null;
+        })()}
+        {shown.map((w) => {
           const selected = selectedId === w.id;
           const def = widgetDef(w.type);
+          // The dragged widget follows the pointer in pixels from where it started;
+          // the others glide to their new places.
+          const dragging = dragView?.id === w.id;
+          const follow = dragging && dragView.mode === "move";
+          const base = follow ? drag.current?.orig ?? w : w;
           return (
             <div
               key={w.id}
               onClick={(e) => { e.stopPropagation(); onSelect(w.id); }}
               className={cn("absolute rounded-lg bg-card border shadow-sm overflow-hidden flex flex-col",
+                follow && "shadow-2xl z-20 cursor-grabbing",
+                dragView && !dragging && "transition-[left,top,width,height] duration-150 ease-out",
                 // Themed, not a fixed blue: the selection ring is a UI accent and
                 // must follow --primary, or it drifts out of the palette the next
                 // time the theme changes.
                 selected ? "border-primary ring-2 ring-primary/30" : "border-border")}
               style={{
-                left: PAD + w.x * cellW + GAP / 2,
-                top: PAD + w.y * ROW_H + GAP / 2,
-                width: w.w * cellW - GAP,
-                height: w.h * ROW_H - GAP,
+                left: PAD + base.x * cellW + GAP / 2 + (follow ? dragView.dx : 0),
+                top: PAD + base.y * ROW_H + GAP / 2 + (follow ? dragView.dy : 0),
+                width: base.w * cellW - GAP,
+                height: base.h * ROW_H - GAP,
               }}
             >
               {/* header / drag handle */}
               <div
                 onPointerDown={readOnly ? undefined : (e) => startDrag(e, w, "move")}
-                className={cn("flex items-center gap-1 px-1.5 h-6 shrink-0 border-b border-border bg-muted/50 select-none", !readOnly && "cursor-move")}
+                className={cn("flex items-center gap-1 px-1.5 h-6 shrink-0 border-b border-border bg-muted/50 select-none", !readOnly && "cursor-move touch-none")}
               >
                 <GripVertical className="w-3 h-3 text-muted-foreground shrink-0" />
                 <span className="text-[11px] truncate flex-1">
@@ -198,7 +276,7 @@ export function DashboardCanvas({
               </div>
               {/* resize handle */}
               {!readOnly && <div onPointerDown={(e) => startDrag(e, w, "resize")}
-                className="absolute bottom-0 right-0 w-3 h-3 cursor-se-resize"
+                className="absolute bottom-0 right-0 w-3 h-3 cursor-se-resize touch-none"
                 style={{ background: "linear-gradient(135deg, transparent 50%, hsl(var(--muted-foreground)) 50%)" }} />}
             </div>
           );
