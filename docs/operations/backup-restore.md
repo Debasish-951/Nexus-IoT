@@ -56,7 +56,20 @@ Copy this passphrase into the password manager too. Without it, the backups cann
 
 ### 2.3 The backup script
 
-Create `/usr/local/bin/nexus-backup` (mode 755):
+The repository ships a ready script, `scripts/ops/nexus-backup.sh`. It does what the script below does, and also copies the files off the VM when `OFFSITE_CMD` is set and reports every run to the app, so Data Management → Archives & backups shows the status and raises an alert when backups stop or fail. Install it instead of the script below:
+
+```bash
+sudo install -m 755 /opt/nexus-iot/scripts/ops/nexus-backup.sh /usr/local/bin/nexus-backup
+# set DB_HOST, DB_NAME, UPLOADS, DEST (and optionally OFFSITE_CMD) at the top of the file
+```
+
+Allow it to report, once, as the database owner:
+
+```sql
+GRANT INSERT ON backup_runs TO nexus_backup;
+```
+
+The minimal version, without reporting, for reference. Create `/usr/local/bin/nexus-backup` (mode 755):
 
 ```bash
 #!/bin/sh

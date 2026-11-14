@@ -98,6 +98,20 @@ export const RetentionBody = z.object({
 
 export const UpdateRetentionBody = RetentionBody.partial();
 
+/** A policy to try out without saving: what would the next pruning run delete? */
+export const RetentionPreviewBody = z.object({
+  policy: z.object({
+    /** Set when editing an existing policy. */
+    id: v.uuid().optional(),
+    assetId: v.uuid().nullable().optional(),
+    metric: v.text(200).nullable().optional(),
+    retentionDays: v.boundedInt(1, 3650),
+    enabled: z.boolean().optional(),
+  }).optional(),
+  /** Preview deleting this policy. */
+  removeId: v.uuid().optional(),
+});
+
 // ── Activity log / security feed ─────────────────────────────────────────────
 
 export const ActivityLogQuery = z.object({

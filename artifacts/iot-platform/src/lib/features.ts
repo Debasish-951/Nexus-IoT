@@ -40,6 +40,16 @@ export const FEATURES = {
   payloadSimulator: envOn(import.meta.env.VITE_ENABLE_PAYLOAD_SIMULATOR),
 
   /**
+   * Data Management (`/data-management`): the previous page
+   * (pages/DataManagementClassic.tsx) instead of the redesigned one with growth,
+   * disk space, retention preview, pruning history and hourly summaries. Off by
+   * default. To bring the old page back:
+   *
+   *   VITE_DATA_MANAGEMENT_CLASSIC=true pnpm --filter @workspace/iot-platform build
+   */
+  dataManagementClassic: envOn(import.meta.env.VITE_DATA_MANAGEMENT_CLASSIC),
+
+  /**
    * Hierarchy Generator (`/hierarchy-generator`, pages/HierarchyGenerator.tsx).
    *
    * Turned off on request, with the page left intact so bringing it back is one

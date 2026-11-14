@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import { respondInvalid } from "../lib/respond";
 import { eq, isNull, sql, and, or, inArray } from "drizzle-orm";
 import {
-  db, assetsTable, attributesTable, assetTemplatesTable, telemetryTable, alarmsTable,
+  db, assetsTable, attributesTable, assetTemplatesTable, telemetryTable, telemetryRollupsTable, alarmsTable,
   alarmHistoryTable, alarmRulesTable,
 } from "@workspace/db";
 import { forgetRuleDelays, invalidateAlarmRuleCache, forgetAssetDelays } from "./ingest";
@@ -230,6 +230,7 @@ router.delete("/assets/:id", async (req, res): Promise<void> => {
     // Remove dependent rows first — telemetry/attributes/alarms have no FK cascade,
     // so without this they'd be orphaned and keep showing up (e.g. in the Live Feed).
     await tx.delete(telemetryTable).where(inArray(telemetryTable.assetId, allIds));
+    await tx.delete(telemetryRollupsTable).where(inArray(telemetryRollupsTable.assetId, allIds));
     await tx.delete(attributesTable).where(inArray(attributesTable.assetId, allIds));
 
     // History rows are records and are kept, but any still open are closed:

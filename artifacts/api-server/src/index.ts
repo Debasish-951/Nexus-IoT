@@ -5,7 +5,12 @@ import { logger } from "./lib/logger";
 import { startMqttSubscribers, stopMqttSubscribers } from "./services/mqtt.js";
 import { pool } from "@workspace/db";
 import { initWebSocketServer, closeWebSocketServer } from "./lib/ws-broadcast";
-import { runPruning, runOperationalPruning } from "./routes/system";
+import { runPruning, runOperationalPruning, runScheduledRetention } from "./routes/system";
+import { startRollupJob } from "./services/rollups";
+import { computeStorage } from "./routes/system";
+import { startAlertJob } from "./services/system-alerts";
+import { startIngestRejectionFlush } from "./services/ingest-rejections";
+import { ensureFuturePartitions } from "./services/partitions";
 import { loadSeenDevices } from "./lib/seen-devices";
 import { assertAuthConfigSane } from "./lib/auth-config";
 import { logSecretsReport } from "./lib/secrets";
@@ -90,15 +95,20 @@ server.listen(port, host, () => {
 
   // Background data-retention pruning — runs every hour
   const PRUNE_INTERVAL_MS = 60 * 60 * 1000;
+  // Hourly telemetry summaries (services/rollups.ts): Data Management counts,
+  // retention previews and long-term chart data. Pruning waits for them.
+  startRollupJob();
+  // Storage / backup / pipeline alerts every 10 minutes (Data Management > Overview).
+  startAlertJob(computeStorage);
+  startIngestRejectionFlush();
+  ensureFuturePartitions().catch((e) => logger.warn({ err: e }, "Partition maintenance failed"));
   setInterval(() => {
-    runPruning()
-      .then((r) => { if (r.totalRowsDeleted > 0) logger.info(r, "Retention pruning completed"); })
-      .catch((e) => logger.warn({ err: e }, "Retention pruning error"));
-
-    // Age-based pruning of alarms, history, logs, broker events and auth tokens.
-    runOperationalPruning()
-      .then((r) => { if (Object.values(r.deleted).some((n) => n > 0)) logger.info(r, "Operational data pruning completed"); })
-      .catch((e) => logger.warn({ err: e }, "Operational data pruning error"));
+    // Telemetry policies, then alarms, history, logs, broker events, auth tokens,
+    // old summaries and the pruning history; recorded as one pruning-history row.
+    runScheduledRetention()
+      .catch((e) => logger.warn({ err: e }, "Retention run error"));
+    // Previous direct calls, now made inside runScheduledRetention:
+    void runPruning; void runOperationalPruning;
 
     // Sessions that can never authenticate again are kept for 7 days (so recent
     // activity stays reviewable in the Security Center) and then dropped.

@@ -3007,14 +3007,24 @@ export const DownloadUploadContentParams = zod.object({
 export const DownloadUploadContentResponse = zod.unknown();
 
 /**
- * @summary Telemetry table size and per-asset row counts
+ * Row totals are the planner's estimate; per-asset and per-day counts come
+ * from the hourly summaries (telemetry_rollups), cached for a minute.
+ * @summary Telemetry size, growth, disk space, per-asset counts and summary-job status
  */
 export const GetSystemStorageResponse = zod.object({
   telemetry: zod.object({
-    totalRows: zod.number().int(),
+    totalRows: zod
+      .number()
+      .int()
+      .describe(
+        "The planner's estimate (pg_class.reltuples), not an exact count.",
+      ),
+    totalRowsEstimated: zod.boolean().optional(),
     tableSize: zod
       .string()
       .describe('Human-readable size from pg_size_pretty, or "unknown".'),
+    tableBytes: zod.number().optional(),
+    bytesPerRow: zod.number().nullish(),
     oldestRecord: zod.coerce.date().nullable(),
     newestRecord: zod.coerce.date().nullable(),
   }),
@@ -3026,8 +3036,106 @@ export const GetSystemStorageResponse = zod.object({
       metrics: zod.number().int(),
       oldest: zod.coerce.date(),
       newest: zod.coerce.date(),
+      bytes: zod
+        .number()
+        .nullish()
+        .describe("Estimated share of the table on disk."),
+      minDays: zod
+        .number()
+        .int()
+        .nullish()
+        .describe(
+          "Shortest retention among this asset's metrics; null when no policy applies.",
+        ),
+      maxDays: zod.number().int().nullish(),
+      keptForever: zod
+        .boolean()
+        .optional()
+        .describe("True when at least one metric has no policy."),
+      deleted: zod
+        .boolean()
+        .optional()
+        .describe("Summaries of an asset that no longer exists."),
     }),
   ),
+  growth: zod
+    .object({
+      daily: zod
+        .array(
+          zod.object({
+            day: zod.coerce.date(),
+            rows: zod.number().int(),
+          }),
+        )
+        .describe("Readings that arrived per plant-time day, last 30 days."),
+      rowsPerDay: zod
+        .number()
+        .nullable()
+        .describe("Average of the last 7 complete days."),
+      bytesPerDay: zod.number().nullable(),
+      bytesPerMonth: zod.number().nullable(),
+      netRowsPerDay: zod
+        .number()
+        .nullable()
+        .describe("Readings per day that no policy will ever delete."),
+      netBytesPerDay: zod.number().nullable(),
+      netBytesPerMonth: zod.number().nullable(),
+    })
+    .optional(),
+  disk: zod
+    .object({
+      path: zod.string(),
+      totalBytes: zod.number(),
+      freeBytes: zod.number(),
+      daysUntilFull: zod.number().int().nullable(),
+    })
+    .nullish()
+    .describe(
+      'Free space on STORAGE_DISK_PATH (default "/") as seen by the API server.',
+    ),
+  rollups: zod
+    .object({
+      enabled: zod.boolean(),
+      watermark: zod.coerce.date().nullable(),
+      startedFrom: zod.coerce.date().nullable(),
+      progressPct: zod.number(),
+      complete: zod.boolean(),
+      summaryRows: zod.number().int(),
+      oldestSummary: zod.coerce.date().nullable(),
+      size: zod.string(),
+      error: zod.string().nullable(),
+    })
+    .optional(),
+  retention: zod
+    .object({
+      enabledPolicies: zod.number().int(),
+      operational: zod.array(
+        zod.object({
+          key: zod.string(),
+          label: zod.string(),
+          env: zod.string(),
+          days: zod.number().int().describe("0 means kept for ever."),
+        }),
+      ),
+    })
+    .optional(),
+  lastRun: zod
+    .union([
+      zod.object({
+        id: zod.string().uuid(),
+        trigger: zod.enum(["hourly", "manual"]),
+        userId: zod.string().nullable(),
+        username: zod.string().nullable(),
+        startedAt: zod.coerce.date(),
+        finishedAt: zod.coerce.date().nullable(),
+        telemetryDeleted: zod.number().int(),
+        details: zod.array(zod.record(zod.string(), zod.unknown())),
+        operational: zod.record(zod.string(), zod.number().int()),
+        error: zod.string().nullable(),
+      }),
+      zod.null(),
+    ])
+    .optional(),
   generatedAt: zod.coerce.date(),
 });
 
@@ -3106,7 +3214,7 @@ export const ListRetentionPoliciesResponse = zod.array(
 );
 
 /**
- * @summary Create a retention policy
+ * @summary Create a retention policy (202 with the pending request when it needs approval)
  */
 export const createRetentionPolicyBodyNameMax = 200;
 
@@ -3140,7 +3248,348 @@ export const CreateRetentionPolicyResponse = zod.object({
 });
 
 /**
- * @summary Run telemetry pruning now (most specific policy wins per row)
+ * @summary Estimate what the next pruning run would delete with a draft change (read-only)
+ */
+export const previewRetentionBodyPolicyMetricMax = 200;
+
+export const previewRetentionBodyPolicyRetentionDaysMax = 3650;
+
+export const PreviewRetentionBody = zod.object({
+  policy: zod
+    .object({
+      id: zod.string().uuid().optional(),
+      assetId: zod.string().uuid().nullish(),
+      metric: zod.string().max(previewRetentionBodyPolicyMetricMax).nullish(),
+      retentionDays: zod
+        .number()
+        .int()
+        .min(1)
+        .max(previewRetentionBodyPolicyRetentionDaysMax),
+      enabled: zod.boolean().optional(),
+    })
+    .optional(),
+  removeId: zod.string().uuid().optional(),
+});
+
+export const PreviewRetentionResponse = zod.object({
+  available: zod
+    .boolean()
+    .describe("False when hourly summaries are switched off."),
+  rows: zod
+    .number()
+    .int()
+    .describe("Readings the next run would delete with the change."),
+  bytes: zod.number().nullable(),
+  current: zod.object({
+    rows: zod.number().int(),
+    bytes: zod.number().nullable(),
+  }),
+  byAsset: zod.array(
+    zod.object({
+      assetId: zod.string(),
+      assetName: zod.string(),
+      rows: zod.number().int(),
+    }),
+  ),
+  complete: zod
+    .boolean()
+    .describe(
+      "False while the summaries are still catching up; the estimate is then low.",
+    ),
+  limited: zod
+    .boolean()
+    .describe("True when a cutoff waits for the summaries."),
+});
+
+/**
+ * @summary Pruning history, newest first (last 50)
+ */
+export const ListRetentionRunsResponseItem = zod.object({
+  id: zod.string().uuid(),
+  trigger: zod.enum(["hourly", "manual"]),
+  userId: zod.string().nullable(),
+  username: zod.string().nullable(),
+  startedAt: zod.coerce.date(),
+  finishedAt: zod.coerce.date().nullable(),
+  telemetryDeleted: zod.number().int(),
+  details: zod.array(zod.record(zod.string(), zod.unknown())),
+  operational: zod.record(zod.string(), zod.number().int()),
+  error: zod.string().nullable(),
+});
+export const ListRetentionRunsResponse = zod.array(
+  ListRetentionRunsResponseItem,
+);
+
+/**
+ * @summary Size of every table, uploads, archives, backups, disk, and partitioning status
+ */
+export const GetStorageAllResponse = zod
+  .record(zod.string(), zod.unknown())
+  .describe(
+    "A JSON object; the shape is described in docs/features/data-management.md.",
+  );
+
+/**
+ * @summary Per-asset last reading, 7-day coverage and gaps, busiest metrics, refused ingest requests
+ */
+export const GetDataHealthResponse = zod
+  .record(zod.string(), zod.unknown())
+  .describe(
+    "A JSON object; the shape is described in docs/features/data-management.md.",
+  );
+
+/**
+ * @summary Data Management settings (webhook URL masked)
+ */
+export const GetDataSettingsResponse = zod
+  .record(zod.string(), zod.unknown())
+  .describe(
+    "A JSON object; the shape is described in docs/features/data-management.md.",
+  );
+
+/**
+ * @summary Change Data Management settings (any subset)
+ */
+export const UpdateDataSettingsBody = zod
+  .record(zod.string(), zod.unknown())
+  .describe(
+    "A JSON object; the shape is described in docs/features/data-management.md.",
+  );
+
+export const UpdateDataSettingsResponse = zod
+  .record(zod.string(), zod.unknown())
+  .describe(
+    "A JSON object; the shape is described in docs/features/data-management.md.",
+  );
+
+/**
+ * @summary Storage and pipeline alerts, newest first
+ */
+export const ListSystemAlertsResponse = zod
+  .record(zod.string(), zod.unknown())
+  .describe(
+    "A JSON object; the shape is described in docs/features/data-management.md.",
+  );
+
+/**
+ * @summary Check alert conditions now
+ */
+export const CheckSystemAlertsResponse = zod
+  .record(zod.string(), zod.unknown())
+  .describe(
+    "A JSON object; the shape is described in docs/features/data-management.md.",
+  );
+
+/**
+ * @summary Acknowledge an active alert
+ */
+export const AcknowledgeSystemAlertParams = zod.object({
+  id: zod.coerce.string().uuid(),
+});
+
+export const AcknowledgeSystemAlertResponse = zod
+  .record(zod.string(), zod.unknown())
+  .describe(
+    "A JSON object; the shape is described in docs/features/data-management.md.",
+  );
+
+/**
+ * @summary Backup runs reported by the backup script, and whether backups are current
+ */
+export const ListBackupsResponse = zod
+  .record(zod.string(), zod.unknown())
+  .describe(
+    "A JSON object; the shape is described in docs/features/data-management.md.",
+  );
+
+/**
+ * @summary Connections, long queries, cache hit ratio, dead rows per table
+ */
+export const GetDbHealthResponse = zod
+  .record(zod.string(), zod.unknown())
+  .describe(
+    "A JSON object; the shape is described in docs/features/data-management.md.",
+  );
+
+/**
+ * @summary Start VACUUM (ANALYZE) on one table in the background
+ */
+export const VacuumTableBody = zod
+  .record(zod.string(), zod.unknown())
+  .describe(
+    "A JSON object; the shape is described in docs/features/data-management.md.",
+  );
+
+export const VacuumTableResponse = zod
+  .record(zod.string(), zod.unknown())
+  .describe(
+    "A JSON object; the shape is described in docs/features/data-management.md.",
+  );
+
+/**
+ * @summary Legal holds
+ */
+export const ListDataHoldsResponse = zod
+  .record(zod.string(), zod.unknown())
+  .describe(
+    "A JSON object; the shape is described in docs/features/data-management.md.",
+  );
+
+/**
+ * @summary Place a legal hold
+ */
+export const CreateDataHoldBody = zod
+  .record(zod.string(), zod.unknown())
+  .describe(
+    "A JSON object; the shape is described in docs/features/data-management.md.",
+  );
+
+export const CreateDataHoldResponse = zod
+  .record(zod.string(), zod.unknown())
+  .describe(
+    "A JSON object; the shape is described in docs/features/data-management.md.",
+  );
+
+/**
+ * @summary Release a legal hold
+ */
+export const ReleaseDataHoldParams = zod.object({
+  id: zod.coerce.string().uuid(),
+});
+
+export const ReleaseDataHoldResponse = zod
+  .record(zod.string(), zod.unknown())
+  .describe(
+    "A JSON object; the shape is described in docs/features/data-management.md.",
+  );
+
+/**
+ * @summary Daily telemetry archive files and archiving status
+ */
+export const ListArchivesResponse = zod
+  .record(zod.string(), zod.unknown())
+  .describe(
+    "A JSON object; the shape is described in docs/features/data-management.md.",
+  );
+
+/**
+ * @summary Download one archive file (gzip JSON lines)
+ */
+export const DownloadArchiveParams = zod.object({
+  id: zod.coerce.string().uuid(),
+});
+
+export const DownloadArchiveResponse = zod
+  .record(zod.string(), zod.unknown())
+  .describe(
+    "A JSON object; the shape is described in docs/features/data-management.md.",
+  );
+
+/**
+ * @summary Re-insert an archived day and place a legal hold on it
+ */
+export const RestoreArchiveParams = zod.object({
+  id: zod.coerce.string().uuid(),
+});
+
+export const RestoreArchiveResponse = zod
+  .record(zod.string(), zod.unknown())
+  .describe(
+    "A JSON object; the shape is described in docs/features/data-management.md.",
+  );
+
+/**
+ * @summary Bad-data removals, approvals and their outcome
+ */
+export const ListDataChangeRequestsResponse = zod
+  .record(zod.string(), zod.unknown())
+  .describe(
+    "A JSON object; the shape is described in docs/features/data-management.md.",
+  );
+
+/**
+ * @summary Count readings in a range and check holds and approval
+ */
+export const PreviewRangeDeleteBody = zod
+  .record(zod.string(), zod.unknown())
+  .describe(
+    "A JSON object; the shape is described in docs/features/data-management.md.",
+  );
+
+export const PreviewRangeDeleteResponse = zod
+  .record(zod.string(), zod.unknown())
+  .describe(
+    "A JSON object; the shape is described in docs/features/data-management.md.",
+  );
+
+/**
+ * @summary Remove readings of one asset (and metric) in a time range; 202 when it waits for approval
+ */
+export const RequestRangeDeleteBody = zod
+  .record(zod.string(), zod.unknown())
+  .describe(
+    "A JSON object; the shape is described in docs/features/data-management.md.",
+  );
+
+export const RequestRangeDeleteResponse = zod
+  .record(zod.string(), zod.unknown())
+  .describe(
+    "A JSON object; the shape is described in docs/features/data-management.md.",
+  );
+
+/**
+ * @summary Approve and carry out a pending request (not your own)
+ */
+export const ApproveDataChangeParams = zod.object({
+  id: zod.coerce.string().uuid(),
+});
+
+export const ApproveDataChangeBody = zod
+  .record(zod.string(), zod.unknown())
+  .describe(
+    "A JSON object; the shape is described in docs/features/data-management.md.",
+  );
+
+export const ApproveDataChangeResponse = zod
+  .record(zod.string(), zod.unknown())
+  .describe(
+    "A JSON object; the shape is described in docs/features/data-management.md.",
+  );
+
+/**
+ * @summary Reject or withdraw a pending request
+ */
+export const RejectDataChangeParams = zod.object({
+  id: zod.coerce.string().uuid(),
+});
+
+export const RejectDataChangeBody = zod
+  .record(zod.string(), zod.unknown())
+  .describe(
+    "A JSON object; the shape is described in docs/features/data-management.md.",
+  );
+
+export const RejectDataChangeResponse = zod
+  .record(zod.string(), zod.unknown())
+  .describe(
+    "A JSON object; the shape is described in docs/features/data-management.md.",
+  );
+
+/**
+ * @summary One pruning run as CSV
+ */
+export const GetRetentionRunReportParams = zod.object({
+  id: zod.coerce.string().uuid(),
+});
+
+export const GetRetentionRunReportResponse = zod
+  .record(zod.string(), zod.unknown())
+  .describe(
+    "A JSON object; the shape is described in docs/features/data-management.md.",
+  );
+
+/**
+ * @summary Run telemetry pruning now (most specific policy wins per row; 202 when it needs approval)
  */
 export const RunRetentionPruningResponse = zod.object({
   policiesRun: zod

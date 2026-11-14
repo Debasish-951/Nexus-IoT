@@ -101,6 +101,7 @@ import type {
   ListSecurityLoginHistoryParams,
   ListSecuritySessionsParams,
   ListUploadsParams,
+  LooseObject,
   NotFoundResponse,
   OkFlag,
   PasswordPolicy,
@@ -120,6 +121,9 @@ import type {
   RetentionPolicy,
   RetentionPolicyCreate,
   RetentionPolicyUpdate,
+  RetentionPreview,
+  RetentionPreviewRequest,
+  RetentionRunRecord,
   RetentionRunResult,
   SecurityEventPage,
   SecuritySummary,
@@ -11763,7 +11767,9 @@ export const getGetSystemStorageUrl = () => {
 };
 
 /**
- * @summary Telemetry table size and per-asset row counts
+ * Row totals are the planner's estimate; per-asset and per-day counts come
+ * from the hourly summaries (telemetry_rollups), cached for a minute.
+ * @summary Telemetry size, growth, disk space, per-asset counts and summary-job status
  */
 export const getSystemStorage = async (
   options?: Parameters<typeof customFetch>[1],
@@ -11807,7 +11813,11 @@ export type GetSystemStorageQueryResult = NonNullable<
 >;
 export type GetSystemStorageQueryError = ErrorType<unknown>;
 
-/** @summary Telemetry table size and per-asset row counts */
+/**
+ * Row totals are the planner's estimate; per-asset and per-day counts come
+ * from the hourly summaries (telemetry_rollups), cached for a minute.
+ * @summary Telemetry size, growth, disk space, per-asset counts and summary-job status
+ */
 export function useGetSystemStorage<
   TData = Awaited<ReturnType<typeof getSystemStorage>>,
   TError = ErrorType<unknown>,
@@ -11834,7 +11844,11 @@ export function useGetSystemStorage<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
-/** @summary Telemetry table size and per-asset row counts */
+/**
+ * Row totals are the planner's estimate; per-asset and per-day counts come
+ * from the hourly summaries (telemetry_rollups), cached for a minute.
+ * @summary Telemetry size, growth, disk space, per-asset counts and summary-job status
+ */
 export function useGetSystemStorage<
   TData = Awaited<ReturnType<typeof getSystemStorage>>,
   TError = ErrorType<unknown>,
@@ -11861,7 +11875,11 @@ export function useGetSystemStorage<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
-/** @summary Telemetry table size and per-asset row counts */
+/**
+ * Row totals are the planner's estimate; per-asset and per-day counts come
+ * from the hourly summaries (telemetry_rollups), cached for a minute.
+ * @summary Telemetry size, growth, disk space, per-asset counts and summary-job status
+ */
 export function useGetSystemStorage<
   TData = Awaited<ReturnType<typeof getSystemStorage>>,
   TError = ErrorType<unknown>,
@@ -11880,7 +11898,11 @@ export function useGetSystemStorage<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
-/** @summary Telemetry table size and per-asset row counts */
+/**
+ * Row totals are the planner's estimate; per-asset and per-day counts come
+ * from the hourly summaries (telemetry_rollups), cached for a minute.
+ * @summary Telemetry size, growth, disk space, per-asset counts and summary-job status
+ */
 export function useGetSystemStorage<
   TData = Awaited<ReturnType<typeof getSystemStorage>>,
   TError = ErrorType<unknown>,
@@ -12247,7 +12269,7 @@ export const getCreateRetentionPolicyUrl = () => {
 };
 
 /**
- * @summary Create a retention policy
+ * @summary Create a retention policy (202 with the pending request when it needs approval)
  */
 export const createRetentionPolicy = async (
   retentionPolicyCreate: RetentionPolicyCreate,
@@ -12336,7 +12358,7 @@ export type CreateRetentionPolicyMutationVariables = {
   data: BodyType<RetentionPolicyCreate>;
 };
 
-/** @summary Create a retention policy */
+/** @summary Create a retention policy (202 with the pending request when it needs approval) */
 export const useCreateRetentionPolicy = <
   TError = ErrorType<ValidationFailedResponse>,
   TContext = unknown,
@@ -12363,12 +12385,3074 @@ export const useCreateRetentionPolicy = <
   );
 };
 
+export const getPreviewRetentionUrl = () => {
+  return `/api/system/retention/preview`;
+};
+
+/**
+ * @summary Estimate what the next pruning run would delete with a draft change (read-only)
+ */
+export const previewRetention = async (
+  retentionPreviewRequest?: RetentionPreviewRequest,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<RetentionPreview> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return customFetch<RetentionPreview>(getPreviewRetentionUrl(), {
+    ...options,
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(retentionPreviewRequest),
+  });
+};
+
+export const getPreviewRetentionMutationKey = () =>
+  ["previewRetention"] as const;
+
+export const getPreviewRetentionMutationOptions = <
+  TError = ErrorType<ValidationFailedResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof previewRetention>>,
+    TError,
+    PreviewRetentionMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof previewRetention>>,
+  TError,
+  PreviewRetentionMutationVariables,
+  TContext
+> => {
+  const mutationKey = getPreviewRetentionMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof previewRetention>>,
+    PreviewRetentionMutationVariables
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return previewRetention(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type PreviewRetentionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof previewRetention>>
+>;
+export type PreviewRetentionMutationBody =
+  | BodyType<RetentionPreviewRequest>
+  | undefined;
+export type PreviewRetentionMutationError = ErrorType<ValidationFailedResponse>;
+export type PreviewRetentionMutationVariables = {
+  data?: BodyType<RetentionPreviewRequest>;
+};
+
+/** @summary Estimate what the next pruning run would delete with a draft change (read-only) */
+export const usePreviewRetention = <
+  TError = ErrorType<ValidationFailedResponse>,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof previewRetention>>,
+      TError,
+      PreviewRetentionMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof previewRetention>>,
+  TError,
+  PreviewRetentionMutationVariables,
+  TContext
+> => {
+  return useMutation(getPreviewRetentionMutationOptions(options), queryClient);
+};
+
+export const getListRetentionRunsUrl = () => {
+  return `/api/system/retention/runs`;
+};
+
+/**
+ * @summary Pruning history, newest first (last 50)
+ */
+export const listRetentionRuns = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<RetentionRunRecord[]> => {
+  return customFetch<RetentionRunRecord[]>(getListRetentionRunsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListRetentionRunsQueryKey = () => {
+  return [`/api/system/retention/runs`] as const;
+};
+
+export const getListRetentionRunsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listRetentionRuns>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: Partial<
+    UseQueryOptions<
+      Awaited<ReturnType<typeof listRetentionRuns>>,
+      TError,
+      TData
+    >
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListRetentionRunsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listRetentionRuns>>
+  > = ({ signal }) => listRetentionRuns({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listRetentionRuns>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListRetentionRunsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listRetentionRuns>>
+>;
+export type ListRetentionRunsQueryError = ErrorType<unknown>;
+
+/** @summary Pruning history, newest first (last 50) */
+export function useListRetentionRuns<
+  TData = Awaited<ReturnType<typeof listRetentionRuns>>,
+  TError = ErrorType<unknown>,
+>(
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listRetentionRuns>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listRetentionRuns>>,
+          TError,
+          Awaited<ReturnType<typeof listRetentionRuns>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Pruning history, newest first (last 50) */
+export function useListRetentionRuns<
+  TData = Awaited<ReturnType<typeof listRetentionRuns>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listRetentionRuns>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listRetentionRuns>>,
+          TError,
+          Awaited<ReturnType<typeof listRetentionRuns>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Pruning history, newest first (last 50) */
+export function useListRetentionRuns<
+  TData = Awaited<ReturnType<typeof listRetentionRuns>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listRetentionRuns>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Pruning history, newest first (last 50) */
+export function useListRetentionRuns<
+  TData = Awaited<ReturnType<typeof listRetentionRuns>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listRetentionRuns>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListRetentionRunsQueryOptions(options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getGetStorageAllUrl = () => {
+  return `/api/system/storage/all`;
+};
+
+/**
+ * @summary Size of every table, uploads, archives, backups, disk, and partitioning status
+ */
+export const getStorageAll = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<LooseObject> => {
+  return customFetch<LooseObject>(getGetStorageAllUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetStorageAllQueryKey = () => {
+  return [`/api/system/storage/all`] as const;
+};
+
+export const getGetStorageAllQueryOptions = <
+  TData = Awaited<ReturnType<typeof getStorageAll>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: Partial<
+    UseQueryOptions<Awaited<ReturnType<typeof getStorageAll>>, TError, TData>
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetStorageAllQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getStorageAll>>> = ({
+    signal,
+  }) => getStorageAll({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getStorageAll>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetStorageAllQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getStorageAll>>
+>;
+export type GetStorageAllQueryError = ErrorType<unknown>;
+
+/** @summary Size of every table, uploads, archives, backups, disk, and partitioning status */
+export function useGetStorageAll<
+  TData = Awaited<ReturnType<typeof getStorageAll>>,
+  TError = ErrorType<unknown>,
+>(
+  options: {
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getStorageAll>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getStorageAll>>,
+          TError,
+          Awaited<ReturnType<typeof getStorageAll>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Size of every table, uploads, archives, backups, disk, and partitioning status */
+export function useGetStorageAll<
+  TData = Awaited<ReturnType<typeof getStorageAll>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getStorageAll>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getStorageAll>>,
+          TError,
+          Awaited<ReturnType<typeof getStorageAll>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Size of every table, uploads, archives, backups, disk, and partitioning status */
+export function useGetStorageAll<
+  TData = Awaited<ReturnType<typeof getStorageAll>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getStorageAll>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Size of every table, uploads, archives, backups, disk, and partitioning status */
+export function useGetStorageAll<
+  TData = Awaited<ReturnType<typeof getStorageAll>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getStorageAll>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getGetStorageAllQueryOptions(options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getGetDataHealthUrl = () => {
+  return `/api/system/data-health`;
+};
+
+/**
+ * @summary Per-asset last reading, 7-day coverage and gaps, busiest metrics, refused ingest requests
+ */
+export const getDataHealth = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<LooseObject> => {
+  return customFetch<LooseObject>(getGetDataHealthUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetDataHealthQueryKey = () => {
+  return [`/api/system/data-health`] as const;
+};
+
+export const getGetDataHealthQueryOptions = <
+  TData = Awaited<ReturnType<typeof getDataHealth>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: Partial<
+    UseQueryOptions<Awaited<ReturnType<typeof getDataHealth>>, TError, TData>
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetDataHealthQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getDataHealth>>> = ({
+    signal,
+  }) => getDataHealth({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getDataHealth>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetDataHealthQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getDataHealth>>
+>;
+export type GetDataHealthQueryError = ErrorType<unknown>;
+
+/** @summary Per-asset last reading, 7-day coverage and gaps, busiest metrics, refused ingest requests */
+export function useGetDataHealth<
+  TData = Awaited<ReturnType<typeof getDataHealth>>,
+  TError = ErrorType<unknown>,
+>(
+  options: {
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getDataHealth>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getDataHealth>>,
+          TError,
+          Awaited<ReturnType<typeof getDataHealth>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Per-asset last reading, 7-day coverage and gaps, busiest metrics, refused ingest requests */
+export function useGetDataHealth<
+  TData = Awaited<ReturnType<typeof getDataHealth>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getDataHealth>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getDataHealth>>,
+          TError,
+          Awaited<ReturnType<typeof getDataHealth>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Per-asset last reading, 7-day coverage and gaps, busiest metrics, refused ingest requests */
+export function useGetDataHealth<
+  TData = Awaited<ReturnType<typeof getDataHealth>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getDataHealth>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Per-asset last reading, 7-day coverage and gaps, busiest metrics, refused ingest requests */
+export function useGetDataHealth<
+  TData = Awaited<ReturnType<typeof getDataHealth>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getDataHealth>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getGetDataHealthQueryOptions(options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getGetDataSettingsUrl = () => {
+  return `/api/system/data-settings`;
+};
+
+/**
+ * @summary Data Management settings (webhook URL masked)
+ */
+export const getDataSettings = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<LooseObject> => {
+  return customFetch<LooseObject>(getGetDataSettingsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetDataSettingsQueryKey = () => {
+  return [`/api/system/data-settings`] as const;
+};
+
+export const getGetDataSettingsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getDataSettings>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: Partial<
+    UseQueryOptions<Awaited<ReturnType<typeof getDataSettings>>, TError, TData>
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetDataSettingsQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getDataSettings>>> = ({
+    signal,
+  }) => getDataSettings({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getDataSettings>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetDataSettingsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getDataSettings>>
+>;
+export type GetDataSettingsQueryError = ErrorType<unknown>;
+
+/** @summary Data Management settings (webhook URL masked) */
+export function useGetDataSettings<
+  TData = Awaited<ReturnType<typeof getDataSettings>>,
+  TError = ErrorType<unknown>,
+>(
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getDataSettings>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getDataSettings>>,
+          TError,
+          Awaited<ReturnType<typeof getDataSettings>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Data Management settings (webhook URL masked) */
+export function useGetDataSettings<
+  TData = Awaited<ReturnType<typeof getDataSettings>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getDataSettings>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getDataSettings>>,
+          TError,
+          Awaited<ReturnType<typeof getDataSettings>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Data Management settings (webhook URL masked) */
+export function useGetDataSettings<
+  TData = Awaited<ReturnType<typeof getDataSettings>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getDataSettings>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Data Management settings (webhook URL masked) */
+export function useGetDataSettings<
+  TData = Awaited<ReturnType<typeof getDataSettings>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getDataSettings>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getGetDataSettingsQueryOptions(options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getUpdateDataSettingsUrl = () => {
+  return `/api/system/data-settings`;
+};
+
+/**
+ * @summary Change Data Management settings (any subset)
+ */
+export const updateDataSettings = async (
+  looseObject?: LooseObject,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<LooseObject> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return customFetch<LooseObject>(getUpdateDataSettingsUrl(), {
+    ...options,
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(looseObject),
+  });
+};
+
+export const getUpdateDataSettingsMutationKey = () =>
+  ["updateDataSettings"] as const;
+
+export const getUpdateDataSettingsMutationOptions = <
+  TError = ErrorType<ValidationFailedResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateDataSettings>>,
+    TError,
+    UpdateDataSettingsMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateDataSettings>>,
+  TError,
+  UpdateDataSettingsMutationVariables,
+  TContext
+> => {
+  const mutationKey = getUpdateDataSettingsMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateDataSettings>>,
+    UpdateDataSettingsMutationVariables
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return updateDataSettings(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateDataSettingsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateDataSettings>>
+>;
+export type UpdateDataSettingsMutationBody = BodyType<LooseObject> | undefined;
+export type UpdateDataSettingsMutationError =
+  ErrorType<ValidationFailedResponse>;
+export type UpdateDataSettingsMutationVariables = {
+  data?: BodyType<LooseObject>;
+};
+
+/** @summary Change Data Management settings (any subset) */
+export const useUpdateDataSettings = <
+  TError = ErrorType<ValidationFailedResponse>,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof updateDataSettings>>,
+      TError,
+      UpdateDataSettingsMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof updateDataSettings>>,
+  TError,
+  UpdateDataSettingsMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getUpdateDataSettingsMutationOptions(options),
+    queryClient,
+  );
+};
+
+export const getListSystemAlertsUrl = () => {
+  return `/api/system/alerts`;
+};
+
+/**
+ * @summary Storage and pipeline alerts, newest first
+ */
+export const listSystemAlerts = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<LooseObject> => {
+  return customFetch<LooseObject>(getListSystemAlertsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListSystemAlertsQueryKey = () => {
+  return [`/api/system/alerts`] as const;
+};
+
+export const getListSystemAlertsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listSystemAlerts>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: Partial<
+    UseQueryOptions<Awaited<ReturnType<typeof listSystemAlerts>>, TError, TData>
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListSystemAlertsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listSystemAlerts>>
+  > = ({ signal }) => listSystemAlerts({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listSystemAlerts>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListSystemAlertsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listSystemAlerts>>
+>;
+export type ListSystemAlertsQueryError = ErrorType<unknown>;
+
+/** @summary Storage and pipeline alerts, newest first */
+export function useListSystemAlerts<
+  TData = Awaited<ReturnType<typeof listSystemAlerts>>,
+  TError = ErrorType<unknown>,
+>(
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listSystemAlerts>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listSystemAlerts>>,
+          TError,
+          Awaited<ReturnType<typeof listSystemAlerts>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Storage and pipeline alerts, newest first */
+export function useListSystemAlerts<
+  TData = Awaited<ReturnType<typeof listSystemAlerts>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listSystemAlerts>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listSystemAlerts>>,
+          TError,
+          Awaited<ReturnType<typeof listSystemAlerts>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Storage and pipeline alerts, newest first */
+export function useListSystemAlerts<
+  TData = Awaited<ReturnType<typeof listSystemAlerts>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listSystemAlerts>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Storage and pipeline alerts, newest first */
+export function useListSystemAlerts<
+  TData = Awaited<ReturnType<typeof listSystemAlerts>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listSystemAlerts>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListSystemAlertsQueryOptions(options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getCheckSystemAlertsUrl = () => {
+  return `/api/system/alerts/check`;
+};
+
+/**
+ * @summary Check alert conditions now
+ */
+export const checkSystemAlerts = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<LooseObject> => {
+  return customFetch<LooseObject>(getCheckSystemAlertsUrl(), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getCheckSystemAlertsMutationKey = () =>
+  ["checkSystemAlerts"] as const;
+
+export const getCheckSystemAlertsMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof checkSystemAlerts>>,
+    TError,
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof checkSystemAlerts>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationKey = getCheckSystemAlertsMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof checkSystemAlerts>>,
+    void
+  > = () => {
+    return checkSystemAlerts(requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CheckSystemAlertsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof checkSystemAlerts>>
+>;
+
+export type CheckSystemAlertsMutationError = ErrorType<unknown>;
+
+/** @summary Check alert conditions now */
+export const useCheckSystemAlerts = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof checkSystemAlerts>>,
+      TError,
+      void,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof checkSystemAlerts>>,
+  TError,
+  void,
+  TContext
+> => {
+  return useMutation(getCheckSystemAlertsMutationOptions(options), queryClient);
+};
+
+export const getAcknowledgeSystemAlertUrl = (id: string) => {
+  return `/api/system/alerts/${id}/acknowledge`;
+};
+
+/**
+ * @summary Acknowledge an active alert
+ */
+export const acknowledgeSystemAlert = async (
+  id: string,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<LooseObject> => {
+  return customFetch<LooseObject>(getAcknowledgeSystemAlertUrl(id), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getAcknowledgeSystemAlertMutationKey = () =>
+  ["acknowledgeSystemAlert"] as const;
+
+export const getAcknowledgeSystemAlertMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof acknowledgeSystemAlert>>,
+    TError,
+    AcknowledgeSystemAlertMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof acknowledgeSystemAlert>>,
+  TError,
+  AcknowledgeSystemAlertMutationVariables,
+  TContext
+> => {
+  const mutationKey = getAcknowledgeSystemAlertMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof acknowledgeSystemAlert>>,
+    AcknowledgeSystemAlertMutationVariables
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return acknowledgeSystemAlert(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AcknowledgeSystemAlertMutationResult = NonNullable<
+  Awaited<ReturnType<typeof acknowledgeSystemAlert>>
+>;
+
+export type AcknowledgeSystemAlertMutationError = ErrorType<unknown>;
+export type AcknowledgeSystemAlertMutationVariables = { id: string };
+
+/** @summary Acknowledge an active alert */
+export const useAcknowledgeSystemAlert = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof acknowledgeSystemAlert>>,
+      TError,
+      AcknowledgeSystemAlertMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof acknowledgeSystemAlert>>,
+  TError,
+  AcknowledgeSystemAlertMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getAcknowledgeSystemAlertMutationOptions(options),
+    queryClient,
+  );
+};
+
+export const getListBackupsUrl = () => {
+  return `/api/system/backups`;
+};
+
+/**
+ * @summary Backup runs reported by the backup script, and whether backups are current
+ */
+export const listBackups = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<LooseObject> => {
+  return customFetch<LooseObject>(getListBackupsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListBackupsQueryKey = () => {
+  return [`/api/system/backups`] as const;
+};
+
+export const getListBackupsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listBackups>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: Partial<
+    UseQueryOptions<Awaited<ReturnType<typeof listBackups>>, TError, TData>
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListBackupsQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listBackups>>> = ({
+    signal,
+  }) => listBackups({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listBackups>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListBackupsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listBackups>>
+>;
+export type ListBackupsQueryError = ErrorType<unknown>;
+
+/** @summary Backup runs reported by the backup script, and whether backups are current */
+export function useListBackups<
+  TData = Awaited<ReturnType<typeof listBackups>>,
+  TError = ErrorType<unknown>,
+>(
+  options: {
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listBackups>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listBackups>>,
+          TError,
+          Awaited<ReturnType<typeof listBackups>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Backup runs reported by the backup script, and whether backups are current */
+export function useListBackups<
+  TData = Awaited<ReturnType<typeof listBackups>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listBackups>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listBackups>>,
+          TError,
+          Awaited<ReturnType<typeof listBackups>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Backup runs reported by the backup script, and whether backups are current */
+export function useListBackups<
+  TData = Awaited<ReturnType<typeof listBackups>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listBackups>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Backup runs reported by the backup script, and whether backups are current */
+export function useListBackups<
+  TData = Awaited<ReturnType<typeof listBackups>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listBackups>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListBackupsQueryOptions(options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getGetDbHealthUrl = () => {
+  return `/api/system/db-health`;
+};
+
+/**
+ * @summary Connections, long queries, cache hit ratio, dead rows per table
+ */
+export const getDbHealth = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<LooseObject> => {
+  return customFetch<LooseObject>(getGetDbHealthUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetDbHealthQueryKey = () => {
+  return [`/api/system/db-health`] as const;
+};
+
+export const getGetDbHealthQueryOptions = <
+  TData = Awaited<ReturnType<typeof getDbHealth>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: Partial<
+    UseQueryOptions<Awaited<ReturnType<typeof getDbHealth>>, TError, TData>
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetDbHealthQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getDbHealth>>> = ({
+    signal,
+  }) => getDbHealth({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getDbHealth>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetDbHealthQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getDbHealth>>
+>;
+export type GetDbHealthQueryError = ErrorType<unknown>;
+
+/** @summary Connections, long queries, cache hit ratio, dead rows per table */
+export function useGetDbHealth<
+  TData = Awaited<ReturnType<typeof getDbHealth>>,
+  TError = ErrorType<unknown>,
+>(
+  options: {
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getDbHealth>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getDbHealth>>,
+          TError,
+          Awaited<ReturnType<typeof getDbHealth>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Connections, long queries, cache hit ratio, dead rows per table */
+export function useGetDbHealth<
+  TData = Awaited<ReturnType<typeof getDbHealth>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getDbHealth>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getDbHealth>>,
+          TError,
+          Awaited<ReturnType<typeof getDbHealth>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Connections, long queries, cache hit ratio, dead rows per table */
+export function useGetDbHealth<
+  TData = Awaited<ReturnType<typeof getDbHealth>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getDbHealth>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Connections, long queries, cache hit ratio, dead rows per table */
+export function useGetDbHealth<
+  TData = Awaited<ReturnType<typeof getDbHealth>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getDbHealth>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getGetDbHealthQueryOptions(options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getVacuumTableUrl = () => {
+  return `/api/system/db-health/vacuum`;
+};
+
+/**
+ * @summary Start VACUUM (ANALYZE) on one table in the background
+ */
+export const vacuumTable = async (
+  looseObject?: LooseObject,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<LooseObject> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return customFetch<LooseObject>(getVacuumTableUrl(), {
+    ...options,
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(looseObject),
+  });
+};
+
+export const getVacuumTableMutationKey = () => ["vacuumTable"] as const;
+
+export const getVacuumTableMutationOptions = <
+  TError = ErrorType<ValidationFailedResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof vacuumTable>>,
+    TError,
+    VacuumTableMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof vacuumTable>>,
+  TError,
+  VacuumTableMutationVariables,
+  TContext
+> => {
+  const mutationKey = getVacuumTableMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof vacuumTable>>,
+    VacuumTableMutationVariables
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return vacuumTable(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type VacuumTableMutationResult = NonNullable<
+  Awaited<ReturnType<typeof vacuumTable>>
+>;
+export type VacuumTableMutationBody = BodyType<LooseObject> | undefined;
+export type VacuumTableMutationError = ErrorType<ValidationFailedResponse>;
+export type VacuumTableMutationVariables = { data?: BodyType<LooseObject> };
+
+/** @summary Start VACUUM (ANALYZE) on one table in the background */
+export const useVacuumTable = <
+  TError = ErrorType<ValidationFailedResponse>,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof vacuumTable>>,
+      TError,
+      VacuumTableMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof vacuumTable>>,
+  TError,
+  VacuumTableMutationVariables,
+  TContext
+> => {
+  return useMutation(getVacuumTableMutationOptions(options), queryClient);
+};
+
+export const getListDataHoldsUrl = () => {
+  return `/api/system/holds`;
+};
+
+/**
+ * @summary Legal holds
+ */
+export const listDataHolds = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<LooseObject> => {
+  return customFetch<LooseObject>(getListDataHoldsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListDataHoldsQueryKey = () => {
+  return [`/api/system/holds`] as const;
+};
+
+export const getListDataHoldsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listDataHolds>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: Partial<
+    UseQueryOptions<Awaited<ReturnType<typeof listDataHolds>>, TError, TData>
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListDataHoldsQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listDataHolds>>> = ({
+    signal,
+  }) => listDataHolds({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listDataHolds>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListDataHoldsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listDataHolds>>
+>;
+export type ListDataHoldsQueryError = ErrorType<unknown>;
+
+/** @summary Legal holds */
+export function useListDataHolds<
+  TData = Awaited<ReturnType<typeof listDataHolds>>,
+  TError = ErrorType<unknown>,
+>(
+  options: {
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listDataHolds>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listDataHolds>>,
+          TError,
+          Awaited<ReturnType<typeof listDataHolds>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Legal holds */
+export function useListDataHolds<
+  TData = Awaited<ReturnType<typeof listDataHolds>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listDataHolds>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listDataHolds>>,
+          TError,
+          Awaited<ReturnType<typeof listDataHolds>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Legal holds */
+export function useListDataHolds<
+  TData = Awaited<ReturnType<typeof listDataHolds>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listDataHolds>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Legal holds */
+export function useListDataHolds<
+  TData = Awaited<ReturnType<typeof listDataHolds>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listDataHolds>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListDataHoldsQueryOptions(options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getCreateDataHoldUrl = () => {
+  return `/api/system/holds`;
+};
+
+/**
+ * @summary Place a legal hold
+ */
+export const createDataHold = async (
+  looseObject?: LooseObject,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<LooseObject> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return customFetch<LooseObject>(getCreateDataHoldUrl(), {
+    ...options,
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(looseObject),
+  });
+};
+
+export const getCreateDataHoldMutationKey = () => ["createDataHold"] as const;
+
+export const getCreateDataHoldMutationOptions = <
+  TError = ErrorType<ValidationFailedResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createDataHold>>,
+    TError,
+    CreateDataHoldMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createDataHold>>,
+  TError,
+  CreateDataHoldMutationVariables,
+  TContext
+> => {
+  const mutationKey = getCreateDataHoldMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createDataHold>>,
+    CreateDataHoldMutationVariables
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createDataHold(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateDataHoldMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createDataHold>>
+>;
+export type CreateDataHoldMutationBody = BodyType<LooseObject> | undefined;
+export type CreateDataHoldMutationError = ErrorType<ValidationFailedResponse>;
+export type CreateDataHoldMutationVariables = { data?: BodyType<LooseObject> };
+
+/** @summary Place a legal hold */
+export const useCreateDataHold = <
+  TError = ErrorType<ValidationFailedResponse>,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof createDataHold>>,
+      TError,
+      CreateDataHoldMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof createDataHold>>,
+  TError,
+  CreateDataHoldMutationVariables,
+  TContext
+> => {
+  return useMutation(getCreateDataHoldMutationOptions(options), queryClient);
+};
+
+export const getReleaseDataHoldUrl = (id: string) => {
+  return `/api/system/holds/${id}/release`;
+};
+
+/**
+ * @summary Release a legal hold
+ */
+export const releaseDataHold = async (
+  id: string,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<LooseObject> => {
+  return customFetch<LooseObject>(getReleaseDataHoldUrl(id), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getReleaseDataHoldMutationKey = () => ["releaseDataHold"] as const;
+
+export const getReleaseDataHoldMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof releaseDataHold>>,
+    TError,
+    ReleaseDataHoldMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof releaseDataHold>>,
+  TError,
+  ReleaseDataHoldMutationVariables,
+  TContext
+> => {
+  const mutationKey = getReleaseDataHoldMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof releaseDataHold>>,
+    ReleaseDataHoldMutationVariables
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return releaseDataHold(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ReleaseDataHoldMutationResult = NonNullable<
+  Awaited<ReturnType<typeof releaseDataHold>>
+>;
+
+export type ReleaseDataHoldMutationError = ErrorType<unknown>;
+export type ReleaseDataHoldMutationVariables = { id: string };
+
+/** @summary Release a legal hold */
+export const useReleaseDataHold = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof releaseDataHold>>,
+      TError,
+      ReleaseDataHoldMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof releaseDataHold>>,
+  TError,
+  ReleaseDataHoldMutationVariables,
+  TContext
+> => {
+  return useMutation(getReleaseDataHoldMutationOptions(options), queryClient);
+};
+
+export const getListArchivesUrl = () => {
+  return `/api/system/archives`;
+};
+
+/**
+ * @summary Daily telemetry archive files and archiving status
+ */
+export const listArchives = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<LooseObject> => {
+  return customFetch<LooseObject>(getListArchivesUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListArchivesQueryKey = () => {
+  return [`/api/system/archives`] as const;
+};
+
+export const getListArchivesQueryOptions = <
+  TData = Awaited<ReturnType<typeof listArchives>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: Partial<
+    UseQueryOptions<Awaited<ReturnType<typeof listArchives>>, TError, TData>
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListArchivesQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listArchives>>> = ({
+    signal,
+  }) => listArchives({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listArchives>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListArchivesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listArchives>>
+>;
+export type ListArchivesQueryError = ErrorType<unknown>;
+
+/** @summary Daily telemetry archive files and archiving status */
+export function useListArchives<
+  TData = Awaited<ReturnType<typeof listArchives>>,
+  TError = ErrorType<unknown>,
+>(
+  options: {
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listArchives>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listArchives>>,
+          TError,
+          Awaited<ReturnType<typeof listArchives>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Daily telemetry archive files and archiving status */
+export function useListArchives<
+  TData = Awaited<ReturnType<typeof listArchives>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listArchives>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listArchives>>,
+          TError,
+          Awaited<ReturnType<typeof listArchives>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Daily telemetry archive files and archiving status */
+export function useListArchives<
+  TData = Awaited<ReturnType<typeof listArchives>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listArchives>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Daily telemetry archive files and archiving status */
+export function useListArchives<
+  TData = Awaited<ReturnType<typeof listArchives>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listArchives>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListArchivesQueryOptions(options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getDownloadArchiveUrl = (id: string) => {
+  return `/api/system/archives/${id}/download`;
+};
+
+/**
+ * @summary Download one archive file (gzip JSON lines)
+ */
+export const downloadArchive = async (
+  id: string,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<LooseObject> => {
+  return customFetch<LooseObject>(getDownloadArchiveUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getDownloadArchiveQueryKey = (id: string) => {
+  return [`/api/system/archives/${id}/download`] as const;
+};
+
+export const getDownloadArchiveQueryOptions = <
+  TData = Awaited<ReturnType<typeof downloadArchive>>,
+  TError = ErrorType<unknown>,
+>(
+  id: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof downloadArchive>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getDownloadArchiveQueryKey(id);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof downloadArchive>>> = ({
+    signal,
+  }) => downloadArchive(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: id !== null && id !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof downloadArchive>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type DownloadArchiveQueryResult = NonNullable<
+  Awaited<ReturnType<typeof downloadArchive>>
+>;
+export type DownloadArchiveQueryError = ErrorType<unknown>;
+
+/** @summary Download one archive file (gzip JSON lines) */
+export function useDownloadArchive<
+  TData = Awaited<ReturnType<typeof downloadArchive>>,
+  TError = ErrorType<unknown>,
+>(
+  id: string,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof downloadArchive>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof downloadArchive>>,
+          TError,
+          Awaited<ReturnType<typeof downloadArchive>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Download one archive file (gzip JSON lines) */
+export function useDownloadArchive<
+  TData = Awaited<ReturnType<typeof downloadArchive>>,
+  TError = ErrorType<unknown>,
+>(
+  id: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof downloadArchive>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof downloadArchive>>,
+          TError,
+          Awaited<ReturnType<typeof downloadArchive>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Download one archive file (gzip JSON lines) */
+export function useDownloadArchive<
+  TData = Awaited<ReturnType<typeof downloadArchive>>,
+  TError = ErrorType<unknown>,
+>(
+  id: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof downloadArchive>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Download one archive file (gzip JSON lines) */
+export function useDownloadArchive<
+  TData = Awaited<ReturnType<typeof downloadArchive>>,
+  TError = ErrorType<unknown>,
+>(
+  id: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof downloadArchive>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getDownloadArchiveQueryOptions(id, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getRestoreArchiveUrl = (id: string) => {
+  return `/api/system/archives/${id}/restore`;
+};
+
+/**
+ * @summary Re-insert an archived day and place a legal hold on it
+ */
+export const restoreArchive = async (
+  id: string,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<LooseObject> => {
+  return customFetch<LooseObject>(getRestoreArchiveUrl(id), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getRestoreArchiveMutationKey = () => ["restoreArchive"] as const;
+
+export const getRestoreArchiveMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof restoreArchive>>,
+    TError,
+    RestoreArchiveMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof restoreArchive>>,
+  TError,
+  RestoreArchiveMutationVariables,
+  TContext
+> => {
+  const mutationKey = getRestoreArchiveMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof restoreArchive>>,
+    RestoreArchiveMutationVariables
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return restoreArchive(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RestoreArchiveMutationResult = NonNullable<
+  Awaited<ReturnType<typeof restoreArchive>>
+>;
+
+export type RestoreArchiveMutationError = ErrorType<unknown>;
+export type RestoreArchiveMutationVariables = { id: string };
+
+/** @summary Re-insert an archived day and place a legal hold on it */
+export const useRestoreArchive = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof restoreArchive>>,
+      TError,
+      RestoreArchiveMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof restoreArchive>>,
+  TError,
+  RestoreArchiveMutationVariables,
+  TContext
+> => {
+  return useMutation(getRestoreArchiveMutationOptions(options), queryClient);
+};
+
+export const getListDataChangeRequestsUrl = () => {
+  return `/api/system/changes`;
+};
+
+/**
+ * @summary Bad-data removals, approvals and their outcome
+ */
+export const listDataChangeRequests = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<LooseObject> => {
+  return customFetch<LooseObject>(getListDataChangeRequestsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListDataChangeRequestsQueryKey = () => {
+  return [`/api/system/changes`] as const;
+};
+
+export const getListDataChangeRequestsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listDataChangeRequests>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: Partial<
+    UseQueryOptions<
+      Awaited<ReturnType<typeof listDataChangeRequests>>,
+      TError,
+      TData
+    >
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListDataChangeRequestsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listDataChangeRequests>>
+  > = ({ signal }) => listDataChangeRequests({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listDataChangeRequests>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListDataChangeRequestsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listDataChangeRequests>>
+>;
+export type ListDataChangeRequestsQueryError = ErrorType<unknown>;
+
+/** @summary Bad-data removals, approvals and their outcome */
+export function useListDataChangeRequests<
+  TData = Awaited<ReturnType<typeof listDataChangeRequests>>,
+  TError = ErrorType<unknown>,
+>(
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listDataChangeRequests>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listDataChangeRequests>>,
+          TError,
+          Awaited<ReturnType<typeof listDataChangeRequests>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Bad-data removals, approvals and their outcome */
+export function useListDataChangeRequests<
+  TData = Awaited<ReturnType<typeof listDataChangeRequests>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listDataChangeRequests>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listDataChangeRequests>>,
+          TError,
+          Awaited<ReturnType<typeof listDataChangeRequests>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Bad-data removals, approvals and their outcome */
+export function useListDataChangeRequests<
+  TData = Awaited<ReturnType<typeof listDataChangeRequests>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listDataChangeRequests>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Bad-data removals, approvals and their outcome */
+export function useListDataChangeRequests<
+  TData = Awaited<ReturnType<typeof listDataChangeRequests>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listDataChangeRequests>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListDataChangeRequestsQueryOptions(options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getPreviewRangeDeleteUrl = () => {
+  return `/api/system/changes/range-preview`;
+};
+
+/**
+ * @summary Count readings in a range and check holds and approval
+ */
+export const previewRangeDelete = async (
+  looseObject?: LooseObject,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<LooseObject> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return customFetch<LooseObject>(getPreviewRangeDeleteUrl(), {
+    ...options,
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(looseObject),
+  });
+};
+
+export const getPreviewRangeDeleteMutationKey = () =>
+  ["previewRangeDelete"] as const;
+
+export const getPreviewRangeDeleteMutationOptions = <
+  TError = ErrorType<ValidationFailedResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof previewRangeDelete>>,
+    TError,
+    PreviewRangeDeleteMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof previewRangeDelete>>,
+  TError,
+  PreviewRangeDeleteMutationVariables,
+  TContext
+> => {
+  const mutationKey = getPreviewRangeDeleteMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof previewRangeDelete>>,
+    PreviewRangeDeleteMutationVariables
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return previewRangeDelete(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type PreviewRangeDeleteMutationResult = NonNullable<
+  Awaited<ReturnType<typeof previewRangeDelete>>
+>;
+export type PreviewRangeDeleteMutationBody = BodyType<LooseObject> | undefined;
+export type PreviewRangeDeleteMutationError =
+  ErrorType<ValidationFailedResponse>;
+export type PreviewRangeDeleteMutationVariables = {
+  data?: BodyType<LooseObject>;
+};
+
+/** @summary Count readings in a range and check holds and approval */
+export const usePreviewRangeDelete = <
+  TError = ErrorType<ValidationFailedResponse>,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof previewRangeDelete>>,
+      TError,
+      PreviewRangeDeleteMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof previewRangeDelete>>,
+  TError,
+  PreviewRangeDeleteMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getPreviewRangeDeleteMutationOptions(options),
+    queryClient,
+  );
+};
+
+export const getRequestRangeDeleteUrl = () => {
+  return `/api/system/changes/range-delete`;
+};
+
+/**
+ * @summary Remove readings of one asset (and metric) in a time range; 202 when it waits for approval
+ */
+export const requestRangeDelete = async (
+  looseObject?: LooseObject,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<LooseObject> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return customFetch<LooseObject>(getRequestRangeDeleteUrl(), {
+    ...options,
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(looseObject),
+  });
+};
+
+export const getRequestRangeDeleteMutationKey = () =>
+  ["requestRangeDelete"] as const;
+
+export const getRequestRangeDeleteMutationOptions = <
+  TError = ErrorType<ValidationFailedResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof requestRangeDelete>>,
+    TError,
+    RequestRangeDeleteMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof requestRangeDelete>>,
+  TError,
+  RequestRangeDeleteMutationVariables,
+  TContext
+> => {
+  const mutationKey = getRequestRangeDeleteMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof requestRangeDelete>>,
+    RequestRangeDeleteMutationVariables
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return requestRangeDelete(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RequestRangeDeleteMutationResult = NonNullable<
+  Awaited<ReturnType<typeof requestRangeDelete>>
+>;
+export type RequestRangeDeleteMutationBody = BodyType<LooseObject> | undefined;
+export type RequestRangeDeleteMutationError =
+  ErrorType<ValidationFailedResponse>;
+export type RequestRangeDeleteMutationVariables = {
+  data?: BodyType<LooseObject>;
+};
+
+/** @summary Remove readings of one asset (and metric) in a time range; 202 when it waits for approval */
+export const useRequestRangeDelete = <
+  TError = ErrorType<ValidationFailedResponse>,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof requestRangeDelete>>,
+      TError,
+      RequestRangeDeleteMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof requestRangeDelete>>,
+  TError,
+  RequestRangeDeleteMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getRequestRangeDeleteMutationOptions(options),
+    queryClient,
+  );
+};
+
+export const getApproveDataChangeUrl = (id: string) => {
+  return `/api/system/changes/${id}/approve`;
+};
+
+/**
+ * @summary Approve and carry out a pending request (not your own)
+ */
+export const approveDataChange = async (
+  id: string,
+  looseObject?: LooseObject,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<LooseObject> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return customFetch<LooseObject>(getApproveDataChangeUrl(id), {
+    ...options,
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(looseObject),
+  });
+};
+
+export const getApproveDataChangeMutationKey = () =>
+  ["approveDataChange"] as const;
+
+export const getApproveDataChangeMutationOptions = <
+  TError = ErrorType<ValidationFailedResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof approveDataChange>>,
+    TError,
+    ApproveDataChangeMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof approveDataChange>>,
+  TError,
+  ApproveDataChangeMutationVariables,
+  TContext
+> => {
+  const mutationKey = getApproveDataChangeMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof approveDataChange>>,
+    ApproveDataChangeMutationVariables
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return approveDataChange(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ApproveDataChangeMutationResult = NonNullable<
+  Awaited<ReturnType<typeof approveDataChange>>
+>;
+export type ApproveDataChangeMutationBody = BodyType<LooseObject> | undefined;
+export type ApproveDataChangeMutationError =
+  ErrorType<ValidationFailedResponse>;
+export type ApproveDataChangeMutationVariables = {
+  id: string;
+  data?: BodyType<LooseObject>;
+};
+
+/** @summary Approve and carry out a pending request (not your own) */
+export const useApproveDataChange = <
+  TError = ErrorType<ValidationFailedResponse>,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof approveDataChange>>,
+      TError,
+      ApproveDataChangeMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof approveDataChange>>,
+  TError,
+  ApproveDataChangeMutationVariables,
+  TContext
+> => {
+  return useMutation(getApproveDataChangeMutationOptions(options), queryClient);
+};
+
+export const getRejectDataChangeUrl = (id: string) => {
+  return `/api/system/changes/${id}/reject`;
+};
+
+/**
+ * @summary Reject or withdraw a pending request
+ */
+export const rejectDataChange = async (
+  id: string,
+  looseObject?: LooseObject,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<LooseObject> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return customFetch<LooseObject>(getRejectDataChangeUrl(id), {
+    ...options,
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(looseObject),
+  });
+};
+
+export const getRejectDataChangeMutationKey = () =>
+  ["rejectDataChange"] as const;
+
+export const getRejectDataChangeMutationOptions = <
+  TError = ErrorType<ValidationFailedResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof rejectDataChange>>,
+    TError,
+    RejectDataChangeMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof rejectDataChange>>,
+  TError,
+  RejectDataChangeMutationVariables,
+  TContext
+> => {
+  const mutationKey = getRejectDataChangeMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof rejectDataChange>>,
+    RejectDataChangeMutationVariables
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return rejectDataChange(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RejectDataChangeMutationResult = NonNullable<
+  Awaited<ReturnType<typeof rejectDataChange>>
+>;
+export type RejectDataChangeMutationBody = BodyType<LooseObject> | undefined;
+export type RejectDataChangeMutationError = ErrorType<ValidationFailedResponse>;
+export type RejectDataChangeMutationVariables = {
+  id: string;
+  data?: BodyType<LooseObject>;
+};
+
+/** @summary Reject or withdraw a pending request */
+export const useRejectDataChange = <
+  TError = ErrorType<ValidationFailedResponse>,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof rejectDataChange>>,
+      TError,
+      RejectDataChangeMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof rejectDataChange>>,
+  TError,
+  RejectDataChangeMutationVariables,
+  TContext
+> => {
+  return useMutation(getRejectDataChangeMutationOptions(options), queryClient);
+};
+
+export const getGetRetentionRunReportUrl = (id: string) => {
+  return `/api/system/retention/runs/${id}/report`;
+};
+
+/**
+ * @summary One pruning run as CSV
+ */
+export const getRetentionRunReport = async (
+  id: string,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<LooseObject> => {
+  return customFetch<LooseObject>(getGetRetentionRunReportUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetRetentionRunReportQueryKey = (id: string) => {
+  return [`/api/system/retention/runs/${id}/report`] as const;
+};
+
+export const getGetRetentionRunReportQueryOptions = <
+  TData = Awaited<ReturnType<typeof getRetentionRunReport>>,
+  TError = ErrorType<unknown>,
+>(
+  id: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getRetentionRunReport>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetRetentionRunReportQueryKey(id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getRetentionRunReport>>
+  > = ({ signal }) => getRetentionRunReport(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: id !== null && id !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getRetentionRunReport>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetRetentionRunReportQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getRetentionRunReport>>
+>;
+export type GetRetentionRunReportQueryError = ErrorType<unknown>;
+
+/** @summary One pruning run as CSV */
+export function useGetRetentionRunReport<
+  TData = Awaited<ReturnType<typeof getRetentionRunReport>>,
+  TError = ErrorType<unknown>,
+>(
+  id: string,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getRetentionRunReport>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getRetentionRunReport>>,
+          TError,
+          Awaited<ReturnType<typeof getRetentionRunReport>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary One pruning run as CSV */
+export function useGetRetentionRunReport<
+  TData = Awaited<ReturnType<typeof getRetentionRunReport>>,
+  TError = ErrorType<unknown>,
+>(
+  id: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getRetentionRunReport>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getRetentionRunReport>>,
+          TError,
+          Awaited<ReturnType<typeof getRetentionRunReport>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary One pruning run as CSV */
+export function useGetRetentionRunReport<
+  TData = Awaited<ReturnType<typeof getRetentionRunReport>>,
+  TError = ErrorType<unknown>,
+>(
+  id: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getRetentionRunReport>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary One pruning run as CSV */
+export function useGetRetentionRunReport<
+  TData = Awaited<ReturnType<typeof getRetentionRunReport>>,
+  TError = ErrorType<unknown>,
+>(
+  id: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getRetentionRunReport>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getGetRetentionRunReportQueryOptions(id, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
 export const getRunRetentionPruningUrl = () => {
   return `/api/system/retention/run`;
 };
 
 /**
- * @summary Run telemetry pruning now (most specific policy wins per row)
+ * @summary Run telemetry pruning now (most specific policy wins per row; 202 when it needs approval)
  */
 export const runRetentionPruning = async (
   options?: Parameters<typeof customFetch>[1],
@@ -12424,7 +15508,7 @@ export type RunRetentionPruningMutationResult = NonNullable<
 
 export type RunRetentionPruningMutationError = ErrorType<ErrorResponse>;
 
-/** @summary Run telemetry pruning now (most specific policy wins per row) */
+/** @summary Run telemetry pruning now (most specific policy wins per row; 202 when it needs approval) */
 export const useRunRetentionPruning = <
   TError = ErrorType<ErrorResponse>,
   TContext = unknown,

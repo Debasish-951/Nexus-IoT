@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQueryClient, type QueryClient } from "@tanstack/react-query";
 import { onUserReset } from "@/lib/user-scoped-state";
 
-export type WsEventType = "activity_log" | "telemetry" | "alarm" | "broker_status" | "connected";
+export type WsEventType = "activity_log" | "telemetry" | "alarm" | "broker_status" | "connected" | "system_alerts";
 
 export type WsStatus = "connecting" | "connected" | "reconnecting";
 

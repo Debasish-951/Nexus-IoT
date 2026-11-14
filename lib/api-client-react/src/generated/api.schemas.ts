@@ -1612,10 +1612,22 @@ export interface UploadBatchResult {
   rejected: UploadRejection[];
 }
 
+/**
+ * A JSON object; the shape is described in docs/features/data-management.md.
+ */
+export interface LooseObject {
+  [key: string]: unknown;
+}
+
 export interface TelemetryTableStats {
+  /** The planner's estimate (pg_class.reltuples), not an exact count. */
   totalRows: number;
+  totalRowsEstimated?: boolean;
   /** Human-readable size from pg_size_pretty, or "unknown". */
   tableSize: string;
+  tableBytes?: number;
+  /** @nullable */
+  bytesPerRow?: number | null;
   /** @nullable */
   oldestRecord: string | null;
   /** @nullable */
@@ -1629,12 +1641,180 @@ export interface AssetStorageStats {
   metrics: number;
   oldest: string;
   newest: string;
+  /**
+   * Estimated share of the table on disk.
+   * @nullable
+   */
+  bytes?: number | null;
+  /**
+   * Shortest retention among this asset's metrics; null when no policy applies.
+   * @nullable
+   */
+  minDays?: number | null;
+  /** @nullable */
+  maxDays?: number | null;
+  /** True when at least one metric has no policy. */
+  keptForever?: boolean;
+  /** Summaries of an asset that no longer exists. */
+  deleted?: boolean;
+}
+
+export type StorageGrowthDailyItem = {
+  day: string;
+  rows: number;
+};
+
+export interface StorageGrowth {
+  /** Readings that arrived per plant-time day, last 30 days. */
+  daily: StorageGrowthDailyItem[];
+  /**
+   * Average of the last 7 complete days.
+   * @nullable
+   */
+  rowsPerDay: number | null;
+  /** @nullable */
+  bytesPerDay: number | null;
+  /** @nullable */
+  bytesPerMonth: number | null;
+  /**
+   * Readings per day that no policy will ever delete.
+   * @nullable
+   */
+  netRowsPerDay: number | null;
+  /** @nullable */
+  netBytesPerDay: number | null;
+  /** @nullable */
+  netBytesPerMonth: number | null;
+}
+
+/**
+ * Free space on STORAGE_DISK_PATH (default "/") as seen by the API server.
+ * @nullable
+ */
+export type StorageDisk = {
+  path: string;
+  totalBytes: number;
+  freeBytes: number;
+  /** @nullable */
+  daysUntilFull: number | null;
+} | null;
+
+export interface RollupStatus {
+  enabled: boolean;
+  /** @nullable */
+  watermark: string | null;
+  /** @nullable */
+  startedFrom: string | null;
+  progressPct: number;
+  complete: boolean;
+  summaryRows: number;
+  /** @nullable */
+  oldestSummary: string | null;
+  size: string;
+  /** @nullable */
+  error: string | null;
+}
+
+export type RetentionOverviewOperationalItem = {
+  key: string;
+  label: string;
+  env: string;
+  /** 0 means kept for ever. */
+  days: number;
+};
+
+export interface RetentionOverview {
+  enabledPolicies: number;
+  operational: RetentionOverviewOperationalItem[];
+}
+
+export type RetentionRunRecordTrigger =
+  (typeof RetentionRunRecordTrigger)[keyof typeof RetentionRunRecordTrigger];
+
+export const RetentionRunRecordTrigger = {
+  hourly: "hourly",
+  manual: "manual",
+} as const;
+
+export type RetentionRunRecordDetailsItem = { [key: string]: unknown };
+
+export type RetentionRunRecordOperational = { [key: string]: number };
+
+export interface RetentionRunRecord {
+  id: string;
+  trigger: RetentionRunRecordTrigger;
+  /** @nullable */
+  userId: string | null;
+  /** @nullable */
+  username: string | null;
+  startedAt: string;
+  /** @nullable */
+  finishedAt: string | null;
+  telemetryDeleted: number;
+  details: RetentionRunRecordDetailsItem[];
+  operational: RetentionRunRecordOperational;
+  /** @nullable */
+  error: string | null;
 }
 
 export interface SystemStorageReport {
   telemetry: TelemetryTableStats;
   perAsset: AssetStorageStats[];
+  growth?: StorageGrowth;
+  disk?: StorageDisk | null;
+  rollups?: RollupStatus;
+  retention?: RetentionOverview;
+  lastRun?: RetentionRunRecord | null;
   generatedAt: string;
+}
+
+export type RetentionPreviewRequestPolicy = {
+  id?: string;
+  /** @nullable */
+  assetId?: string | null;
+  /**
+   * @maxLength 200
+   * @nullable
+   */
+  metric?: string | null;
+  /**
+   * @minimum 1
+   * @maximum 3650
+   */
+  retentionDays: number;
+  enabled?: boolean;
+};
+
+export interface RetentionPreviewRequest {
+  policy?: RetentionPreviewRequestPolicy;
+  removeId?: string;
+}
+
+export type RetentionPreviewCurrent = {
+  rows: number;
+  /** @nullable */
+  bytes: number | null;
+};
+
+export type RetentionPreviewByAssetItem = {
+  assetId: string;
+  assetName: string;
+  rows: number;
+};
+
+export interface RetentionPreview {
+  /** False when hourly summaries are switched off. */
+  available: boolean;
+  /** Readings the next run would delete with the change. */
+  rows: number;
+  /** @nullable */
+  bytes: number | null;
+  current: RetentionPreviewCurrent;
+  byAsset: RetentionPreviewByAssetItem[];
+  /** False while the summaries are still catching up; the estimate is then low. */
+  complete: boolean;
+  /** True when a cutoff waits for the summaries. */
+  limited: boolean;
 }
 
 /**

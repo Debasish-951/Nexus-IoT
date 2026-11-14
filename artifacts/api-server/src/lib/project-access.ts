@@ -111,6 +111,8 @@ const PLATFORM_WIDE = [
   // restricted user could otherwise create a global policy and delete history for
   // all projects, or read every project's asset names from the storage report.
   /^\/system\/(storage|retention)(\/|$)/,
+  // The rest of Data Management (health, alerts, backups, holds, archives, approvals) is plant-wide too.
+  /^\/system\/(db-health|data-health|data-settings|alerts|backups|holds|archives|changes)(\/|$)/,
 ];
 
 /** Asset id carried directly in the path. */

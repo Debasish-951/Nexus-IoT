@@ -1999,7 +1999,10 @@ paths:
     get:
       operationId: getSystemStorage
       tags: [system]
-      summary: Telemetry table size and per-asset row counts
+      summary: Telemetry size, growth, disk space, per-asset counts and summary-job status
+      description: |
+        Row totals are the planner's estimate; per-asset and per-day counts come
+        from the hourly summaries (telemetry_rollups), cached for a minute.
       responses:
         "200":
           description: OK
@@ -2080,7 +2083,7 @@ paths:
     post:
       operationId: createRetentionPolicy
       tags: [system]
-      summary: Create a retention policy
+      summary: Create a retention policy (202 with the pending request when it needs approval)
       requestBody:
         required: true
         content:
@@ -2097,11 +2100,399 @@ paths:
         "400":
           $ref: "#/components/responses/ValidationFailed"
 
+  /system/retention/preview:
+    post:
+      operationId: previewRetention
+      tags: [system]
+      summary: Estimate what the next pruning run would delete with a draft change (read-only)
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RetentionPreviewRequest"
+      responses:
+        "200":
+          description: Estimate
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RetentionPreview"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+
+  /system/retention/runs:
+    get:
+      operationId: listRetentionRuns
+      tags: [system]
+      summary: Pruning history, newest first (last 50)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/RetentionRunRecord"
+
+  /system/storage/all:
+    get:
+      operationId: getStorageAll
+      tags: [system]
+      summary: Size of every table, uploads, archives, backups, disk, and partitioning status
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LooseObject"
+
+  /system/data-health:
+    get:
+      operationId: getDataHealth
+      tags: [system]
+      summary: Per-asset last reading, 7-day coverage and gaps, busiest metrics, refused ingest requests
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LooseObject"
+
+  /system/data-settings:
+    get:
+      operationId: getDataSettings
+      tags: [system]
+      summary: Data Management settings (webhook URL masked)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LooseObject"
+    put:
+      operationId: updateDataSettings
+      tags: [system]
+      summary: Change Data Management settings (any subset)
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LooseObject"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LooseObject"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+
+  /system/alerts:
+    get:
+      operationId: listSystemAlerts
+      tags: [system]
+      summary: Storage and pipeline alerts, newest first
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LooseObject"
+
+  /system/alerts/check:
+    post:
+      operationId: checkSystemAlerts
+      tags: [system]
+      summary: Check alert conditions now
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LooseObject"
+
+  /system/alerts/{id}/acknowledge:
+    post:
+      operationId: acknowledgeSystemAlert
+      tags: [system]
+      summary: Acknowledge an active alert
+      parameters:
+        - $ref: "#/components/parameters/UuidPath"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LooseObject"
+
+  /system/backups:
+    get:
+      operationId: listBackups
+      tags: [system]
+      summary: Backup runs reported by the backup script, and whether backups are current
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LooseObject"
+
+  /system/db-health:
+    get:
+      operationId: getDbHealth
+      tags: [system]
+      summary: Connections, long queries, cache hit ratio, dead rows per table
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LooseObject"
+
+  /system/db-health/vacuum:
+    post:
+      operationId: vacuumTable
+      tags: [system]
+      summary: Start VACUUM (ANALYZE) on one table in the background
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LooseObject"
+      responses:
+        "202":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LooseObject"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+
+  /system/holds:
+    get:
+      operationId: listDataHolds
+      tags: [system]
+      summary: Legal holds
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LooseObject"
+    post:
+      operationId: createDataHold
+      tags: [system]
+      summary: Place a legal hold
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LooseObject"
+      responses:
+        "201":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LooseObject"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+
+  /system/holds/{id}/release:
+    post:
+      operationId: releaseDataHold
+      tags: [system]
+      summary: Release a legal hold
+      parameters:
+        - $ref: "#/components/parameters/UuidPath"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LooseObject"
+
+  /system/archives:
+    get:
+      operationId: listArchives
+      tags: [system]
+      summary: Daily telemetry archive files and archiving status
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LooseObject"
+
+  /system/archives/{id}/download:
+    get:
+      operationId: downloadArchive
+      tags: [system]
+      summary: Download one archive file (gzip JSON lines)
+      parameters:
+        - $ref: "#/components/parameters/UuidPath"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LooseObject"
+
+  /system/archives/{id}/restore:
+    post:
+      operationId: restoreArchive
+      tags: [system]
+      summary: Re-insert an archived day and place a legal hold on it
+      parameters:
+        - $ref: "#/components/parameters/UuidPath"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LooseObject"
+
+  /system/changes:
+    get:
+      operationId: listDataChangeRequests
+      tags: [system]
+      summary: Bad-data removals, approvals and their outcome
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LooseObject"
+
+  /system/changes/range-preview:
+    post:
+      operationId: previewRangeDelete
+      tags: [system]
+      summary: Count readings in a range and check holds and approval
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LooseObject"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LooseObject"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+
+  /system/changes/range-delete:
+    post:
+      operationId: requestRangeDelete
+      tags: [system]
+      summary: Remove readings of one asset (and metric) in a time range; 202 when it waits for approval
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LooseObject"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LooseObject"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+
+  /system/changes/{id}/approve:
+    post:
+      operationId: approveDataChange
+      tags: [system]
+      summary: Approve and carry out a pending request (not your own)
+      parameters:
+        - $ref: "#/components/parameters/UuidPath"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LooseObject"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LooseObject"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+
+  /system/changes/{id}/reject:
+    post:
+      operationId: rejectDataChange
+      tags: [system]
+      summary: Reject or withdraw a pending request
+      parameters:
+        - $ref: "#/components/parameters/UuidPath"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/LooseObject"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LooseObject"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+
+  /system/retention/runs/{id}/report:
+    get:
+      operationId: getRetentionRunReport
+      tags: [system]
+      summary: One pruning run as CSV
+      parameters:
+        - $ref: "#/components/parameters/UuidPath"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LooseObject"
+
   /system/retention/run:
     post:
       operationId: runRetentionPruning
       tags: [system]
-      summary: Run telemetry pruning now (most specific policy wins per row)
+      summary: Run telemetry pruning now (most specific policy wins per row; 202 when it needs approval)
       responses:
         "200":
           description: Run finished
@@ -5357,6 +5748,11 @@ components:
       required: [uploaded, rejected]
 
     # ─── System ──────────────────────────────────────────────────────────────
+    LooseObject:
+      type: object
+      description: A JSON object; the shape is described in docs/features/data-management.md.
+      additionalProperties: true
+
     SystemStorageReport:
       type: object
       properties:
@@ -5366,19 +5762,251 @@ components:
           type: array
           items:
             $ref: "#/components/schemas/AssetStorageStats"
+        growth:
+          $ref: "#/components/schemas/StorageGrowth"
+        disk:
+          $ref: "#/components/schemas/StorageDisk"
+        rollups:
+          $ref: "#/components/schemas/RollupStatus"
+        retention:
+          $ref: "#/components/schemas/RetentionOverview"
+        lastRun:
+          allOf:
+            - $ref: "#/components/schemas/RetentionRunRecord"
+          nullable: true
         generatedAt:
           type: string
           format: date-time
       required: [telemetry, perAsset, generatedAt]
+
+    StorageGrowth:
+      type: object
+      properties:
+        daily:
+          type: array
+          description: Readings that arrived per plant-time day, last 30 days.
+          items:
+            type: object
+            properties:
+              day:
+                type: string
+                format: date-time
+              rows:
+                type: integer
+            required: [day, rows]
+        rowsPerDay:
+          type: number
+          nullable: true
+          description: Average of the last 7 complete days.
+        bytesPerDay:
+          type: number
+          nullable: true
+        bytesPerMonth:
+          type: number
+          nullable: true
+        netRowsPerDay:
+          type: number
+          nullable: true
+          description: Readings per day that no policy will ever delete.
+        netBytesPerDay:
+          type: number
+          nullable: true
+        netBytesPerMonth:
+          type: number
+          nullable: true
+      required: [daily, rowsPerDay, bytesPerDay, bytesPerMonth, netRowsPerDay, netBytesPerDay, netBytesPerMonth]
+
+    StorageDisk:
+      type: object
+      nullable: true
+      description: Free space on STORAGE_DISK_PATH (default "/") as seen by the API server.
+      properties:
+        path:
+          type: string
+        totalBytes:
+          type: number
+        freeBytes:
+          type: number
+        daysUntilFull:
+          type: integer
+          nullable: true
+      required: [path, totalBytes, freeBytes, daysUntilFull]
+
+    RollupStatus:
+      type: object
+      properties:
+        enabled:
+          type: boolean
+        watermark:
+          type: string
+          format: date-time
+          nullable: true
+        startedFrom:
+          type: string
+          format: date-time
+          nullable: true
+        progressPct:
+          type: number
+        complete:
+          type: boolean
+        summaryRows:
+          type: integer
+        oldestSummary:
+          type: string
+          format: date-time
+          nullable: true
+        size:
+          type: string
+        error:
+          type: string
+          nullable: true
+      required: [enabled, watermark, startedFrom, progressPct, complete, summaryRows, oldestSummary, size, error]
+
+    RetentionOverview:
+      type: object
+      properties:
+        enabledPolicies:
+          type: integer
+        operational:
+          type: array
+          items:
+            type: object
+            properties:
+              key:
+                type: string
+              label:
+                type: string
+              env:
+                type: string
+              days:
+                type: integer
+                description: 0 means kept for ever.
+            required: [key, label, env, days]
+      required: [enabledPolicies, operational]
+
+    RetentionPreviewRequest:
+      type: object
+      properties:
+        policy:
+          type: object
+          properties:
+            id:
+              type: string
+              format: uuid
+            assetId:
+              type: string
+              format: uuid
+              nullable: true
+            metric:
+              type: string
+              maxLength: 200
+              nullable: true
+            retentionDays:
+              type: integer
+              minimum: 1
+              maximum: 3650
+            enabled:
+              type: boolean
+          required: [retentionDays]
+        removeId:
+          type: string
+          format: uuid
+
+    RetentionPreview:
+      type: object
+      properties:
+        available:
+          type: boolean
+          description: False when hourly summaries are switched off.
+        rows:
+          type: integer
+          description: Readings the next run would delete with the change.
+        bytes:
+          type: number
+          nullable: true
+        current:
+          type: object
+          properties:
+            rows:
+              type: integer
+            bytes:
+              type: number
+              nullable: true
+          required: [rows, bytes]
+        byAsset:
+          type: array
+          items:
+            type: object
+            properties:
+              assetId:
+                type: string
+              assetName:
+                type: string
+              rows:
+                type: integer
+            required: [assetId, assetName, rows]
+        complete:
+          type: boolean
+          description: False while the summaries are still catching up; the estimate is then low.
+        limited:
+          type: boolean
+          description: True when a cutoff waits for the summaries.
+      required: [available, rows, bytes, current, byAsset, complete, limited]
+
+    RetentionRunRecord:
+      type: object
+      properties:
+        id:
+          type: string
+          format: uuid
+        trigger:
+          type: string
+          enum: [hourly, manual]
+        userId:
+          type: string
+          nullable: true
+        username:
+          type: string
+          nullable: true
+        startedAt:
+          type: string
+          format: date-time
+        finishedAt:
+          type: string
+          format: date-time
+          nullable: true
+        telemetryDeleted:
+          type: integer
+        details:
+          type: array
+          items:
+            type: object
+            additionalProperties: true
+        operational:
+          type: object
+          additionalProperties:
+            type: integer
+        error:
+          type: string
+          nullable: true
+      required: [id, trigger, userId, username, startedAt, finishedAt, telemetryDeleted, details, operational, error]
 
     TelemetryTableStats:
       type: object
       properties:
         totalRows:
           type: integer
+          description: The planner's estimate (pg_class.reltuples), not an exact count.
+        totalRowsEstimated:
+          type: boolean
         tableSize:
           type: string
           description: Human-readable size from pg_size_pretty, or "unknown".
+        tableBytes:
+          type: number
+        bytesPerRow:
+          type: number
+          nullable: true
         oldestRecord:
           type: string
           format: date-time
@@ -5406,6 +6034,23 @@ components:
         newest:
           type: string
           format: date-time
+        bytes:
+          type: number
+          nullable: true
+          description: Estimated share of the table on disk.
+        minDays:
+          type: integer
+          nullable: true
+          description: Shortest retention among this asset's metrics; null when no policy applies.
+        maxDays:
+          type: integer
+          nullable: true
+        keptForever:
+          type: boolean
+          description: True when at least one metric has no policy.
+        deleted:
+          type: boolean
+          description: Summaries of an asset that no longer exists.
       required: [assetId, assetName, rows, metrics, oldest, newest]
 
     SystemAggregateReport:

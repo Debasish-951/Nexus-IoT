@@ -18,7 +18,8 @@
     "bootstrap": "tsx src/bootstrap-owner.ts",
     "set-password": "tsx src/set-password.ts",
     "remap-children": "tsx src/remap-children.ts",
-    "hash-api-secrets": "tsx src/hash-api-secrets.ts"
+    "hash-api-secrets": "tsx src/hash-api-secrets.ts",
+    "partition-telemetry": "tsx src/partition-telemetry.ts"
   },
   "dependencies": {
     "drizzle-orm": "catalog:",

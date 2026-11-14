@@ -1,4 +1,5 @@
 import express, { type Express, type Request, type Response, type NextFunction } from "express";
+import { ingestRejectionRecorder } from "./services/ingest-rejections";
 import cors from "cors";
 import cookieParser from "cookie-parser";
 import pinoHttp from "pino-http";
@@ -142,6 +143,8 @@ app.use(requestGuard);
 //      after step 1 — hence a second limiter here rather than one at the top.
 //
 // Mounted on /api as a whole so no route file can forget its guard.
+// Counts refused/failed ingest calls for Data Management > Data health (before auth, so 401s count too).
+app.use("/api", ingestRejectionRecorder);
 app.use("/api", floodGuard);
 app.use("/api", attachPrincipal, attachApiClient, stripForgedActorHeaders, csrfGuard, authorize, projectScopeGuard);
 app.use("/api", apiRateLimit);

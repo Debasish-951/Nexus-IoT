@@ -69,13 +69,25 @@ scripts/                  — Utility scripts
 - `POST /api/plant-twins/values` — latest reading for up to 500 asset+metric pairs (read-only; one indexed lookup per pair; pairs outside the caller's projects are dropped)
 - `GET /api/activity-log` — paginated audit trail (category, actorName, limit, offset filters)
 - `POST /api/assets/:id/maintenance` — toggle maintenance mode (body: { enabled, note? })
-- `GET /api/system/storage` — storage stats (totalRows, tableSize, perAsset breakdown)
+- `GET /api/system/storage` — storage, growth and disk figures for Data Management. Row total is the planner estimate (`pg_class.reltuples`); oldest/newest use the timestamp index; per-asset and per-day counts come from `telemetry_rollups` (cached 60 s). Also returns disk free space (`STORAGE_DISK_PATH`), summary-job status, the age-based retention periods and the last run
 - `GET /api/system/aggregate` — time-bucketed aggregation (bucket: 5m/15m/30m/1h/6h/12h/1d/1w; avg/min/max per interval). Over `limit`, the NEWEST buckets are kept and `truncated: true` is returned; 1d/1w buckets start at midnight / Monday in `PLANT_TIME_ZONE`
 - `GET /api/system/retention` — list data retention policies
 - `POST /api/system/retention` — create retention policy (name, retentionDays, assetId?, metric?, enabled)
 - `PUT /api/system/retention/:id` — update retention policy
 - `DELETE /api/system/retention/:id` — delete retention policy
-- `POST /api/system/retention/run` — manually trigger pruning across all enabled policies (409 `pruning_in_progress` while a run is going)
+- `POST /api/system/retention/run` — manually trigger pruning across all enabled policies (409 `pruning_in_progress` while a run is going); recorded in `retention_runs` and the activity log
+- `POST /api/system/retention/preview` — read-only estimate of what the next run would delete with a draft change (`policy` with optional `id`, or `removeId`; empty body = current policies). Computed from `telemetry_rollups`; needs only Reports read
+- `GET /api/system/retention/runs` — pruning history, newest first (last 50); `GET /api/system/retention/runs/:id/report` — one run as CSV
+- `POST /api/system/retention`, `PUT /api/system/retention/:id`, `POST /api/system/retention/run` return **202** `{pendingApproval, request}` when approval is on and the change would delete more than the limit
+- `GET /api/system/storage/all` — every table, uploads folder, archives, last backup, disk, partitioning status
+- `GET /api/system/data-health` — per-asset last reading / 7-day coverage / gaps, busiest metrics, refused ingest requests (24 h)
+- `GET /api/system/db-health` (Manage assets) — connections, long queries, cache hit ratio, dead rows per table; `POST /api/system/db-health/vacuum` `{schema, table}` — background VACUUM (ANALYZE), 202
+- `GET|PUT /api/system/data-settings` — alert thresholds and webhook (masked), quiet time, pruning window, approval, archiving, summary levels
+- `GET /api/system/alerts`, `POST /api/system/alerts/check`, `POST /api/system/alerts/:id/acknowledge`
+- `GET /api/system/backups` — backup runs reported by `scripts/ops/nexus-backup.sh`
+- `GET|POST /api/system/holds`, `POST /api/system/holds/:id/release` — legal holds
+- `GET /api/system/archives`, `GET /api/system/archives/:id/download` (Manage assets), `POST /api/system/archives/:id/restore` (re-inserts the day and places a hold)
+- `GET /api/system/changes`, `POST /api/system/changes/range-preview`, `POST /api/system/changes/range-delete` (202 when it needs approval; 409 `hold_conflict`), `POST /api/system/changes/:id/approve` (403 `self_approval` for the requester), `POST /api/system/changes/:id/reject`
 
 ### Activity Logging
 - `logActivity(action, category, targetId, targetName, detail, req)` — internal helper in `activity_log.ts`
@@ -173,12 +185,22 @@ Everything else (sessions, account lockouts, users, alarms, telemetry, audit and
 - `alarms`: indexes on `status`, `(asset_id, status)`, `triggered_at`; `alarm_history`: `acknowledged_at` column, indexes on `alarm_id`, `triggered_at`; `attributes`: index on `asset_id`; `broker_events`: `(broker_id, timestamp)`, `timestamp`; `activity_logs`: `timestamp`. No foreign keys were added to telemetry/attributes/alarms/alarm_history (existing orphan rows would fail `db push`); asset deletion removes dependants in one transaction instead
 - `telemetry`: three composite indexes: `idx_telemetry_asset_metric_ts (asset_id, metric, timestamp)`, `idx_telemetry_ts (timestamp)`, `idx_telemetry_asset_ts (asset_id, timestamp)`
 - `data_retention_policies`: id, name, assetId (null=all), metric (null=all), retentionDays, enabled, lastPrunedAt, rowsPruned
+- `telemetry_rollups`: (asset_id, metric, bucket) primary key, bucket = start of the UTC hour; `rows` (all readings), `n`/`sum`/`min`/`max` (numeric readings only). Index on bucket. Deleted with the asset
+- `job_state`: key/value for background jobs; `telemetry_rollups` holds the summary watermark
+- `retention_runs`: one row per hourly or manual run: trigger, user, started/finished, telemetryDeleted, per-policy details, deletions per other table, error
+- `telemetry_rollups_15m`: as `telemetry_rollups` with 15-minute buckets (watermark in `job_state` key `telemetry_rollups_15m`)
+- `backup_runs` (written by the backup script), `system_alerts` (one open row per condition key), `data_holds` (legal holds), `data_archives` (one row per archived UTC day, path + SHA-256), `data_change_requests` (bad-data removals and approvals), `ingest_rejections` (refused ingest per hour/source/route/status/code)
+- `job_state` keys: `telemetry_rollups`, `telemetry_rollups_15m`, `telemetry_archive` (`archivedUntil`), `data_settings`, `telemetry_partitioning` (conversion state)
+- Optional: `telemetry` partitioned by month (`lib/db/src/partition-telemetry.ts`), partitions in schema `telemetry_parts`; `drizzle.config.ts` then leaves `telemetry.ts` out of push
 
 ### Data Retention / Pruning
-- Hourly background job (`setInterval` in `src/index.ts`) calls `runPruning()` and `runOperationalPruning()` from `routes/system.ts`; each has a single-run guard
+- Hourly background job (`setInterval` in `src/index.ts`) calls `runScheduledRetention()` from `routes/system.ts`: `runPruning()`, `runOperationalPruning()`, old summaries and old history, recorded as one `retention_runs` row. Each step has a single-run guard
+- Summary job (`services/rollups.ts`, every 10 minutes, first run 15 s after start): walks raw telemetry forward from the oldest reading in 6-hour slices into `telemetry_rollups`, re-summarising the last 6 hours each run for late readings (a recount never lowers a stored count). `TELEMETRY_ROLLUPS=false` turns it off
+- Pruning never deletes raw readings newer than `watermark - 6 h` of any active summary level, readings under a legal hold, or (with archiving on) days not yet archived; it skips telemetry outside the pruning window; when telemetry is partitioned and an all-assets policy exists, whole expired months are dropped first
+- `/system/aggregate` with buckets of 15 min or longer fills quarter hours without raw readings from `telemetry_rollups_15m`, and hours with neither from `telemetry_rollups` (buckets of 1 h or longer), so long-term charts survive raw retention and gaps
 - Telemetry: the MOST SPECIFIC enabled policy covering a row decides its retention — asset+metric over asset, asset over metric, metric over global. Two enabled policies with the same scope merge and the longer retention wins. (Previously every policy deleted independently, so a short global policy deleted data a longer asset policy should keep.)
 - Deletes run in batches of 5,000 rows by primary key, at most 200 batches per policy/table per run; the next hourly run continues
-- Operational tables are pruned by age, configurable by env (0 disables): cleared alarms `RETENTION_CLEARED_ALARMS_DAYS` (365), alarm history `RETENTION_ALARM_HISTORY_DAYS` (730), activity logs `RETENTION_ACTIVITY_LOG_DAYS` (365), broker events `RETENTION_BROKER_EVENTS_DAYS` (90), expired/redeemed/revoked auth tokens `RETENTION_AUTH_TOKENS_DAYS` (30). Open alarms and the history of open alarms are never deleted
+- Operational tables are pruned by age, configurable by env (0 disables): cleared alarms `RETENTION_CLEARED_ALARMS_DAYS` (365), alarm history `RETENTION_ALARM_HISTORY_DAYS` (730), activity logs `RETENTION_ACTIVITY_LOG_DAYS` (365), broker events `RETENTION_BROKER_EVENTS_DAYS` (90), expired/redeemed/revoked auth tokens `RETENTION_AUTH_TOKENS_DAYS` (30), hourly summaries `RETENTION_ROLLUP_DAYS` (1825), pruning history `RETENTION_RUNS_DAYS` (90). Open alarms and the history of open alarms are never deleted
 - `rowsPruned` counter accumulates across all runs
 
 ### Ingest, alarms and destinations

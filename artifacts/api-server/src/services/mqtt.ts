@@ -11,6 +11,7 @@ import mqtt from "mqtt";
 import { db, brokersTable, brokerEventsTable } from "@workspace/db";
 import { and, eq, sql } from "drizzle-orm";
 import { normalise, processNormalised } from "../routes/ingest.js";
+import { recordIngestRejection } from "./ingest-rejections.js";
 import { broadcast } from "../lib/ws-broadcast.js";
 
 const activeClients: Map<string, ReturnType<typeof mqtt.connect>> = new Map();
@@ -127,7 +128,10 @@ export async function startMqttSubscribers(onlyId?: string): Promise<void> {
           // Ensure deviceId is set
           if (!body.deviceId && broker.mqttClientId) body.deviceId = broker.mqttClientId;
           const n = normalise(body);
-          if (!n) return;
+          if (!n) {
+            recordIngestRejection({ source: "mqtt", route: `mqtt:${broker.name}`, status: 422, code: "no_readings", message: "The message held no readings that could be stored.", client: broker.name });
+            return;
+          }
           await processNormalised(n);
           // One message, one request. This used to write the number of BROKERS.
           await db.update(brokersTable)
@@ -135,6 +139,10 @@ export async function startMqttSubscribers(onlyId?: string): Promise<void> {
             .where(eq(brokersTable.id, broker.id));
         } catch (err: any) {
           console.error(`[MQTT] Message error on ${broker.name}:`, err?.message ?? err);
+          recordIngestRejection({
+            source: "mqtt", route: `mqtt:${broker.name}`, status: err instanceof SyntaxError ? 400 : 500,
+            code: err instanceof SyntaxError ? "invalid_json" : "processing_failed", message: err?.message ?? String(err), client: broker.name,
+          });
         }
       };
 

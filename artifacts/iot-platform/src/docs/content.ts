@@ -721,39 +721,37 @@ export function buildDocumentContent(): ContentItem[] {
     // ─── CHAPTER 9 ────────────────────────────────────────────────────────────
     h1("Chapter 9: System Management"),
     h2("9.1 Data Management"),
-    p("The Data Management page (System → Data Management) provides visibility into database storage usage and allows configuration of data retention policies."),
+    p("The Data Management page (System → Data Management) shows how much sensor data is stored, how fast it grows, how much disk space is left, and when old readings are deleted. A warning appears at the top while no retention policy exists, because readings are then never deleted."),
+    p("It has six tabs: Overview (alerts, storage, growth, data per project and asset, summaries), Retention (policies, approvals, bad-data removal, legal holds, pruning history), Data health (quiet assets, gaps, busiest metrics, refused ingest requests), Archives & backups, Database (what uses the disk, monthly partitions, database health) and Settings (alert thresholds and webhook, pruning window, approval of large deletions, archiving, summary levels). The full guide is docs/features/data-management.md."),
 
-    h3("9.1.1 Storage Overview"),
-    p("The top of the page shows aggregate storage statistics:"),
+    h3("9.1.1 Storage and growth"),
     ul([
-      "Total Rows — total number of telemetry records stored across all assets.",
-      "Table Size — disk space used by the telemetry table (PostgreSQL pg_size_pretty format).",
-      "Oldest Record — timestamp of the oldest telemetry reading in the database.",
-      "Newest Record — timestamp of the most recent telemetry reading.",
+      "Readings stored — an estimate from the database statistics, so it loads instantly on any table size.",
+      "Size on disk — the telemetry table with its indexes. Space freed by pruning is reused; the file does not shrink.",
+      "Oldest and newest reading.",
+      "Readings per day and new data per month — averages over the last 7 complete days, with a bar chart of the last 30 days.",
+      "Kept for ever, per month — readings that no policy covers. This is what keeps filling the disk.",
+      "Free disk space — measured on the API server at STORAGE_DISK_PATH (default /), with an estimate of the days until the disk is full.",
     ]),
 
-    h3("9.1.2 Per-Asset Breakdown"),
-    p("Below the summary is a table showing storage usage broken down by asset:"),
-    ul([
-      "Asset name",
-      "Row count (number of telemetry records for this asset)",
-      "Oldest record timestamp",
-      "Newest record timestamp",
-    ]),
-    p("This allows you to identify which assets are generating the most data and target retention policies accordingly."),
+    h3("9.1.2 Data per asset"),
+    p("A table lists every asset with its readings, estimated size, number of metrics, oldest and newest reading, and how long its readings are kept under the current policies. Search filters the list."),
+
+    h3("9.1.3 Long-term summaries"),
+    p("Every hour of readings is summarised per asset and metric (count, minimum, average, maximum). The counts on this page come from these summaries. Charts with 1-hour or longer steps use them for hours whose raw readings were deleted, so long-term trends survive a short retention. On first start the platform summarises existing data in the background; the page shows the progress. Pruning only deletes readings whose hour is already summarised."),
 
     h2("9.2 Data Retention Policies"),
     p("Retention policies automatically delete telemetry records older than a configured age. The platform evaluates all enabled policies hourly using a background job. A manual trigger is also available."),
 
     h3("9.2.1 Creating a Retention Policy"),
     ol([
-      "Click 'New Policy' on the Data Management page.",
-      "Enter a Policy Name.",
-      "Set Retention Days (data older than this many days is deleted).",
-      "Optionally restrict the policy to a specific Asset (leave blank for all assets).",
-      "Optionally restrict the policy to a specific Metric (leave blank for all metrics).",
-      "Enable the policy immediately using the Enabled toggle.",
-      "Click Create.",
+      "Click 'Add policy' on the Data Management page.",
+      "Enter a name.",
+      "Set how many days to keep readings, or pick 30 d, 90 d, 180 d, 1 yr or 2 yr.",
+      "Optionally choose an Asset from the list (All assets by default).",
+      "Optionally choose a Metric; with an asset chosen, its metrics are listed.",
+      "Check the estimate: the dialog shows how many readings the next pruning run would delete.",
+      "Click Save policy.",
     ]),
 
     h3("9.2.2 Policy Evaluation"),
@@ -764,7 +762,10 @@ export function buildDocumentContent(): ContentItem[] {
     ]),
 
     h3("9.2.3 Manual Pruning"),
-    p("Click 'Run Pruning Now' to trigger an immediate evaluation of all enabled policies, outside of the normal hourly schedule. This is useful after creating or modifying a policy to see its effect immediately."),
+    p("Click 'Run pruning now' to apply the policies immediately instead of waiting for the hourly run. A confirmation shows how many readings will be deleted; deletion cannot be undone. Deleting a policy also asks for confirmation and shows the effect."),
+
+    h3("9.2.4 Pruning history and other records"),
+    p("The Pruning history lists every hourly and manual run with the readings and other records it deleted and whether it succeeded. Other records (cleared alarms, alarm history, activity log, broker events, sign-in links, summaries, pruning history) are deleted by age; their periods are shown on the page and set in the server's .env file."),
 
     h2("9.3 Reports"),
     p("The Reports page (System → Reports) enables on-demand generation of structured reports from the platform's data. Three report types are available."),
