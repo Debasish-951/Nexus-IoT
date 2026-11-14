@@ -153,6 +153,39 @@ export const PutVizNodeShareBody = z.object({
   delete: z.boolean(),
 });
 
+// ── 3D plant twins ───────────────────────────────────────────────────────────
+
+/**
+ * The scene is the 3D editor's own document (areas, machines, bindings,
+ * connections), open-ended for the same reason widget arrays are: a new machine
+ * model adds settings without a backend release. Structural limits still apply;
+ * the route raises the key budget because a large plant legitimately has more
+ * keys than a dashboard.
+ */
+const plantScene = z.record(z.string(), z.unknown());
+
+export const CreatePlantTwinBody = z.object({
+  id: v.nodeId().optional(),
+  name: v.name(),
+  projectId: v.uuid().nullable().optional(),
+  scene: plantScene,
+});
+
+export const UpdatePlantTwinBody = z.object({
+  name: v.name().optional(),
+  projectId: v.uuid().nullable().optional(),
+  scene: plantScene.optional(),
+  /** Folder in the Live Twin hierarchy (a twin whose scene.kind is "folder"); null = top level. */
+  parentId: v.nodeId().nullable().optional(),
+});
+
+export const PlantTwinParams = z.object({ id: v.nodeId() });
+
+/** Latest reading for each asset + metric pair a twin shows. */
+export const PlantTwinValuesBody = z.object({
+  pairs: z.array(z.object({ assetId: v.uuid(), metric: v.text(200, 1) })).max(500, "at most 500 readings per request"),
+});
+
 /** The shape a single imported node must satisfy. Applied per node, not to the batch. */
 export const ImportVizNode = z.object({
   id: v.nodeId(),

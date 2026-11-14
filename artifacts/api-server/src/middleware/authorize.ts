@@ -192,6 +192,18 @@ const ROUTE_RULES: Rule[] = [
   { path: "/viz-nodes/:id",       methods: ["PUT"],    module: "visualization", level: "read" },
   { path: "/viz-nodes/:id",       methods: ["DELETE"], module: "visualization", level: "read" },
 
+  // 3D plant twins (Live Twin). `/plant-twins/values` must precede `/plant-twins/:id`
+  // and is level "read": it is a POST only because the list of readings is long.
+  // Change and delete are level "write" here; the route also requires the owner
+  // or a Super Admin / Company Admin, because that depends on the row. Delete is
+  // not level "delete": roles with read-write Visualization (engineer, developer)
+  // must be able to remove a twin they created themselves.
+  { path: "/plant-twins/values",  methods: ["POST"],          module: "visualization", level: "read" },
+  { path: "/plant-twins",         methods: READ,              module: "visualization", level: "read" },
+  { path: "/plant-twins",         methods: ["POST"],          module: "visualization", level: "write" },
+  { path: "/plant-twins/:id",     methods: READ,              module: "visualization", level: "read" },
+  { path: "/plant-twins/:id",     methods: ["PUT", "DELETE"], module: "visualization", level: "write" },
+
   // ── Uploads ────────────────────────────────────────────────────────────────
   // `/uploads/:id/content` precedes the collection rules so the download is not
   // read as an id. Delete is a separate level from write: being able to add a

@@ -2651,6 +2651,259 @@ export const ListVizTagsResponseItem = zod.object({
 export const ListVizTagsResponse = zod.array(ListVizTagsResponseItem);
 
 /**
+ * A twin with a project shows only to users who may open that project; a
+ * twin without a project shows to everyone with Visualization read.
+ * @summary 3D plant twins the caller may see, newest first (without scenes)
+ */
+export const ListPlantTwinsResponseItem = zod.object({
+  id: zod.string(),
+  name: zod.string(),
+  kind: zod
+    .enum(["plant", "machine", "process", "asset", "folder"])
+    .describe(
+      "Taken from `scene.kind`; plant when absent. `machine` is the detailed pump skid, `asset` a canvas of machines from the library, `folder` a node of the Live Twin hierarchy.",
+    ),
+  projectId: zod.string().nullable(),
+  machines: zod.number().int(),
+  parentId: zod
+    .string()
+    .nullable()
+    .describe(
+      "Folder this twin sits in (`scene.parent`); null at the top level.",
+    ),
+  forType: zod
+    .string()
+    .nullable()
+    .describe(
+      "For folders, the Live Twin type whose hierarchy they belong to (`scene.forType`).",
+    ),
+  updatedAt: zod.coerce.date(),
+  canEdit: zod.boolean(),
+});
+export const ListPlantTwinsResponse = zod.array(ListPlantTwinsResponseItem);
+
+/**
+ * `id` is optional; the server generates `pt-<uuid>` when it is absent.
+ * The caller becomes the owner.
+ * @summary Create a 3D plant twin
+ */
+export const createPlantTwinBodyIdMax = 64;
+
+export const createPlantTwinBodyIdRegExp = new RegExp("^[A-Za-z0-9_-]+$");
+export const createPlantTwinBodyNameMax = 200;
+
+export const CreatePlantTwinBody = zod.object({
+  id: zod
+    .string()
+    .max(createPlantTwinBodyIdMax)
+    .regex(createPlantTwinBodyIdRegExp)
+    .optional(),
+  name: zod.string().min(1).max(createPlantTwinBodyNameMax),
+  projectId: zod.string().uuid().nullish(),
+  scene: zod.record(zod.string(), zod.unknown()),
+});
+
+export const CreatePlantTwinResponse = zod
+  .object({
+    id: zod.string(),
+    name: zod.string(),
+    kind: zod
+      .enum(["plant", "machine", "process", "asset", "folder"])
+      .describe(
+        "Taken from `scene.kind`; plant when absent. `machine` is the detailed pump skid, `asset` a canvas of machines from the library, `folder` a node of the Live Twin hierarchy.",
+      ),
+    projectId: zod.string().nullable(),
+    machines: zod.number().int(),
+    parentId: zod
+      .string()
+      .nullable()
+      .describe(
+        "Folder this twin sits in (`scene.parent`); null at the top level.",
+      ),
+    forType: zod
+      .string()
+      .nullable()
+      .describe(
+        "For folders, the Live Twin type whose hierarchy they belong to (`scene.forType`).",
+      ),
+    updatedAt: zod.coerce.date(),
+    canEdit: zod.boolean(),
+  })
+  .and(
+    zod.object({
+      scene: zod
+        .record(zod.string(), zod.unknown())
+        .describe(
+          "The 3D editor's scene document (areas, machines, bindings, connections).",
+        ),
+    }),
+  );
+
+/**
+ * Read-only; a POST because the list can be long. Pairs for assets outside
+ * the caller's projects are left out of the result rather than refused.
+ * Pairs with no reading yet are absent.
+ * @summary Latest reading for each asset + metric pair a twin shows
+ */
+export const getPlantTwinValuesBodyPairsItemMetricMax = 200;
+
+export const getPlantTwinValuesBodyPairsMax = 500;
+
+export const GetPlantTwinValuesBody = zod.object({
+  pairs: zod
+    .array(
+      zod.object({
+        assetId: zod.string().uuid(),
+        metric: zod
+          .string()
+          .min(1)
+          .max(getPlantTwinValuesBodyPairsItemMetricMax),
+      }),
+    )
+    .max(getPlantTwinValuesBodyPairsMax),
+});
+
+export const GetPlantTwinValuesResponseItem = zod.object({
+  assetId: zod.string(),
+  metric: zod.string(),
+  value: zod.number().nullable(),
+  ts: zod.coerce.date(),
+});
+export const GetPlantTwinValuesResponse = zod.array(
+  GetPlantTwinValuesResponseItem,
+);
+
+/**
+ * @summary One 3D plant twin with its scene
+ */
+export const getPlantTwinPathIdMax = 64;
+
+export const getPlantTwinPathIdRegExp = new RegExp("^[A-Za-z0-9_-]+$");
+
+export const GetPlantTwinParams = zod.object({
+  id: zod.coerce
+    .string()
+    .max(getPlantTwinPathIdMax)
+    .regex(getPlantTwinPathIdRegExp),
+});
+
+export const GetPlantTwinResponse = zod
+  .object({
+    id: zod.string(),
+    name: zod.string(),
+    kind: zod
+      .enum(["plant", "machine", "process", "asset", "folder"])
+      .describe(
+        "Taken from `scene.kind`; plant when absent. `machine` is the detailed pump skid, `asset` a canvas of machines from the library, `folder` a node of the Live Twin hierarchy.",
+      ),
+    projectId: zod.string().nullable(),
+    machines: zod.number().int(),
+    parentId: zod
+      .string()
+      .nullable()
+      .describe(
+        "Folder this twin sits in (`scene.parent`); null at the top level.",
+      ),
+    forType: zod
+      .string()
+      .nullable()
+      .describe(
+        "For folders, the Live Twin type whose hierarchy they belong to (`scene.forType`).",
+      ),
+    updatedAt: zod.coerce.date(),
+    canEdit: zod.boolean(),
+  })
+  .and(
+    zod.object({
+      scene: zod
+        .record(zod.string(), zod.unknown())
+        .describe(
+          "The 3D editor's scene document (areas, machines, bindings, connections).",
+        ),
+    }),
+  );
+
+/**
+ * @summary Rename, move to a project, or save the scene (owner or administrator)
+ */
+export const updatePlantTwinPathIdMax = 64;
+
+export const updatePlantTwinPathIdRegExp = new RegExp("^[A-Za-z0-9_-]+$");
+
+export const UpdatePlantTwinParams = zod.object({
+  id: zod.coerce
+    .string()
+    .max(updatePlantTwinPathIdMax)
+    .regex(updatePlantTwinPathIdRegExp),
+});
+
+export const updatePlantTwinBodyNameMax = 200;
+
+export const UpdatePlantTwinBody = zod.object({
+  name: zod.string().min(1).max(updatePlantTwinBodyNameMax).optional(),
+  projectId: zod.string().uuid().nullish(),
+  scene: zod.record(zod.string(), zod.unknown()).optional(),
+  parentId: zod
+    .string()
+    .nullish()
+    .describe(
+      "Move into this folder (a twin of kind `folder`); null moves to the top level. Omitted keeps the current folder, also when a scene is saved.",
+    ),
+});
+
+export const UpdatePlantTwinResponse = zod
+  .object({
+    id: zod.string(),
+    name: zod.string(),
+    kind: zod
+      .enum(["plant", "machine", "process", "asset", "folder"])
+      .describe(
+        "Taken from `scene.kind`; plant when absent. `machine` is the detailed pump skid, `asset` a canvas of machines from the library, `folder` a node of the Live Twin hierarchy.",
+      ),
+    projectId: zod.string().nullable(),
+    machines: zod.number().int(),
+    parentId: zod
+      .string()
+      .nullable()
+      .describe(
+        "Folder this twin sits in (`scene.parent`); null at the top level.",
+      ),
+    forType: zod
+      .string()
+      .nullable()
+      .describe(
+        "For folders, the Live Twin type whose hierarchy they belong to (`scene.forType`).",
+      ),
+    updatedAt: zod.coerce.date(),
+    canEdit: zod.boolean(),
+  })
+  .and(
+    zod.object({
+      scene: zod
+        .record(zod.string(), zod.unknown())
+        .describe(
+          "The 3D editor's scene document (areas, machines, bindings, connections).",
+        ),
+    }),
+  );
+
+/**
+ * @summary Delete a 3D plant twin (owner or administrator)
+ */
+export const deletePlantTwinPathIdMax = 64;
+
+export const deletePlantTwinPathIdRegExp = new RegExp("^[A-Za-z0-9_-]+$");
+
+export const DeletePlantTwinParams = zod.object({
+  id: zod.coerce
+    .string()
+    .max(deletePlantTwinPathIdMax)
+    .regex(deletePlantTwinPathIdRegExp),
+});
+
+export const DeletePlantTwinResponse = zod.void();
+
+/**
  * @summary Legacy dashboards (id and name only), read by the Access Control editor
  */
 export const ListLegacyVizDashboardsResponseItem = zod.object({

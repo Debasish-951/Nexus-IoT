@@ -81,6 +81,20 @@ test("SEC-18: legacy dashboard writes have no rule and are denied", () => {
   }
 });
 
+test("3D plant twins: viewers read and fetch live values; only write roles create, change or delete", () => {
+  const viewer = resolveAccess("viewer", null), engineer = resolveAccess("engineer", null);
+  for (const [method, path] of [["GET", "/plant-twins"], ["GET", "/plant-twins/pt-1"], ["POST", "/plant-twins/values"]] as const) {
+    assert.equal(ruleAllows(viewer, method, path), true, `viewer ${method} ${path}`);
+  }
+  for (const [method, path] of [["POST", "/plant-twins"], ["PUT", "/plant-twins/pt-1"], ["DELETE", "/plant-twins/pt-1"]] as const) {
+    assert.equal(ruleAllows(viewer, method, path), false, `viewer ${method} ${path}`);
+  }
+  // Delete passes the rule for read-write roles; the route then requires the owner or an administrator.
+  for (const [method, path] of [["POST", "/plant-twins"], ["PUT", "/plant-twins/pt-1"], ["DELETE", "/plant-twins/pt-1"]] as const) {
+    assert.equal(ruleAllows(engineer, method, path), true, `engineer ${method} ${path}`);
+  }
+});
+
 test("SEC-27: WebSocket origins are checked against CORS_ORIGINS, the public URL and the Host", () => {
   const cors = ["https://iot.example.com"];
   assert.equal(originAllowed(undefined, "iot.example.com", cors), true);

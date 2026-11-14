@@ -259,7 +259,7 @@ export default function LiveFeed() {
 
   return (
     <div className="h-full overflow-y-auto p-4 space-y-4" style={{ background: C.bg }}>
-      <button onClick={() => navigate("/data-explorer")}
+      <button onClick={() => navigate("/")}
         className="flex items-center gap-1 text-sm hover:opacity-70" style={{ color: C.dim }}>
         <ChevronLeft className="w-4 h-4" /> Back
       </button>

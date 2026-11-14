@@ -16,6 +16,8 @@ import CriticalAlarmBanner from "@/components/CriticalAlarmBanner";
 import UserProfileTopMenu from "@/components/UserProfileTopMenu";
 import BrokerStatusBar from "@/components/BrokerStatusBar";
 import AppearanceMenu from "@/components/AppearanceMenu";
+import LanguageMenu from "@/components/LanguageMenu";
+import { useT } from "@/i18n";
 import { FEATURES, type FeatureKey } from "@/lib/features";
 import { HomeBackground } from "@/features/home/HomeBackground";
 
@@ -49,6 +51,15 @@ interface NavItem {
   plantWide?: boolean;
 }
 
+// Former AI Advisor sub-menu, not shown (see the AI Advisor entry below).
+const AI_ADVISOR_CHILDREN: NavItem[] = [
+  { label: "Ask Your Assets",       href: "/ai-copilot",                   icon: MessageSquare,  module: "explorer" },
+  { label: "Health Insights",       href: "/ai-copilot?action=health",     icon: Activity,       module: "explorer" },
+  { label: "Failure Explanations",  href: "/ai-copilot?action=failure",    icon: AlertTriangle,  module: "explorer" },
+  { label: "Smart Recommendations", href: "/ai-copilot?action=recommend",  icon: Lightbulb,      module: "explorer" },
+];
+void AI_ADVISOR_CHILDREN;
+
 const navItems: NavItem[] = [
   { label: "Home", href: "/", icon: Home, module: "dashboard" },
   {
@@ -73,23 +84,16 @@ const navItems: NavItem[] = [
     icon: BarChart2,
     children: [
       { label: "Visualization",   href: "/visualization",       icon: LayoutDashboard, module: "visualization" },
-      { label: "Live Twin",       href: "/live-twin",           icon: Radio,           module: "visualization" },
       { label: "Asset Template",  href: "/dashboard-templates", icon: LayoutTemplate,  module: "visualization" },
       { label: "Live Feed",       href: "/live",                icon: Activity,        module: "live" },
     ],
   },
-  {
-    label: "AI Advisor",
-    icon: BrainCircuit,
-    module: "explorer",
-    plantWide: true,
-    children: [
-      { label: "Ask Your Assets",       href: "/ai-copilot",                   icon: MessageSquare,  module: "explorer" },
-      { label: "Health Insights",       href: "/ai-copilot?action=health",     icon: Activity,       module: "explorer" },
-      { label: "Failure Explanations",  href: "/ai-copilot?action=failure",    icon: AlertTriangle,  module: "explorer" },
-      { label: "Smart Recommendations", href: "/ai-copilot?action=recommend",  icon: Lightbulb,      module: "explorer" },
-    ],
-  },
+  // Live Twin is its own section (moved out of Data Insights at the owner's request).
+  { label: "Live Twin", href: "/live-twin", icon: Radio, module: "visualization" },
+  // AI Advisor is one entry: its four modes are already cards at the top of the
+  // page, so the menu no longer repeats them (owner's request). The old sub-items
+  // are kept in AI_ADVISOR_CHILDREN below; put them back as `children` to restore.
+  { label: "AI Advisor", href: "/ai-copilot", icon: BrainCircuit, module: "explorer", plantWide: true },
   {
     label: "Event Manager",
     icon: Bell,
@@ -175,6 +179,7 @@ function visibleNav(
 }
 
 function NavGroup({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
+  const t = useT();
   const [location, navigate] = useLocation();
   // A group without its own page opens an empty main window, so the previous
   // page (often the Home project list) does not stay on screen.
@@ -204,7 +209,7 @@ function NavGroup({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
           )}
         >
           <item.icon className="w-[18px] h-[18px] shrink-0" />
-          {!collapsed && <span>{item.label}</span>}
+          {!collapsed && <span>{t(item.label)}</span>}
         </div>
       </Link>
     );
@@ -238,7 +243,7 @@ function NavGroup({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
             onMouseDown={() => setOpen(true)}
           >
             <item.icon className="w-[18px] h-[18px] shrink-0" />
-            {!collapsed && <span className="flex-1 text-left truncate">{item.label}</span>}
+            {!collapsed && <span className="flex-1 text-left truncate">{t(item.label)}</span>}
           </Link>
           {!collapsed && (
             <button onClick={(e) => { e.preventDefault(); setOpen((o) => !o); }} className="shrink-0" aria-label="Toggle section">
@@ -260,7 +265,7 @@ function NavGroup({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
           <item.icon className="w-[18px] h-[18px] shrink-0" />
           {!collapsed && (
             <>
-              <span className="flex-1 text-left">{item.label}</span>
+              <span className="flex-1 text-left">{t(item.label)}</span>
               {open ? <ChevronDown className="w-3 h-3" /> : <ChevronRight className="w-3 h-3" />}
             </>
           )}
@@ -282,7 +287,7 @@ function NavGroup({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
                   )}
                 >
                   <child.icon className="w-4 h-4 shrink-0" />
-                  <span>{child.label}</span>
+                  <span>{t(child.label)}</span>
                 </div>
               </Link>
             );
@@ -299,6 +304,7 @@ function NavGroup({ item, collapsed }: { item: NavItem; collapsed: boolean }) {
 // assigned by an administrator, not something the user needs to reason about.
 
 export default function Layout({ children }: { children: React.ReactNode }) {
+  const t = useT();
   const [collapsed, setCollapsed] = useState(false);
   const { canModule, session } = useCurrentUser();
   const restrictProjects = !!session?.restrictProjects;
@@ -354,8 +360,8 @@ export default function Layout({ children }: { children: React.ReactNode }) {
         <header className="h-12 shrink-0 border-b border-border bg-background/95 backdrop-blur-sm flex items-center px-4 gap-2 relative z-20">
           <button
             onClick={() => setCollapsed((c) => !c)}
-            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            title={collapsed ? t("Expand sidebar") : t("Collapse sidebar")}
+            aria-label={collapsed ? t("Expand sidebar") : t("Collapse sidebar")}
             className="flex items-center justify-center w-8 h-8 rounded-md border !border-primary/40 text-primary hover:bg-muted hover:text-foreground transition-colors"
           >
             <Menu className="w-4 h-4" />
@@ -363,6 +369,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
           <div className="flex-1" />
           <BrokerStatusBar />
           <div className="w-px h-5 bg-border" />
+          <LanguageMenu />
           <AppearanceMenu />
           <NotificationBell />
           <div className="w-px h-5 bg-border" />

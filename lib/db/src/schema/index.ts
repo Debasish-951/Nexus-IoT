@@ -16,6 +16,7 @@ export * from "./broker_events";
 export * from "./data_retention";
 export * from "./viz_dashboards";
 export * from "./viz_nodes";
+export * from "./plant_twins";
 export * from "./home_boards";
 export * from "./seen_devices";
 export * from "./uploads";

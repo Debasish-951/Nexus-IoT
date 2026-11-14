@@ -105,6 +105,33 @@ export const FEATURES = {
   proWidgets: import.meta.env.VITE_DISABLE_PRO_WIDGETS !== "true",
 
   /**
+   * "3D plant twins" on the Live Twin page (features/plantTwin): whole plants
+   * laid out by process from industry templates, stored on the server
+   * (plant_twins), with machines linked to assets so live telemetry drives them.
+   * The original image twins are unchanged and sit beside it behind a switch.
+   *
+   * ON by default. Turning it off hides the switch and shows only image twins;
+   * saved 3D twins stay in the database and come back when it is turned on:
+   *
+   *   VITE_DISABLE_PLANT_TWIN_3D=true pnpm --filter @workspace/iot-platform build
+   *
+   * Not built yet: saving uploaded .glb models (they show for the session only),
+   * per-reading alarm limits (each model's built-in limits are used) and sharing
+   * a twin with edit rights (only the owner or an administrator can change it).
+   */
+  plantTwin3d: import.meta.env.VITE_DISABLE_PLANT_TWIN_3D !== "true",
+
+  /**
+   * Live Twin layout. Off (default): one twin type at a time, chosen from a
+   * dropdown, with the saved twins of that type in a side panel; the types
+   * offered come from LIVE_TWIN_TYPES below. On: the earlier layout with all
+   * five views as tabs, kept intact:
+   *
+   *   VITE_LIVE_TWIN_TABS=true pnpm --filter @workspace/iot-platform build
+   */
+  liveTwinTabs: envOn(import.meta.env.VITE_LIVE_TWIN_TABS),
+
+  /**
    * Opaque address-bar tokens (lib/routeSlugs.ts).
    *
    * ON by default, unlike everything else here — this one was asked for, and
@@ -122,3 +149,27 @@ export const FEATURES = {
 } as const;
 
 export type FeatureKey = keyof typeof FEATURES;
+
+/**
+ * Twin types offered on Live Twin, set per installation to match what the
+ * customer has taken: `image` (2D twin: photo with pinned values), `asset`
+ * (3D machines), `process` (P&ID), `plant` (saved 3D plants, view only) and
+ * `builder` (3D Builder: lays plants out from industry templates and the
+ * machine library). Comma separated, in dropdown order. Unset or empty means
+ * all five. With one type the dropdown is replaced by its name. Offer `plant`
+ * with `builder` unless plants are built for the customer. Example, asset
+ * twin only:
+ *
+ *   VITE_LIVE_TWIN_TYPES=asset pnpm --filter @workspace/iot-platform build
+ *
+ * This only decides what the page shows. Twins of other types already saved
+ * stay in the database, and the API does not refuse them.
+ */
+export type LiveTwinType = "image" | "asset" | "process" | "plant" | "builder";
+const ALL_TWIN_TYPES: LiveTwinType[] = ["image", "asset", "process", "plant", "builder"];
+function parseTwinTypes(value: unknown): LiveTwinType[] {
+  const picked = String(value ?? "").split(",").map((t) => t.trim().toLowerCase())
+    .filter((t, i, a): t is LiveTwinType => (ALL_TWIN_TYPES as string[]).includes(t) && a.indexOf(t) === i);
+  return picked.length ? picked : ALL_TWIN_TYPES;
+}
+export const LIVE_TWIN_TYPES: LiveTwinType[] = parseTwinTypes(import.meta.env.VITE_LIVE_TWIN_TYPES);

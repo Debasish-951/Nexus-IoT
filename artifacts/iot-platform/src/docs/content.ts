@@ -146,7 +146,8 @@ export function buildDocumentContent(): ContentItem[] {
       [
         ["Home", "Project list — the projects your role lets you open"],
         ["Asset Hub", "Assets (hierarchy + attributes), Asset Templates, Media Library"],
-        ["Data Insights", "Visualization, Live Twin, dashboard templates, Live Feed"],
+        ["Data Insights", "Visualization, dashboard templates, Live Feed"],
+        ["Live Twin", "3D and 2D twins of machines, processes and plants, linked to live asset data"],
         ["AI Advisor", "Natural-language questions, health insights, recommendations"],
         ["Event Manager", "Active Alarms, Alarm History, Alarm Rules"],
         ["Integration Hub", "Broker configuration, API Clients, Destinations, Connections, Integration Guide"],

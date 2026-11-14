@@ -1,6 +1,6 @@
 # Project Home
 
-Home lists the projects a user may open. A project is a root-level asset. Each card opens that project's Assets or Visualization, and a button appears only if the user has that module.
+Home lists the projects a user may open. A project is a root-level asset. Each card shows only the project name; clicking it opens the project (its Assets, or Visualization for users without the Assets module). The separate Assets and Visualization links on the cards were removed on request; the code is kept in `pages/ProjectsHome.tsx` and can be switched back on.
 
 ## Who sees which projects
 

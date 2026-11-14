@@ -1342,6 +1342,110 @@ export interface VizNodeAccessFlags {
   owner: boolean;
 }
 
+/**
+ * Taken from `scene.kind`; plant when absent. `machine` is the detailed pump skid, `asset` a canvas of machines from the library, `folder` a node of the Live Twin hierarchy.
+ */
+export type PlantTwinSummaryKind =
+  (typeof PlantTwinSummaryKind)[keyof typeof PlantTwinSummaryKind];
+
+export const PlantTwinSummaryKind = {
+  plant: "plant",
+  machine: "machine",
+  process: "process",
+  asset: "asset",
+  folder: "folder",
+} as const;
+
+export interface PlantTwinSummary {
+  id: string;
+  name: string;
+  /** Taken from `scene.kind`; plant when absent. `machine` is the detailed pump skid, `asset` a canvas of machines from the library, `folder` a node of the Live Twin hierarchy. */
+  kind: PlantTwinSummaryKind;
+  /** @nullable */
+  projectId: string | null;
+  machines: number;
+  /**
+   * Folder this twin sits in (`scene.parent`); null at the top level.
+   * @nullable
+   */
+  parentId: string | null;
+  /**
+   * For folders, the Live Twin type whose hierarchy they belong to (`scene.forType`).
+   * @nullable
+   */
+  forType: string | null;
+  updatedAt: string;
+  canEdit: boolean;
+}
+
+/**
+ * The 3D editor's scene document (areas, machines, bindings, connections).
+ */
+export type PlantTwinScene = { [key: string]: unknown };
+
+export type PlantTwin = PlantTwinSummary & {
+  /** The 3D editor's scene document (areas, machines, bindings, connections). */
+  scene: PlantTwinScene;
+};
+
+export type PlantTwinCreateScene = { [key: string]: unknown };
+
+export interface PlantTwinCreate {
+  /**
+   * @maxLength 64
+   * @pattern ^[A-Za-z0-9_-]+$
+   */
+  id?: string;
+  /**
+   * @minLength 1
+   * @maxLength 200
+   */
+  name: string;
+  /** @nullable */
+  projectId?: string | null;
+  scene: PlantTwinCreateScene;
+}
+
+export type PlantTwinUpdateScene = { [key: string]: unknown };
+
+export interface PlantTwinUpdate {
+  /**
+   * @minLength 1
+   * @maxLength 200
+   */
+  name?: string;
+  /** @nullable */
+  projectId?: string | null;
+  scene?: PlantTwinUpdateScene;
+  /**
+   * Move into this folder (a twin of kind `folder`); null moves to the top level. Omitted keeps the current folder, also when a scene is saved.
+   * @nullable
+   */
+  parentId?: string | null;
+}
+
+export type PlantTwinValuesRequestPairsItem = {
+  assetId: string;
+  /**
+   * @minLength 1
+   * @maxLength 200
+   */
+  metric: string;
+};
+
+export interface PlantTwinValuesRequest {
+  /** @maxItems 500 */
+  pairs: PlantTwinValuesRequestPairsItem[];
+}
+
+export interface PlantTwinValue {
+  assetId: string;
+  metric: string;
+  /** @nullable */
+  value: number | null;
+  ts: string;
+}
+
 export interface VizTreeNode {
   id: string;
   name: string;

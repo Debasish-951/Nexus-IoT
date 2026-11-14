@@ -440,8 +440,13 @@ export default function Visualization() {
           spending a second full-width strip on it. */}
       <div className="flex items-center gap-3 shrink-0 flex-wrap">
         {/* Back = one level up within THIS section, not browser history (which
-            could be any page the user happened to arrive from). */}
-        <button onClick={() => navigate("/data-explorer")} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground shrink-0">
+            could be any page the user happened to arrive from): the open
+            dashboard's parent, and from the top level, Home. */}
+        <button onClick={() => {
+          if (!selId) { navigate("/"); return; }
+          const parent = (viz.nodes as { id: string; parentId?: string | null }[]).find((n) => n.id === selId)?.parentId ?? null;
+          selectNode(parent);
+        }} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground shrink-0">
           <ArrowLeft className="w-4 h-4" /> Back
         </button>
         <div className="flex items-center gap-1.5 shrink-0">

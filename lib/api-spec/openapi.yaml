@@ -1738,6 +1738,148 @@ paths:
                 items:
                   $ref: "#/components/schemas/VizTag"
 
+  /plant-twins:
+    get:
+      operationId: listPlantTwins
+      tags: [visualization]
+      summary: 3D plant twins the caller may see, newest first (without scenes)
+      description: |
+        A twin with a project shows only to users who may open that project; a
+        twin without a project shows to everyone with Visualization read.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PlantTwinSummary"
+    post:
+      operationId: createPlantTwin
+      tags: [visualization]
+      summary: Create a 3D plant twin
+      description: |
+        `id` is optional; the server generates `pt-<uuid>` when it is absent.
+        The caller becomes the owner.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlantTwinCreate"
+      responses:
+        "201":
+          description: Created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlantTwin"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "403":
+          description: "`plant_twin_access_denied` — project not allowed"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: "`id_conflict`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
+  /plant-twins/values:
+    post:
+      operationId: getPlantTwinValues
+      tags: [visualization]
+      summary: Latest reading for each asset + metric pair a twin shows
+      description: |
+        Read-only; a POST because the list can be long. Pairs for assets outside
+        the caller's projects are left out of the result rather than refused.
+        Pairs with no reading yet are absent.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlantTwinValuesRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PlantTwinValue"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+
+  /plant-twins/{id}:
+    get:
+      operationId: getPlantTwin
+      tags: [visualization]
+      summary: One 3D plant twin with its scene
+      parameters:
+        - $ref: "#/components/parameters/PlantTwinIdPath"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlantTwin"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    put:
+      operationId: updatePlantTwin
+      tags: [visualization]
+      summary: Rename, move to a project, or save the scene (owner or administrator)
+      parameters:
+        - $ref: "#/components/parameters/PlantTwinIdPath"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PlantTwinUpdate"
+      responses:
+        "200":
+          description: Updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PlantTwin"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "403":
+          description: "`plant_twin_access_denied`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+    delete:
+      operationId: deletePlantTwin
+      tags: [visualization]
+      summary: Delete a 3D plant twin (owner or administrator)
+      parameters:
+        - $ref: "#/components/parameters/PlantTwinIdPath"
+      responses:
+        "204":
+          description: Deleted
+        "403":
+          description: "`plant_twin_access_denied`"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+
   /viz-dashboards:
     get:
       operationId: listLegacyVizDashboards
@@ -4847,6 +4989,121 @@ components:
           description: The caller owns this exact node rather than inheriting access.
       required: [read, write, delete, owner]
 
+    PlantTwinSummary:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        kind:
+          type: string
+          enum: [plant, machine, process, asset, folder]
+          description: Taken from `scene.kind`; plant when absent. `machine` is the detailed pump skid, `asset` a canvas of machines from the library, `folder` a node of the Live Twin hierarchy.
+        projectId:
+          type: string
+          nullable: true
+        machines:
+          type: integer
+        parentId:
+          type: string
+          nullable: true
+          description: Folder this twin sits in (`scene.parent`); null at the top level.
+        forType:
+          type: string
+          nullable: true
+          description: For folders, the Live Twin type whose hierarchy they belong to (`scene.forType`).
+        updatedAt:
+          type: string
+          format: date-time
+        canEdit:
+          type: boolean
+      required: [id, name, kind, projectId, machines, parentId, forType, updatedAt, canEdit]
+
+    PlantTwin:
+      allOf:
+        - $ref: "#/components/schemas/PlantTwinSummary"
+        - type: object
+          properties:
+            scene:
+              type: object
+              additionalProperties: true
+              description: The 3D editor's scene document (areas, machines, bindings, connections).
+          required: [scene]
+
+    PlantTwinCreate:
+      type: object
+      properties:
+        id:
+          type: string
+          maxLength: 64
+          pattern: "^[A-Za-z0-9_-]+$"
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        projectId:
+          type: string
+          format: uuid
+          nullable: true
+        scene:
+          type: object
+          additionalProperties: true
+      required: [name, scene]
+
+    PlantTwinUpdate:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 200
+        projectId:
+          type: string
+          format: uuid
+          nullable: true
+        scene:
+          type: object
+          additionalProperties: true
+        parentId:
+          type: string
+          nullable: true
+          description: Move into this folder (a twin of kind `folder`); null moves to the top level. Omitted keeps the current folder, also when a scene is saved.
+
+    PlantTwinValuesRequest:
+      type: object
+      properties:
+        pairs:
+          type: array
+          maxItems: 500
+          items:
+            type: object
+            properties:
+              assetId:
+                type: string
+                format: uuid
+              metric:
+                type: string
+                minLength: 1
+                maxLength: 200
+            required: [assetId, metric]
+      required: [pairs]
+
+    PlantTwinValue:
+      type: object
+      properties:
+        assetId:
+          type: string
+        metric:
+          type: string
+        value:
+          type: number
+          nullable: true
+        ts:
+          type: string
+          format: date-time
+      required: [assetId, metric, value, ts]
+
     VizTreeNode:
       type: object
       properties:
@@ -5956,6 +6213,14 @@ components:
       schema:
         type: string
         format: uuid
+    PlantTwinIdPath:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+        maxLength: 64
+        pattern: "^[A-Za-z0-9_-]+$"
     VizNodeIdPath:
       name: id
       in: path

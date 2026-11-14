@@ -93,7 +93,7 @@ export default function DashboardTemplates() {
 
   return (
     <div className="p-6 space-y-3 h-full flex flex-col">
-      <button onClick={() => navigate("/data-explorer")} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground shrink-0">
+      <button onClick={() => navigate("/")} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground shrink-0">
         <ArrowLeft className="w-4 h-4" /> Back
       </button>
       <div className="shrink-0">

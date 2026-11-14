@@ -1,4 +1,5 @@
 import { Link } from "wouter";
+import { useT } from "@/i18n";
 import { motion } from "framer-motion";
 import { ArrowRight, Factory } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -27,19 +28,20 @@ export default function ProjectsHome() {
   const { session, canModule } = useCurrentUser();
   const { projects, loaded, canListProjects } = useProject();
   const sections = SECTIONS.filter((s) => canModule(s.module));
+  const t = useT();
 
   return (
     <div className="relative min-h-full overflow-hidden">
       {/* With the app-wide background on, Layout already draws it behind every page. */}
       {!FEATURES.appBackground && <HomeBackground />}
       <div className="relative p-8 space-y-6">
-        <Greeting subtitle="Your projects" />
+        <Greeting subtitle={t("Your projects")} />
 
         {loaded && projects.length === 0 && (
           <p className="text-sm text-muted-foreground">
-            {!canListProjects ? "Your account cannot view the project list."
-              : session?.restrictProjects ? "No project assigned. Ask an administrator to assign one."
-              : "No projects yet. Create a top-level asset in Assets to start one."}
+            {!canListProjects ? t("Your account cannot view the project list.")
+              : session?.restrictProjects ? t("No project assigned. Ask an administrator to assign one.")
+              : t("No projects yet. Create a top-level asset in Assets to start one.")}
           </p>
         )}
 
@@ -52,15 +54,19 @@ export default function ProjectsHome() {
                 whileHover={{ y: -8 }}
                 transition={{ type: "spring", stiffness: 420, damping: 12 }}
               >
+                {/* The card shows only the project name (the Assets / Visualization
+                    links were removed on request); clicking it opens the project. */}
+                <Link href={sections[0] ? `~${APP_BASE}/p/${p.id}/${sections[0].path}` : "#"} className="block h-full" aria-label={t("Open {name}", { name: p.name })}>
                 <Card
                   style={{ borderTopColor: accent.color, borderTopWidth: 3 }}
-                  className="group h-full border shadow-sm transition-all duration-150 hover:border-primary/40 hover:shadow-xl"
+                  className="group h-full border shadow-sm transition-all duration-150 hover:border-primary/40 hover:shadow-xl cursor-pointer"
                 >
                   <CardContent className="flex h-full flex-col p-5">
                     <div className={`w-fit rounded-xl p-2.5 transition-transform duration-200 group-hover:scale-110 ${accent.tint}`}>
                       <Factory className="h-5 w-5" />
                     </div>
                     <h2 className="mt-3 truncate text-base font-semibold" title={p.name}>{p.name}</h2>
+                    {false && (
                     <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-[13px] text-muted-foreground">
                       {sections.map((s) => (
                         <Link
@@ -73,8 +79,10 @@ export default function ProjectsHome() {
                         </Link>
                       ))}
                     </div>
+                    )}
                   </CardContent>
                 </Card>
+                </Link>
               </motion.div>
             );
           })}

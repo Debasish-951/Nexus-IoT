@@ -1,0 +1,46 @@
+/* 3D plant twin: the viewport stays dark in both themes, like a control-room screen. */
+.pt-stage { position: relative; overflow: hidden; background: radial-gradient(ellipse at 50% 30%, #152033 0%, #0d131d 70%); }
+/* plantTwin.css loads after Tailwind, so .pt-stage would override an "absolute" utility class. */
+.pt-stage.pt-fill { position: absolute; inset: 0; }
+.pt-stage canvas { display: block; width: 100%; height: 100%; touch-action: none; cursor: grab; }
+.pt-stage canvas:active { cursor: grabbing; }
+.pt-overlay { position: absolute; inset: 0; pointer-events: none; overflow: hidden; }
+
+.pt-pin { position: absolute; left: 0; top: 0; display: flex; align-items: center; gap: 6px; cursor: pointer; pointer-events: auto; transform: translate(-9999px, 0); color: #dde6f2; }
+.pt-dot { width: 12px; height: 12px; border-radius: 50%; background: #22c55e; flex: none; position: relative; }
+.pt-dot::after { content: ""; position: absolute; inset: -6px; border-radius: 50%; border: 2px solid transparent; }
+.pt-pin.warn .pt-dot { background: #f59e0b; }
+.pt-pin.crit .pt-dot { background: #ef4444; }
+.pt-pin.crit .pt-dot::after { border-color: #ef4444; animation: pt-ping 1s ease-out infinite; }
+.pt-pin.off .pt-dot, .pt-pin.nolink .pt-dot { background: #64748b; }
+.pt-card { background: rgba(17, 23, 34, 0.88); border: 1px solid #233044; border-radius: 6px; padding: 3px 8px; white-space: nowrap; backdrop-filter: blur(3px); }
+.pt-card b { display: block; font-weight: 600; font-size: 12px; color: #8796ab; letter-spacing: .02em; }
+.pt-card span { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 12.5px; }
+.pt-pin.warn .pt-card { border-color: #f59e0b; }
+.pt-pin.crit .pt-card { border-color: #ef4444; }
+.pt-pin.nolink .pt-card span, .pt-pin.off .pt-card span { color: #8796ab; }
+.pt-pin.sel .pt-card { border-color: #3b82f6; box-shadow: 0 0 0 1px #3b82f6; }
+.pt-flowlbl { position: absolute; left: 0; top: 0; pointer-events: none; font-family: ui-monospace, SFMono-Regular, Consolas, monospace; font-size: 11.5px; color: #dde6f2; background: rgba(10, 14, 21, 0.8); border: 1px solid #233044; border-radius: 4px; padding: 1px 6px; white-space: nowrap; transform: translate(-9999px, 0); }
+@keyframes pt-ping { 0% { transform: scale(.6); opacity: .9; } 100% { transform: scale(1.8); opacity: 0; } }
+@keyframes pt-blink { 50% { opacity: .35; } }
+.pt-blink { animation: pt-blink 1s steps(2, start) infinite; }
+@media (prefers-reduced-motion: reduce) { .pt-pin.crit .pt-dot::after, .pt-blink { animation: none; } }
+
+/* Process Twin (P&ID) */
+.pt-pipe { fill: none; stroke: #3a4658; stroke-width: 11; stroke-linecap: round; stroke-linejoin: round; }
+.pt-flow { fill: none; stroke: #38bdf8; stroke-width: 3.5; stroke-dasharray: 9 13; stroke-linecap: round; stroke-linejoin: round; }
+.pt-flow.cold { stroke: #60a5fa; } .pt-flow.hot { stroke: #fb923c; }
+.pt-flow.rec { stroke-dasharray: 4 10; stroke-width: 2.5; opacity: .8; }
+.pt-eq { fill: #1a2433; stroke: #4a5a72; stroke-width: 2; }
+.pt-eq.alarm { stroke: #ef4444; animation: pt-eqpulse 1s ease-in-out infinite; }
+.pt-eq.alarmw { stroke: #f59e0b; }
+@keyframes pt-eqpulse { 50% { stroke-width: 5; } }
+.pt-lbl { fill: #8796ab; font-weight: 600; font-size: 15px; letter-spacing: .03em; font-family: system-ui, sans-serif; }
+.pt-lbl.sm { font-size: 12px; font-weight: 500; }
+.pt-bub rect { fill: #0f1520; stroke: #2c3a50; stroke-width: 1.2; }
+.pt-bub .pt-bt { fill: #8796ab; font-family: ui-monospace, Consolas, monospace; font-size: 11px; }
+.pt-bub .pt-bv { fill: #dde6f2; font-family: ui-monospace, Consolas, monospace; font-size: 14px; font-weight: 500; }
+.pt-bub.warn rect { stroke: #f59e0b; } .pt-bub.warn .pt-bv { fill: #f59e0b; }
+.pt-bub.crit rect { stroke: #ef4444; } .pt-bub.crit .pt-bv { fill: #ef4444; }
+.pt-bub.nolink .pt-bv { fill: #8796ab; font-size: 12px; }
+@media (prefers-reduced-motion: reduce) { .pt-eq.alarm { animation: none; } }

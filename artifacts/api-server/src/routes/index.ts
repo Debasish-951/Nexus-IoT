@@ -17,6 +17,7 @@ import exportRouter from "./export";
 import systemRouter from "./system";
 import vizDashboardsRouter from "./viz_dashboards";
 import vizNodesRouter from "./viz_nodes";
+import plantTwinsRouter from "./plant_twins";
 import uploadsRouter from "./uploads";
 import aiRouter from "./ai";
 import authRouter from "./auth";
@@ -44,6 +45,7 @@ router.use(exportRouter);
 router.use(systemRouter);
 router.use(vizDashboardsRouter);
 router.use(vizNodesRouter);
+router.use(plantTwinsRouter);
 router.use(uploadsRouter);
 router.use(aiRouter);
 

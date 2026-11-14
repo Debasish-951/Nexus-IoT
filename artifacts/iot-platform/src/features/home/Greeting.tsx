@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { useT } from "@/i18n";
 import { useCurrentUser } from "@/contexts/UserContext";
 
 function timeOfDay(): string {
@@ -14,8 +15,10 @@ function timeOfDay(): string {
  */
 export function Greeting({ subtitle }: { subtitle: ReactNode }) {
   const { currentUser } = useCurrentUser();
+  const t = useT();
   const firstName = currentUser?.fullName?.split(" ")[0];
-  const text = firstName ? `${timeOfDay()}, ${firstName}` : timeOfDay();
+  // The user's name is data and stays as stored; only the greeting is translated.
+  const text = firstName ? t("{greeting}, {name}", { greeting: t(timeOfDay()), name: firstName }) : t(timeOfDay());
 
   return (
     <div>

@@ -105,6 +105,12 @@ import type {
   OkFlag,
   PasswordPolicy,
   PasswordResetSent,
+  PlantTwin,
+  PlantTwinCreate,
+  PlantTwinSummary,
+  PlantTwinUpdate,
+  PlantTwinValue,
+  PlantTwinValuesRequest,
   ProjectRef,
   RateLimitedResponse,
   RbacCatalog,
@@ -10285,6 +10291,774 @@ export function useListVizTags<
 
   return withQueryKey(query, queryOptions.queryKey);
 }
+
+export const getListPlantTwinsUrl = () => {
+  return `/api/plant-twins`;
+};
+
+/**
+ * A twin with a project shows only to users who may open that project; a
+ * twin without a project shows to everyone with Visualization read.
+ * @summary 3D plant twins the caller may see, newest first (without scenes)
+ */
+export const listPlantTwins = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<PlantTwinSummary[]> => {
+  return customFetch<PlantTwinSummary[]>(getListPlantTwinsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListPlantTwinsQueryKey = () => {
+  return [`/api/plant-twins`] as const;
+};
+
+export const getListPlantTwinsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listPlantTwins>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: Partial<
+    UseQueryOptions<Awaited<ReturnType<typeof listPlantTwins>>, TError, TData>
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListPlantTwinsQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listPlantTwins>>> = ({
+    signal,
+  }) => listPlantTwins({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listPlantTwins>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListPlantTwinsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listPlantTwins>>
+>;
+export type ListPlantTwinsQueryError = ErrorType<unknown>;
+
+/**
+ * A twin with a project shows only to users who may open that project; a
+ * twin without a project shows to everyone with Visualization read.
+ * @summary 3D plant twins the caller may see, newest first (without scenes)
+ */
+export function useListPlantTwins<
+  TData = Awaited<ReturnType<typeof listPlantTwins>>,
+  TError = ErrorType<unknown>,
+>(
+  options: {
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listPlantTwins>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listPlantTwins>>,
+          TError,
+          Awaited<ReturnType<typeof listPlantTwins>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * A twin with a project shows only to users who may open that project; a
+ * twin without a project shows to everyone with Visualization read.
+ * @summary 3D plant twins the caller may see, newest first (without scenes)
+ */
+export function useListPlantTwins<
+  TData = Awaited<ReturnType<typeof listPlantTwins>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listPlantTwins>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listPlantTwins>>,
+          TError,
+          Awaited<ReturnType<typeof listPlantTwins>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * A twin with a project shows only to users who may open that project; a
+ * twin without a project shows to everyone with Visualization read.
+ * @summary 3D plant twins the caller may see, newest first (without scenes)
+ */
+export function useListPlantTwins<
+  TData = Awaited<ReturnType<typeof listPlantTwins>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listPlantTwins>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * A twin with a project shows only to users who may open that project; a
+ * twin without a project shows to everyone with Visualization read.
+ * @summary 3D plant twins the caller may see, newest first (without scenes)
+ */
+export function useListPlantTwins<
+  TData = Awaited<ReturnType<typeof listPlantTwins>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listPlantTwins>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListPlantTwinsQueryOptions(options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getCreatePlantTwinUrl = () => {
+  return `/api/plant-twins`;
+};
+
+/**
+ * `id` is optional; the server generates `pt-<uuid>` when it is absent.
+ * The caller becomes the owner.
+ * @summary Create a 3D plant twin
+ */
+export const createPlantTwin = async (
+  plantTwinCreate: PlantTwinCreate,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<PlantTwin> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return customFetch<PlantTwin>(getCreatePlantTwinUrl(), {
+    ...options,
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(plantTwinCreate),
+  });
+};
+
+export const getCreatePlantTwinMutationKey = () => ["createPlantTwin"] as const;
+
+export const getCreatePlantTwinMutationOptions = <
+  TError = ErrorType<ValidationFailedResponse | ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createPlantTwin>>,
+    TError,
+    CreatePlantTwinMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createPlantTwin>>,
+  TError,
+  CreatePlantTwinMutationVariables,
+  TContext
+> => {
+  const mutationKey = getCreatePlantTwinMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createPlantTwin>>,
+    CreatePlantTwinMutationVariables
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createPlantTwin(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreatePlantTwinMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createPlantTwin>>
+>;
+export type CreatePlantTwinMutationBody = BodyType<PlantTwinCreate>;
+export type CreatePlantTwinMutationError = ErrorType<
+  ValidationFailedResponse | ErrorResponse
+>;
+export type CreatePlantTwinMutationVariables = {
+  data: BodyType<PlantTwinCreate>;
+};
+
+/**
+ * `id` is optional; the server generates `pt-<uuid>` when it is absent.
+ * The caller becomes the owner.
+ * @summary Create a 3D plant twin
+ */
+export const useCreatePlantTwin = <
+  TError = ErrorType<ValidationFailedResponse | ErrorResponse>,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof createPlantTwin>>,
+      TError,
+      CreatePlantTwinMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof createPlantTwin>>,
+  TError,
+  CreatePlantTwinMutationVariables,
+  TContext
+> => {
+  return useMutation(getCreatePlantTwinMutationOptions(options), queryClient);
+};
+
+export const getGetPlantTwinValuesUrl = () => {
+  return `/api/plant-twins/values`;
+};
+
+/**
+ * Read-only; a POST because the list can be long. Pairs for assets outside
+ * the caller's projects are left out of the result rather than refused.
+ * Pairs with no reading yet are absent.
+ * @summary Latest reading for each asset + metric pair a twin shows
+ */
+export const getPlantTwinValues = async (
+  plantTwinValuesRequest: PlantTwinValuesRequest,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<PlantTwinValue[]> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return customFetch<PlantTwinValue[]>(getGetPlantTwinValuesUrl(), {
+    ...options,
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(plantTwinValuesRequest),
+  });
+};
+
+export const getGetPlantTwinValuesMutationKey = () =>
+  ["getPlantTwinValues"] as const;
+
+export const getGetPlantTwinValuesMutationOptions = <
+  TError = ErrorType<ValidationFailedResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof getPlantTwinValues>>,
+    TError,
+    GetPlantTwinValuesMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof getPlantTwinValues>>,
+  TError,
+  GetPlantTwinValuesMutationVariables,
+  TContext
+> => {
+  const mutationKey = getGetPlantTwinValuesMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof getPlantTwinValues>>,
+    GetPlantTwinValuesMutationVariables
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return getPlantTwinValues(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type GetPlantTwinValuesMutationResult = NonNullable<
+  Awaited<ReturnType<typeof getPlantTwinValues>>
+>;
+export type GetPlantTwinValuesMutationBody = BodyType<PlantTwinValuesRequest>;
+export type GetPlantTwinValuesMutationError =
+  ErrorType<ValidationFailedResponse>;
+export type GetPlantTwinValuesMutationVariables = {
+  data: BodyType<PlantTwinValuesRequest>;
+};
+
+/**
+ * Read-only; a POST because the list can be long. Pairs for assets outside
+ * the caller's projects are left out of the result rather than refused.
+ * Pairs with no reading yet are absent.
+ * @summary Latest reading for each asset + metric pair a twin shows
+ */
+export const useGetPlantTwinValues = <
+  TError = ErrorType<ValidationFailedResponse>,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof getPlantTwinValues>>,
+      TError,
+      GetPlantTwinValuesMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof getPlantTwinValues>>,
+  TError,
+  GetPlantTwinValuesMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getGetPlantTwinValuesMutationOptions(options),
+    queryClient,
+  );
+};
+
+export const getGetPlantTwinUrl = (id: string) => {
+  return `/api/plant-twins/${id}`;
+};
+
+/**
+ * @summary One 3D plant twin with its scene
+ */
+export const getPlantTwin = async (
+  id: string,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<PlantTwin> => {
+  return customFetch<PlantTwin>(getGetPlantTwinUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetPlantTwinQueryKey = (id: string) => {
+  return [`/api/plant-twins/${id}`] as const;
+};
+
+export const getGetPlantTwinQueryOptions = <
+  TData = Awaited<ReturnType<typeof getPlantTwin>>,
+  TError = ErrorType<NotFoundResponse>,
+>(
+  id: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getPlantTwin>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetPlantTwinQueryKey(id);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getPlantTwin>>> = ({
+    signal,
+  }) => getPlantTwin(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: id !== null && id !== undefined,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getPlantTwin>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetPlantTwinQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getPlantTwin>>
+>;
+export type GetPlantTwinQueryError = ErrorType<NotFoundResponse>;
+
+/** @summary One 3D plant twin with its scene */
+export function useGetPlantTwin<
+  TData = Awaited<ReturnType<typeof getPlantTwin>>,
+  TError = ErrorType<NotFoundResponse>,
+>(
+  id: string,
+  options: {
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getPlantTwin>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPlantTwin>>,
+          TError,
+          Awaited<ReturnType<typeof getPlantTwin>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary One 3D plant twin with its scene */
+export function useGetPlantTwin<
+  TData = Awaited<ReturnType<typeof getPlantTwin>>,
+  TError = ErrorType<NotFoundResponse>,
+>(
+  id: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getPlantTwin>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getPlantTwin>>,
+          TError,
+          Awaited<ReturnType<typeof getPlantTwin>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary One 3D plant twin with its scene */
+export function useGetPlantTwin<
+  TData = Awaited<ReturnType<typeof getPlantTwin>>,
+  TError = ErrorType<NotFoundResponse>,
+>(
+  id: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getPlantTwin>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary One 3D plant twin with its scene */
+export function useGetPlantTwin<
+  TData = Awaited<ReturnType<typeof getPlantTwin>>,
+  TError = ErrorType<NotFoundResponse>,
+>(
+  id: string,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof getPlantTwin>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getGetPlantTwinQueryOptions(id, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getUpdatePlantTwinUrl = (id: string) => {
+  return `/api/plant-twins/${id}`;
+};
+
+/**
+ * @summary Rename, move to a project, or save the scene (owner or administrator)
+ */
+export const updatePlantTwin = async (
+  id: string,
+  plantTwinUpdate: PlantTwinUpdate,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<PlantTwin> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return customFetch<PlantTwin>(getUpdatePlantTwinUrl(id), {
+    ...options,
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(plantTwinUpdate),
+  });
+};
+
+export const getUpdatePlantTwinMutationKey = () => ["updatePlantTwin"] as const;
+
+export const getUpdatePlantTwinMutationOptions = <
+  TError = ErrorType<
+    ValidationFailedResponse | ErrorResponse | NotFoundResponse
+  >,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updatePlantTwin>>,
+    TError,
+    UpdatePlantTwinMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updatePlantTwin>>,
+  TError,
+  UpdatePlantTwinMutationVariables,
+  TContext
+> => {
+  const mutationKey = getUpdatePlantTwinMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updatePlantTwin>>,
+    UpdatePlantTwinMutationVariables
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return updatePlantTwin(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdatePlantTwinMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updatePlantTwin>>
+>;
+export type UpdatePlantTwinMutationBody = BodyType<PlantTwinUpdate>;
+export type UpdatePlantTwinMutationError = ErrorType<
+  ValidationFailedResponse | ErrorResponse | NotFoundResponse
+>;
+export type UpdatePlantTwinMutationVariables = {
+  id: string;
+  data: BodyType<PlantTwinUpdate>;
+};
+
+/** @summary Rename, move to a project, or save the scene (owner or administrator) */
+export const useUpdatePlantTwin = <
+  TError = ErrorType<
+    ValidationFailedResponse | ErrorResponse | NotFoundResponse
+  >,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof updatePlantTwin>>,
+      TError,
+      UpdatePlantTwinMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof updatePlantTwin>>,
+  TError,
+  UpdatePlantTwinMutationVariables,
+  TContext
+> => {
+  return useMutation(getUpdatePlantTwinMutationOptions(options), queryClient);
+};
+
+export const getDeletePlantTwinUrl = (id: string) => {
+  return `/api/plant-twins/${id}`;
+};
+
+/**
+ * @summary Delete a 3D plant twin (owner or administrator)
+ */
+export const deletePlantTwin = async (
+  id: string,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<void> => {
+  return customFetch<void>(getDeletePlantTwinUrl(id), {
+    ...options,
+    method: "DELETE",
+  });
+};
+
+export const getDeletePlantTwinMutationKey = () => ["deletePlantTwin"] as const;
+
+export const getDeletePlantTwinMutationOptions = <
+  TError = ErrorType<ErrorResponse | NotFoundResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deletePlantTwin>>,
+    TError,
+    DeletePlantTwinMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deletePlantTwin>>,
+  TError,
+  DeletePlantTwinMutationVariables,
+  TContext
+> => {
+  const mutationKey = getDeletePlantTwinMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deletePlantTwin>>,
+    DeletePlantTwinMutationVariables
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return deletePlantTwin(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeletePlantTwinMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deletePlantTwin>>
+>;
+
+export type DeletePlantTwinMutationError = ErrorType<
+  ErrorResponse | NotFoundResponse
+>;
+export type DeletePlantTwinMutationVariables = { id: string };
+
+/** @summary Delete a 3D plant twin (owner or administrator) */
+export const useDeletePlantTwin = <
+  TError = ErrorType<ErrorResponse | NotFoundResponse>,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof deletePlantTwin>>,
+      TError,
+      DeletePlantTwinMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof deletePlantTwin>>,
+  TError,
+  DeletePlantTwinMutationVariables,
+  TContext
+> => {
+  return useMutation(getDeletePlantTwinMutationOptions(options), queryClient);
+};
 
 export const getListLegacyVizDashboardsUrl = () => {
   return `/api/viz-dashboards`;

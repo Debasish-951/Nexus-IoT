@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect, useCallback } from "react";
+import { useT } from "@/i18n";
 import { useLocation } from "wouter";
 import { useCurrentUser } from "@/contexts/UserContext";
 import {
@@ -18,6 +19,7 @@ const APP_BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 export default function UserProfileTopMenu() {
   const { currentUser, logout } = useCurrentUser();
+  const t = useT();
   const [, navigate] = useLocation();
 
   const [open, setOpen] = useState(false);
@@ -101,7 +103,7 @@ export default function UserProfileTopMenu() {
                 className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm hover:bg-muted transition-colors text-left"
               >
                 <KeyRound className="w-4 h-4 text-muted-foreground" />
-                Change Password
+                {t("Change Password")}
               </button>
             </div>
 
@@ -112,7 +114,7 @@ export default function UserProfileTopMenu() {
                 className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-destructive hover:bg-destructive/10 transition-colors text-left"
               >
                 <LogOut className="w-4 h-4" />
-                Sign Out
+                {t("Sign Out")}
               </button>
             </div>
           </div>
@@ -136,6 +138,7 @@ function ChangePasswordModal({
   open: boolean; onClose: () => void; userId: string; userName: string;
 }) {
   const policy = usePasswordPolicy();
+  const t = useT();
   const [current, setCurrent] = useState("");
   const [next, setNext] = useState("");
   const [confirm, setConfirm] = useState("");
@@ -161,7 +164,7 @@ function ChangePasswordModal({
     setError(null);
 
     if (next !== confirm) {
-      setError("New passwords do not match."); return;
+      setError(t("New passwords do not match.")); return;
     }
     // Client-side policy check is UX only — the server re-validates and is the
     // authority. Keeping the check here just avoids a round trip.
@@ -179,13 +182,13 @@ function ChangePasswordModal({
       });
       const body = await res.json().catch(() => ({}));
       if (!res.ok) {
-        setError(body.violations?.[0] ?? body.error ?? "Password change failed.");
+        setError(body.violations?.[0] ?? body.error ?? t("Password change failed."));
       } else {
         setSuccess(true);
         setTimeout(() => { handleClose(); }, 1800);
       }
     } catch {
-      setError("Network error — please try again.");
+      setError(t("Network error — please try again."));
     } finally {
       setLoading(false);
     }
@@ -196,7 +199,7 @@ function ChangePasswordModal({
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
-            <KeyRound className="w-4 h-4" /> Change Password
+            <KeyRound className="w-4 h-4" /> {t("Change Password")}
           </DialogTitle>
         </DialogHeader>
 
@@ -205,21 +208,21 @@ function ChangePasswordModal({
             <div className="w-12 h-12 rounded-full bg-green-100 flex items-center justify-center">
               <Check className="w-6 h-6 text-green-600" />
             </div>
-            <p className="text-sm font-medium text-green-700">Password changed successfully</p>
-            <p className="text-xs text-muted-foreground">You have been signed out on all other devices.</p>
+            <p className="text-sm font-medium text-green-700">{t("Password changed successfully")}</p>
+            <p className="text-xs text-muted-foreground">{t("You have been signed out on all other devices.")}</p>
           </div>
         ) : (
           <form onSubmit={handleSubmit} className="space-y-4 pt-2">
-            <p className="text-xs text-muted-foreground">Changing password for <strong>{userName}</strong></p>
+            <p className="text-xs text-muted-foreground">{t("Changing password for")} <strong>{userName}</strong></p>
 
             <div className="space-y-1.5">
-              <Label className="text-xs">Current Password</Label>
+              <Label className="text-xs">{t("Current Password")}</Label>
               <div className="relative">
                 <Input
                   type={showCurrent ? "text" : "password"}
                   value={current}
                   onChange={(e) => setCurrent(e.target.value)}
-                  placeholder="Enter current password"
+                  placeholder={t("Enter current password")}
                   required
                   className="pr-9 h-9 text-sm"
                 />
@@ -231,7 +234,7 @@ function ChangePasswordModal({
             </div>
 
             <div className="space-y-1.5">
-              <Label className="text-xs">New Password</Label>
+              <Label className="text-xs">{t("New Password")}</Label>
               <div className="relative">
                 <Input
                   type={showNext ? "text" : "password"}
@@ -254,12 +257,12 @@ function ChangePasswordModal({
             </div>
 
             <div className="space-y-1.5">
-              <Label className="text-xs">Confirm New Password</Label>
+              <Label className="text-xs">{t("Confirm New Password")}</Label>
               <Input
                 type="password"
                 value={confirm}
                 onChange={(e) => setConfirm(e.target.value)}
-                placeholder="Repeat new password"
+                placeholder={t("Repeat new password")}
                 required
                 className="h-9 text-sm"
               />
@@ -274,7 +277,7 @@ function ChangePasswordModal({
                 Cancel
               </Button>
               <Button type="submit" size="sm" disabled={loading || !current || !next || !confirm}>
-                {loading ? "Saving…" : "Change Password"}
+                {loading ? t("Saving…") : t("Change Password")}
               </Button>
             </DialogFooter>
           </form>

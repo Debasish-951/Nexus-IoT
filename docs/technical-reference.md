@@ -30,6 +30,7 @@ scripts/                  — Utility scripts
 - `api_clients` — OAuth client credentials with scopes, expiresAt, allowedIps, description, secretRotatedAt, totalRequests, lastUsedAt
 - `destinations` — webhook/HTTP forward destinations with auth, enabled toggle, eventTypes filter
 - `activity_logs` — audit trail: action, category, actorName, actorRole, actorUsername, targetId, targetName, detail, timestamp
+- `plant_twins` — 3D plant twins (Live Twin → 3D plant twins): id (text, `pt-…`), name, projectId (root asset, `ON DELETE SET NULL`, null = every project), ownerId, scene (JSONB: areas, sub-processes, machines with settings, position, linked assetId and reading→metric map, connections, demo switch). See docs/features/plant-twin.md
 
 ### API Routes (all under /api)
 - `GET/POST /api/assets` — list/create assets
@@ -63,6 +64,9 @@ scripts/                  — Utility scripts
 - `POST /api/viz-dashboards` — create dashboard
 - `PUT /api/viz-dashboards/:id` — update dashboard (name, roleAccess, widgets)
 - `DELETE /api/viz-dashboards/:id` — delete dashboard
+- `GET /api/plant-twins` — 3D plant twins the caller may see (no scenes); `POST` creates one (Visualization write; caller becomes owner)
+- `GET/PUT/DELETE /api/plant-twins/:id` — one twin with its scene; change and delete need Visualization write AND owner or Super Admin / Company Admin (checked in the route)
+- `POST /api/plant-twins/values` — latest reading for up to 500 asset+metric pairs (read-only; one indexed lookup per pair; pairs outside the caller's projects are dropped)
 - `GET /api/activity-log` — paginated audit trail (category, actorName, limit, offset filters)
 - `POST /api/assets/:id/maintenance` — toggle maintenance mode (body: { enabled, note? })
 - `GET /api/system/storage` — storage stats (totalRows, tableSize, perAsset breakdown)
