@@ -90,9 +90,12 @@ Table `plant_twins` (`lib/db/src/schema/plant_twins.ts`); routes in `artifacts/a
 
 | Action | Needs |
 |---|---|
-| See a twin, fetch live values | Visualization read, and the twin's project must be one the user may open (no project = every project) |
-| Create | Visualization write; the creator is the owner |
-| Change or delete | Visualization write, and the owner or a Super Admin / Company Admin |
+| See a twin, fetch live values | Live Twin read, and the twin's project must be one the user may open (no project = every project) |
+| Create | Live Twin write; the creator is the owner |
+| Change | Live Twin write, and the owner or a Super Admin / Company Admin |
+| Delete | Live Twin delete, and the owner or a Super Admin / Company Admin |
+
+Live Twin is its own module in Access Control (Read / Write / Delete) since November 2026. Role defaults match what Visualization gave before (roles that could edit twins can also delete them); a user whose Visualization access was overridden keeps that setting for Live Twin until Live Twin is set for them. The 2D twin is stored per browser and only follows the menu entry.
 
 Others see a twin read-only ("View only" in the toolbar). Live values are returned only for assets in the caller's projects.
 

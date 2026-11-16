@@ -53,10 +53,10 @@ interface NavItem {
 
 // Former AI Advisor sub-menu, not shown (see the AI Advisor entry below).
 const AI_ADVISOR_CHILDREN: NavItem[] = [
-  { label: "Ask Your Assets",       href: "/ai-copilot",                   icon: MessageSquare,  module: "explorer" },
-  { label: "Health Insights",       href: "/ai-copilot?action=health",     icon: Activity,       module: "explorer" },
-  { label: "Failure Explanations",  href: "/ai-copilot?action=failure",    icon: AlertTriangle,  module: "explorer" },
-  { label: "Smart Recommendations", href: "/ai-copilot?action=recommend",  icon: Lightbulb,      module: "explorer" },
+  { label: "Ask Your Assets",       href: "/ai-copilot",                   icon: MessageSquare,  module: "ai_advisor" },
+  { label: "Health Insights",       href: "/ai-copilot?action=health",     icon: Activity,       module: "ai_advisor" },
+  { label: "Failure Explanations",  href: "/ai-copilot?action=failure",    icon: AlertTriangle,  module: "ai_advisor" },
+  { label: "Smart Recommendations", href: "/ai-copilot?action=recommend",  icon: Lightbulb,      module: "ai_advisor" },
 ];
 void AI_ADVISOR_CHILDREN;
 
@@ -89,11 +89,11 @@ const navItems: NavItem[] = [
     ],
   },
   // Live Twin is its own section (moved out of Data Insights at the owner's request).
-  { label: "Live Twin", href: "/live-twin", icon: Radio, module: "visualization" },
+  { label: "Live Twin", href: "/live-twin", icon: Radio, module: "live_twin" },
   // AI Advisor is one entry: its four modes are already cards at the top of the
   // page, so the menu no longer repeats them (owner's request). The old sub-items
   // are kept in AI_ADVISOR_CHILDREN below; put them back as `children` to restore.
-  { label: "AI Advisor", href: "/ai-copilot", icon: BrainCircuit, module: "explorer", plantWide: true },
+  { label: "AI Advisor", href: "/ai-copilot", icon: BrainCircuit, module: "ai_advisor", plantWide: true },
   {
     label: "Event Manager",
     icon: Bell,

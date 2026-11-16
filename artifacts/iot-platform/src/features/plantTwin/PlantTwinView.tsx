@@ -73,7 +73,8 @@ export default function PlantTwinView({ variant = "builder", onOpenBuilder, link
   const qc = useQueryClient();
   const { currentProjectId } = useProject();
   const { canModule } = useCurrentUser();
-  const canCreate = canModule("visualization", "write");
+  const canCreate = canModule("live_twin", "write");
+  const canDelete = canModule("live_twin", "delete");
   const { inScope } = useProjectScope();
   const { data: assetsData } = useListAssets();
   const assets = useMemo(() => ((assetsData as any[] | undefined) ?? []).filter((a: any) => inScope(a.id, { strict: true })).map((a: any) => ({ id: a.id as string, name: a.name as string })), [assetsData, inScope]);
@@ -292,7 +293,7 @@ export default function PlantTwinView({ variant = "builder", onOpenBuilder, link
       {!floor && current?.canEdit && !renaming && (
         <>
           <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => { setNameDraft(current.name); setRenaming(true); }} aria-label={t("Rename twin")} title={t("Rename")}><Pencil className="w-4 h-4" /></Button>
-          <Button size="icon" variant="ghost" className="h-8 w-8 text-red-500" onClick={() => setConfirmDelete(true)} aria-label={t("Delete twin")} title={t("Delete")}><Trash2 className="w-4 h-4" /></Button>
+          {canDelete && <Button size="icon" variant="ghost" className="h-8 w-8 text-red-500" onClick={() => setConfirmDelete(true)} aria-label={t("Delete twin")} title={t("Delete")}><Trash2 className="w-4 h-4" /></Button>}
         </>
       )}
       {renaming && (
@@ -353,10 +354,10 @@ export default function PlantTwinView({ variant = "builder", onOpenBuilder, link
             {floor
               ? <>{t("Sample plant ({name}). No plant is saved in this project yet. Open 3D Builder to lay out your own plant and link machines to assets.", { name: t(PACKS[engine?.pack ?? "textile"]?.name ?? "") })}</>
               : asset
-              ? (canCreate ? <>{t("Click Add twin to choose machines, click a machine to connect its data source, then Save.")}</> : <>{t("Preview. Saving a twin needs Visualization write access.")}</>)
+              ? (canCreate ? <>{t("Click Add twin to choose machines, click a machine to connect its data source, then Save.")}</> : <>{t("Preview. Saving a twin needs Live Twin write access.")}</>)
               : canCreate
               ? <>{t("Click Add twin, pick an industry and Load it (or add single machines), untick stages the plant does not have, then Save.")}</>
-              : <>{t("Template preview. You can look around; saving a twin needs Visualization write access.")}</>}
+              : <>{t("Template preview. You can look around; saving a twin needs Live Twin write access.")}</>}
             {listQ.isError && <span className="text-red-500"> Saved twins could not be loaded: {(listQ.error as Error)?.message}</span>}
           </div>
         )}

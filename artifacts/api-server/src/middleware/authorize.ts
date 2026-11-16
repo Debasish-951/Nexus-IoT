@@ -198,11 +198,12 @@ const ROUTE_RULES: Rule[] = [
   // or a Super Admin / Company Admin, because that depends on the row. Delete is
   // not level "delete": roles with read-write Visualization (engineer, developer)
   // must be able to remove a twin they created themselves.
-  { path: "/plant-twins/values",  methods: ["POST"],          module: "visualization", level: "read" },
-  { path: "/plant-twins",         methods: READ,              module: "visualization", level: "read" },
-  { path: "/plant-twins",         methods: ["POST"],          module: "visualization", level: "write" },
-  { path: "/plant-twins/:id",     methods: READ,              module: "visualization", level: "read" },
-  { path: "/plant-twins/:id",     methods: ["PUT", "DELETE"], module: "visualization", level: "write" },
+  { path: "/plant-twins/values",  methods: ["POST"],          module: "live_twin", level: "read" },
+  { path: "/plant-twins",         methods: READ,              module: "live_twin", level: "read" },
+  { path: "/plant-twins",         methods: ["POST"],          module: "live_twin", level: "write" },
+  { path: "/plant-twins/:id",     methods: READ,              module: "live_twin", level: "read" },
+  { path: "/plant-twins/:id",     methods: ["PUT"],           module: "live_twin", level: "write" },
+  { path: "/plant-twins/:id",     methods: ["DELETE"],        module: "live_twin", level: "delete" },
 
   // ── Uploads ────────────────────────────────────────────────────────────────
   // `/uploads/:id/content` precedes the collection rules so the download is not
@@ -269,7 +270,7 @@ const ROUTE_RULES: Rule[] = [
   { path: "/system/retention/:id", methods: ["DELETE"], permission: "manage_assets", module: "reports", level: "delete" },
 
   // ── AI copilot ─────────────────────────────────────────────────────────────
-  { path: "/ai/chat", methods: ["POST"], module: "explorer", level: "read" },
+  { path: "/ai/chat", methods: ["POST"], module: "ai_advisor", level: "read" },
 ];
 
 // ── Matching ─────────────────────────────────────────────────────────────────

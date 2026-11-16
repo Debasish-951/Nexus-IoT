@@ -110,8 +110,8 @@ test("SEC-17: AI tools are offered only for modules the caller can read", () => 
   assert.ok(noAlarms.includes("query_telemetry"));
   for (const t of ["get_alarms", "get_alarm_history", "asset_health"]) assert.ok(!noAlarms.includes(t), t);
 
-  const noExplorer = toolNamesFor(resolveAccess("engineer", { modules: { explorer: false } }));
-  assert.ok(!noExplorer.includes("query_telemetry"));
+  const noAdvisor = toolNamesFor(resolveAccess("engineer", { modules: { ai_advisor: false } }));
+  assert.ok(!noAdvisor.includes("query_telemetry"));
 
   assert.equal(MAX_QUESTION_CHARS, 2000);
 });

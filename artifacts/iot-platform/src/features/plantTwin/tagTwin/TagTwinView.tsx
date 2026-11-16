@@ -79,7 +79,8 @@ export function TagTwinView({ kind, keys, Stage, demoValve, link }: {
   const qc = useQueryClient();
   const { currentProjectId } = useProject();
   const { canModule } = useCurrentUser();
-  const canCreate = canModule("visualization", "write");
+  const canCreate = canModule("live_twin", "write");
+  const canDelete = canModule("live_twin", "delete");
   const { inScope } = useProjectScope();
   const { data: assetsData } = useListAssets();
   const assets = useMemo(() => ((assetsData as any[] | undefined) ?? []).filter((a: any) => inScope(a.id, { strict: true })).map((a: any) => ({ id: a.id as string, name: a.name as string })), [assetsData, inScope]);
@@ -239,7 +240,7 @@ export function TagTwinView({ kind, keys, Stage, demoValve, link }: {
       {current?.canEdit && !renaming && (
         <>
           <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => { setNameDraft(current.name); setRenaming(true); }} aria-label={t("Rename")} title={t("Rename")}><Pencil className="w-4 h-4" /></Button>
-          <Button size="icon" variant="ghost" className="h-8 w-8 text-red-500" onClick={() => setConfirmDel(true)} aria-label={t("Delete")} title={t("Delete")}><Trash2 className="w-4 h-4" /></Button>
+          {canDelete && <Button size="icon" variant="ghost" className="h-8 w-8 text-red-500" onClick={() => setConfirmDel(true)} aria-label={t("Delete")} title={t("Delete")}><Trash2 className="w-4 h-4" /></Button>}
         </>
       )}
       {renaming && (

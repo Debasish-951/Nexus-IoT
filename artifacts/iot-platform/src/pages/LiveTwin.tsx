@@ -609,13 +609,14 @@ function LiveTwinByType() {
     step(); setType(t); remember(TYPE_KEY, t); setPick((p) => ({ id: currentId, n: p.n + 1 }));
   };
   const meta = TYPES[type];
-  const canWrite = canModule("visualization", "write");
+  const canWrite = canModule("live_twin", "write");
 
   // ── folders (the twin hierarchy) ─────────────────────────────────────────
   const refresh = () => qc.invalidateQueries({ queryKey: ["plant-twins"] });
   const fail = (title: string) => (err: any) => toast({ title, description: err?.message ?? String(err), variant: "destructive" });
   const hierarchy = type === "image" ? undefined : {
     canEdit: canWrite,
+    canDelete: canModule("live_twin", "delete"),
     create: (parentId: string | null) => {
       const n = serverItems.filter((i) => i.folder).length + 1;
       createPlantTwin({ id: `pf-${crypto.randomUUID()}`, name: t("New folder {n}", { n }), projectId: currentProjectId ?? null, scene: { kind: "folder", forType: folderType, parent: parentId } })

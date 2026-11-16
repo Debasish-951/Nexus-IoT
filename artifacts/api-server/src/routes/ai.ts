@@ -587,12 +587,12 @@ type ToolFn = (args: any, ctx: ToolContext) => Promise<unknown>;
 
 /**
  * `modules`: every module the caller must be able to read for the tool to be
- * offered at all. The route itself needs only Data Explorer, so without this the
+ * offered at all. The route itself needs only AI Advisor, so without this the
  * assistant read alarms and alarm history for users the Alarms page refuses.
  */
 const TOOLS: Record<string, { fn: ToolFn; def: any; modules: string[] }> = {
   resolve_asset: {
-    modules: ["explorer"],
+    modules: ["ai_advisor"],
     fn: resolveAsset,
     def: {
       name: "resolve_asset",
@@ -605,7 +605,7 @@ const TOOLS: Record<string, { fn: ToolFn; def: any; modules: string[] }> = {
     },
   },
   list_assets: {
-    modules: ["explorer"],
+    modules: ["ai_advisor"],
     fn: listAssets,
     def: {
       name: "list_assets",
@@ -614,7 +614,7 @@ const TOOLS: Record<string, { fn: ToolFn; def: any; modules: string[] }> = {
     },
   },
   list_metrics: {
-    modules: ["explorer"],
+    modules: ["ai_advisor"],
     fn: listMetrics,
     def: {
       name: "list_metrics",
@@ -627,7 +627,7 @@ const TOOLS: Record<string, { fn: ToolFn; def: any; modules: string[] }> = {
     },
   },
   get_latest_telemetry: {
-    modules: ["explorer"],
+    modules: ["ai_advisor"],
     fn: getLatestTelemetry,
     def: {
       name: "get_latest_telemetry",
@@ -640,7 +640,7 @@ const TOOLS: Record<string, { fn: ToolFn; def: any; modules: string[] }> = {
     },
   },
   query_telemetry: {
-    modules: ["explorer"],
+    modules: ["ai_advisor"],
     fn: queryTelemetry,
     def: {
       name: "query_telemetry",
@@ -656,7 +656,7 @@ const TOOLS: Record<string, { fn: ToolFn; def: any; modules: string[] }> = {
     },
   },
   aggregate_telemetry: {
-    modules: ["explorer"],
+    modules: ["ai_advisor"],
     fn: aggregateTelemetry,
     def: {
       name: "aggregate_telemetry",
@@ -672,7 +672,7 @@ const TOOLS: Record<string, { fn: ToolFn; def: any; modules: string[] }> = {
     },
   },
   compare_metrics: {
-    modules: ["explorer"],
+    modules: ["ai_advisor"],
     fn: compareMetrics,
     def: {
       name: "compare_metrics",
@@ -688,7 +688,7 @@ const TOOLS: Record<string, { fn: ToolFn; def: any; modules: string[] }> = {
     },
   },
   asset_health: {
-    modules: ["explorer", "alarms"],
+    modules: ["ai_advisor", "alarms"],
     fn: assetHealth,
     def: {
       name: "asset_health",

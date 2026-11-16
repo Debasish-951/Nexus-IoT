@@ -112,3 +112,33 @@ test("access: viewers read health; deleting, restoring, approving and raw SQL ne
   assert.equal(ruleAllows(viewer, "PUT", "/system/data-settings"), false);
   assert.equal(ruleAllows(viewer, "POST", "/system/holds"), false);
 });
+
+test("access: Live Twin and AI Advisor are their own modules, defaults keep today's access", () => {
+  // Defaults copy Visualization / Data Explorer; delete comes with edit as before.
+  const eng = resolveAccess("engineer", {});
+  assert.deepEqual(eng.modules.live_twin, { r: true, w: true, d: true });
+  assert.equal(eng.modules.ai_advisor, true);
+  const viewer = resolveAccess("viewer", {});
+  assert.deepEqual(viewer.modules.live_twin, { r: true, w: false, d: false });
+  assert.equal(viewer.modules.ai_advisor, false);
+  assert.equal(ruleAllows(viewer, "GET", "/plant-twins"), true);
+  assert.equal(ruleAllows(viewer, "POST", "/plant-twins"), false);
+  assert.equal(ruleAllows(viewer, "POST", "/ai/chat"), false);
+
+  // Switched off per user.
+  const noTwin = resolveAccess("engineer", { modules: { live_twin: false, ai_advisor: false } });
+  assert.equal(ruleAllows(noTwin, "GET", "/plant-twins"), false);
+  assert.equal(ruleAllows(noTwin, "POST", "/ai/chat"), false);
+  assert.equal(ruleAllows(noTwin, "GET", "/viz-nodes"), ruleAllows(eng, "GET", "/viz-nodes"), "Visualization is not affected");
+
+  // Granted per user to a role that lacks it.
+  const op = resolveAccess("operator", { modules: { ai_advisor: true, live_twin: { r: true, w: true, d: false } } });
+  assert.equal(ruleAllows(op, "POST", "/ai/chat"), true);
+  assert.equal(ruleAllows(op, "PUT", "/plant-twins/pt-1"), true);
+  assert.equal(ruleAllows(op, "DELETE", "/plant-twins/pt-1"), false, "delete is its own circle");
+
+  // An older override of the source module still applies until the new one is set.
+  const legacy = resolveAccess("engineer", { modules: { explorer: false, visualization: { r: true, w: true, d: false } } });
+  assert.equal(legacy.modules.ai_advisor, false);
+  assert.deepEqual(legacy.modules.live_twin, { r: true, w: true, d: true });
+});

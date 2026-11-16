@@ -110,6 +110,13 @@ export const MODULES: ModuleDef[] = [
   { key: "visualization", label: "Visualization",    type: "granular" },
   { key: "live",          label: "Live Feed",        type: "simple" },
   { key: "explorer",      label: "Data Explorer",    type: "simple" },
+  // Own modules since November 2026 (they used to ride on Data Explorer and
+  // Visualization). Role defaults copy those modules, and a user whose old module
+  // was overridden keeps that decision until the new one is set (LEGACY_SOURCE).
+  { key: "ai_advisor",    label: "AI Advisor",       type: "simple" },
+  // Read = open twins; Write = create and change; Delete = delete. Roles that could
+  // edit twins before keep delete too (it used to come with write).
+  { key: "live_twin",     label: "Live Twin",        type: "granular" },
   { key: "analytics",     label: "Analytics & KPI",  type: "granular" },
   { key: "users",         label: "User Management",  type: "simple" },
   { key: "security",      label: "Security Settings", type: "simple" },
@@ -131,47 +138,47 @@ export const ROLE_MODULE_DEFAULTS: Record<Role, Record<string, ModuleAccess>> = 
   super_admin: {
     dashboard: true, alarms: true, brokers: true, api_clients: true, reports: true,
     live: true, explorer: true, users: true, security: true, activity_log: true,
-    assets: ALL, visualization: ALL, analytics: ALL,
+    assets: ALL, visualization: ALL, ai_advisor: true, live_twin: ALL, analytics: ALL,
   },
   company_admin: {
     dashboard: true, alarms: true, brokers: true, api_clients: true, reports: true,
     live: true, explorer: true, users: true, security: true, activity_log: true,
-    assets: ALL, visualization: ALL, analytics: ALL,
+    assets: ALL, visualization: ALL, ai_advisor: true, live_twin: ALL, analytics: ALL,
   },
   admin: {
     dashboard: true, alarms: true, brokers: true, api_clients: true, reports: true,
     live: true, explorer: true, users: true, security: true, activity_log: true,
-    assets: ALL, visualization: ALL, analytics: ALL,
+    assets: ALL, visualization: ALL, ai_advisor: true, live_twin: ALL, analytics: ALL,
   },
   project_manager: {
     dashboard: true, alarms: true, brokers: false, api_clients: false, reports: true,
     live: true, explorer: true, users: false, security: false, activity_log: false,
-    assets: RO, visualization: RW, analytics: RO,
+    assets: RO, visualization: RW, ai_advisor: true, live_twin: ALL, analytics: RO,
   },
   team_lead: {
     dashboard: true, alarms: true, brokers: false, api_clients: false, reports: true,
     live: true, explorer: true, users: false, security: false, activity_log: false,
-    assets: RO, visualization: RW, analytics: RO,
+    assets: RO, visualization: RW, ai_advisor: true, live_twin: ALL, analytics: RO,
   },
   developer: {
     dashboard: true, alarms: true, brokers: true, api_clients: true, reports: true,
     live: true, explorer: true, users: false, security: false, activity_log: true,
-    assets: RW, visualization: RW, analytics: RO,
+    assets: RW, visualization: RW, ai_advisor: true, live_twin: ALL, analytics: RO,
   },
   engineer: {
     dashboard: true, alarms: true, brokers: true, api_clients: true, reports: true,
     live: true, explorer: true, users: false, security: false, activity_log: true,
-    assets: RW, visualization: RW, analytics: RO,
+    assets: RW, visualization: RW, ai_advisor: true, live_twin: ALL, analytics: RO,
   },
   operator: {
     dashboard: true, alarms: true, brokers: false, api_clients: false, reports: true,
     live: true, explorer: false, users: false, security: false, activity_log: false,
-    assets: RO, visualization: RO, analytics: RO,
+    assets: RO, visualization: RO, ai_advisor: false, live_twin: RO, analytics: RO,
   },
   viewer: {
     dashboard: true, alarms: false, brokers: false, api_clients: false, reports: true,
     live: true, explorer: false, users: false, security: false, activity_log: false,
-    assets: RO, visualization: RO, analytics: NONE,
+    assets: RO, visualization: RO, ai_advisor: false, live_twin: RO, analytics: NONE,
   },
 };
 
@@ -274,6 +281,13 @@ export function normaliseRole(value: string | null | undefined): Role {
   return value && isRole(value) ? value : "viewer";
 }
 
+/**
+ * Modules split out of older ones. Until an administrator sets the new module for
+ * a user, that user's override of the old module applies, so nobody gains (or
+ * loses) AI Advisor or Live Twin through the split.
+ */
+const LEGACY_SOURCE: Record<string, string> = { ai_advisor: "explorer", live_twin: "visualization" };
+
 function defaultForModule(role: Role, key: string): ModuleAccess {
   const def = ROLE_MODULE_DEFAULTS[role]?.[key];
   if (def !== undefined) return def;
@@ -298,7 +312,13 @@ export function resolveAccess(
 
   for (const mod of MODULES) {
     const base = defaultForModule(role, mod.key);
-    const override = overrides?.modules?.[mod.key];
+    const legacy = LEGACY_SOURCE[mod.key];
+    let override = overrides?.modules?.[mod.key];
+    if (override === undefined && legacy) {
+      const old = overrides?.modules?.[legacy];
+      // Twins could always be deleted by anyone who could edit them; keep that.
+      override = mod.key === "live_twin" && old && typeof old === "object" ? { ...old, d: !!old.d || !!old.w } : old;
+    }
 
     if (override === undefined) {
       modules[mod.key] = typeof base === "boolean" ? base : { ...base };

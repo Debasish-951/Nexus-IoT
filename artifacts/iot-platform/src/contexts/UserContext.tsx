@@ -8,7 +8,7 @@ import { claimUserStorage, releaseUserStorage, runUserResets } from "@/lib/user-
  * Modules with r/w/d levels (type "granular" in api-server/src/lib/rbac.ts MODULES).
  * Keep in step with the server.
  */
-const GRANULAR_MODULES = new Set(["assets", "visualization", "analytics"]);
+const GRANULAR_MODULES = new Set(["assets", "visualization", "analytics", "live_twin"]);
 
 /** Least time between two background session re-reads (focus, stale-session 403s). */
 const REVALIDATE_MIN_MS = 15_000;

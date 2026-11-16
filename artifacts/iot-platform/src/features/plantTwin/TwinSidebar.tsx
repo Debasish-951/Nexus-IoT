@@ -29,6 +29,8 @@ export function TwinSidebar({ title, items, currentId, loading, collapsed, onCol
   /** Folder actions; absent where twins cannot be organised (image twins live in the browser). */
   hierarchy?: {
     canEdit: boolean;
+    /** Live Twin Delete right; folders cannot be deleted without it. */
+    canDelete?: boolean;
     create: (parentId: string | null) => void;
     rename: (id: string, name: string) => void;
     remove: (id: string) => void;
@@ -125,7 +127,7 @@ export function TwinSidebar({ title, items, currentId, loading, collapsed, onCol
             <span className="hidden group-hover:flex items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
               <button className="p-0.5 rounded hover:bg-background" title={t("New folder inside")} aria-label={t("New folder inside")} onClick={() => { hierarchy.create(i.id); setOpen((s) => new Set(s).add(i.id)); }}><FolderPlus className="w-3.5 h-3.5" /></button>
               <button className="p-0.5 rounded hover:bg-background" title={t("Rename")} aria-label={t("Rename")} onClick={() => setRenaming({ id: i.id, name: i.name })}><Pencil className="w-3.5 h-3.5" /></button>
-              <button className="p-0.5 rounded hover:bg-background text-red-500" title={t("Delete folder")} aria-label={t("Delete folder")} onClick={() => setConfirmDel(i)}><Trash2 className="w-3.5 h-3.5" /></button>
+              {hierarchy.canDelete !== false && <button className="p-0.5 rounded hover:bg-background text-red-500" title={t("Delete folder")} aria-label={t("Delete folder")} onClick={() => setConfirmDel(i)}><Trash2 className="w-3.5 h-3.5" /></button>}
             </span>
           )}
         </div>

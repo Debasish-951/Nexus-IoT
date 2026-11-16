@@ -64,8 +64,9 @@ scripts/                  — Utility scripts
 - `POST /api/viz-dashboards` — create dashboard
 - `PUT /api/viz-dashboards/:id` — update dashboard (name, roleAccess, widgets)
 - `DELETE /api/viz-dashboards/:id` — delete dashboard
-- `GET /api/plant-twins` — 3D plant twins the caller may see (no scenes); `POST` creates one (Visualization write; caller becomes owner)
-- `GET/PUT/DELETE /api/plant-twins/:id` — one twin with its scene; change and delete need Visualization write AND owner or Super Admin / Company Admin (checked in the route)
+- `GET /api/plant-twins` — 3D plant twins the caller may see (no scenes); `POST` creates one (Live Twin write; caller becomes owner)
+- `GET/PUT/DELETE /api/plant-twins/:id` — one twin with its scene; change needs Live Twin write, delete Live Twin delete, AND owner or Super Admin / Company Admin (checked in the route)
+- Access Control modules `live_twin` (granular: Live Twin page and `/plant-twins*`) and `ai_advisor` (simple: AI Advisor page, `/ai/chat` and its data tools; alarm tools also need Alarms). Split from Visualization and Data Explorer in November 2026: role defaults copy those modules, and an existing override of the old module applies until the new one is set (`LEGACY_SOURCE` in `lib/rbac.ts`)
 - `POST /api/plant-twins/values` — latest reading for up to 500 asset+metric pairs (read-only; one indexed lookup per pair; pairs outside the caller's projects are dropped)
 - `GET /api/activity-log` — paginated audit trail (category, actorName, limit, offset filters)
 - `POST /api/assets/:id/maintenance` — toggle maintenance mode (body: { enabled, note? })
