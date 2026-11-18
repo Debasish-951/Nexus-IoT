@@ -15756,6 +15756,7 @@ export const getGetExportHealthUrl = () => {
 };
 
 /**
+ * Public. Anonymous callers and project-restricted users get only status and timestamp; platform, version and stats are returned to an unrestricted signed-in user.
  * @summary Platform health snapshot
  */
 export const getExportHealth = async (
@@ -15800,7 +15801,10 @@ export type GetExportHealthQueryResult = NonNullable<
 >;
 export type GetExportHealthQueryError = ErrorType<unknown>;
 
-/** @summary Platform health snapshot */
+/**
+ * Public. Anonymous callers and project-restricted users get only status and timestamp; platform, version and stats are returned to an unrestricted signed-in user.
+ * @summary Platform health snapshot
+ */
 export function useGetExportHealth<
   TData = Awaited<ReturnType<typeof getExportHealth>>,
   TError = ErrorType<unknown>,
@@ -15827,7 +15831,10 @@ export function useGetExportHealth<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
-/** @summary Platform health snapshot */
+/**
+ * Public. Anonymous callers and project-restricted users get only status and timestamp; platform, version and stats are returned to an unrestricted signed-in user.
+ * @summary Platform health snapshot
+ */
 export function useGetExportHealth<
   TData = Awaited<ReturnType<typeof getExportHealth>>,
   TError = ErrorType<unknown>,
@@ -15854,7 +15861,10 @@ export function useGetExportHealth<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
-/** @summary Platform health snapshot */
+/**
+ * Public. Anonymous callers and project-restricted users get only status and timestamp; platform, version and stats are returned to an unrestricted signed-in user.
+ * @summary Platform health snapshot
+ */
 export function useGetExportHealth<
   TData = Awaited<ReturnType<typeof getExportHealth>>,
   TError = ErrorType<unknown>,
@@ -15873,7 +15883,10 @@ export function useGetExportHealth<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
-/** @summary Platform health snapshot */
+/**
+ * Public. Anonymous callers and project-restricted users get only status and timestamp; platform, version and stats are returned to an unrestricted signed-in user.
+ * @summary Platform health snapshot
+ */
 export function useGetExportHealth<
   TData = Awaited<ReturnType<typeof getExportHealth>>,
   TError = ErrorType<unknown>,

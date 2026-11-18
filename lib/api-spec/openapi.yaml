@@ -2549,6 +2549,7 @@ paths:
       operationId: getExportHealth
       tags: [export]
       summary: Platform health snapshot
+      description: Public. Anonymous callers and project-restricted users get only status and timestamp; platform, version and stats are returned to an unrestricted signed-in user.
       responses:
         "200":
           description: OK
@@ -6224,7 +6225,7 @@ components:
           type: string
         stats:
           $ref: "#/components/schemas/ExportHealthStats"
-      required: [status, timestamp, platform, version, stats]
+      required: [status, timestamp]
 
     ExportHealthStats:
       type: object

@@ -3659,20 +3659,23 @@ export const DeleteRetentionPolicyParams = zod.object({
 export const DeleteRetentionPolicyResponse = zod.void();
 
 /**
+ * Public. Anonymous callers and project-restricted users get only status and timestamp; platform, version and stats are returned to an unrestricted signed-in user.
  * @summary Platform health snapshot
  */
 export const GetExportHealthResponse = zod.object({
   status: zod.string(),
   timestamp: zod.coerce.date(),
-  platform: zod.string(),
-  version: zod.string(),
-  stats: zod.object({
-    totalAssets: zod.number().int(),
-    activeAlarms: zod.number().int(),
-    connectedBrokers: zod.number().int(),
-    telemetryRateLast60s: zod.number().int(),
-    assetsInMaintenance: zod.number().int(),
-  }),
+  platform: zod.string().optional(),
+  version: zod.string().optional(),
+  stats: zod
+    .object({
+      totalAssets: zod.number().int(),
+      activeAlarms: zod.number().int(),
+      connectedBrokers: zod.number().int(),
+      telemetryRateLast60s: zod.number().int(),
+      assetsInMaintenance: zod.number().int(),
+    })
+    .optional(),
 });
 
 /**

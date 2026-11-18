@@ -57,6 +57,42 @@ export async function ingestScope(req: Request): Promise<Set<string> | null> {
 }
 
 /**
+ * The assets an export (read) request may see, or null when unrestricted.
+ *
+ * Same rule as ingest: a key assigned to a project reads only that project's
+ * subtree. `/export/*` used to ignore `api_clients.project_id` entirely, so a key
+ * handed to one customer for their own plant could read every project's
+ * telemetry, alarms and asset list in the installation. A project that no longer
+ * exists yields an empty set, so a stale key sees nothing rather than everything.
+ */
+export const exportScope = ingestScope;
+
+/**
+ * What an export does with an explicit `assetId` filter, given the caller's scope.
+ * "forbidden" for an asset outside it, so a customer probing another project's id
+ * is refused and logged instead of silently answered.
+ */
+export function exportAssetDecision(scope: Set<string> | null, assetId: string | undefined): "all" | "filtered" | "forbidden" {
+  if (!scope) return "all";
+  if (assetId && !scope.has(assetId)) return "forbidden";
+  return "filtered";
+}
+
+/** Record and refuse an export that named an asset outside the key's project. */
+export function refuseExportAsset(req: Request, res: Response, assetId: string): void {
+  recordSecurityEvent({
+    type: "authz.denied",
+    outcome: "failure",
+    reason: "export_out_of_project_scope",
+    userId: null,
+    username: null,
+    req,
+    detail: { path: req.path, method: req.method, assetId, apiClientId: req.apiClient?.id ?? null, projectId: req.apiClient?.projectId ?? null },
+  });
+  res.status(403).json({ error: "This asset is outside the project this API key is assigned to.", code: "project_forbidden" });
+}
+
+/**
  * True when a project-restricted caller names a device id that an asset outside
  * their projects already uses. Readings for a shared device id are split between
  * every asset that claims it, so binding another project's device to one's own

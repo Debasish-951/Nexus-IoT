@@ -334,7 +334,7 @@ Fifteen of nineteen tables have no index beyond their primary key. Full ranked r
 |---|---|---|
 | Public | `/auth/login`, `/auth/activate`, `/auth/session`, `/healthz`, `/export/schema` | None |
 | Ingest | `/ingest/{payload,batch,validate,register-device}`, `/ingest/k/:clientId/*` | API key with `ingest:write` scope, or a human with the `brokers` module |
-| Data read | `/export/{assets,telemetry,alarms,alarm-history}`, `/telemetry/:assetId/*`, `/dashboard/*` | `read:*` API scope or `explorer`/`dashboard` module |
+| Data read | `/export/{assets,telemetry,alarms,alarm-history}`, `/telemetry/:assetId/*`, `/dashboard/*` | `read:*` API scope or `explorer`/`dashboard` module. A project-assigned API client's export results are limited to its project (`lib/project-access.ts`, `exportScope`) |
 | Assets/attributes/templates | `/assets`, `/assets/:id/*`, `/attributes/:id`, `/asset-templates` | `manage_assets` / `manage_templates` permission + `assets` module R/W/D |
 | Alarms | `/alarms`, `/alarms/:id/acknowledge`, `/alarm-rules/*` | `acknowledge_alarms` / `manage_alarms` + `alarms` module |
 | Brokers/destinations | `/brokers/*`, `/destinations/*` | `manage_brokers` / `manage_destinations` + `brokers` module |

@@ -40,6 +40,23 @@ function projectFilter(req: Request): { restricted: boolean; allowed: Set<string
   return { restricted: true, allowed: new Set(access.allowedProjects) };
 }
 
+/** Refuse a restricted user's attempt to create or detach a key to platform-wide. */
+function refuseUnassigned(req: Request, res: Response, apiClientId: string | null): void {
+  recordSecurityEvent({
+    type: "authz.denied",
+    outcome: "failure",
+    reason: "api_client_unassigned_forbidden",
+    userId: req.principal?.user.id ?? null,
+    username: req.principal?.user.username ?? null,
+    detail: { apiClientId },
+    req,
+  });
+  res.status(403).json({
+    error: "Choose one of your projects. Only an unrestricted administrator can create a key for every project.",
+    code: "project_required",
+  });
+}
+
 /**
  * Object-level check for a single API client.
  *
@@ -270,6 +287,13 @@ router.post("/api-clients", async (req, res): Promise<void> => {
   const projectId = typeof body.projectId === "string" && UUID_RE.test(body.projectId)
     ? body.projectId
     : null;
+  // A project-restricted user may not mint a platform-wide key. An unassigned key
+  // reads and writes every project, so creating one would hand this user (or the
+  // customer the key goes to) the access their own account is denied.
+  if (!projectId && projectFilter(req).restricted) {
+    refuseUnassigned(req, res, null);
+    return;
+  }
   if (projectId) {
     const { restricted, allowed } = projectFilter(req);
     if (restricted && !allowed.has(projectId)) {
@@ -413,6 +437,11 @@ router.put("/api-clients/:id", async (req, res): Promise<void> => {
     const next = typeof body.projectId === "string" && UUID_RE.test(body.projectId)
       ? body.projectId
       : null;
+    // Same rule as create: detaching to platform-wide is an escalation.
+    if (!next && projectFilter(req).restricted) {
+      refuseUnassigned(req, res, params.data.id);
+      return;
+    }
     if (next) {
       const { restricted, allowed } = projectFilter(req);
       if (restricted && !allowed.has(next)) {

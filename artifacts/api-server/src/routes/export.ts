@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { authConfig } from "../lib/auth-config";
-import { eq, and, desc, gte, lte, sql } from "drizzle-orm";
+import { eq, and, desc, gte, lte, sql, inArray, type SQL } from "drizzle-orm";
 import {
   db, assetsTable, attributesTable, telemetryTable,
   alarmsTable, alarmHistoryTable, brokersTable,
@@ -9,6 +9,7 @@ import { apiKeyAuth } from "../middleware/apiKeyAuth";
 import { csvCell, safeFilename } from "../lib/validation";
 import { validate } from "../middleware/validate";
 import { z } from "zod";
+import { exportScope, exportAssetDecision, refuseExportAsset } from "../lib/project-access";
 import {
   ExportQuery, TelemetryExportQuery, AlarmExportQuery, AlarmHistoryExportQuery,
 } from "../schemas/common";
@@ -66,7 +67,16 @@ function sendResult(
 }
 
 // ── Platform health (no auth) ─────────────────────────────────────────────────
-router.get("/export/health", async (_req, res): Promise<void> => {
+router.get("/export/health", async (req, res): Promise<void> => {
+  // Public so uptime monitors can reach it, which is why it answers only "up"
+  // to anonymous callers. It used to publish the asset count, active alarm count,
+  // connected brokers and ingest rate to anyone on the internet. The figures are
+  // still returned to a signed-in user who is not restricted to some projects.
+  const showStats = !!req.principal && !req.principal.access?.restrictProjects;
+  if (!showStats) {
+    res.json({ status: "ok", timestamp: new Date().toISOString() });
+    return;
+  }
   const [[assetRow], [alarmRow], [brokerRow], [telRow]] = await Promise.all([
     db.select({ count: sql<number>`count(*)::int` }).from(assetsTable),
     db.select({ count: sql<number>`count(*)::int` }).from(alarmsTable).where(eq(alarmsTable.status, "active")),
@@ -173,8 +183,12 @@ router.get("/export/schema", (_req, res) => {
 // ── Assets export ─────────────────────────────────────────────────────────────
 router.get("/export/assets", apiKeyAuth("read:assets"), validate({ query: ExportQuery }), async (req, res): Promise<void> => {
   const { format } = req.query as z.infer<typeof ExportQuery>;
-  const assets = await db.select().from(assetsTable).orderBy(assetsTable.name);
-  const attrs  = await db.select().from(attributesTable);
+  // A project-assigned key sees only its project's assets and their attributes.
+  const scope = await exportScope(req);
+  const assets = (await db.select().from(assetsTable).orderBy(assetsTable.name))
+    .filter((a) => !scope || scope.has(a.id));
+  const attrs  = (await db.select().from(attributesTable))
+    .filter((a) => !scope || scope.has(a.assetId));
 
   const attrsByAsset: Record<string, Array<{ name: string; value: unknown; unit: string | null; dataType: string; updatedAt: Date }>> = {};
   for (const a of attrs) {
@@ -222,7 +236,15 @@ router.get("/export/telemetry", apiKeyAuth("read:telemetry"), validate({ query: 
   // Already bounded and coerced by the schema; no NaN can reach the query.
   const maxLimit = limit ?? 500;
 
-  const conditions = [];
+  const scope = await exportScope(req);
+  const decision = exportAssetDecision(scope, assetId);
+  if (decision === "forbidden") { refuseExportAsset(req, res, assetId!); return; }
+
+  const conditions: SQL[] = [];
+  if (decision === "filtered" && !assetId) {
+    if (scope!.size === 0) { sendResult(res, format, "telemetry", [], { limit: maxLimit }); return; }
+    conditions.push(inArray(telemetryTable.assetId, [...scope!]));
+  }
   if (assetId) conditions.push(eq(telemetryTable.assetId, assetId));
   if (metric)  conditions.push(eq(telemetryTable.metric, metric));
   if (from)    conditions.push(gte(telemetryTable.timestamp, from));
@@ -249,7 +271,13 @@ router.get("/export/alarms", apiKeyAuth("read:alarms"), validate({ query: AlarmE
   const { status, severity, limit, format } = req.query as z.infer<typeof AlarmExportQuery>;
   const maxLimit = limit ?? 5000;
 
-  const conditions = [];
+  // Alarms with no asset (platform-wide) are left out for a project-assigned key.
+  const scope = await exportScope(req);
+  const conditions: SQL[] = [];
+  if (scope) {
+    if (scope.size === 0) { sendResult(res, format, "alarms", [], { limit: maxLimit }); return; }
+    conditions.push(inArray(alarmsTable.assetId, [...scope]));
+  }
   if (status)   conditions.push(eq(alarmsTable.status, status));
   if (severity) conditions.push(eq(alarmsTable.severity, severity));
 
@@ -279,7 +307,15 @@ router.get("/export/alarm-history", apiKeyAuth("read:alarm-history"), validate({
   const { assetId, from, to, limit, format } = req.query as z.infer<typeof AlarmHistoryExportQuery>;
   const maxLimit = limit ?? 200;
 
-  const conditions = [];
+  const scope = await exportScope(req);
+  const decision = exportAssetDecision(scope, assetId);
+  if (decision === "forbidden") { refuseExportAsset(req, res, assetId!); return; }
+
+  const conditions: SQL[] = [];
+  if (decision === "filtered" && !assetId) {
+    if (scope!.size === 0) { sendResult(res, format, "alarm-history", [], { limit: maxLimit }); return; }
+    conditions.push(inArray(alarmHistoryTable.assetId, [...scope!]));
+  }
   if (assetId) conditions.push(eq(alarmHistoryTable.assetId, assetId));
   if (from)    conditions.push(gte(alarmHistoryTable.triggeredAt, from));
   if (to)      conditions.push(lte(alarmHistoryTable.triggeredAt, to));

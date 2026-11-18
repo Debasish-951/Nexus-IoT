@@ -410,7 +410,18 @@ Broker connection event history (newest-first, up to 500 events).
 List all API clients.
 
 ### `POST /api/api-clients`
-Create an API client (auto-generates `clientId` and `clientSecret`).
+Create an API client (auto-generates `clientId` and `clientSecret`). A user restricted to some projects must assign the client to one of them; an unassigned (platform-wide) client, or detaching one to platform-wide via `PUT`, returns `403 project_required`.
+
+### Project scope of a client
+
+A client assigned to a project reads and writes only that project's asset subtree:
+
+- **Ingest:** readings for devices outside the project are rejected.
+- **`/api/export/assets`, `/telemetry`, `/alarms`, `/alarm-history`:** results are filtered to the project. An explicit `assetId` from another project returns `403 project_forbidden` and is logged to security events. Alarms with no asset are left out. A client whose project has been deleted gets empty results.
+
+An unassigned client sees every project. Give each customer or outside system a project-assigned client with only the read scopes it needs.
+
+`GET /api/export/health` stays public for uptime monitors but returns only `status` and `timestamp` to anonymous callers; the platform figures (`stats`) go only to an unrestricted signed-in user.
 
 ---
 

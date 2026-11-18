@@ -1933,9 +1933,9 @@ export interface ExportHealthStats {
 export interface ExportHealth {
   status: string;
   timestamp: string;
-  platform: string;
-  version: string;
-  stats: ExportHealthStats;
+  platform?: string;
+  version?: string;
+  stats?: ExportHealthStats;
 }
 
 export type ExportEnvelopeDataItem = { [key: string]: unknown };
