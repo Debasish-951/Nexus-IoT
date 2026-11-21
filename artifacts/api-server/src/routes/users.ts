@@ -10,6 +10,22 @@ import {
   DeleteUserParams,
 } from "@workspace/api-zod";
 import { logActivity } from "./activity_log";
+import { diffFields, type AuditChange } from "../lib/audit-core";
+
+/** Per-module and per-setting differences between two access-override documents. */
+function accessChanges(before: unknown, after: unknown): AuditChange[] {
+  const flat = (o: unknown): Record<string, unknown> => {
+    const out: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries((o ?? {}) as Record<string, unknown>)) {
+      if (v && typeof v === "object" && !Array.isArray(v)) for (const [k2, v2] of Object.entries(v as Record<string, unknown>)) out[`${k}.${k2}`] = v2;
+      else out[k] = v;
+    }
+    return out;
+  };
+  const a = flat(before), b = flat(after);
+  for (const k of Object.keys(a)) if (!(k in b)) b[k] = null;
+  return diffFields(a, b);
+}
 import { isTopAdminRole,
   isRole, resolveAccess, sanitiseAccessOverrides, ROLES,
   canActOnRole, canGrantRole, SELF_ROLE_CHANGE_MESSAGE,
@@ -227,7 +243,8 @@ router.post("/users", async (req, res): Promise<void> => {
     detail: { role, invitedBy: req.principal?.user.username ?? "system", expiresAt: issued.expiresAt.toISOString() },
     req,
   });
-  void logActivity("user.invited", "user", user.id, user.fullName, `role=${user.role}`, req);
+  void logActivity("user.invited", "user", user.id, user.fullName, `role=${user.role}`, req,
+    { changes: [{ field: "role", from: null, to: user.role }, { field: "email", from: null, to: user.email }] });
 
   // Mail failure must not fail provisioning — the admin can resend.
   const emailed = await sendEmail(user.email, renderActivationEmail({
@@ -375,7 +392,8 @@ router.put("/users/:id", async (req, res): Promise<void> => {
   if (updateData.role || updateData.accessOverrides) closeSockets({ userId: user.id }, "access_changed");
 
   const changed = Object.keys(updateData).join(",");
-  void logActivity("user.updated", "user", user.id, user.fullName, `fields=${changed}`, req);
+  void logActivity("user.updated", "user", user.id, user.fullName, `fields=${changed}`, req,
+    { changes: diffFields(existing as unknown as Record<string, unknown>, user as unknown as Record<string, unknown>, { only: Object.keys(updateData) }) });
 
   res.json(sanitizeUser(user));
 });
@@ -438,7 +456,8 @@ router.put("/users/:id/access", async (req, res): Promise<void> => {
   });
   closeSockets({ userId: user.id }, "access_changed");
   void logActivity("user.access_updated", "user", user.id, user.fullName,
-    `modules=${Object.keys(overrides.modules ?? {}).length} overridden`, req);
+    `modules=${Object.keys(overrides.modules ?? {}).length} overridden`, req,
+    { changes: accessChanges(user.accessOverrides, overrides) });
 
   res.json({
     userId: updated.id,

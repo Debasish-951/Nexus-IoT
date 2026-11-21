@@ -158,7 +158,7 @@ export default function DataManagementClassic() {
   // Storage and retention cover every project, so the server refuses them to
   // project-restricted users; nothing is requested for them.
   const restricted = !!session?.restrictProjects;
-  const canManageRetention = canAction("manage_assets", "reports") && !restricted;
+  const canManageRetention = canAction("manage_assets", "data_management") && !restricted;
 
   async function getJson<T>(path: string): Promise<T> {
     const r = await apiFetch(`${BASE}${path}`);
@@ -280,7 +280,7 @@ export default function DataManagementClassic() {
           <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5" onClick={() => { refetchStats(); refetchPolicies(); }}>
             <RefreshCw className="w-3.5 h-3.5" /> Refresh
           </Button>
-          <RoleGuard permission="manage_assets" module="reports">
+          <RoleGuard permission="manage_assets" module="data_management">
             <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5" onClick={runPruneNow} disabled={pruning}>
               <Play className="w-3.5 h-3.5" /> {pruning ? "Pruning…" : "Run Pruning Now"}
             </Button>
@@ -342,7 +342,7 @@ export default function DataManagementClassic() {
               <h2 className="text-sm font-medium">Retention Policies</h2>
               <p className="text-xs text-muted-foreground">Pruning runs automatically every hour. More specific policies (asset+metric) take precedence.</p>
             </div>
-            <RoleGuard permission="manage_assets" module="reports">
+            <RoleGuard permission="manage_assets" module="data_management">
               <Button size="sm" className="h-8 text-xs gap-1.5" onClick={() => { setEditPolicy(null); setPolicyDialogOpen(true); }}>
                 <Plus className="w-3.5 h-3.5" /> Add Policy
               </Button>

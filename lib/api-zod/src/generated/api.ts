@@ -2651,6 +2651,25 @@ export const ListVizTagsResponseItem = zod.object({
 export const ListVizTagsResponse = zod.array(ListVizTagsResponseItem);
 
 /**
+ * Location comes from the static attributes Latitude, Longitude and Address on the project (root) asset. Alarms are not included; read them from /alarms.
+ * @summary Projects the caller may open, with map location, asset count and newest data time
+ */
+export const ListSitesResponseItem = zod.object({
+  projectId: zod.string(),
+  name: zod.string(),
+  latitude: zod.number().nullable(),
+  longitude: zod.number().nullable(),
+  address: zod.string().nullable(),
+  latitudeAttrId: zod.string().nullable(),
+  longitudeAttrId: zod.string().nullable(),
+  addressAttrId: zod.string().nullable(),
+  assetCount: zod.number().int(),
+  maintenanceCount: zod.number().int(),
+  lastDataAt: zod.coerce.date().nullable(),
+});
+export const ListSitesResponse = zod.array(ListSitesResponseItem);
+
+/**
  * A twin with a project shows only to users who may open that project; a
  * twin without a project shows to everyone with Visualization read.
  * @summary 3D plant twins the caller may see, newest first (without scenes)
@@ -2659,9 +2678,9 @@ export const ListPlantTwinsResponseItem = zod.object({
   id: zod.string(),
   name: zod.string(),
   kind: zod
-    .enum(["plant", "machine", "process", "asset", "folder"])
+    .enum(["plant", "machine", "process", "asset", "image", "folder"])
     .describe(
-      "Taken from `scene.kind`; plant when absent. `machine` is the detailed pump skid, `asset` a canvas of machines from the library, `folder` a node of the Live Twin hierarchy.",
+      "Taken from `scene.kind`; plant when absent. `machine` is the detailed pump skid, `asset` a canvas of machines from the library, `image` a 2D twin (drawing or photo with mapped readings), `process` a P&ID, `folder` a node of the Live Twin hierarchy.",
     ),
   projectId: zod.string().nullable(),
   machines: zod.number().int(),
@@ -2708,9 +2727,9 @@ export const CreatePlantTwinResponse = zod
     id: zod.string(),
     name: zod.string(),
     kind: zod
-      .enum(["plant", "machine", "process", "asset", "folder"])
+      .enum(["plant", "machine", "process", "asset", "image", "folder"])
       .describe(
-        "Taken from `scene.kind`; plant when absent. `machine` is the detailed pump skid, `asset` a canvas of machines from the library, `folder` a node of the Live Twin hierarchy.",
+        "Taken from `scene.kind`; plant when absent. `machine` is the detailed pump skid, `asset` a canvas of machines from the library, `image` a 2D twin (drawing or photo with mapped readings), `process` a P&ID, `folder` a node of the Live Twin hierarchy.",
       ),
     projectId: zod.string().nullable(),
     machines: zod.number().int(),
@@ -2792,9 +2811,9 @@ export const GetPlantTwinResponse = zod
     id: zod.string(),
     name: zod.string(),
     kind: zod
-      .enum(["plant", "machine", "process", "asset", "folder"])
+      .enum(["plant", "machine", "process", "asset", "image", "folder"])
       .describe(
-        "Taken from `scene.kind`; plant when absent. `machine` is the detailed pump skid, `asset` a canvas of machines from the library, `folder` a node of the Live Twin hierarchy.",
+        "Taken from `scene.kind`; plant when absent. `machine` is the detailed pump skid, `asset` a canvas of machines from the library, `image` a 2D twin (drawing or photo with mapped readings), `process` a P&ID, `folder` a node of the Live Twin hierarchy.",
       ),
     projectId: zod.string().nullable(),
     machines: zod.number().int(),
@@ -2856,9 +2875,9 @@ export const UpdatePlantTwinResponse = zod
     id: zod.string(),
     name: zod.string(),
     kind: zod
-      .enum(["plant", "machine", "process", "asset", "folder"])
+      .enum(["plant", "machine", "process", "asset", "image", "folder"])
       .describe(
-        "Taken from `scene.kind`; plant when absent. `machine` is the detailed pump skid, `asset` a canvas of machines from the library, `folder` a node of the Live Twin hierarchy.",
+        "Taken from `scene.kind`; plant when absent. `machine` is the detailed pump skid, `asset` a canvas of machines from the library, `image` a 2D twin (drawing or photo with mapped readings), `process` a P&ID, `folder` a node of the Live Twin hierarchy.",
       ),
     projectId: zod.string().nullable(),
     machines: zod.number().int(),
@@ -4296,6 +4315,13 @@ export const AskAiAssistantBody = zod.object({
     .max(askAiAssistantBodyTimeZoneMax)
     .optional()
     .describe("IANA time zone for presenting times; ignored when invalid."),
+  scopeAssetId: zod
+    .string()
+    .uuid()
+    .nullish()
+    .describe(
+      "Project or asset the question is about. The assistant then uses only\nthis asset and the assets beneath it: tools taking an asset id refuse\nothers, and search, list, alarm and summary tools are filtered.\nOmitted or null means all assets.\n",
+    ),
   history: zod
     .array(
       zod.object({
@@ -4327,7 +4353,88 @@ export const AskAiAssistantResponse = zod.object({
 });
 
 /**
- * @summary Activity log, newest first (limited to the caller's project assets when project-restricted)
+ * AI Reports. The report is written for the caller's level, decided from
+ * their role: executive (super_admin, company_admin, project_manager),
+ * manager (admin, team_lead, viewer and any other role) or engineer
+ * (engineer, developer, operator). Every figure is computed by the server
+ * from the database, limited to the assets the caller may see (project
+ * access) and to alarm data only when the caller has the Alarms module.
+ * When an AI provider is configured (GROQ_API_KEY), only the figures the
+ * level needs are sent to the model, which writes the narrative in that
+ * level's shape. Without a provider, or when the model fails, the figures
+ * are still returned with `narrative: null`, `narrativeStatus` and
+ * `narrativeError`. Numbers in the narrative that are not in the figures
+ * are listed in `unverifiedNumbers`. Rate limited per user.
+ * @summary Generate an AI report for an asset, a project or all visible assets
+ */
+export const GenerateAiReportBody = zod.object({
+  assetId: zod
+    .string()
+    .uuid()
+    .nullish()
+    .describe(
+      "Asset or project (root asset); its whole subtree is reported. Omit for all assets the caller may see.",
+    ),
+  range: zod
+    .object({
+      from: zod.coerce.date(),
+      to: zod.coerce.date(),
+    })
+    .describe("Required. `from` must be earlier than `to`."),
+  timeZone: zod
+    .string()
+    .optional()
+    .describe(
+      "IANA time zone of the reader, for alarm time-of-day figures. Defaults to UTC.",
+    ),
+  focus: zod
+    .string()
+    .optional()
+    .describe(
+      "Accepted from older links and ignored; the report's content follows the caller's level.",
+    ),
+});
+
+export const GenerateAiReportResponse = zod.object({
+  level: zod.enum(["executive", "manager", "engineer"]),
+  facts: zod
+    .record(zod.string(), zod.unknown())
+    .describe(
+      "Figures computed by the server: level, scope, range, previous period,\nkpis and previousKpis (assets, reporting, stale, readings, coverage,\nalarms by severity, MTTA, MTTR, energy used in kWh), healthScore (0-100\nwith its parts and formula), kpiCards (4-6, value against the previous\nperiod with direction), assetHealth and statusCounts, metrics (min/avg/\nmax and change), topMovers, trends, correlations (|r| >= 0.7),\nleadingSignals (a metric away from normal just before an alarm),\nalarmAssets, topAlarms, repeatAlarms (3+ times), alarmTiming (by hour\nand weekday in the reader's time zone), alarmTimeline, maintenance,\nenergy and dataQuality (stale, low coverage, silent, stuck sensors).\n",
+    ),
+  narrative: zod.union([
+    zod
+      .object({
+        level: zod.enum(["executive", "manager", "engineer"]),
+        summary: zod.string(),
+      })
+      .passthrough()
+      .describe(
+        "Shape depends on `level`. executive: headline, summary, risks[{title,\nwhat, impact, cause, decision}] (at most 3), improvements[], decisions[],\noutlook. manager: summary, problemAreas[{area, issue, impact, cause}],\nresponse, patterns[], priorities[{action, owner}]. engineer: summary,\ndiagnoses[{asset, observation, correlated, rootCause, confidence\n(low|medium|high)}], alarmSequence[], dataIssues[], actions[{action,\nurgency (immediate|this_week|planned)}].\n",
+      ),
+    zod.null(),
+  ]),
+  narrativeStatus: zod
+    .enum(["ok", "unavailable", "failed", "rate_limited", "unreadable"])
+    .describe(
+      "unavailable: no AI provider on this installation (licence, internet); failed, rate_limited, unreadable: temporary, try again.",
+    ),
+  narrativeError: zod.string().nullable(),
+  unverifiedNumbers: zod.array(zod.string()),
+  alarmsIncluded: zod.boolean(),
+  generatedAt: zod.coerce.date(),
+  range: zod
+    .object({
+      from: zod.coerce.date(),
+      to: zod.coerce.date(),
+    })
+    .describe("Required. `from` must be earlier than `to`."),
+  scope: zod.record(zod.string(), zod.unknown()),
+  model: zod.string().nullable(),
+});
+
+/**
+ * @summary Audit log search, newest first (limited to the caller's project assets when project-restricted)
  */
 export const listActivityLogQueryLimitDefault = 100;
 export const listActivityLogQueryLimitMax = 500;
@@ -4339,6 +4446,16 @@ export const listActivityLogQueryOffsetMax = 1000000;
 export const listActivityLogQueryCategoryMax = 64;
 
 export const listActivityLogQueryActorNameMax = 200;
+
+export const listActivityLogQueryQMax = 200;
+
+export const listActivityLogQueryActorMax = 200;
+
+export const listActivityLogQueryActionMax = 200;
+
+export const listActivityLogQueryTargetIdMax = 200;
+
+export const listActivityLogQueryAssetIdMax = 200;
 
 export const ListActivityLogQueryParams = zod.object({
   limit: zod.coerce
@@ -4357,7 +4474,45 @@ export const ListActivityLogQueryParams = zod.object({
   actorName: zod.coerce
     .string()
     .max(listActivityLogQueryActorNameMax)
-    .optional(),
+    .optional()
+    .describe("Earlier name of `actor`"),
+  q: zod.coerce
+    .string()
+    .max(listActivityLogQueryQMax)
+    .optional()
+    .describe("Free text over action, target, detail and actor"),
+  from: zod.coerce.date().optional().describe("Earliest time (ISO 8601)"),
+  to: zod.coerce.date().optional().describe("Latest time (ISO 8601)"),
+  actor: zod.coerce
+    .string()
+    .max(listActivityLogQueryActorMax)
+    .optional()
+    .describe("User id, username or part of the name"),
+  action: zod.coerce
+    .string()
+    .max(listActivityLogQueryActionMax)
+    .optional()
+    .describe("Action, or its beginning (e.g. `user.`)"),
+  outcome: zod
+    .enum(["success", "failure", "denied"])
+    .optional()
+    .describe("success, failure or denied"),
+  targetId: zod.coerce
+    .string()
+    .max(listActivityLogQueryTargetIdMax)
+    .optional()
+    .describe("Entries about this item (per-item history)"),
+  assetId: zod.coerce
+    .string()
+    .max(listActivityLogQueryAssetIdMax)
+    .optional()
+    .describe("Entries about this asset or project, or anything under it"),
+  includeSecurity: zod
+    .enum(["true", "false"])
+    .optional()
+    .describe(
+      "Merge security events (sign-ins, refusals, rate limits) into the list",
+    ),
 });
 
 export const ListActivityLogResponse = zod.object({
@@ -4374,11 +4529,225 @@ export const ListActivityLogResponse = zod.object({
         targetName: zod.string().nullish(),
         detail: zod.string().nullish(),
         timestamp: zod.coerce.date(),
+        source: zod.enum(["audit", "security"]).optional(),
+        actorUserId: zod.string().nullish(),
+        changes: zod
+          .array(
+            zod.object({
+              field: zod.string(),
+              from: zod.unknown().optional(),
+              to: zod.unknown().optional(),
+            }),
+          )
+          .nullish(),
+        outcome: zod.enum(["success", "failure", "denied"]).optional(),
+        ip: zod.string().nullish(),
+        userAgent: zod.string().nullish(),
+        correlationId: zod.string().nullish(),
+        assetId: zod.string().nullish(),
+        projectId: zod.string().nullish(),
+        hash: zod.string().nullish(),
+        seq: zod.number().int().nullish(),
       })
       .passthrough(),
   ),
   total: zod.number().int(),
 });
+
+/**
+ * @summary The filtered audit log as CSV (at most 50,000 rows); takes the same filters as /activity-log
+ */
+export const exportActivityLogQueryQMax = 200;
+
+export const exportActivityLogQueryActorMax = 200;
+
+export const exportActivityLogQueryActionMax = 200;
+
+export const exportActivityLogQueryTargetIdMax = 200;
+
+export const exportActivityLogQueryAssetIdMax = 200;
+
+export const ExportActivityLogQueryParams = zod.object({
+  q: zod.coerce
+    .string()
+    .max(exportActivityLogQueryQMax)
+    .optional()
+    .describe("Free text over action, target, detail and actor"),
+  from: zod.coerce.date().optional().describe("Earliest time (ISO 8601)"),
+  to: zod.coerce.date().optional().describe("Latest time (ISO 8601)"),
+  actor: zod.coerce
+    .string()
+    .max(exportActivityLogQueryActorMax)
+    .optional()
+    .describe("User id, username or part of the name"),
+  action: zod.coerce
+    .string()
+    .max(exportActivityLogQueryActionMax)
+    .optional()
+    .describe("Action, or its beginning (e.g. `user.`)"),
+  outcome: zod
+    .enum(["success", "failure", "denied"])
+    .optional()
+    .describe("success, failure or denied"),
+  targetId: zod.coerce
+    .string()
+    .max(exportActivityLogQueryTargetIdMax)
+    .optional()
+    .describe("Entries about this item (per-item history)"),
+  assetId: zod.coerce
+    .string()
+    .max(exportActivityLogQueryAssetIdMax)
+    .optional()
+    .describe("Entries about this asset or project, or anything under it"),
+  includeSecurity: zod
+    .enum(["true", "false"])
+    .optional()
+    .describe(
+      "Merge security events (sign-ins, refusals, rate limits) into the list",
+    ),
+});
+
+export const ExportActivityLogResponse = zod.unknown();
+
+/**
+ * @summary Last 7 days - changes per day, most active users, sensitive actions, failed or denied actions
+ */
+export const getActivityLogSummaryQueryTimeZoneMax = 64;
+
+export const GetActivityLogSummaryQueryParams = zod.object({
+  timeZone: zod.coerce
+    .string()
+    .max(getActivityLogSummaryQueryTimeZoneMax)
+    .optional(),
+});
+
+export const GetActivityLogSummaryResponse = zod.object({
+  perDay: zod.array(
+    zod.object({
+      day: zod.string().optional(),
+      count: zod.number().int().optional(),
+    }),
+  ),
+  topActors: zod.array(
+    zod.object({
+      name: zod.string().optional(),
+      count: zod.number().int().optional(),
+    }),
+  ),
+  sensitive: zod.record(zod.string(), zod.unknown()),
+  failures: zod.object({
+    audit: zod.number().int().optional(),
+    security: zod.number().int().optional(),
+  }),
+});
+
+/**
+ * @summary Walk the hash chain and report the first broken entry, if any (security administrators)
+ */
+export const VerifyActivityLogResponse = zod.object({
+  ok: zod.boolean(),
+  checked: zod.number().int(),
+  verifiedAt: zod.coerce.date(),
+  checkpoint: zod.record(zod.string(), zod.unknown()).nullish(),
+  broken: zod
+    .object({
+      id: zod.string().optional(),
+      seq: zod.number().int().optional(),
+      timestamp: zod.string().optional(),
+      reason: zod
+        .enum(["prev_mismatch", "hash_mismatch", "missing_hash"])
+        .optional(),
+    })
+    .nullish(),
+});
+
+/**
+ * @summary Active sensitive-action alerts (Security Settings module)
+ */
+export const ListAuditAlertsResponseItem = zod
+  .object({
+    id: zod.string(),
+    rule: zod.string(),
+    severity: zod.string(),
+    title: zod.string(),
+    message: zod.string(),
+    entryId: zod.string().nullish(),
+    status: zod.string(),
+    raisedAt: zod.coerce.date(),
+    acknowledgedBy: zod.string().nullish(),
+    acknowledgedAt: zod.coerce.date().nullish(),
+  })
+  .passthrough();
+export const ListAuditAlertsResponse = zod.array(ListAuditAlertsResponseItem);
+
+/**
+ * @summary Acknowledge a sensitive-action alert
+ */
+export const AcknowledgeAuditAlertParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const AcknowledgeAuditAlertResponse = zod
+  .object({
+    id: zod.string(),
+    rule: zod.string(),
+    severity: zod.string(),
+    title: zod.string(),
+    message: zod.string(),
+    entryId: zod.string().nullish(),
+    status: zod.string(),
+    raisedAt: zod.coerce.date(),
+    acknowledgedBy: zod.string().nullish(),
+    acknowledgedAt: zod.coerce.date().nullish(),
+  })
+  .passthrough();
+
+/**
+ * @summary Audit retention (minimum 365 days) and which sensitive-action alerts are on
+ */
+export const GetAuditSettingsResponse = zod
+  .object({
+    retentionDays: zod.number().int().nullish(),
+    effectiveRetentionDays: zod.number().int().optional(),
+    defaultRetentionDays: zod.number().int().optional(),
+    minimumRetentionDays: zod.number().int().optional(),
+    alerts: zod
+      .array(
+        zod.object({
+          key: zod.string().optional(),
+          title: zod.string().optional(),
+          severity: zod.string().optional(),
+          enabled: zod.boolean().optional(),
+        }),
+      )
+      .optional(),
+    checkpoint: zod.record(zod.string(), zod.unknown()).nullish(),
+  })
+  .passthrough();
+
+/**
+ * @summary Change audit retention or switch sensitive-action alerts on or off
+ */
+export const updateAuditSettingsBodyRetentionDaysMin = 0;
+export const updateAuditSettingsBodyRetentionDaysMax = 36500;
+
+export const UpdateAuditSettingsBody = zod.object({
+  retentionDays: zod
+    .number()
+    .int()
+    .min(updateAuditSettingsBodyRetentionDaysMin)
+    .max(updateAuditSettingsBodyRetentionDaysMax)
+    .nullish()
+    .describe(
+      "0 keeps entries for ever; other values below 365 are raised to 365",
+    ),
+  alerts: zod.record(zod.string(), zod.boolean()).optional(),
+});
+
+export const UpdateAuditSettingsResponse = zod.record(
+  zod.string(),
+  zod.unknown(),
+);
 
 /**
  * @summary Send a test event to the rule's webhook URL

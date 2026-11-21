@@ -8,7 +8,7 @@ import type { SceneDoc } from "./engine/types";
  */
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
-export interface PlantTwinSummary { id: string; name: string; kind?: "plant" | "machine" | "process" | "asset" | "folder"; projectId: string | null; machines: number; parentId?: string | null; forType?: string | null; updatedAt: string; canEdit: boolean }
+export interface PlantTwinSummary { id: string; name: string; kind?: "plant" | "machine" | "process" | "asset" | "image" | "folder"; projectId: string | null; machines: number; parentId?: string | null; forType?: string | null; updatedAt: string; canEdit: boolean }
 export interface PlantTwin extends PlantTwinSummary { scene: Partial<SceneDoc> }
 export interface PlantValue { assetId: string; metric: string; value: number | null; ts: string }
 

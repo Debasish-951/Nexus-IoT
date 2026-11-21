@@ -1,6 +1,6 @@
 # Data Management
 
-System → Data Management is where administrators see how much sensor data is stored, how fast it grows and whether it is complete, and control when old readings are deleted. It has six tabs.
+Governance → Data Management is where administrators see how much sensor data is stored, how fast it grows and whether it is complete, and control when old readings are deleted. It has six tabs.
 
 | Tab | What it is for |
 |---|---|
@@ -11,7 +11,7 @@ System → Data Management is where administrators see how much sensor data is s
 | Database | What uses the disk (every table, uploads, archives, backups), monthly partitions, database health with Vacuum |
 | Settings | Alert thresholds and webhook, quiet time for assets, pruning window, approval of large deletions, archiving, summary levels |
 
-Reading needs the Reports module. Anything that deletes, restores, changes settings, downloads raw data or shows database queries also needs the Manage assets permission. Project-restricted users cannot open the page (it covers every project). Every change is written to the activity log.
+Reading needs the Data Management module (its own module in Access Control since November 2026; before that it came with Reports, and a user whose Reports access was set individually keeps that setting until Data Management is set). Anything that deletes, restores, changes settings, downloads raw data or shows database queries also needs the Manage assets permission. Project-restricted users cannot open the page (it covers every project). Every change is written to the activity log.
 
 The previous single-page design is kept as `pages/DataManagementClassic.tsx`; build with `VITE_DATA_MANAGEMENT_CLASSIC=true` to show it instead.
 
@@ -93,7 +93,7 @@ Checked every 10 minutes (and with Check now). Each condition raises one alert t
 | Asset(s) stopped sending | an asset that sent in the last 7 days has been quiet longer than the quiet time (60 min) |
 | Archiving failed | archiving is on and its last run failed |
 
-Alerts show in the bell (for users with the Reports module) and on the Overview, are written to the activity log, and are posted as JSON to the optional webhook (`{source, event: "raised"|"cleared", key, severity, title, message, at, installation}`). The webhook URL is masked when read back. Email, SMS and WhatsApp delivery do not exist in the platform yet, so Notification Groups cannot receive these alerts.
+Alerts show in the bell (for users with the Data Management module) and on the Overview, are written to the activity log, and are posted as JSON to the optional webhook (`{source, event: "raised"|"cleared", key, severity, title, message, at, installation}`). The webhook URL is masked when read back. Email, SMS and WhatsApp delivery do not exist in the platform yet, so Notification Groups cannot receive these alerts.
 
 ## Data health
 

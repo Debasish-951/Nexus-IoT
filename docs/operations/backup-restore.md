@@ -211,3 +211,9 @@ A backup that has never been restored is not known to work. Every three months, 
 ## 6. Retention of backups
 
 Backups keep data that was deleted from the live system, including personal data of removed users. Keep them only as long as your recovery needs and data-protection obligations require, and delete older copies from off-VM storage as well. The script above keeps 14 days on the VM.
+
+## Audit log
+
+- The audit log (`activity_logs`) is in the database backup, with its hash chain (`seq`, `prev_hash`, `hash`), the pruning checkpoint and the audit settings (`job_state` keys `audit_checkpoint` and `audit_settings`). Back them up and restore them together, or **Verify integrity** reports the chain as broken.
+- The append-only trigger `audit_logs_guard` refuses DELETE and TRUNCATE on `activity_logs`. To restore into an existing database, drop the trigger first (`DROP TRIGGER IF EXISTS audit_logs_guard_row ON activity_logs; DROP TRIGGER IF EXISTS audit_logs_guard_truncate ON activity_logs;`) or restore into an empty database. The API recreates the trigger at the next start.
+- Audit entries are kept at least 365 days (Audit Log → Settings). After a restore, run **Verify integrity** on the Audit Log page.

@@ -671,6 +671,7 @@ router.post("/auth/forgot-password", forgotLimiter, async (req, res): Promise<vo
         policy: getPasswordPolicy().description,
       }), { userId: user.id, username: user.username, purpose: "activation_resend" });
       recordSecurityEvent({ type: "invitation.resent", userId: user.id, username: user.username, reason: "self_service", req });
+      void logActivity("user.invitation_resent", "user", user.id, user.username, "self-service request from the sign-in page", req);
       return;
     }
 
@@ -684,6 +685,8 @@ router.post("/auth/forgot-password", forgotLimiter, async (req, res): Promise<vo
     }), { userId: user.id, username: user.username, purpose: "password_reset" });
 
     recordSecurityEvent({ type: "password_reset.requested", userId: user.id, username: user.username, req });
+    // Recorded only for an existing, active account; unknown names go to security_events only.
+    void logActivity("user.password_reset_requested", "user", user.id, user.username, "self-service request from the sign-in page", req);
   } catch {
     /* already responded — never surface internals on this endpoint */
   }

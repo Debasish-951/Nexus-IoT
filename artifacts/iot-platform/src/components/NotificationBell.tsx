@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "wouter";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertCircle, AlertTriangle, Bell, CheckCircle2, Info, HardDrive } from "lucide-react";
+import { AlertCircle, AlertTriangle, Bell, CheckCircle2, Info, HardDrive, ShieldAlert } from "lucide-react";
 import { formatDistanceToNow } from "date-fns";
 import { cn } from "@/lib/utils";
 import { useWsEvents } from "@/hooks/useWsEvents";
@@ -12,6 +12,8 @@ import { apiFetch } from "@/lib/auth-api";
 
 interface SystemAlert { id: string; severity: string; title: string; message: string; status: string; raisedAt: string }
 const SYSTEM_ALERTS_KEY = ["system/alerts"];
+interface AuditAlert { id: string; severity: string; title: string; message: string; status: string; raisedAt: string }
+const AUDIT_ALERTS_KEY = ["activity-log/alerts"];
 
 const SEVERITY_CONFIG: Record<string, { icon: React.ElementType; color: string }> = {
   critical: { icon: AlertCircle,   color: "text-red-500" },
@@ -39,8 +41,9 @@ const REFRESH_DELAY_MS = 3_000;
 export default function NotificationBell() {
   const { enabled, alarms } = useOpenAlarms();
   // Storage / backup / pipeline alerts (Data Management) for those who may see that page.
-  const { canModule, session } = useCurrentUser();
-  const systemEnabled = canModule("reports") && !session?.restrictProjects;
+  const { can, canModule, session } = useCurrentUser();
+  const systemEnabled = canModule("data_management") && !session?.restrictProjects;
+  const qc = useQueryClient();
   const systemQ = useQuery({
     queryKey: SYSTEM_ALERTS_KEY,
     queryFn: async () => {
@@ -50,9 +53,24 @@ export default function NotificationBell() {
     enabled: systemEnabled, refetchInterval: 120_000, retry: false,
   });
   const systemAlerts = (systemQ.data ?? []).filter((a) => a.status !== "cleared");
+  // Sensitive-action alerts from the audit log, for users with Security Settings.
+  const auditEnabled = canModule("security") && !session?.restrictProjects;
+  const canAckAudit = auditEnabled && can("manage_security");
+  const auditQ = useQuery({
+    queryKey: AUDIT_ALERTS_KEY,
+    queryFn: async () => {
+      const r = await apiFetch(`${import.meta.env.BASE_URL.replace(/\/$/, "")}/api/activity-log/alerts`);
+      return r.ok ? ((await r.json()) as AuditAlert[]) : [];
+    },
+    enabled: auditEnabled, refetchInterval: 120_000, retry: false,
+  });
+  const auditAlerts = auditQ.data ?? [];
+  const ackAudit = async (id: string) => {
+    await apiFetch(`${import.meta.env.BASE_URL.replace(/\/$/, "")}/api/activity-log/alerts/${id}/acknowledge`, { method: "POST" });
+    void qc.invalidateQueries({ queryKey: AUDIT_ALERTS_KEY });
+  };
   // The bell stays global across projects, so each alarm says which project it is in.
   const { whereLabel } = useProjectScope();
-  const qc = useQueryClient();
   const [open, setOpen] = useState(false);
   const [recent, setRecent] = useState<RecentGroup[]>([]);
   const boxRef = useRef<HTMLDivElement>(null);
@@ -83,7 +101,7 @@ export default function NotificationBell() {
     });
   }, [qc]);
 
-  useWsEvents({ alarm: handleAlarm, system_alerts: () => { void qc.invalidateQueries({ queryKey: SYSTEM_ALERTS_KEY }); } });
+  useWsEvents({ alarm: handleAlarm, system_alerts: () => { void qc.invalidateQueries({ queryKey: SYSTEM_ALERTS_KEY }); }, audit_alerts: () => { void qc.invalidateQueries({ queryKey: AUDIT_ALERTS_KEY }); } });
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
 
   useEffect(() => {
@@ -96,9 +114,9 @@ export default function NotificationBell() {
   }, [open]);
 
   // Alarm data follows the Alarms module, the same rule as the Alarm List page.
-  if (!enabled && !systemEnabled) return null;
+  if (!enabled && !systemEnabled && !auditEnabled) return null;
 
-  const needingAction = (enabled ? alarms.filter((a) => a.status === "active").length : 0) + systemAlerts.filter((a) => a.status === "active").length;
+  const needingAction = (enabled ? alarms.filter((a) => a.status === "active").length : 0) + systemAlerts.filter((a) => a.status === "active").length + auditAlerts.length;
 
   return (
     <div className="relative" ref={boxRef}>
@@ -118,9 +136,28 @@ export default function NotificationBell() {
       {open && (
         <div className="absolute right-0 top-10 w-80 rounded-xl border border-border bg-popover shadow-xl z-50 overflow-hidden">
           <div className="max-h-96 overflow-y-auto">
+            {auditAlerts.length > 0 && (
+              <>
+                <p className="px-4 pt-3 pb-1.5 text-xs font-semibold">Security alerts ({auditAlerts.length})</p>
+                {auditAlerts.map((a) => {
+                  const cfg = SEVERITY_CONFIG[a.severity] ?? SEVERITY_CONFIG.info!;
+                  return (
+                    <div key={a.id} className="flex gap-2.5 px-4 py-2 border-t border-border/50 hover:bg-muted/50">
+                      <ShieldAlert className={cn("w-3.5 h-3.5 mt-0.5 shrink-0", cfg.color)} />
+                      <Link href="/activity-log" onClick={() => setOpen(false)} className="min-w-0 flex-1">
+                        <p className="text-xs font-medium truncate" title={a.message}>{a.title}</p>
+                        <p className="text-[11px] text-muted-foreground truncate" title={a.message}>{a.message}</p>
+                        <p className="text-[11px] text-muted-foreground">Audit Log · {formatDistanceToNow(new Date(a.raisedAt), { addSuffix: true })}</p>
+                      </Link>
+                      {canAckAudit && <button onClick={() => void ackAudit(a.id)} className="text-[11px] text-primary hover:underline self-start shrink-0">Acknowledge</button>}
+                    </div>
+                  );
+                })}
+              </>
+            )}
             {systemAlerts.length > 0 && (
               <>
-                <p className="px-4 pt-3 pb-1.5 text-xs font-semibold">System alerts ({systemAlerts.length})</p>
+                <p className={cn("px-4 pt-3 pb-1.5 text-xs font-semibold", auditAlerts.length > 0 && "border-t border-border")}>System alerts ({systemAlerts.length})</p>
                 {systemAlerts.map((a) => {
                   const cfg = SEVERITY_CONFIG[a.severity] ?? SEVERITY_CONFIG.info!;
                   return (
@@ -135,7 +172,7 @@ export default function NotificationBell() {
                 })}
               </>
             )}
-            {enabled && <p className={cn("px-4 pt-3 pb-1.5 text-xs font-semibold", systemAlerts.length > 0 && "border-t border-border")}>Open alarms ({alarms.length})</p>}
+            {enabled && <p className={cn("px-4 pt-3 pb-1.5 text-xs font-semibold", (systemAlerts.length > 0 || auditAlerts.length > 0) && "border-t border-border")}>Open alarms ({alarms.length})</p>}
             {enabled && alarms.length === 0 && <p className="px-4 pb-3 text-xs text-muted-foreground">No alarms are open.</p>}
             {alarms.map((a) => {
               const cfg = SEVERITY_CONFIG[a.severity] ?? SEVERITY_CONFIG.info!;
@@ -175,7 +212,8 @@ export default function NotificationBell() {
           </div>
           <div className="border-t border-border px-4 py-2">
             {enabled ? <Link href="/alarms" onClick={() => setOpen(false)} className="text-xs text-primary hover:underline">View all alarms</Link>
-              : <Link href="/data-management" onClick={() => setOpen(false)} className="text-xs text-primary hover:underline">Open Data Management</Link>}
+              : systemEnabled ? <Link href="/data-management" onClick={() => setOpen(false)} className="text-xs text-primary hover:underline">Open Data Management</Link>
+              : <Link href="/activity-log" onClick={() => setOpen(false)} className="text-xs text-primary hover:underline">Open Audit Log</Link>}
           </div>
         </div>
       )}

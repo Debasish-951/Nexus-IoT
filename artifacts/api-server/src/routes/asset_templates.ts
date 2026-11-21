@@ -10,6 +10,7 @@ import {
   DeleteAssetTemplateParams,
 } from "@workspace/api-zod";
 import { logActivity } from "./activity_log";
+import { diffFields } from "../lib/audit-core";
 import { AttributeDefinitionsSchema } from "../schemas/common";
 
 const router: IRouter = Router();
@@ -116,6 +117,7 @@ router.put("/asset-templates/:id", async (req, res): Promise<void> => {
     return;
   }
 
+  const [beforeTemplate] = await db.select().from(assetTemplatesTable).where(eq(assetTemplatesTable.id, params.data.id));
   const [template] = await db
     .update(assetTemplatesTable)
     .set(updatePayload as any)
@@ -124,7 +126,8 @@ router.put("/asset-templates/:id", async (req, res): Promise<void> => {
 
   if (!template) { res.status(404).json({ error: "Template not found" }); return; }
   void logActivity("template.updated", "template", template.id, template.name,
-    `fields=${Object.keys(updatePayload).join(",")}`, req);
+    `fields=${Object.keys(updatePayload).join(",")}`, req,
+    { changes: diffFields(beforeTemplate as unknown as Record<string, unknown>, template as unknown as Record<string, unknown>, { only: Object.keys(updatePayload) }) });
   res.json(toClient(template));
 });
 

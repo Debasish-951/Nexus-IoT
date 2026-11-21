@@ -44,6 +44,7 @@ import { ReadOnlyBanner } from "@/components/RoleGuard";
 import { apiFetch } from "@/lib/auth-api";
 import { FEATURES } from "@/lib/features";
 import { useProjectScope } from "@/hooks/useProjectScope";
+import { HistoryButton } from "@/features/auditLog/shared";
 
 const SEVERITY_STYLES: Record<string, string> = {
   critical: "bg-red-100 text-red-700 border-red-200 dark:bg-red-950/40 dark:text-red-400",
@@ -338,6 +339,7 @@ export default function AlarmRules() {
                           : <Webhook className="w-3.5 h-3.5" />}
                       </button>
                     )}
+                    <HistoryButton targetId={rule.id} targetName={rule.name} size="icon" variant="ghost" label={false} className="h-6 w-6 text-muted-foreground" />
                     {canManage && (<>
                       <button className="text-muted-foreground hover:text-primary transition-colors"
                         title="Edit rule"

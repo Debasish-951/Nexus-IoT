@@ -16,14 +16,14 @@ This document describes the platform's current security controls and their align
 |---------|------------|-------------|-------|
 | Access control | All frameworks | Partial | UI-layer RBAC; no server-side enforcement |
 | Authentication | All frameworks | No | No login system; profile switcher only |
-| Audit logging | IEC 62443, SOC 2 | Yes | `activity_logs` table with actor + timestamp |
+| Audit logging | IEC 62443, SOC 2, ISO 27001 A.8.15, 21 CFR Part 11 | Yes | `activity_logs`: actor from the session, IP, device, request id, outcome, field-level before/after; append-only trigger and SHA-256 hash chain with an integrity check; sensitive-action alerts (docs/features/audit-log.md) |
 | Data encryption at rest | GDPR, ISO 27001 | Partial | DB encryption is managed by the database host; secrets not encrypted at app level |
 | Data encryption in transit | All frameworks | Yes | HTTPS/TLS via the reverse proxy |
 | Session management | OWASP | No | No sessions; localStorage-based |
 | Input validation | OWASP | Partial | Zod on selected endpoints |
 | Vulnerability management | ISO 27001 | Partial | `minimumReleaseAge` supply-chain protection; no CVE scanning |
 | Incident response | SOC 2, ISO 27001 | No | No formal incident response process |
-| Data retention | GDPR | Partial | Configurable retention policies for telemetry; no retention for audit logs |
+| Data retention | GDPR | Partial | Configurable retention policies for telemetry; audit log kept at least 365 days (configurable, pruned with a chain checkpoint) |
 | Data minimisation | GDPR | No | All telemetry stored indefinitely without default limits |
 | Right to erasure | GDPR | No | No user data deletion workflow |
 

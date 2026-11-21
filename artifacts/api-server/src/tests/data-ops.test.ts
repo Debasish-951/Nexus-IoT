@@ -142,3 +142,29 @@ test("access: Live Twin and AI Advisor are their own modules, defaults keep toda
   assert.equal(legacy.modules.ai_advisor, false);
   assert.deepEqual(legacy.modules.live_twin, { r: true, w: true, d: true });
 });
+
+test("access: Data Management is its own module, split from Reports without changing anyone's access", () => {
+  // Defaults copy Reports.
+  const viewer = resolveAccess("viewer", {});
+  assert.equal(viewer.modules.data_management, true);
+  assert.equal(ruleAllows(viewer, "GET", "/system/data-health"), true);
+
+  // Switched off per user: the data pages close, reports keep working.
+  const noDm = resolveAccess("engineer", { modules: { data_management: false } });
+  assert.equal(ruleAllows(noDm, "GET", "/system/storage"), false);
+  assert.equal(ruleAllows(noDm, "GET", "/system/holds"), false);
+  assert.equal(ruleAllows(noDm, "POST", "/system/retention/run"), false);
+  assert.equal(ruleAllows(noDm, "GET", "/system/aggregate"), true, "report and chart data stay on Reports");
+
+  // Reports off, Data Management on.
+  const dmOnly = resolveAccess("engineer", { modules: { reports: false, data_management: true } });
+  assert.equal(ruleAllows(dmOnly, "GET", "/system/data-health"), true);
+  assert.equal(ruleAllows(dmOnly, "GET", "/system/aggregate"), false);
+
+  // An older Reports override still applies until Data Management is set.
+  const legacyOff = resolveAccess("engineer", { modules: { reports: false } });
+  assert.equal(legacyOff.modules.data_management, false);
+  assert.equal(ruleAllows(legacyOff, "GET", "/system/data-health"), false);
+  const legacyOn = resolveAccess("viewer", { modules: { reports: true } });
+  assert.equal(legacyOn.modules.data_management, true);
+});

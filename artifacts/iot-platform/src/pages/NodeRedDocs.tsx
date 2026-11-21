@@ -8,6 +8,7 @@ import {
 import { generatePdf } from "@/docs/pdfGenerator";
 import { generateDocx } from "@/docs/docxGenerator";
 import { buildDocumentContent_v11, PLATFORM_VERSION_V11, DOC_DATE_V11 } from "@/docs/content_v11";
+import { buildDocumentContent_v22, PLATFORM_VERSION_V22, DOC_DATE_V22 } from "@/docs/content_v22";
 
 const BASE_URL = window.location.origin;
 const INGEST_URL = `${BASE_URL}/api/ingest/payload`;
@@ -27,10 +28,68 @@ interface DocVersion {
 
 const DOC_VERSIONS: DocVersion[] = [
   {
+    version: "2.2",
+    date: "Nov 2026",
+    label: "v2.2",
+    isLatest: true,
+    description: "Complete manual and technical reference rewritten for the current release — describes only features that exist in the application today.",
+    newChapters: [
+      { title: "Sign-in & Sessions", desc: "Activation links, password reset, lockout, session timeouts" },
+      { title: "Projects & Home", desc: "Role-filtered project list; dashboards assignable to a project" },
+      { title: "Live Twin", desc: "SVG / image 2D twin, P&ID builder, Asset and Plant twins, 83-machine library with solar, wind, BMS and meters, Map view" },
+      { title: "AI Advisor", desc: "Advisor (Ask Your Assets, Health Insights, Failure Explanations, Recommendations) and AI Reports per role level" },
+      { title: "Visualization", desc: "Dashboard tree, sharing, free layout, 104 Pro widgets, SPC lines" },
+      { title: "Data Management", desc: "Now under Governance, own module: summaries, retention approvals, legal holds, archives, data health" },
+      { title: "Integration Hub", desc: "Project-scoped API clients, per-client ingest URLs, CIDR allowlist" },
+      { title: "Security Center", desc: "Login history, security events, active sessions with revoke" },
+    ],
+    chapters: [
+      { title: "Introduction & Navigation", desc: "Capabilities, sign-in, menus, top bar, languages" },
+      { title: "Home & Asset Hub", desc: "Projects, assets, attributes, templates, maintenance, Media Library" },
+      { title: "Data Studio & Visualization", desc: "Dashboard templates, widgets, SPC lines, layout, time range" },
+      { title: "Live Feed & Live Twin", desc: "Live operations view; twin types, library, scenarios" },
+      { title: "Event Manager", desc: "Alarm list, history, threshold & rate-of-change rules, webhooks" },
+      { title: "Integration Hub", desc: "Brokers, destinations, API clients, scopes, ingest URLs" },
+      { title: "Governance & RBAC", desc: "Users, nine roles, modules, project access, Security Center" },
+      { title: "Data Management, Reports & Audit", desc: "Data Management (Governance), classic reports (switch only), Audit Log" },
+      { title: "AI Advisor", desc: "Question modes, read-only data tools, AI Reports for executives, managers and engineers" },
+      { title: "Architecture & Database", desc: "Monorepo, stack, background jobs, all current tables" },
+      { title: "API Reference", desc: "Every current endpoint group, export, health, errors" },
+      { title: "Pipeline & Engines", desc: "Ingest, MQTT, expressions, alarm rules, WebSocket events" },
+      { title: "Security & Webhooks", desc: "Sessions, passwords, API keys, authorization, outbound payloads" },
+      { title: "Operations", desc: "Installation, backups, monitoring, feature switches" },
+    ],
+    onPdf: async (toast, setLoading) => {
+      setLoading(true);
+      toast({ title: "Preparing PDF v2.2…" });
+      try {
+        const items = buildDocumentContent_v22();
+        await generatePdf(undefined, { items, version: PLATFORM_VERSION_V22, date: DOC_DATE_V22 });
+        toast({ title: "PDF v2.2 Downloaded", description: "Check your downloads folder." });
+      } catch (err: any) {
+        toast({ title: "PDF generation failed", description: err?.message ?? "Unknown error", variant: "destructive" });
+      } finally {
+        setLoading(false);
+      }
+    },
+    onDocx: async (toast, setLoading) => {
+      setLoading(true);
+      toast({ title: "Building Word document v2.2…" });
+      try {
+        const items = buildDocumentContent_v22();
+        await generateDocx(undefined, { items, version: PLATFORM_VERSION_V22, date: DOC_DATE_V22 });
+        toast({ title: "Word Document v2.2 Downloaded", description: "Check your downloads folder." });
+      } catch (err: any) {
+        toast({ title: "DOCX generation failed", description: err?.message ?? "Unknown error", variant: "destructive" });
+      } finally {
+        setLoading(false);
+      }
+    },
+  },
+  {
     version: "1.1",
     date: "May 2026",
     label: "v1.1",
-    isLatest: true,
     description: "Everything in v1.0 plus Chapter 25: SPC reference lines, per-series labels & UoM, drag-to-reorder widgets, and corner resize.",
     newChapters: [
       { title: "SPC Reference Lines", desc: "UCL / LCL / CL horizontal markers on Line, Area, Bar charts" },

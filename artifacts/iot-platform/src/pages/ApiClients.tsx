@@ -29,6 +29,7 @@ import { useCurrentUser } from "@/contexts/UserContext";
 import { ReadOnlyBanner } from "@/components/RoleGuard";
 import { apiGet, apiFetch } from "@/lib/auth-api";
 import { describeApiError, formatApiError } from "@/lib/validation";
+import { HistoryButton } from "@/features/auditLog/shared";
 
 // ── Scope definitions ─────────────────────────────────────────────────────────
 const SCOPES = [
@@ -995,6 +996,8 @@ export default function ApiClients() {
                             >
                               <RefreshCw className="w-3.5 h-3.5" />
                             </button>
+
+                            <HistoryButton targetId={client.id as string} targetName={client.name as string} size="icon" variant="ghost" label={false} className="h-6 w-6 text-muted-foreground" />
 
                             {/* Revoke / Restore */}
                             {isRevoked ? (

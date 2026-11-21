@@ -26,6 +26,8 @@ import type {
   ActivityLogPage,
   AiChatAnswer,
   AiChatRequest,
+  AiReportRequest,
+  AiReportResponse,
   Alarm,
   AlarmHistory,
   AlarmRule,
@@ -39,6 +41,11 @@ import type {
   AssetTemplate,
   Attribute,
   AttributeImportResult,
+  AuditAlert,
+  AuditSettings,
+  AuditSettingsUpdate,
+  AuditSummary,
+  AuditVerifyResult,
   AuthActivationInfo,
   AuthChangePasswordRequest,
   AuthChangePasswordResult,
@@ -68,6 +75,7 @@ import type {
   DestinationCreate,
   DestinationUpdate,
   ErrorResponse,
+  ExportActivityLogParams,
   ExportAlarmHistoryParams,
   ExportAlarmsParams,
   ExportAssetTelemetryCsvParams,
@@ -75,6 +83,7 @@ import type {
   ExportEnvelope,
   ExportHealth,
   ExportTelemetryParams,
+  GetActivityLogSummaryParams,
   GetBrokerHistoryParams,
   GetDashboardAlarmTrendParams,
   GetDashboardAttentionParams,
@@ -131,6 +140,7 @@ import type {
   SeenDevicesPruneResult,
   SessionLimitRequest,
   SessionsRevokedResult,
+  Site,
   SuccessFlag,
   SystemAggregateReport,
   SystemStorageReport,
@@ -142,6 +152,7 @@ import type {
   UpdateAssetBody,
   UpdateAssetTemplateBody,
   UpdateAttributeBody,
+  UpdateAuditSettings200,
   UpdateBrokerBody,
   UpdateUserBody,
   UploadBatchResult,
@@ -10296,6 +10307,154 @@ export function useListVizTags<
   return withQueryKey(query, queryOptions.queryKey);
 }
 
+export const getListSitesUrl = () => {
+  return `/api/sites`;
+};
+
+/**
+ * Location comes from the static attributes Latitude, Longitude and Address on the project (root) asset. Alarms are not included; read them from /alarms.
+ * @summary Projects the caller may open, with map location, asset count and newest data time
+ */
+export const listSites = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<Site[]> => {
+  return customFetch<Site[]>(getListSitesUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListSitesQueryKey = () => {
+  return [`/api/sites`] as const;
+};
+
+export const getListSitesQueryOptions = <
+  TData = Awaited<ReturnType<typeof listSites>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: Partial<
+    UseQueryOptions<Awaited<ReturnType<typeof listSites>>, TError, TData>
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListSitesQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listSites>>> = ({
+    signal,
+  }) => listSites({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listSites>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListSitesQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listSites>>
+>;
+export type ListSitesQueryError = ErrorType<unknown>;
+
+/**
+ * Location comes from the static attributes Latitude, Longitude and Address on the project (root) asset. Alarms are not included; read them from /alarms.
+ * @summary Projects the caller may open, with map location, asset count and newest data time
+ */
+export function useListSites<
+  TData = Awaited<ReturnType<typeof listSites>>,
+  TError = ErrorType<unknown>,
+>(
+  options: {
+    query: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listSites>>, TError, TData>
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listSites>>,
+          TError,
+          Awaited<ReturnType<typeof listSites>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * Location comes from the static attributes Latitude, Longitude and Address on the project (root) asset. Alarms are not included; read them from /alarms.
+ * @summary Projects the caller may open, with map location, asset count and newest data time
+ */
+export function useListSites<
+  TData = Awaited<ReturnType<typeof listSites>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listSites>>, TError, TData>
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listSites>>,
+          TError,
+          Awaited<ReturnType<typeof listSites>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * Location comes from the static attributes Latitude, Longitude and Address on the project (root) asset. Alarms are not included; read them from /alarms.
+ * @summary Projects the caller may open, with map location, asset count and newest data time
+ */
+export function useListSites<
+  TData = Awaited<ReturnType<typeof listSites>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listSites>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/**
+ * Location comes from the static attributes Latitude, Longitude and Address on the project (root) asset. Alarms are not included; read them from /alarms.
+ * @summary Projects the caller may open, with map location, asset count and newest data time
+ */
+export function useListSites<
+  TData = Awaited<ReturnType<typeof listSites>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<Awaited<ReturnType<typeof listSites>>, TError, TData>
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListSitesQueryOptions(options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
 export const getListPlantTwinsUrl = () => {
   return `/api/plant-twins`;
 };
@@ -17946,6 +18105,149 @@ export const useAskAiAssistant = <
   return useMutation(getAskAiAssistantMutationOptions(options), queryClient);
 };
 
+export const getGenerateAiReportUrl = () => {
+  return `/api/ai/report`;
+};
+
+/**
+ * AI Reports. The report is written for the caller's level, decided from
+ * their role: executive (super_admin, company_admin, project_manager),
+ * manager (admin, team_lead, viewer and any other role) or engineer
+ * (engineer, developer, operator). Every figure is computed by the server
+ * from the database, limited to the assets the caller may see (project
+ * access) and to alarm data only when the caller has the Alarms module.
+ * When an AI provider is configured (GROQ_API_KEY), only the figures the
+ * level needs are sent to the model, which writes the narrative in that
+ * level's shape. Without a provider, or when the model fails, the figures
+ * are still returned with `narrative: null`, `narrativeStatus` and
+ * `narrativeError`. Numbers in the narrative that are not in the figures
+ * are listed in `unverifiedNumbers`. Rate limited per user.
+ * @summary Generate an AI report for an asset, a project or all visible assets
+ */
+export const generateAiReport = async (
+  aiReportRequest: AiReportRequest,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<AiReportResponse> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return customFetch<AiReportResponse>(getGenerateAiReportUrl(), {
+    ...options,
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(aiReportRequest),
+  });
+};
+
+export const getGenerateAiReportMutationKey = () =>
+  ["generateAiReport"] as const;
+
+export const getGenerateAiReportMutationOptions = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof generateAiReport>>,
+    TError,
+    GenerateAiReportMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof generateAiReport>>,
+  TError,
+  GenerateAiReportMutationVariables,
+  TContext
+> => {
+  const mutationKey = getGenerateAiReportMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof generateAiReport>>,
+    GenerateAiReportMutationVariables
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return generateAiReport(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type GenerateAiReportMutationResult = NonNullable<
+  Awaited<ReturnType<typeof generateAiReport>>
+>;
+export type GenerateAiReportMutationBody = BodyType<AiReportRequest>;
+export type GenerateAiReportMutationError = ErrorType<ErrorResponse>;
+export type GenerateAiReportMutationVariables = {
+  data: BodyType<AiReportRequest>;
+};
+
+/**
+ * AI Reports. The report is written for the caller's level, decided from
+ * their role: executive (super_admin, company_admin, project_manager),
+ * manager (admin, team_lead, viewer and any other role) or engineer
+ * (engineer, developer, operator). Every figure is computed by the server
+ * from the database, limited to the assets the caller may see (project
+ * access) and to alarm data only when the caller has the Alarms module.
+ * When an AI provider is configured (GROQ_API_KEY), only the figures the
+ * level needs are sent to the model, which writes the narrative in that
+ * level's shape. Without a provider, or when the model fails, the figures
+ * are still returned with `narrative: null`, `narrativeStatus` and
+ * `narrativeError`. Numbers in the narrative that are not in the figures
+ * are listed in `unverifiedNumbers`. Rate limited per user.
+ * @summary Generate an AI report for an asset, a project or all visible assets
+ */
+export const useGenerateAiReport = <
+  TError = ErrorType<ErrorResponse>,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof generateAiReport>>,
+      TError,
+      GenerateAiReportMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof generateAiReport>>,
+  TError,
+  GenerateAiReportMutationVariables,
+  TContext
+> => {
+  return useMutation(getGenerateAiReportMutationOptions(options), queryClient);
+};
+
 export const getListActivityLogUrl = (params?: ListActivityLogParams) => {
   const normalizedParams = new URLSearchParams();
 
@@ -17963,7 +18265,7 @@ export const getListActivityLogUrl = (params?: ListActivityLogParams) => {
 };
 
 /**
- * @summary Activity log, newest first (limited to the caller's project assets when project-restricted)
+ * @summary Audit log search, newest first (limited to the caller's project assets when project-restricted)
  */
 export const listActivityLog = async (
   params?: ListActivityLogParams,
@@ -18015,7 +18317,7 @@ export type ListActivityLogQueryResult = NonNullable<
 >;
 export type ListActivityLogQueryError = ErrorType<ValidationFailedResponse>;
 
-/** @summary Activity log, newest first (limited to the caller's project assets when project-restricted) */
+/** @summary Audit log search, newest first (limited to the caller's project assets when project-restricted) */
 export function useListActivityLog<
   TData = Awaited<ReturnType<typeof listActivityLog>>,
   TError = ErrorType<ValidationFailedResponse>,
@@ -18043,7 +18345,7 @@ export function useListActivityLog<
 ): DefinedUseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
-/** @summary Activity log, newest first (limited to the caller's project assets when project-restricted) */
+/** @summary Audit log search, newest first (limited to the caller's project assets when project-restricted) */
 export function useListActivityLog<
   TData = Awaited<ReturnType<typeof listActivityLog>>,
   TError = ErrorType<ValidationFailedResponse>,
@@ -18071,7 +18373,7 @@ export function useListActivityLog<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
-/** @summary Activity log, newest first (limited to the caller's project assets when project-restricted) */
+/** @summary Audit log search, newest first (limited to the caller's project assets when project-restricted) */
 export function useListActivityLog<
   TData = Awaited<ReturnType<typeof listActivityLog>>,
   TError = ErrorType<ValidationFailedResponse>,
@@ -18091,7 +18393,7 @@ export function useListActivityLog<
 ): UseQueryResult<TData, TError> & {
   queryKey: DataTag<QueryKey, TData, TError>;
 };
-/** @summary Activity log, newest first (limited to the caller's project assets when project-restricted) */
+/** @summary Audit log search, newest first (limited to the caller's project assets when project-restricted) */
 export function useListActivityLog<
   TData = Awaited<ReturnType<typeof listActivityLog>>,
   TError = ErrorType<ValidationFailedResponse>,
@@ -18120,6 +18422,1035 @@ export function useListActivityLog<
 
   return withQueryKey(query, queryOptions.queryKey);
 }
+
+export const getExportActivityLogUrl = (params?: ExportActivityLogParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/activity-log/export?${stringifiedParams}`
+    : `/api/activity-log/export`;
+};
+
+/**
+ * @summary The filtered audit log as CSV (at most 50,000 rows); takes the same filters as /activity-log
+ */
+export const exportActivityLog = async (
+  params?: ExportActivityLogParams,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<string> => {
+  return customFetch<string>(getExportActivityLogUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getExportActivityLogQueryKey = (
+  params?: ExportActivityLogParams,
+) => {
+  return [`/api/activity-log/export`, ...(params ? [params] : [])] as const;
+};
+
+export const getExportActivityLogQueryOptions = <
+  TData = Awaited<ReturnType<typeof exportActivityLog>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ExportActivityLogParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof exportActivityLog>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getExportActivityLogQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof exportActivityLog>>
+  > = ({ signal }) => exportActivityLog(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof exportActivityLog>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ExportActivityLogQueryResult = NonNullable<
+  Awaited<ReturnType<typeof exportActivityLog>>
+>;
+export type ExportActivityLogQueryError = ErrorType<unknown>;
+
+/** @summary The filtered audit log as CSV (at most 50,000 rows); takes the same filters as /activity-log */
+export function useExportActivityLog<
+  TData = Awaited<ReturnType<typeof exportActivityLog>>,
+  TError = ErrorType<unknown>,
+>(
+  params: undefined | ExportActivityLogParams,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof exportActivityLog>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof exportActivityLog>>,
+          TError,
+          Awaited<ReturnType<typeof exportActivityLog>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary The filtered audit log as CSV (at most 50,000 rows); takes the same filters as /activity-log */
+export function useExportActivityLog<
+  TData = Awaited<ReturnType<typeof exportActivityLog>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ExportActivityLogParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof exportActivityLog>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof exportActivityLog>>,
+          TError,
+          Awaited<ReturnType<typeof exportActivityLog>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary The filtered audit log as CSV (at most 50,000 rows); takes the same filters as /activity-log */
+export function useExportActivityLog<
+  TData = Awaited<ReturnType<typeof exportActivityLog>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ExportActivityLogParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof exportActivityLog>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary The filtered audit log as CSV (at most 50,000 rows); takes the same filters as /activity-log */
+export function useExportActivityLog<
+  TData = Awaited<ReturnType<typeof exportActivityLog>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ExportActivityLogParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof exportActivityLog>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getExportActivityLogQueryOptions(params, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getGetActivityLogSummaryUrl = (
+  params?: GetActivityLogSummaryParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : String(value));
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/activity-log/summary?${stringifiedParams}`
+    : `/api/activity-log/summary`;
+};
+
+/**
+ * @summary Last 7 days - changes per day, most active users, sensitive actions, failed or denied actions
+ */
+export const getActivityLogSummary = async (
+  params?: GetActivityLogSummaryParams,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<AuditSummary> => {
+  return customFetch<AuditSummary>(getGetActivityLogSummaryUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetActivityLogSummaryQueryKey = (
+  params?: GetActivityLogSummaryParams,
+) => {
+  return [`/api/activity-log/summary`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetActivityLogSummaryQueryOptions = <
+  TData = Awaited<ReturnType<typeof getActivityLogSummary>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetActivityLogSummaryParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getActivityLogSummary>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetActivityLogSummaryQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getActivityLogSummary>>
+  > = ({ signal }) =>
+    getActivityLogSummary(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getActivityLogSummary>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetActivityLogSummaryQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getActivityLogSummary>>
+>;
+export type GetActivityLogSummaryQueryError = ErrorType<unknown>;
+
+/** @summary Last 7 days - changes per day, most active users, sensitive actions, failed or denied actions */
+export function useGetActivityLogSummary<
+  TData = Awaited<ReturnType<typeof getActivityLogSummary>>,
+  TError = ErrorType<unknown>,
+>(
+  params: undefined | GetActivityLogSummaryParams,
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getActivityLogSummary>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getActivityLogSummary>>,
+          TError,
+          Awaited<ReturnType<typeof getActivityLogSummary>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Last 7 days - changes per day, most active users, sensitive actions, failed or denied actions */
+export function useGetActivityLogSummary<
+  TData = Awaited<ReturnType<typeof getActivityLogSummary>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetActivityLogSummaryParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getActivityLogSummary>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getActivityLogSummary>>,
+          TError,
+          Awaited<ReturnType<typeof getActivityLogSummary>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Last 7 days - changes per day, most active users, sensitive actions, failed or denied actions */
+export function useGetActivityLogSummary<
+  TData = Awaited<ReturnType<typeof getActivityLogSummary>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetActivityLogSummaryParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getActivityLogSummary>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Last 7 days - changes per day, most active users, sensitive actions, failed or denied actions */
+export function useGetActivityLogSummary<
+  TData = Awaited<ReturnType<typeof getActivityLogSummary>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetActivityLogSummaryParams,
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getActivityLogSummary>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getGetActivityLogSummaryQueryOptions(params, options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getVerifyActivityLogUrl = () => {
+  return `/api/activity-log/verify`;
+};
+
+/**
+ * @summary Walk the hash chain and report the first broken entry, if any (security administrators)
+ */
+export const verifyActivityLog = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<AuditVerifyResult> => {
+  return customFetch<AuditVerifyResult>(getVerifyActivityLogUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getVerifyActivityLogQueryKey = () => {
+  return [`/api/activity-log/verify`] as const;
+};
+
+export const getVerifyActivityLogQueryOptions = <
+  TData = Awaited<ReturnType<typeof verifyActivityLog>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: Partial<
+    UseQueryOptions<
+      Awaited<ReturnType<typeof verifyActivityLog>>,
+      TError,
+      TData
+    >
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getVerifyActivityLogQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof verifyActivityLog>>
+  > = ({ signal }) => verifyActivityLog({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof verifyActivityLog>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type VerifyActivityLogQueryResult = NonNullable<
+  Awaited<ReturnType<typeof verifyActivityLog>>
+>;
+export type VerifyActivityLogQueryError = ErrorType<unknown>;
+
+/** @summary Walk the hash chain and report the first broken entry, if any (security administrators) */
+export function useVerifyActivityLog<
+  TData = Awaited<ReturnType<typeof verifyActivityLog>>,
+  TError = ErrorType<unknown>,
+>(
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof verifyActivityLog>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof verifyActivityLog>>,
+          TError,
+          Awaited<ReturnType<typeof verifyActivityLog>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Walk the hash chain and report the first broken entry, if any (security administrators) */
+export function useVerifyActivityLog<
+  TData = Awaited<ReturnType<typeof verifyActivityLog>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof verifyActivityLog>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof verifyActivityLog>>,
+          TError,
+          Awaited<ReturnType<typeof verifyActivityLog>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Walk the hash chain and report the first broken entry, if any (security administrators) */
+export function useVerifyActivityLog<
+  TData = Awaited<ReturnType<typeof verifyActivityLog>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof verifyActivityLog>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Walk the hash chain and report the first broken entry, if any (security administrators) */
+export function useVerifyActivityLog<
+  TData = Awaited<ReturnType<typeof verifyActivityLog>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof verifyActivityLog>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getVerifyActivityLogQueryOptions(options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getListAuditAlertsUrl = () => {
+  return `/api/activity-log/alerts`;
+};
+
+/**
+ * @summary Active sensitive-action alerts (Security Settings module)
+ */
+export const listAuditAlerts = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<AuditAlert[]> => {
+  return customFetch<AuditAlert[]>(getListAuditAlertsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListAuditAlertsQueryKey = () => {
+  return [`/api/activity-log/alerts`] as const;
+};
+
+export const getListAuditAlertsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listAuditAlerts>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: Partial<
+    UseQueryOptions<Awaited<ReturnType<typeof listAuditAlerts>>, TError, TData>
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListAuditAlertsQueryKey();
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listAuditAlerts>>> = ({
+    signal,
+  }) => listAuditAlerts({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listAuditAlerts>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type ListAuditAlertsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listAuditAlerts>>
+>;
+export type ListAuditAlertsQueryError = ErrorType<unknown>;
+
+/** @summary Active sensitive-action alerts (Security Settings module) */
+export function useListAuditAlerts<
+  TData = Awaited<ReturnType<typeof listAuditAlerts>>,
+  TError = ErrorType<unknown>,
+>(
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listAuditAlerts>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listAuditAlerts>>,
+          TError,
+          Awaited<ReturnType<typeof listAuditAlerts>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Active sensitive-action alerts (Security Settings module) */
+export function useListAuditAlerts<
+  TData = Awaited<ReturnType<typeof listAuditAlerts>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listAuditAlerts>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof listAuditAlerts>>,
+          TError,
+          Awaited<ReturnType<typeof listAuditAlerts>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Active sensitive-action alerts (Security Settings module) */
+export function useListAuditAlerts<
+  TData = Awaited<ReturnType<typeof listAuditAlerts>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listAuditAlerts>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Active sensitive-action alerts (Security Settings module) */
+export function useListAuditAlerts<
+  TData = Awaited<ReturnType<typeof listAuditAlerts>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof listAuditAlerts>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getListAuditAlertsQueryOptions(options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getAcknowledgeAuditAlertUrl = (id: string) => {
+  return `/api/activity-log/alerts/${id}/acknowledge`;
+};
+
+/**
+ * @summary Acknowledge a sensitive-action alert
+ */
+export const acknowledgeAuditAlert = async (
+  id: string,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<AuditAlert> => {
+  return customFetch<AuditAlert>(getAcknowledgeAuditAlertUrl(id), {
+    ...options,
+    method: "POST",
+  });
+};
+
+export const getAcknowledgeAuditAlertMutationKey = () =>
+  ["acknowledgeAuditAlert"] as const;
+
+export const getAcknowledgeAuditAlertMutationOptions = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof acknowledgeAuditAlert>>,
+    TError,
+    AcknowledgeAuditAlertMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof acknowledgeAuditAlert>>,
+  TError,
+  AcknowledgeAuditAlertMutationVariables,
+  TContext
+> => {
+  const mutationKey = getAcknowledgeAuditAlertMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof acknowledgeAuditAlert>>,
+    AcknowledgeAuditAlertMutationVariables
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return acknowledgeAuditAlert(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type AcknowledgeAuditAlertMutationResult = NonNullable<
+  Awaited<ReturnType<typeof acknowledgeAuditAlert>>
+>;
+
+export type AcknowledgeAuditAlertMutationError = ErrorType<void>;
+export type AcknowledgeAuditAlertMutationVariables = { id: string };
+
+/** @summary Acknowledge a sensitive-action alert */
+export const useAcknowledgeAuditAlert = <
+  TError = ErrorType<void>,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof acknowledgeAuditAlert>>,
+      TError,
+      AcknowledgeAuditAlertMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof acknowledgeAuditAlert>>,
+  TError,
+  AcknowledgeAuditAlertMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getAcknowledgeAuditAlertMutationOptions(options),
+    queryClient,
+  );
+};
+
+export const getGetAuditSettingsUrl = () => {
+  return `/api/activity-log/settings`;
+};
+
+/**
+ * @summary Audit retention (minimum 365 days) and which sensitive-action alerts are on
+ */
+export const getAuditSettings = async (
+  options?: Parameters<typeof customFetch>[1],
+): Promise<AuditSettings> => {
+  return customFetch<AuditSettings>(getGetAuditSettingsUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetAuditSettingsQueryKey = () => {
+  return [`/api/activity-log/settings`] as const;
+};
+
+export const getGetAuditSettingsQueryOptions = <
+  TData = Awaited<ReturnType<typeof getAuditSettings>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: Partial<
+    UseQueryOptions<Awaited<ReturnType<typeof getAuditSettings>>, TError, TData>
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetAuditSettingsQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getAuditSettings>>
+  > = ({ signal }) => getAuditSettings({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getAuditSettings>>,
+    TError,
+    TData
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+};
+
+export type GetAuditSettingsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getAuditSettings>>
+>;
+export type GetAuditSettingsQueryError = ErrorType<unknown>;
+
+/** @summary Audit retention (minimum 365 days) and which sensitive-action alerts are on */
+export function useGetAuditSettings<
+  TData = Awaited<ReturnType<typeof getAuditSettings>>,
+  TError = ErrorType<unknown>,
+>(
+  options: {
+    query: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getAuditSettings>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        DefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getAuditSettings>>,
+          TError,
+          Awaited<ReturnType<typeof getAuditSettings>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): DefinedUseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Audit retention (minimum 365 days) and which sensitive-action alerts are on */
+export function useGetAuditSettings<
+  TData = Awaited<ReturnType<typeof getAuditSettings>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getAuditSettings>>,
+        TError,
+        TData
+      >
+    > &
+      Pick<
+        UndefinedInitialDataOptions<
+          Awaited<ReturnType<typeof getAuditSettings>>,
+          TError,
+          Awaited<ReturnType<typeof getAuditSettings>>
+        >,
+        "initialData"
+      >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Audit retention (minimum 365 days) and which sensitive-action alerts are on */
+export function useGetAuditSettings<
+  TData = Awaited<ReturnType<typeof getAuditSettings>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getAuditSettings>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+};
+/** @summary Audit retention (minimum 365 days) and which sensitive-action alerts are on */
+export function useGetAuditSettings<
+  TData = Awaited<ReturnType<typeof getAuditSettings>>,
+  TError = ErrorType<unknown>,
+>(
+  options?: {
+    query?: Partial<
+      UseQueryOptions<
+        Awaited<ReturnType<typeof getAuditSettings>>,
+        TError,
+        TData
+      >
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseQueryResult<TData, TError> & {
+  queryKey: DataTag<QueryKey, TData, TError>;
+} {
+  const queryOptions = getGetAuditSettingsQueryOptions(options);
+
+  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
+    TData,
+    TError
+  > & { queryKey: DataTag<QueryKey, TData, TError> };
+
+  return withQueryKey(query, queryOptions.queryKey);
+}
+
+export const getUpdateAuditSettingsUrl = () => {
+  return `/api/activity-log/settings`;
+};
+
+/**
+ * @summary Change audit retention or switch sensitive-action alerts on or off
+ */
+export const updateAuditSettings = async (
+  auditSettingsUpdate: AuditSettingsUpdate,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<UpdateAuditSettings200> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return customFetch<UpdateAuditSettings200>(getUpdateAuditSettingsUrl(), {
+    ...options,
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(auditSettingsUpdate),
+  });
+};
+
+export const getUpdateAuditSettingsMutationKey = () =>
+  ["updateAuditSettings"] as const;
+
+export const getUpdateAuditSettingsMutationOptions = <
+  TError = ErrorType<ValidationFailedResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateAuditSettings>>,
+    TError,
+    UpdateAuditSettingsMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateAuditSettings>>,
+  TError,
+  UpdateAuditSettingsMutationVariables,
+  TContext
+> => {
+  const mutationKey = getUpdateAuditSettingsMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateAuditSettings>>,
+    UpdateAuditSettingsMutationVariables
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return updateAuditSettings(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateAuditSettingsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateAuditSettings>>
+>;
+export type UpdateAuditSettingsMutationBody = BodyType<AuditSettingsUpdate>;
+export type UpdateAuditSettingsMutationError =
+  ErrorType<ValidationFailedResponse>;
+export type UpdateAuditSettingsMutationVariables = {
+  data: BodyType<AuditSettingsUpdate>;
+};
+
+/** @summary Change audit retention or switch sensitive-action alerts on or off */
+export const useUpdateAuditSettings = <
+  TError = ErrorType<ValidationFailedResponse>,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof updateAuditSettings>>,
+      TError,
+      UpdateAuditSettingsMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof updateAuditSettings>>,
+  TError,
+  UpdateAuditSettingsMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getUpdateAuditSettingsMutationOptions(options),
+    queryClient,
+  );
+};
 
 export const getTestAlarmRuleWebhookUrl = (id: string) => {
   return `/api/alarm-rules/${id}/test-webhook`;

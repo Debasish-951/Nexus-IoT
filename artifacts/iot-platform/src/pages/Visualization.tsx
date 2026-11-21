@@ -21,6 +21,7 @@ import { useProject } from "@/contexts/ProjectContext";
 import { useVizNodes, useVizNodeActions, VizConflictError } from "@/features/dashboards/vizStore";
 import type { Asset } from "@/pages/assetShared";
 import { validateName, LIMITS } from "@/lib/validation";
+import { HistoryButton } from "@/features/auditLog/shared";
 
 // Dashboards themselves now live on the server (see features/dashboards/vizStore.ts).
 // What stays here is genuinely local: the copy/paste clipboard, this person's
@@ -454,6 +455,7 @@ export default function Visualization() {
           <h1 className="text-base font-bold">Visualization</h1>
         </div>
         <div ref={setToolbarSlot} className="flex flex-1 items-center gap-2 min-w-0 flex-wrap" />
+        {selectedNode && <HistoryButton targetId={selectedNode.id} targetName={selectedNode.name} className="h-8 text-xs shrink-0" />}
       </div>
 
       <Card className="flex-1 min-h-0 overflow-hidden shadow-sm">

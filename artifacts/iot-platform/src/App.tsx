@@ -33,6 +33,7 @@ import { FEATURES, type FeatureKey } from "@/lib/features";
  * from a per-browser preference.
  */
 const AICopilot = lazy(() => import("@/pages/AICopilot"));
+const AiReports = lazy(() => import("@/features/aiReport/AiReportsPage"));
 const ActivityLog = lazy(() => import("@/pages/ActivityLog"));
 const AlarmHistory = lazy(() => import("@/pages/AlarmHistory"));
 const AlarmRules = lazy(() => import("@/pages/AlarmRules"));
@@ -145,8 +146,9 @@ const ROUTES: {
   { path: "/api-clients",          component: ApiClients,           module: "api_clients" },
   { path: "/data-explorer",        component: DataExplorerHome,     module: "explorer" },
   { path: "/ai-copilot",           component: AICopilot,            module: "ai_advisor" },
+  { path: "/ai-reports",           component: AiReports,            module: "ai_advisor" },
   { path: "/activity-log",         component: ActivityLog,          module: "activity_log" },
-  { path: "/data-management",      component: DataManagement,       module: "reports" },
+  { path: "/data-management",      component: DataManagement,       module: "data_management" },
   { path: "/reports",              component: Reports,              module: "reports" },
   { path: "/visualization",        component: Visualization,        module: "visualization" },
   { path: "/live-twin",            component: LiveTwin,             module: "live_twin" },

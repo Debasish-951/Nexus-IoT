@@ -21,14 +21,28 @@ import type { AreaState, ConnSpec, Item, ItemSpec, SceneDoc, Status } from "./ty
 
 export type LabelMode = "smart" | "all" | "off";
 export type Source = "live" | "demo" | "none";
-export type Scenario = "normal" | "fault" | "cavitation" | "overheat" | "trip";
-export interface Reading { k: string; n: string; u: string; d: number; value: number | null; source: Source; status: Status; metric: string | null }
+export type Scenario = "normal" | "fault" | "cavitation" | "overheat" | "trip" | "cloud" | "storm" | "lowwind" | "charge" | "discharge";
+/** Scenarios that only models declaring them in `scen` react to (solar, wind, battery storage). */
+const MODEL_SCENARIOS: Scenario[] = ["cloud", "storm", "lowwind", "charge", "discharge"];
+export interface Reading {
+  k: string; n: string; u: string; d: number; value: number | null; source: Source; status: Status; metric: string | null;
+  /** The status comes from the asset's alarm rules, not the model's own limits. */
+  rules?: boolean;
+  /** History playback is on and the value is a recorded one. */
+  playback?: boolean;
+}
+/** Alarm limits for one linked reading (see shared/alarmLimits.ts). */
+export interface RuleLimits { warn?: number; crit?: number; low?: number; lowCrit?: number }
 export interface AreaStat { id: string; total: number; running: number; alarms: number; worst: Status; linked: number }
 export interface EngineOptions {
   canvas: HTMLCanvasElement;
   host: HTMLElement;
   overlay: HTMLElement;
   getLive: (assetId: string, metric: string) => number | null | undefined;
+  /** Limits from the asset's alarm rules for a linked reading, used instead of the model's own. */
+  getLimits?: (assetId: string, metric: string) => RuleLimits | undefined;
+  /** Bytes of an uploaded .glb model, by upload id. */
+  fetchGlb?: (uploadId: string) => Promise<ArrayBuffer>;
   /** Something the panels show changed. */
   onChange: () => void;
   /** The saved scene changed and should be persisted. */
@@ -44,6 +58,10 @@ const ALIASES: Record<string, string[]> = {
 const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
 const tagStatus = (t: TagDef, v: number): Status => t.warn === undefined || t.crit === undefined ? "ok"
   : t.low ? (v <= t.crit ? "crit" : v <= t.warn ? "warn" : "ok") : (v >= t.crit ? "crit" : v >= t.warn ? "warn" : "ok");
+const hasLimits = (l: RuleLimits | undefined): l is RuleLimits => !!l && (l.warn !== undefined || l.crit !== undefined || l.low !== undefined || l.lowCrit !== undefined);
+const ruleStatus = (l: RuleLimits, v: number): Status =>
+  (l.crit !== undefined && v >= l.crit) || (l.lowCrit !== undefined && v <= l.lowCrit) ? "crit"
+    : (l.warn !== undefined && v >= l.warn) || (l.low !== undefined && v <= l.low) ? "warn" : "ok";
 export const fmtReading = (r: { value: number | null; d: number; u: string }) => r.value == null ? "—" : `${r.value.toFixed(r.d)}${r.u ? " " + r.u : ""}`;
 export const hex = (c: number) => "#" + c.toString(16).padStart(6, "0");
 
@@ -83,6 +101,8 @@ export function createPlantEngine(o: EngineOptions) {
   const isRotating = (it: Item) => MODELS[it.type]?.fam === "rotating";
   function scenarioTarget(it: Item, t: TagDef, base: number): number {
     if (scenario === "fault" && t.fault !== undefined) return t.fault;
+    const own = MODELS[it.type]?.scen?.(it.params)?.[scenario]?.[t.k];
+    if (own !== undefined) return own;
     if (scenario === "cavitation" && isPump(it)) {
       if (t.k === "vib") return t.fault ?? (t.crit ?? base) * 1.05;
       if (t.k === "flow") return base * 0.72;
@@ -93,6 +113,16 @@ export function createPlantEngine(o: EngineOptions) {
     }
     return base;
   }
+  /** History playback: linked values are recorded ones, labelled "playback". */
+  let playback = false;
+  /** Rule limits of a linked reading, if its asset has threshold alarm rules for that metric. */
+  function limitsOf(it: Item, t: TagDef): RuleLimits | undefined {
+    const metric = it.assetId ? it.bind[t.k] : undefined;
+    if (!metric || !it.assetId || !o.getLimits) return undefined;
+    const l = o.getLimits(it.assetId, metric);
+    return hasLimits(l) ? l : undefined;
+  }
+  function statusOf(it: Item, t: TagDef, v: number): Status { const l = limitsOf(it, t); return l ? ruleStatus(l, v) : tagStatus(t, v); }
   let pack = "textile", demo = true, readOnly = false, focusId: string | null = null, iso = false, raf = 0, disposed = false;
   let flowTex: THREE.Texture[] = [], flowLbls: { el: HTMLDivElement; p: THREE.Vector3; g: THREE.Group }[] = [];
   const tgt = P(0, 0.5, 0), goal = { t: P(0, 0.5, 0), r: 40, on: false, th: null as number | null, ph: null as number | null }; let th = 0.5, ph = 0.92, rad = 40;
@@ -142,15 +172,24 @@ export function createPlantEngine(o: EngineOptions) {
     (p.querySelector("b") as HTMLElement).textContent = title;
     overlay.appendChild(p); return p;
   }
+  /* Readings pinned onto parts of an uploaded model: one small label per part pin. */
+  function syncPartPins(it: Item) {
+    const x = it as any; (x._gp as HTMLDivElement[] | undefined)?.forEach((p) => p.remove()); x._gp = [];
+    (it.gp || []).forEach((g) => { const p = document.createElement("div"); p.className = "pt-pin pt-part"; p.innerHTML = `<span class="pt-dot"></span><span class="pt-card"><b></b><span></span></span>`; (p.querySelector("b") as HTMLElement).textContent = g.mesh; overlay.appendChild(p); x._gp.push(p); });
+  }
+  function dropPartPins(it: Item) { ((it as any)._gp as HTMLDivElement[] | undefined)?.forEach((p) => p.remove()); (it as any)._gp = []; }
+  let partPick: { id: string; cb: (mesh: string) => void } | null = null;
   function createItem(spec: Partial<ItemSpec> & { type: string } & Partial<Item>): Item | null {
     if (!MODELS[spec.type]) return null;
+    if (spec.type === "glb" && !spec.glbObj) return null;
     const it = {
       id: spec.id || nid("m"), type: spec.type, name: spec.name || autoName(spec.type), x: spec.x || 0, z: spec.z || 0, rot: spec.rot || 0,
       params: { ...defaults(spec.type), ...(spec.params || {}) }, running: spec.running !== false, fault: !!spec.fault,
       area: spec.area || "", sub: spec.sub || "", assetId: spec.assetId ?? null, bind: { ...(spec.bind || {}) },
-      glbObj: spec.glbObj, glbK: spec.glbK, glbNames: spec.glbNames, gb: spec.gb, live: new Set<string>(), status: "nolink",
+      glbObj: spec.glbObj, glbK: spec.glbK, glbNames: spec.glbNames, gb: spec.gb, gp: spec.gp, glbId: spec.glbId, live: new Set<string>(), status: "nolink",
     } as unknown as Item;
     build(it);
+    syncPartPins(it);
     it.pin = makePin(it.name);
     it.pin.addEventListener("click", () => select(it.id));
     items.push(it); return it;
@@ -285,10 +324,14 @@ export function createPlantEngine(o: EngineOptions) {
   function heatLevel(it: Item): number {
     let h = -1;
     it.tags.forEach((t) => {
-      if (t.u !== "\u00b0C" || t.warn === undefined || t.crit === undefined || t.low) return;
+      if (t.u !== "\u00b0C") return;
+      const l = limitsOf(it, t);
+      const crit = l?.crit ?? (l?.warn !== undefined ? l.warn * 1.15 : t.low ? undefined : t.crit);
+      const warn = l?.warn ?? (l?.crit !== undefined ? l.crit * 0.87 : t.low ? undefined : t.warn);
+      if (warn === undefined || crit === undefined || crit <= warn) return;
       const v = it.r[t.k]; if (v === undefined || !Number.isFinite(v)) return;
-      const span = Math.max(1e-6, t.crit - t.warn), lo = t.warn - span * 3;
-      h = Math.max(h, clamp((v - lo) / (t.crit - lo), 0, 1));
+      const span = Math.max(1e-6, crit - warn), lo = warn - span * 3;
+      h = Math.max(h, clamp((v - lo) / (crit - lo), 0, 1));
     });
     if (h >= 0) return h;
     return it.status === "crit" ? 1 : it.status === "warn" ? 0.65 : it.status === "ok" ? 0.2 : 0;
@@ -317,7 +360,38 @@ export function createPlantEngine(o: EngineOptions) {
   function structureChanged(edit = true) { sizeFloor(); rebuildConns(); rebuildAreas(); applyIso(); o.onChange(); if (edit) o.onEdit(); }
 
   /* ---------- loading and saving ---------- */
-  function clearAll() { items.slice().forEach((i) => { world.remove(i.root); if (i.type !== "glb") disposeTree(i.root); i.pin.remove(); }); items = []; conns = []; sel = null; connectFrom = null; rebuildConns(); }
+  function clearAll() { loadGen++; pendingGlb = []; partPick = null; items.slice().forEach((i) => { world.remove(i.root); if (i.type !== "glb") disposeTree(i.root); i.pin.remove(); dropPartPins(i); }); items = []; conns = []; sel = null; connectFrom = null; rebuildConns(); }
+
+  /* ---------- uploaded .glb models ---------- */
+  /** Saved models still downloading: kept as specs so a save meanwhile does not drop them. */
+  let pendingGlb: ItemSpec[] = [], loadGen = 0;
+  const glbCache = new Map<string, Promise<{ obj: THREE.Object3D; names: string[]; k: number }>>();
+  function parseGlb(buf: ArrayBuffer) {
+    return new Promise<any>((res, rej) => new GLTFLoader().parse(buf, "", res, rej)).then((gltf) => {
+      const obj: THREE.Object3D = gltf.scene, names: string[] = []; let n = 0;
+      obj.traverse((q: any) => { if (q.isMesh) { if (!q.name) q.name = "Part " + (++n); names.push(q.name); } });
+      const sz = new THREE.Box3().setFromObject(obj).getSize(new THREE.Vector3());
+      return { obj, names, k: 3 / Math.max(sz.x, sz.y, sz.z, 0.001) };
+    });
+  }
+  function loadSavedGlb(spec: ItemSpec) {
+    if (!spec.glbId || !o.fetchGlb) return;
+    pendingGlb.push(spec);
+    const gen = loadGen;
+    let p = glbCache.get(spec.glbId);
+    if (!p) { p = o.fetchGlb(spec.glbId).then(parseGlb); glbCache.set(spec.glbId, p); p.catch(() => glbCache.delete(spec.glbId!)); }
+    p.then((m) => {
+      if (gen !== loadGen || disposed) return;
+      pendingGlb = pendingGlb.filter((s) => s !== spec);
+      const it = createItem({ ...spec, glbObj: m.obj, glbK: m.k, glbNames: m.names });
+      if (it) { applyIso(); sizeFloor(); rebuildConns(); rebuildAreas(); applyIso(); o.onChange(); }
+    }).catch(() => {
+      if (gen !== loadGen) return;
+      // Kept in pendingGlb, so saving does not lose it; the panel reports it.
+      glbFailed.add(spec.id); o.onChange();
+    });
+  }
+  const glbFailed = new Set<string>();
   function makeAreas(pk: PackDef): AreaState[] { let k = 0; return pk.areas.map((a) => ({ id: a.id, name: a.name, out: a.out || "", med: a.med || "product", util: !!a.util, color: a.util ? UTIL_COL : AREA_COL[k++ % AREA_COL.length], enabled: true, subs: a.subs.map((s) => ({ name: s.name, enabled: true })) })); }
   function packFlows(pk: PackDef): [string, string, string][] { if (pk.flows) return pk.flows; const proc = pk.areas.filter((a) => !a.util); return proc.slice(0, -1).map((a, i) => [a.id, proc[i + 1].id, a.out || ""]); }
 
@@ -347,6 +421,7 @@ export function createPlantEngine(o: EngineOptions) {
     for (const spec of kept.values()) {
       const A = areaById(spec.area); if (spec.area && !A?.enabled) continue;
       if (A && !A.subs.some((s) => s.name === spec.sub)) A.subs.push({ name: spec.sub || "Added", enabled: true });
+      if (spec.type === "glb") { loadSavedGlb(spec); continue; }
       const it = createItem({ ...spec, id: undefined }); if (it) placeFree(it, 0, 0);
     }
     areas.forEach((A) => {
@@ -365,20 +440,28 @@ export function createPlantEngine(o: EngineOptions) {
     demo = doc.demo !== false;
     let k = 0;
     areas = doc.areas.map((a) => ({ ...a, subs: a.subs.map((s) => ({ ...s })), color: a.util ? UTIL_COL : AREA_COL[k++ % AREA_COL.length] }));
-    doc.items.forEach((s) => createItem(s));
+    doc.items.forEach((s) => { if (s.type === "glb") loadSavedGlb(s); else createItem(s); });
     (doc.conns || []).forEach((c) => { if (byId(c.a) && byId(c.b)) conns.push({ id: nid("c"), a: c.a, b: c.b, medium: MED[c.medium] ? c.medium : "product" }); });
     flows = (doc.flows || []).filter((f) => Array.isArray(f) && f.length >= 2) as [string, string, string][];
     focusId = null;
     sizeFloor(); rebuildConns(); rebuildAreas(); applyIso(); frameNow(); o.onChange();
   }
   function serialize(): SceneDoc {
-    const keep = items.filter((i) => i.type !== "glb");
-    const ids = new Set(keep.map((i) => i.id));
+    // Uploaded models are saved when they are in the upload store (glbId); a model
+    // read from a file only in this browser is not.
+    const keep = items.filter((i) => i.type !== "glb" || i.glbId);
+    const ids = new Set([...keep.map((i) => i.id), ...pendingGlb.map((s) => s.id)]);
     return {
       version: 1, pack, demo,
       areas: areas.map((a) => ({ id: a.id, name: a.name, out: a.out, med: a.med, util: a.util, enabled: a.enabled, subs: a.subs.map((s) => ({ ...s })) })),
       flows,
-      items: keep.map((i) => ({ id: i.id, type: i.type, name: i.name, x: +i.x.toFixed(2), z: +i.z.toFixed(2), rot: i.rot, params: i.params, area: i.area, sub: i.sub, assetId: i.assetId || null, bind: i.bind, running: i.running, fault: i.fault })),
+      items: [
+        ...keep.map((i) => ({
+          id: i.id, type: i.type, name: i.name, x: +i.x.toFixed(2), z: +i.z.toFixed(2), rot: i.rot, params: i.params, area: i.area, sub: i.sub, assetId: i.assetId || null, bind: i.bind, running: i.running, fault: i.fault,
+          ...(i.type === "glb" ? { glbId: i.glbId, gb: (i.gb || []).map((b) => ({ ...b })), gp: (i.gp || []).map((g) => ({ ...g })) } : {}),
+        })),
+        ...pendingGlb.map((s) => ({ ...s })),
+      ],
       conns: conns.filter((c) => ids.has(c.a) && ids.has(c.b)).map((c) => ({ a: c.a, b: c.b, medium: c.medium })),
     };
   }
@@ -389,7 +472,8 @@ export function createPlantEngine(o: EngineOptions) {
     const live = it.live.has(t.k);
     const source: Source = live ? "live" : demo && !metric ? "demo" : "none";
     const value = source === "none" ? null : it.r[t.k];
-    return { k: t.k, n: t.n, u: t.u, d: t.d, value, source, status: value == null ? "nolink" : tagStatus(t, value), metric };
+    const rules = !!limitsOf(it, t);
+    return { k: t.k, n: t.n, u: t.u, d: t.d, value, source, status: value == null ? "nolink" : statusOf(it, t, value), metric, rules, playback: playback && live };
   }
   function sim(dt: number) {
     const k = Math.min(1, dt * 0.6), kl = Math.min(1, dt * 4);
@@ -412,7 +496,7 @@ export function createPlantEngine(o: EngineOptions) {
         }
         counted++;
         const v = it.live.has(t.k) ? (lv as number) : it.r[t.k];
-        const s = tagStatus(t, v); if (RANK[s] > RANK[w]) w = s;
+        const s = statusOf(it, t, v); if (RANK[s] > RANK[w]) w = s;
       });
       it.status = demo && !it.running ? "off" : counted ? w : "nolink";
     });
@@ -447,6 +531,14 @@ export function createPlantEngine(o: EngineOptions) {
   };
   const onUp = () => {
     if (!ptr) return;
+    if (ptr.moved <= 5 && partPick) {
+      const pk = partPick; partPick = null;
+      const target = byId(pk.id);
+      if (target) {
+        for (const h of ray.intersectObject(target.inner, true)) { const ob: any = h.object; if (ob.isMesh && !ob.userData.fx && ob.name) { pk.cb(ob.name); break; } }
+      }
+      o.onChange(); ptr = null; return;
+    }
     if (ptr.moved <= 5) {
       if (connectFrom) {
         if (ptr.it && ptr.it !== connectFrom) { conns.push({ id: nid("c"), a: connectFrom.id, b: ptr.it.id, medium: areaById(connectFrom.area)?.med || "product" }); rebuildConns(); applyIso(); o.onEdit(); }
@@ -519,7 +611,21 @@ export function createPlantEngine(o: EngineOptions) {
       it.pin.className = "pt-pin " + (it.status === "ok" ? "" : it.status) + (sel === it ? " sel" : "");
       const mt = it.tags.find((x) => x.k === it.mainKey);
       const r = mt ? readingOf(it, mt) : null;
-      (it.pin.querySelector(".pt-card > span") as HTMLElement).textContent = it.status === "off" ? "stopped" : !r ? "" : r.source === "none" ? "not linked" : fmtReading(r) + (r.source === "demo" ? " · demo" : "");
+      (it.pin.querySelector(".pt-card > span") as HTMLElement).textContent = it.status === "off" ? "stopped" : !r ? "" : r.source === "none" ? "not linked" : fmtReading(r) + (r.source === "demo" ? " · demo" : r.playback ? " · playback" : "");
+    });
+    items.forEach((it) => {
+      const pins = (it as any)._gp as HTMLDivElement[] | undefined; if (!pins?.length) return;
+      (it.gp || []).forEach((g, i) => {
+        const pin = pins[i]; if (!pin) return;
+        const mesh: any = it.root.visible ? it.inner.getObjectByName(g.mesh) : null;
+        if (!mesh || labelMode === "off") { pin.style.transform = "translate(-9999px,0)"; return; }
+        if (mesh.geometry && !mesh.geometry.boundingBox) mesh.geometry.computeBoundingBox();
+        const bb = mesh.geometry?.boundingBox; anchorV.set(bb ? (bb.min.x + bb.max.x) / 2 : 0, bb ? bb.max.y : 0, bb ? (bb.min.z + bb.max.z) / 2 : 0);
+        mesh.localToWorld(anchorV); placePin(pin, anchorV);
+        const t = it.tags.find((x) => x.k === g.k); const r = t ? readingOf(it, t) : null;
+        pin.className = "pt-pin pt-part " + (r && r.status !== "ok" && r.status !== "nolink" ? r.status : "");
+        (pin.querySelector(".pt-card > span") as HTMLElement).textContent = !r ? "" : r.source === "none" ? `${r.n}: not linked` : `${r.n}: ${fmtReading(r)}${r.source === "demo" ? " · demo" : r.playback ? " · playback" : ""}`;
+      });
     });
     flowLbls.forEach((l) => {
       if (!l.g.visible) { l.el.style.transform = "translate(-9999px,0)"; return; }
@@ -556,7 +662,10 @@ export function createPlantEngine(o: EngineOptions) {
     /** Which scenarios do something with the machines now on the floor. */
     scenarioFits(): Record<Scenario, boolean> {
       const pumps = items.some(isPump), rot = items.some(isRotating);
-      return { normal: true, fault: items.some((i) => i.tags.some((t) => t.fault !== undefined)), cavitation: pumps, overheat: rot, trip: pumps };
+      const own = (sc: Scenario) => items.some((i) => !!MODELS[i.type]?.scen?.(i.params)?.[sc]);
+      const fits = { normal: true, fault: items.some((i) => i.tags.some((t) => t.fault !== undefined)), cavitation: pumps, overheat: rot, trip: pumps } as Record<Scenario, boolean>;
+      MODEL_SCENARIOS.forEach((sc) => { fits[sc] = own(sc); });
+      return fits;
     },
     get xray() { return xray; }, get heat() { return heat; }, get auto() { return auto; },
     fitAll,
@@ -598,7 +707,7 @@ export function createPlantEngine(o: EngineOptions) {
     },
     removeItem(id: string) {
       const it = byId(id); if (!it) return;
-      world.remove(it.root); if (it.type !== "glb") disposeTree(it.root); it.pin.remove();
+      world.remove(it.root); if (it.type !== "glb") disposeTree(it.root); it.pin.remove(); dropPartPins(it);
       items = items.filter((i) => i !== it); conns = conns.filter((c) => c.a !== it.id && c.b !== it.id);
       if (sel === it) sel = null; if (connectFrom === it) connectFrom = null;
       structureChanged();
@@ -606,9 +715,64 @@ export function createPlantEngine(o: EngineOptions) {
     rotateItem(id: string) { const it = byId(id); if (!it) return; it.rot = (it.rot + 90) % 360; it.root.rotation.y = it.rot * PI / 180; structureChanged(); },
     duplicateItem(id: string) {
       const it = byId(id); if (!it) return;
-      const n = createItem({ type: it.type, params: { ...it.params }, rot: it.rot, area: it.area, sub: it.sub, assetId: it.assetId, bind: { ...it.bind }, glbObj: it.glbObj, glbK: it.glbK, glbNames: it.glbNames, gb: it.gb?.map((x) => ({ ...x })) });
+      const n = createItem({ type: it.type, params: { ...it.params }, rot: it.rot, area: it.area, sub: it.sub, assetId: it.assetId, bind: { ...it.bind }, glbObj: it.glbObj, glbK: it.glbK, glbNames: it.glbNames, glbId: it.glbId, gb: it.gb?.map((x) => ({ ...x })), gp: it.gp?.map((x) => ({ ...x })) });
       if (!n) return; placeFree(n, it.x, it.z); applyIso(); sel = n; structureChanged();
     },
+    /**
+     * Copies of a machine with its settings and readings links, numbered on from
+     * its name (WTG-01 → WTG-02, WTG-03…) and laid out in a row or a grid.
+     * `assetFor(i)` may give copy i (1-based) a different asset; the links are
+     * kept by reading key, so sibling assets made from one template map at once.
+     */
+    duplicateMany(id: string, count: number, layout: "row" | "grid", gap: number, assetFor?: (i: number) => string | null | undefined): string[] {
+      const it = byId(id); if (!it) return [];
+      count = Math.max(1, Math.min(50, Math.round(count)));
+      const m = /^(.*?)(\d+)$/.exec(it.name);
+      const prefix = m ? m[1] : it.name + "-", width = m ? m[2].length : 2;
+      const used = new Set(items.map((i) => i.name));
+      let num = m ? Number(m[2]) : 1;
+      const nextName = () => { let nm: string; do { num++; nm = prefix + String(num).padStart(width, "0"); } while (used.has(nm)); used.add(nm); return nm; };
+      const stepX = it.w + gap, stepZ = it.d + gap, cols = layout === "grid" ? Math.ceil(Math.sqrt(count + 1)) : count + 1;
+      const out: string[] = [];
+      for (let i = 1; i <= count; i++) {
+        const other = assetFor?.(i);
+        const n = createItem({
+          type: it.type, name: nextName(), params: { ...it.params }, rot: it.rot, area: it.area, sub: it.sub,
+          assetId: other ?? it.assetId, bind: { ...it.bind }, running: it.running,
+          glbObj: it.glbObj, glbK: it.glbK, glbNames: it.glbNames, glbId: it.glbId, gb: it.gb?.map((x) => ({ ...x })), gp: it.gp?.map((x) => ({ ...x })),
+        });
+        if (!n) continue;
+        const col = i % cols, row = Math.floor(i / cols);
+        n.x = Math.round((it.x + col * stepX) * 2) / 2; n.z = Math.round((it.z + row * stepZ) * 2) / 2; n.root.position.set(n.x, 0, n.z);
+        out.push(n.id);
+      }
+      applyIso(); structureChanged(); fitTo([it, ...out.map((x) => byId(x)!).filter(Boolean)]);
+      return out;
+    },
+    /** Close view of one machine that also fits its height (a wind turbine is tall). */
+    frameClose(id: string) {
+      const it = byId(id); if (!it) return;
+      const b = ib(it), size = Math.max(b.x1 - b.x0, b.z1 - b.z0, it.top * 1.25);
+      goal.t.set(b.cx, Math.max(0.5, it.top * 0.42), b.cz); goal.r = clamp(size * 1.45 + 3, 7, 170);
+      goal.th = 0.6; goal.ph = 1.12; goal.on = true; o.onChange();
+    },
+    /** PNG of the current 3D view on the page background. Renders a frame first, so no preserved buffer is needed. */
+    snapshot(background = "#0b1220"): string {
+      renderer.render(scene, cam);
+      const out = document.createElement("canvas"); out.width = canvas.width; out.height = canvas.height;
+      const x = out.getContext("2d")!; x.fillStyle = background; x.fillRect(0, 0, out.width, out.height); x.drawImage(canvas, 0, 0);
+      return out.toDataURL("image/png");
+    },
+    setPlayback(b: boolean) { playback = b; o.onChange(); },
+    get playback() { return playback; },
+    /** Saved models that are still downloading, or failed to. */
+    glbStatus() { return { loading: pendingGlb.filter((s) => !glbFailed.has(s.id)).length, failed: pendingGlb.filter((s) => glbFailed.has(s.id)).map((s) => s.name) }; },
+    /** Next click on a part of this machine reports the part name. */
+    pickPart(id: string | null, cb?: (mesh: string) => void) { partPick = id && cb ? { id, cb } : null; o.onChange(); },
+    get pickingPart() { return partPick?.id ?? null; },
+    addPartPin(id: string, mesh: string, k: string) { const it = byId(id); if (!it) return; it.gp = [...(it.gp || []), { mesh, k }]; syncPartPins(it); o.onChange(); o.onEdit(); },
+    setPartPin(id: string, i: number, field: "mesh" | "k", value: string) { const it = byId(id); if (!it?.gp?.[i]) return; it.gp[i] = { ...it.gp[i], [field]: value }; syncPartPins(it); o.onChange(); o.onEdit(); },
+    removePartPin(id: string, i: number) { const it = byId(id); if (!it?.gp) return; it.gp = it.gp.filter((_, j) => j !== i); syncPartPins(it); o.onChange(); o.onEdit(); },
     startConnect(id: string | null) { connectFrom = id ? byId(id) ?? null : null; o.onChange(); },
     setName(id: string, name: string) { const it = byId(id); if (!it) return; it.name = name; (it.pin.querySelector("b") as HTMLElement).textContent = name; o.onChange(); o.onEdit(); },
     setParam(id: string, key: string, value: any, final: boolean) {
@@ -635,21 +799,22 @@ export function createPlantEngine(o: EngineOptions) {
       loadPack(pack, dis, keep);
       o.onChange(); o.onEdit();
     },
-    /** Uploaded models stay in this session only; saving them needs file storage that accepts 3D files. */
-    async addGlb(file: File, areaId: string): Promise<string> {
-      const buf = await file.arrayBuffer();
-      const gltf: any = await new Promise((res, rej) => new GLTFLoader().parse(buf, "", res, rej));
-      const obj: THREE.Object3D = gltf.scene, names: string[] = []; let n = 0;
-      obj.traverse((q: any) => { if (q.isMesh) { if (!q.name) q.name = "Part " + (++n); names.push(q.name); } });
-      const sz = new THREE.Box3().setFromObject(obj).getSize(new THREE.Vector3());
+    /**
+     * Places an uploaded .glb model. With `uploadId` (the file is in the upload
+     * store) it is saved with the twin; without, it shows in this session only.
+     */
+    async addGlb(file: File, areaId: string, uploadId?: string): Promise<string> {
+      const m = await parseGlb(await file.arrayBuffer());
+      if (uploadId) glbCache.set(uploadId, Promise.resolve(m));
       const A = areaById(areaId);
-      const it = createItem({ type: "glb", name: file.name.replace(/\.glb$/i, ""), glbObj: obj, glbK: 3 / Math.max(sz.x, sz.y, sz.z, 0.001), glbNames: names, gb: [{ mesh: names[0] || "", beh: "Rotate Y", k: "speed" }], area: A ? areaId : "", sub: A ? "Added" : "" });
+      const it = createItem({ type: "glb", name: file.name.replace(/\.glb$/i, ""), glbObj: m.obj, glbK: m.k, glbNames: m.names, glbId: uploadId, gb: [{ mesh: m.names[0] || "", beh: "Rotate Y", k: "speed" }], area: A ? areaId : "", sub: A ? "Added" : "" });
       if (!it) throw new Error("model could not be created");
-      ensureSub(A, "Added"); placeFree(it, A?.rect?.cx ?? tgt.x, A?.rect?.cz ?? tgt.z); sel = it; structureChanged(false);
-      return `Loaded ${names.length} parts.`;
+      ensureSub(A, "Added"); placeFree(it, A?.rect?.cx ?? tgt.x, A?.rect?.cz ?? tgt.z); sel = it; structureChanged(!!uploadId);
+      return `Loaded ${m.names.length} parts.`;
     },
-    setGlbBehaviour(id: string, i: number, field: "mesh" | "beh" | "k", value: string) { const it = byId(id); if (!it?.gb) return; (it.gb[i] as any)[field] = value; o.onChange(); },
-    addGlbBehaviour(id: string) { const it = byId(id); if (!it) return; it.gb = it.gb || []; it.gb.push({ mesh: it.glbNames?.[0] || "", beh: "Heat colour", k: "temp" }); o.onChange(); },
+    setGlbBehaviour(id: string, i: number, field: "mesh" | "beh" | "k", value: string) { const it = byId(id); if (!it?.gb) return; (it.gb[i] as any)[field] = value; o.onChange(); o.onEdit(); },
+    addGlbBehaviour(id: string) { const it = byId(id); if (!it) return; it.gb = it.gb || []; it.gb.push({ mesh: it.glbNames?.[0] || "", beh: "Heat colour", k: "temp" }); o.onChange(); o.onEdit(); },
+    removeGlbBehaviour(id: string, i: number) { const it = byId(id); if (!it?.gb) return; it.gb = it.gb.filter((_, j) => j !== i); o.onChange(); o.onEdit(); },
   };
   return api;
 }

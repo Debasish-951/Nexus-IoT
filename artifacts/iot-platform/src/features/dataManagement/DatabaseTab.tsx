@@ -34,7 +34,7 @@ export function DatabaseTab() {
   const { toast } = useToast();
   const qc = useQueryClient();
   const { canAction } = useCurrentUser();
-  const canManage = canAction("manage_assets", "reports");
+  const canManage = canAction("manage_assets", "data_management");
   const [allTables, setAllTables] = useState(false);
   const all = useQuery({ queryKey: ["system/storage/all"], queryFn: () => getJson<StorageAll>("/api/system/storage/all"), retry: 1 });
   const health = useQuery({ queryKey: ["system/db-health"], queryFn: () => getJson<DbHealth>("/api/system/db-health"), refetchInterval: 30_000, retry: 1, enabled: canManage });

@@ -9,6 +9,7 @@ import {
   DeleteBrokerParams,
 } from "@workspace/api-zod";
 import { logActivity } from "./activity_log";
+import { diffFields } from "../lib/audit-core";
 import { encryptSecret } from "../lib/secret-box";
 import { refreshMqttSubscribers } from "../services/mqtt";
 import { logger } from "../lib/logger";
@@ -142,6 +143,7 @@ router.put("/brokers/:id", async (req, res): Promise<void> => {
     return;
   }
 
+  const [beforeBroker] = await db.select().from(brokersTable).where(eq(brokersTable.id, params.data.id));
   const [broker] = await db
     .update(brokersTable)
     .set(updateData)
@@ -153,7 +155,8 @@ router.put("/brokers/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  void logActivity("broker.updated", "broker", broker.id, broker.name, null, req);
+  void logActivity("broker.updated", "broker", broker.id, broker.name, null, req,
+    { changes: diffFields(beforeBroker as unknown as Record<string, unknown>, broker as unknown as Record<string, unknown>, { only: Object.keys(updateData) }) });
   refreshSubscriber(broker.id);
   res.json(toClient(broker));
 });

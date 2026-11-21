@@ -10,6 +10,7 @@ import { attachPrincipal, stripForgedActorHeaders } from "./middleware/principal
 import { attachApiClient } from "./middleware/apiKeyAuth";
 import { csrfGuard } from "./middleware/csrf";
 import { authorize } from "./middleware/authorize";
+import { auditSafetyNet } from "./middleware/audit";
 import { projectScopeGuard } from "./lib/project-access";
 import { floodGuard, apiRateLimit } from "./middleware/apiRateLimit";
 import { requestGuard } from "./middleware/requestGuard";
@@ -146,7 +147,7 @@ app.use(requestGuard);
 // Counts refused/failed ingest calls for Data Management > Data health (before auth, so 401s count too).
 app.use("/api", ingestRejectionRecorder);
 app.use("/api", floodGuard);
-app.use("/api", attachPrincipal, attachApiClient, stripForgedActorHeaders, csrfGuard, authorize, projectScopeGuard);
+app.use("/api", attachPrincipal, attachApiClient, stripForgedActorHeaders, auditSafetyNet, csrfGuard, authorize, projectScopeGuard);
 app.use("/api", apiRateLimit);
 
 app.use("/api", router);

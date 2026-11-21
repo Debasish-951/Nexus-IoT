@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { eq, sql } from "drizzle-orm";
 import { db, destinationsTable } from "@workspace/db";
 import { logActivity } from "./activity_log";
+import { diffFields } from "../lib/audit-core";
 import { z } from "zod";
 import { checkOutboundUrl, assertSafeOutboundUrl, safeFetch, UnsafeUrlError } from "../lib/outbound-url";
 import { validate } from "../middleware/validate";
@@ -112,8 +113,11 @@ router.put("/destinations/:id", validate({ params: IdParams, body: UpdateDestina
   if (body.basicPass !== undefined)   updateData.basicPass = body.basicPass ? encryptSecret(body.basicPass, ctx("basicPass")) : null;
   if (body.eventTypes !== undefined)  updateData.eventTypes = body.eventTypes;
   if (body.enabled !== undefined)     updateData.enabled = body.enabled;
+  const [before] = await db.select().from(destinationsTable).where(eq(destinationsTable.id, id));
   const [row] = await db.update(destinationsTable).set(updateData).where(eq(destinationsTable.id, id)).returning();
   if (!row) { res.status(404).json({ error: "Not found" }); return; }
+  void logActivity("destination.updated", "destination", row.id, row.name, null, req,
+    { changes: diffFields(before as unknown as Record<string, unknown>, row as unknown as Record<string, unknown>, { only: Object.keys(updateData) }) });
   res.json(toClient(row));
 });
 
@@ -147,12 +151,14 @@ router.post("/destinations/:id/test", async (req, res): Promise<void> => {
       body: JSON.stringify({ event: "test", source: "iot-platform", timestamp: new Date().toISOString(), destinationId: dest.id }),
       signal: AbortSignal.timeout(6000),
     });
+    void logActivity("destination.tested", "destination", row.id, row.name, `test event answered ${resp.status}`, req, { outcome: resp.ok ? "success" : "failure" });
     res.json({ success: resp.ok, statusCode: resp.status });
   } catch (err) {
     // A fetch failure carries the resolved host and the OS error
     // (`ECONNREFUSED 10.0.0.5:8080`). Useful in the log, a network map in a
     // response — so the caller is told only that the send failed.
     logger.warn({ destinationId: id, err }, "destination test-fire failed");
+    void logActivity("destination.tested", "destination", row.id, row.name, "the destination could not be reached", req, { outcome: "failure" });
     res.status(502).json({
       success: false,
       error: "The destination could not be reached.",

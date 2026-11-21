@@ -10,7 +10,11 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Slider } from "@/components/ui/slider";
 import { Select, SelectTrigger, SelectValue, SelectContent, SelectItem } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { ChevronRight, Copy, Link2, RotateCw, Trash2, Upload, X } from "lucide-react";
+import { ChevronRight, Copy, Crosshair, Link2, MapPin, RotateCw, Trash2, Upload, X } from "lucide-react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { apiFetch } from "@/lib/auth-api";
+import { describeApiError, formatApiError } from "@/lib/validation";
+import { useCurrentUser } from "@/contexts/UserContext";
 import { useMetricChoices } from "@/features/dashboards/useWidgetData";
 import { fetchAssetMetrics } from "./api";
 import { fmtReading, hex, type AreaStat, type PlantEngine, type Reading } from "./engine/engine";
@@ -143,9 +147,11 @@ function ReadingRow({ r, assetId, metrics, readOnly, onBind }: { r: Reading; ass
         <span className={cn("font-mono tabular-nums", STATUS_TEXT[r.status])}>
           {r.source === "none" ? t("not linked") : fmtReading(r)}
           {r.source === "demo" && <span className="ml-1 text-[10px] rounded bg-amber-500/15 text-amber-600 dark:text-amber-400 px-1">{t("demo")}</span>}
-          {r.source === "live" && <span className="ml-1 text-[10px] rounded bg-green-500/15 text-green-600 dark:text-green-400 px-1">{t("live")}</span>}
+          {r.source === "live" && !r.playback && <span className="ml-1 text-[10px] rounded bg-green-500/15 text-green-600 dark:text-green-400 px-1">{t("live")}</span>}
+          {r.playback && <span className="ml-1 text-[10px] rounded bg-blue-500/15 text-blue-600 dark:text-blue-400 px-1">{t("playback")}</span>}
         </span>
       </div>
+      {r.rules && <div className="text-[10px] text-muted-foreground">{t("Limits from alarm rules")}</div>}
       <ReadingTrend value={r.value} source={r.source} status={r.status} assetId={assetId} metric={r.metric} />
       {(
         <Select value={r.metric ?? NONE} onValueChange={(v) => onBind(v === NONE ? "" : v)} disabled={readOnly || !assetId}>
@@ -161,7 +167,7 @@ function ReadingRow({ r, assetId, metrics, readOnly, onBind }: { r: Reading; ass
   );
 }
 
-export function Inspector({ engine, assets, readOnly }: { engine: PlantEngine; assets: { id: string; name: string }[]; readOnly: boolean }) {
+export function Inspector({ engine, assets, readOnly, onDuplicate }: { engine: PlantEngine; assets: { id: string; name: string }[]; readOnly: boolean; onDuplicate?: (id: string) => void }) {
   const t = useT();
   const it = engine.selected;
   const metrics = useMetricChoices(it?.assetId ?? undefined);
@@ -251,7 +257,7 @@ export function Inspector({ engine, assets, readOnly }: { engine: PlantEngine; a
           ))}
           <div className="flex flex-wrap gap-1.5">
             <Button size="sm" variant="outline" onClick={() => engine.rotateItem(it.id)}><RotateCw className="w-3.5 h-3.5 mr-1" />{t("Rotate")}</Button>
-            <Button size="sm" variant="outline" onClick={() => engine.duplicateItem(it.id)}><Copy className="w-3.5 h-3.5 mr-1" />{t("Duplicate")}</Button>
+            <Button size="sm" variant="outline" onClick={() => (onDuplicate ? onDuplicate(it.id) : engine.duplicateItem(it.id))}><Copy className="w-3.5 h-3.5 mr-1" />{t("Duplicate")}</Button>
             <Button size="sm" variant={engine.connectingFrom === it ? "default" : "outline"} onClick={() => engine.startConnect(engine.connectingFrom === it ? null : it.id)}><Link2 className="w-3.5 h-3.5 mr-1" />{t("Connect to…")}</Button>
             <Button size="sm" variant="outline" className="text-red-500" onClick={() => engine.removeItem(it.id)}><Trash2 className="w-3.5 h-3.5 mr-1" />{t("Delete")}</Button>
           </div>
@@ -264,16 +270,44 @@ export function Inspector({ engine, assets, readOnly }: { engine: PlantEngine; a
         </Section>
       )}
 
+      {it.type === "glb" && !it.glbId && (
+        <p className="text-xs rounded-md border border-amber-500/50 bg-amber-500/10 text-amber-700 dark:text-amber-300 p-2">{t("This model was read from a file in this browser only and is not saved with the twin. Upload it again with Visualization write access to keep it.")}</p>
+      )}
       {it.type === "glb" && !readOnly && (
         <Section title="Part behaviours">
           {(it.gb || []).map((b, i) => (
-            <div key={i} className="grid grid-cols-3 gap-1">
+            <div key={i} className="grid grid-cols-[1fr_1fr_1fr_auto] gap-1">
               <Select value={b.mesh} onValueChange={(v) => engine.setGlbBehaviour(it.id, i, "mesh", v)}><SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger><SelectContent>{(it.glbNames || []).map((n) => <SelectItem key={n} value={n}>{n}</SelectItem>)}</SelectContent></Select>
               <Select value={b.beh} onValueChange={(v) => engine.setGlbBehaviour(it.id, i, "beh", v)}><SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger><SelectContent>{GBEH.map((n) => <SelectItem key={n} value={n}>{n}</SelectItem>)}</SelectContent></Select>
               <Select value={b.k} onValueChange={(v) => engine.setGlbBehaviour(it.id, i, "k", v)}><SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger><SelectContent>{it.tags.map((t) => <SelectItem key={t.k} value={t.k}>{t.n}</SelectItem>)}</SelectContent></Select>
+              <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => engine.removeGlbBehaviour(it.id, i)} aria-label={t("Remove part behaviour")}><X className="w-3.5 h-3.5" /></Button>
             </div>
           ))}
-          <Button size="sm" variant="outline" onClick={() => engine.addGlbBehaviour(it.id)}>{t("Add part behaviour")}</Button>
+          <div className="flex flex-wrap gap-1.5">
+            <Button size="sm" variant="outline" onClick={() => engine.addGlbBehaviour(it.id)}>{t("Add part behaviour")}</Button>
+            <Button size="sm" variant={engine.pickingPart === it.id ? "default" : "outline"} title={t("Click a part of the model in the 3D view to use it")}
+              onClick={() => engine.pickingPart === it.id ? engine.pickPart(null) : engine.pickPart(it.id, (mesh) => { engine.addGlbBehaviour(it.id); engine.setGlbBehaviour(it.id, (it.gb?.length ?? 1) - 1, "mesh", mesh); })}>
+              <Crosshair className="w-3.5 h-3.5 mr-1" />{engine.pickingPart === it.id ? t("Click a part…") : t("Pick part in 3D")}
+            </Button>
+          </div>
+        </Section>
+      )}
+      {it.type === "glb" && (
+        <Section title="Readings on parts">
+          <p className="text-xs text-muted-foreground">{t("Pin a reading onto a part of the model: it shows as a label on that part.")}</p>
+          {(it.gp || []).map((g, i) => (
+            <div key={i} className="grid grid-cols-[1fr_1fr_auto] gap-1">
+              <Select value={g.mesh} disabled={readOnly} onValueChange={(v) => engine.setPartPin(it.id, i, "mesh", v)}><SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger><SelectContent>{(it.glbNames || []).map((n) => <SelectItem key={n} value={n}>{n}</SelectItem>)}</SelectContent></Select>
+              <Select value={g.k} disabled={readOnly} onValueChange={(v) => engine.setPartPin(it.id, i, "k", v)}><SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger><SelectContent>{it.tags.map((t) => <SelectItem key={t.k} value={t.k}>{t.n}</SelectItem>)}</SelectContent></Select>
+              {!readOnly && <Button size="icon" variant="ghost" className="h-7 w-7" onClick={() => engine.removePartPin(it.id, i)} aria-label={t("Remove reading pin")}><X className="w-3.5 h-3.5" /></Button>}
+            </div>
+          ))}
+          {!readOnly && (
+            <Button size="sm" variant={engine.pickingPart === it.id ? "default" : "outline"}
+              onClick={() => engine.pickingPart === it.id ? engine.pickPart(null) : engine.pickPart(it.id, (mesh) => engine.addPartPin(it.id, mesh, it.tags[0]?.k ?? "speed"))}>
+              <MapPin className="w-3.5 h-3.5 mr-1" />{engine.pickingPart === it.id ? t("Click a part…") : t("Pin a reading on a part")}
+            </Button>
+          )}
         </Section>
       )}
 
@@ -303,7 +337,6 @@ export function AddMachine({ engine, onMessage }: { engine: PlantEngine; onMessa
   const t = useT();
   const [area, setArea] = useState<string>(engine.focusId ?? engine.areas.find((a) => a.enabled)?.id ?? NONE);
   const [open, setOpen] = useState<string | null>(null);
-  const fileRef = useRef<HTMLInputElement>(null);
   const areaId = area === NONE ? "" : area;
   const fams = Object.entries(FAM).map(([f, label]) => ({ f, label, models: Object.entries(MODELS).filter(([, md]) => md.fam === f && !md.hidden) })).filter((x) => x.models.length);
   return (
@@ -335,13 +368,131 @@ export function AddMachine({ engine, onMessage }: { engine: PlantEngine; onMessa
           </div>
         ))}
       </div>
+      <GlbUpload engine={engine} areaId={areaId} onMessage={onMessage} />
+    </Section>
+  );
+}
+
+const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
+
+/** Puts a .glb file in the upload store and returns its id. */
+async function uploadGlb(file: File): Promise<string> {
+  const fd = new FormData(); fd.append("file", file, file.name);
+  const res = await apiFetch(`${BASE}/api/uploads`, { method: "POST", body: fd });
+  if (!res.ok) throw new Error(formatApiError(await describeApiError(res)));
+  const body = await res.json() as { uploaded?: { id: string }[]; rejected?: { reason: string }[] };
+  const id = body.uploaded?.[0]?.id;
+  if (!id) throw new Error(body.rejected?.[0]?.reason ?? "The upload was rejected.");
+  return id;
+}
+
+/** Bytes of an uploaded model, for the engine's `fetchGlb`. */
+export async function fetchGlbBytes(uploadId: string): Promise<ArrayBuffer> {
+  const res = await apiFetch(`${BASE}/api/uploads/${encodeURIComponent(uploadId)}/content`, { headers: { accept: "model/gltf-binary" } });
+  if (!res.ok) throw new Error(formatApiError(await describeApiError(res)));
+  return res.arrayBuffer();
+}
+
+/**
+ * Upload your own 3D model (.glb). Stored in the upload store with the twin, so
+ * it shows for everyone; that needs Visualization write access. Without it the
+ * model shows in this browser only and the reason is said.
+ */
+export function GlbUpload({ engine, areaId, onMessage }: { engine: PlantEngine; areaId: string; onMessage: (text: string, error?: boolean) => void }) {
+  const t = useT();
+  const { canModule } = useCurrentUser();
+  const canStore = canModule("visualization", "write");
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="space-y-1.5">
       <input ref={fileRef} type="file" accept=".glb,model/gltf-binary" className="hidden" onChange={(e) => {
         const f = e.target.files?.[0]; e.target.value = ""; if (!f) return;
-        engine.addGlb(f, areaId).then((msg) => onMessage(`${msg} Uploaded models stay in this session only; saving them is not built yet.`))
-          .catch((err) => onMessage(`This file could not be read as a .glb model: ${err?.message ?? err}`, true));
+        setBusy(true);
+        (async () => {
+          let id: string | undefined, note = "";
+          if (canStore) {
+            try { id = await uploadGlb(f); }
+            catch (err: any) { note = ` ${t("Not saved with the twin: {err}", { err: err?.message ?? String(err) })}`; }
+          }
+          const msg = await engine.addGlb(f, areaId, id);
+          onMessage(id ? `${msg} ${t("Saved with the twin when you press Save.")}` : `${msg}${note || " " + t("Shown in this browser only: storing 3D models needs Visualization write access.")}`, false);
+        })().catch((err) => onMessage(t("This file could not be read as a .glb model: {err}", { err: err?.message ?? String(err) }), true))
+          .finally(() => setBusy(false));
       }} />
-      <Button size="sm" variant="outline" onClick={() => fileRef.current?.click()}><Upload className="w-3.5 h-3.5 mr-1" />{t("Upload your own 3D model (.glb)")}</Button>
-      <p className="text-xs text-muted-foreground">{t("An uploaded model is shown for this session only. It is not saved with the twin yet.")}</p>
-    </Section>
+      <Button size="sm" variant="outline" disabled={busy} onClick={() => fileRef.current?.click()}><Upload className="w-3.5 h-3.5 mr-1" />{busy ? t("Uploading…") : t("Upload your own 3D model (.glb)")}</Button>
+      <p className="text-xs text-muted-foreground">
+        {canStore ? t("The model is stored on the server and saved with the twin (up to the upload size limit, 10 MB by default). Draco-compressed models are not supported.")
+          : t("Storing a model with the twin needs Visualization write access. Without it the model shows in this browser only.")}
+      </p>
+    </div>
+  );
+}
+
+/** Copies of one machine, numbered on and optionally linked to sibling assets. */
+export function DuplicateDialog({ engine, itemId, assets, onClose, onDone }: {
+  engine: PlantEngine; itemId: string | null; assets: { id: string; name: string; identifier?: string | null }[];
+  onClose: () => void; onDone: (text: string) => void;
+}) {
+  const t = useT();
+  const it = itemId ? engine.items.find((i) => i.id === itemId) : undefined;
+  const [count, setCount] = useState(3);
+  const [layout, setLayout] = useState<"row" | "grid">("row");
+  const [gap, setGap] = useState(4);
+  const [relink, setRelink] = useState(true);
+  const src = it?.assetId ? assets.find((a) => a.id === it.assetId) : undefined;
+  /** Sibling asset for copy i: same name (or identifier) with its number increased by i. */
+  const sibling = (i: number): string | undefined => {
+    if (!src) return undefined;
+    for (const key of ["name", "identifier"] as const) {
+      const v = src[key]; const m = v ? /^(.*?)(\d+)$/.exec(v) : null; if (!m) continue;
+      const want = Number(m[2]) + i, pre = m[1].toLowerCase();
+      const hit = assets.find((a) => { const w = a[key]; const mm = w ? /^(.*?)(\d+)$/.exec(w) : null; return !!mm && mm[1].toLowerCase() === pre && Number(mm[2]) === want; });
+      if (hit) return hit.id;
+    }
+    return undefined;
+  };
+  const found = it && relink ? Array.from({ length: Math.max(1, Math.min(50, count)) }, (_, k) => sibling(k + 1)).filter(Boolean).length : 0;
+  const go = () => {
+    if (!it) return;
+    const n = Math.max(1, Math.min(50, Math.round(count) || 1));
+    const ids = engine.duplicateMany(it.id, n, layout, gap, relink ? sibling : undefined);
+    const linked = relink ? Array.from({ length: n }, (_, k) => sibling(k + 1)).filter(Boolean).length : 0;
+    onDone(it.assetId
+      ? (linked === ids.length ? t("{n} copies added, each linked to its own asset.", { n: ids.length })
+        : t("{n} copies added. {m} linked to their own asset; the others still use {asset}: re-link them.", { n: ids.length, m: linked, asset: src?.name ?? "" }))
+      : t("{n} copies added.", { n: ids.length }));
+    onClose();
+  };
+  return (
+    <Dialog open={!!it} onOpenChange={(o) => { if (!o) onClose(); }}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{t("Duplicate {name}", { name: it?.name ?? "" })}</DialogTitle>
+          <DialogDescription>{t("Copies keep the settings and reading links and are numbered on from the name.")}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-3">
+          <div className="grid grid-cols-3 gap-2">
+            <div className="space-y-1"><Label className="text-xs">{t("Copies")}</Label><Input type="number" min={1} max={50} value={count} onChange={(e) => setCount(Number(e.target.value))} className="h-8" /></div>
+            <div className="space-y-1"><Label className="text-xs">{t("Layout")}</Label>
+              <Select value={layout} onValueChange={(v) => setLayout(v as "row" | "grid")}><SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                <SelectContent><SelectItem value="row">{t("Row")}</SelectItem><SelectItem value="grid">{t("Grid")}</SelectItem></SelectContent></Select>
+            </div>
+            <div className="space-y-1"><Label className="text-xs">{t("Spacing (m)")}</Label><Input type="number" min={0} max={200} value={gap} onChange={(e) => setGap(Math.max(0, Number(e.target.value)))} className="h-8" /></div>
+          </div>
+          {it?.assetId && (
+            <label className="flex items-start gap-2 text-xs">
+              <Checkbox checked={relink} onCheckedChange={(b) => setRelink(!!b)} className="mt-0.5" />
+              <span>{t("Link each copy to the next asset by number (for example {a} → the asset numbered one higher)", { a: src?.name ?? "" })}<br />
+                <span className="text-muted-foreground">{relink ? t("{m} of {n} sibling assets found. Copies without one keep the same asset.", { m: found, n: Math.max(1, Math.min(50, count)) }) : t("All copies keep the same asset.")}</span></span>
+            </label>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>{t("Cancel")}</Button>
+          <Button onClick={go}>{t("Add copies")}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

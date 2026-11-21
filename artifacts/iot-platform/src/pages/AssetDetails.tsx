@@ -33,6 +33,7 @@ import {
   deriveStatus, STATUS_STYLES, siteOf, HealthBar, STALE_AFTER_MS, lastUpdatedAt,
 } from "./assetShared";
 import { apiFetch } from "@/lib/auth-api";
+import { HistoryButton } from "@/features/auditLog/shared";
 
 // Suggested Device ID per machine name (auto-prefill; user can edit).
 const MACHINE_DEVICE_MAP: Record<string, string> = {
@@ -270,6 +271,7 @@ export default function AssetDetails({ assetId: assetIdProp, embedded }: { asset
           <span className="text-foreground font-medium">{asset.name}</span>
         </div>
         <div className="flex items-center gap-2">
+          <HistoryButton targetId={asset.id} targetName={asset.name} assetScope className="h-8 text-xs" />
           {canDelete && (
             <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive h-8 text-xs"
               onClick={() => deleteAsset.mutate({ id: asset.id }, {

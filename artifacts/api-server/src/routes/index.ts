@@ -19,6 +19,7 @@ import dataOpsRouter from "./data_ops";
 import vizDashboardsRouter from "./viz_dashboards";
 import vizNodesRouter from "./viz_nodes";
 import plantTwinsRouter from "./plant_twins";
+import sitesRouter from "./sites";
 import uploadsRouter from "./uploads";
 import aiRouter from "./ai";
 import authRouter from "./auth";
@@ -48,6 +49,7 @@ router.use(dataOpsRouter);
 router.use(vizDashboardsRouter);
 router.use(vizNodesRouter);
 router.use(plantTwinsRouter);
+router.use(sitesRouter);
 router.use(uploadsRouter);
 router.use(aiRouter);
 

@@ -45,7 +45,7 @@ export function RetentionTab({ operational, pruneWindow, onChanged }: {
   const { toast } = useToast();
   const qc = useQueryClient();
   const { canAction, session } = useCurrentUser();
-  const canManage = canAction("manage_assets", "reports");
+  const canManage = canAction("manage_assets", "data_management");
   const assets = useAssetPaths();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<RetentionPolicy | null>(null);
@@ -120,7 +120,7 @@ export function RetentionTab({ operational, pruneWindow, onChanged }: {
       <Section title="Retention policies"
         hint={`The pruning run deletes readings older than these periods every hour${pruneWindow?.enabled ? `, only between ${pruneWindow.start} and ${pruneWindow.end} (plant time)` : ""}. The most specific policy decides: asset and metric, then asset, then metric, then all.`}
         action={
-          <RoleGuard permission="manage_assets" module="reports">
+          <RoleGuard permission="manage_assets" module="data_management">
             <div className="flex gap-2">
               <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5" onClick={() => setBadOpen(true)}><Eraser className="w-3.5 h-3.5" /> Remove bad data</Button>
               <Button size="sm" className="h-8 text-xs gap-1.5" onClick={() => { setEditing(null); setDialogOpen(true); }}><Plus className="w-3.5 h-3.5" /> Add policy</Button>
@@ -165,7 +165,7 @@ export function RetentionTab({ operational, pruneWindow, onChanged }: {
         action={
           <div className="flex items-center gap-3">
             <label className="text-xs flex items-center gap-1.5 text-muted-foreground"><Switch checked={showReleased} onCheckedChange={setShowReleased} className="scale-75" /> Show released</label>
-            <RoleGuard permission="manage_assets" module="reports">
+            <RoleGuard permission="manage_assets" module="data_management">
               <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5" onClick={() => setHoldOpen(true)}><ShieldCheck className="w-3.5 h-3.5" /> Add hold</Button>
             </RoleGuard>
           </div>

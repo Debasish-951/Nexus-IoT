@@ -11,6 +11,7 @@ import {
 import { randomUUID } from "crypto";
 import { hashToken } from "../lib/tokens";
 import { logActivity } from "./activity_log";
+import { diffFields } from "../lib/audit-core";
 import { recordSecurityEvent, type SecurityEventType } from "../lib/security-log";
 import { normaliseAllowlist } from "../middleware/apiKeyAuth";
 import { ungrantableScopes, canCreateApiClients } from "../lib/rbac";
@@ -460,6 +461,7 @@ router.put("/api-clients/:id", async (req, res): Promise<void> => {
     updateData.projectId = next;
   }
 
+  const [beforeClient] = await db.select().from(apiClientsTable).where(eq(apiClientsTable.id, params.data.id));
   const [client] = await db
     .update(apiClientsTable)
     .set(updateData)
@@ -478,7 +480,8 @@ router.put("/api-clients/:id", async (req, res): Promise<void> => {
     });
   }
   void logActivity("api_client.updated", "api_client", client.id, client.name,
-    `fields=${Object.keys(updateData).join(",")}`, req);
+    `fields=${Object.keys(updateData).join(",")}`, req,
+    { changes: diffFields(beforeClient as unknown as Record<string, unknown>, client as unknown as Record<string, unknown>, { only: Object.keys(updateData) }) });
   res.json(redactSecret(client));
 });
 

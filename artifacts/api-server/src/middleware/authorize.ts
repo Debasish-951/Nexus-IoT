@@ -205,6 +205,11 @@ const ROUTE_RULES: Rule[] = [
   { path: "/plant-twins/:id",     methods: ["PUT"],           module: "live_twin", level: "write" },
   { path: "/plant-twins/:id",     methods: ["DELETE"],        module: "live_twin", level: "delete" },
 
+  // Map view (Live Twin) and the Sites map dashboard widget (Visualization):
+  // projects with location, asset count and newest data time. Read only; the
+  // route narrows the list to the caller's projects.
+  { path: "/sites",               methods: READ,              anyModule: ["live_twin", "visualization"], level: "read" },
+
   // ── Uploads ────────────────────────────────────────────────────────────────
   // `/uploads/:id/content` precedes the collection rules so the download is not
   // read as an id. Delete is a separate level from write: being able to add a
@@ -234,43 +239,53 @@ const ROUTE_RULES: Rule[] = [
 
   // ── Reports, analytics, activity log, system ───────────────────────────────
   { path: "/activity-log",         methods: READ,      module: "activity_log" },
-  { path: "/system/storage",       methods: READ,      module: "reports" },
+  { path: "/activity-log/export",  methods: READ,      module: "activity_log" },
+  { path: "/activity-log/summary", methods: READ,      module: "activity_log" },
+  // Integrity check, sensitive-action alerts and audit settings: security administrators.
+  { path: "/activity-log/verify",  methods: READ,      permission: "manage_security", module: "security" },
+  { path: "/activity-log/alerts",  methods: READ,      module: "security" },
+  { path: "/activity-log/alerts/:id/acknowledge", methods: ["POST"], permission: "manage_security", module: "security", level: "write" },
+  { path: "/activity-log/settings", methods: READ,     permission: "manage_security", module: "security" },
+  { path: "/activity-log/settings", methods: ["PUT"],  permission: "manage_security", module: "security", level: "write" },
+  { path: "/system/storage",       methods: READ,      module: "data_management" },
   { path: "/system/aggregate",     methods: READ,      module: "reports" },
-  { path: "/system/retention",     methods: READ,      module: "reports" },
-  { path: "/system/retention",     methods: ["POST"],  permission: "manage_assets", module: "reports", level: "write" },
-  { path: "/system/retention/run", methods: ["POST"],  permission: "manage_assets", module: "reports", level: "write" },
+  { path: "/system/retention",     methods: READ,      module: "data_management" },
+  { path: "/system/retention",     methods: ["POST"],  permission: "manage_assets", module: "data_management", level: "write" },
+  { path: "/system/retention/run", methods: ["POST"],  permission: "manage_assets", module: "data_management", level: "write" },
   // Data Management operations (routes/data_ops.ts). Reading needs Reports; anything
   // that deletes, restores, changes settings or shows raw SQL needs manage_assets too.
-  { path: "/system/storage/all",            methods: READ,     module: "reports" },
-  { path: "/system/data-health",            methods: READ,     module: "reports" },
-  { path: "/system/data-settings",          methods: READ,     module: "reports" },
-  { path: "/system/data-settings",          methods: ["PUT"],  permission: "manage_assets", module: "reports", level: "write" },
-  { path: "/system/alerts",                 methods: READ,     module: "reports" },
-  { path: "/system/alerts/check",           methods: ["POST"], permission: "manage_assets", module: "reports", level: "write" },
-  { path: "/system/alerts/:id/acknowledge", methods: ["POST"], permission: "manage_assets", module: "reports", level: "write" },
-  { path: "/system/backups",                methods: READ,     module: "reports" },
-  { path: "/system/db-health",              methods: READ,     permission: "manage_assets", module: "reports" },
-  { path: "/system/db-health/vacuum",       methods: ["POST"], permission: "manage_assets", module: "reports", level: "write" },
-  { path: "/system/holds",                  methods: READ,     module: "reports" },
-  { path: "/system/holds",                  methods: ["POST"], permission: "manage_assets", module: "reports", level: "write" },
-  { path: "/system/holds/:id/release",      methods: ["POST"], permission: "manage_assets", module: "reports", level: "write" },
-  { path: "/system/archives",               methods: READ,     module: "reports" },
-  { path: "/system/archives/:id/download",  methods: READ,     permission: "manage_assets", module: "reports" },
-  { path: "/system/archives/:id/restore",   methods: ["POST"], permission: "manage_assets", module: "reports", level: "write" },
-  { path: "/system/changes",                methods: READ,     module: "reports" },
-  { path: "/system/changes/range-preview",  methods: ["POST"], permission: "manage_assets", module: "reports", level: "read" },
-  { path: "/system/changes/range-delete",   methods: ["POST"], permission: "manage_assets", module: "reports", level: "delete" },
-  { path: "/system/changes/:id/approve",    methods: ["POST"], permission: "manage_assets", module: "reports", level: "delete" },
-  { path: "/system/changes/:id/reject",     methods: ["POST"], permission: "manage_assets", module: "reports", level: "write" },
-  { path: "/system/retention/runs/:id/report", methods: READ,  module: "reports" },
+  { path: "/system/storage/all",            methods: READ,     module: "data_management" },
+  { path: "/system/data-health",            methods: READ,     module: "data_management" },
+  { path: "/system/data-settings",          methods: READ,     module: "data_management" },
+  { path: "/system/data-settings",          methods: ["PUT"],  permission: "manage_assets", module: "data_management", level: "write" },
+  { path: "/system/alerts",                 methods: READ,     module: "data_management" },
+  { path: "/system/alerts/check",           methods: ["POST"], permission: "manage_assets", module: "data_management", level: "write" },
+  { path: "/system/alerts/:id/acknowledge", methods: ["POST"], permission: "manage_assets", module: "data_management", level: "write" },
+  { path: "/system/backups",                methods: READ,     module: "data_management" },
+  { path: "/system/db-health",              methods: READ,     permission: "manage_assets", module: "data_management" },
+  { path: "/system/db-health/vacuum",       methods: ["POST"], permission: "manage_assets", module: "data_management", level: "write" },
+  { path: "/system/holds",                  methods: READ,     module: "data_management" },
+  { path: "/system/holds",                  methods: ["POST"], permission: "manage_assets", module: "data_management", level: "write" },
+  { path: "/system/holds/:id/release",      methods: ["POST"], permission: "manage_assets", module: "data_management", level: "write" },
+  { path: "/system/archives",               methods: READ,     module: "data_management" },
+  { path: "/system/archives/:id/download",  methods: READ,     permission: "manage_assets", module: "data_management" },
+  { path: "/system/archives/:id/restore",   methods: ["POST"], permission: "manage_assets", module: "data_management", level: "write" },
+  { path: "/system/changes",                methods: READ,     module: "data_management" },
+  { path: "/system/changes/range-preview",  methods: ["POST"], permission: "manage_assets", module: "data_management", level: "read" },
+  { path: "/system/changes/range-delete",   methods: ["POST"], permission: "manage_assets", module: "data_management", level: "delete" },
+  { path: "/system/changes/:id/approve",    methods: ["POST"], permission: "manage_assets", module: "data_management", level: "delete" },
+  { path: "/system/changes/:id/reject",     methods: ["POST"], permission: "manage_assets", module: "data_management", level: "write" },
+  { path: "/system/retention/runs/:id/report", methods: READ,  module: "data_management" },
   // Read-only: an estimate of what a policy would delete. POST only to carry the draft policy.
-  { path: "/system/retention/preview", methods: ["POST"], module: "reports", level: "read" },
-  { path: "/system/retention/runs", methods: READ,     module: "reports" },
-  { path: "/system/retention/:id", methods: WRITE,     permission: "manage_assets", module: "reports", level: "write" },
-  { path: "/system/retention/:id", methods: ["DELETE"], permission: "manage_assets", module: "reports", level: "delete" },
+  { path: "/system/retention/preview", methods: ["POST"], module: "data_management", level: "read" },
+  { path: "/system/retention/runs", methods: READ,     module: "data_management" },
+  { path: "/system/retention/:id", methods: WRITE,     permission: "manage_assets", module: "data_management", level: "write" },
+  { path: "/system/retention/:id", methods: ["DELETE"], permission: "manage_assets", module: "data_management", level: "delete" },
 
   // ── AI copilot ─────────────────────────────────────────────────────────────
   { path: "/ai/chat", methods: ["POST"], module: "ai_advisor", level: "read" },
+  // Figures come from the database within the caller's projects; the route applies the project scope itself.
+  { path: "/ai/report", methods: ["POST"], module: "ai_advisor", level: "read" },
 ];
 
 // ── Matching ─────────────────────────────────────────────────────────────────

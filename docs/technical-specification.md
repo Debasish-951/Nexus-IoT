@@ -341,8 +341,8 @@ Fifteen of nineteen tables have no index beyond their primary key. Full ranked r
 | API clients | `/api-clients`, `/api-clients/:id/*` | `manage_api_clients` + `api_clients` module, plus a server-enforced scope ceiling (§7.5) |
 | Visualization | `/viz-nodes`, `/viz-nodes/:id`, `/viz-nodes/:id/shares/*`, `/viz-nodes/import`, `/viz-tags`, `/uploads/*`; legacy `/viz-dashboards` (list only) | `visualization` module R/W/D; node ownership and shares checked in the route (`lib/viz-access.ts`) |
 | Users/security | `/users/*`, `/security/*` | `manage_users` / `manage_security` |
-| Reports/system | `/activity-log`, `/system/*` | `activity_log` / `reports` module |
-| AI | `/ai/chat` | `explorer` module |
+| Reports/system | `/activity-log`, `/system/aggregate`, other `/system/*` | `activity_log` / `reports` / `data_management` module |
+| AI | `/ai/chat` | `ai_advisor` module; optional `scopeAssetId` limits every tool to that asset and its descendants |
 
 ### 7.4 Error contract
 

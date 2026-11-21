@@ -1,4 +1,5 @@
 import { aggregateTelemetryWithMeta } from "../lib/telemetry-aggregate";
+import { auditRetentionDays, pruneAuditLog } from "../lib/audit-store";
 import { PLANT_TIME_ZONE } from "../lib/plant-time";
 import { Router, type IRouter, type Request } from "express";
 import { statfs } from "node:fs/promises";
@@ -13,6 +14,7 @@ import {
 } from "@workspace/db";
 import { logger } from "../lib/logger";
 import { logActivity } from "./activity_log";
+import { diffFields } from "../lib/audit-core";
 import {
   rollupsEnabled, getRollupState, rawPruneLimit, floorHour, rollupJobError, pruneRollups, pruneTier, TIERS, activeTiers, onRollupsAdvanced,
 } from "../services/rollups";
@@ -463,8 +465,10 @@ export async function applyPolicyChange(op: "create" | "update", id: string | nu
   if (b.enabled       !== undefined) update.enabled       = b.enabled;
   if (b.metric        !== undefined) update.metric        = b.metric ?? null;
   if (b.assetId       !== undefined) update.assetId       = b.assetId ?? null;
+  const [beforePolicy] = await db.select().from(dataRetentionTable).where(eq(dataRetentionTable.id, id!));
   const [policy] = await db.update(dataRetentionTable).set(update).where(eq(dataRetentionTable.id, id!)).returning();
-  if (policy) await logActivity("retention.updated", "system", policy.id, policy.name, describePolicy(policy), req);
+  if (policy) await logActivity("retention.updated", "system", policy.id, policy.name, describePolicy(policy), req,
+    { assetId: policy.assetId ?? null, changes: diffFields(beforePolicy as unknown as Record<string, unknown>, policy as unknown as Record<string, unknown>, { only: Object.keys(update) }) });
   return policy ?? null;
 }
 
@@ -985,9 +989,11 @@ export async function runOperationalPruning(): Promise<{ deleted: Record<string,
             AND open_alarm.status IN ('active', 'acknowledged')
         )`);
     }
-    if (days.activityLogs > 0) {
-      deleted.activityLogs = await deleteInBatches(activityLogsTable,
-        sql`${activityLogsTable.timestamp} < ${cutoff(days.activityLogs)}`);
+    {
+      // The audit log is append-only and hash-chained: lib/audit-store.ts prunes it
+      // oldest-first with a checkpoint, never under 365 days (setting on the Audit Log page).
+      const auditDays = await auditRetentionDays(days.activityLogs);
+      if (auditDays > 0) deleted.activityLogs = await pruneAuditLog(auditDays);
     }
     if (days.brokerEvents > 0) {
       deleted.brokerEvents = await deleteInBatches(brokerEventsTable,

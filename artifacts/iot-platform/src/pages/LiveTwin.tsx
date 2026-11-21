@@ -11,7 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import {
   ArrowLeft, Radio, Plus, Trash2, Image as ImageIcon, Wifi, WifiOff, MapPin,
-  Save, Maximize2, Minimize2, MousePointerClick, X, Pencil, FilePlus,
+  Save, Maximize2, Minimize2, MousePointerClick, X, Pencil, FilePlus, MonitorPlay, Repeat,
 } from "lucide-react";
 import { useListAssets } from "@workspace/api-client-react";
 import { useProjectScope } from "@/hooks/useProjectScope";
@@ -32,6 +32,9 @@ import { TwinSidebar, type TwinListItem } from "@/features/plantTwin/TwinSidebar
 
 // three.js loads only when someone opens a 3D tab.
 const LiveTwin3D = lazy(() => import("@/features/plantTwin/LiveTwin3D"));
+const ImageTwinView = lazy(() => import("@/features/imageTwin/ImageTwinView"));
+const ProcessTwinView = lazy(() => import("@/features/processTwin/ProcessTwinView"));
+const SitesMapView = lazy(() => import("@/features/sitesMap/SitesMap"));
 
 // ── Live Twin ────────────────────────────────────────────────────────────────
 // A digital-twin view: drop a plant layout / machine photo in as the backdrop,
@@ -545,8 +548,12 @@ const TYPES: Record<LiveTwinType, { label: string; hint: string; about: string; 
   process: { label: "Process twin", hint: "P&ID", list: "Process twins", newLabel: "New twin", about: "An animated process diagram: tank, pump, control valve, cooler and reactor. Link each tag to an asset metric; flow, level and valve opening move with live data." },
   plant: { label: "Plant twin", hint: "3D floor", list: "Plant twins", newLabel: "New plant", about: "Your whole plant in 3D, area by area in process order, with live status on every machine. Plants are laid out in 3D Builder." },
   builder: { label: "3D Builder", hint: "any industry", list: "Plant twins", newLabel: "New plant", about: "Build a fully customised plant twin: Add twin, pick an industry template and Load it, or place single machines; untick stages the plant does not have and connect each machine to its data source." },
-  image: { label: "2D twin", hint: "photo", list: "2D twins", newLabel: "New twin", about: "Pin live readings onto a plant layout or machine photo. Each point binds to an asset attribute and updates in real time. Saved in this browser only." },
+  image: FEATURES.liveTwinClassic
+    ? { label: "2D twin", hint: "photo", list: "2D twins", newLabel: "New twin", about: "Pin live readings onto a plant layout or machine photo. Each point binds to an asset attribute and updates in real time. Saved in this browser only." }
+    : { label: "2D twin", hint: "SVG / image", list: "2D twins", newLabel: "New twin", about: "Upload a plant drawing (SVG) or any image. Each part of an SVG, or each region you draw on an image, maps to an asset reading and shows its value, colour, level or alarm live." },
+  map: { label: "Map view", hint: "all sites", list: "Sites", newLabel: "", about: "Every project (plant) on a map, with its live status and active alarms. Click a site to open it." },
 };
+if (!FEATURES.liveTwinClassic) TYPES.process = { ...TYPES.process, hint: "P&ID builder", about: "Build your own process diagram: drag tanks, pumps, valves, heat exchangers and instruments, connect them with pipes and link each tag to an asset metric. Flow, level and valve opening move with live data." };
 function readType(): LiveTwinType {
   try { const t = localStorage.getItem(TYPE_KEY) as LiveTwinType | null; if (t && LIVE_TWIN_TYPES.includes(t)) return t; } catch { /* per browser only */ }
   return LIVE_TWIN_TYPES[0];
@@ -577,7 +584,12 @@ function LiveTwinByType() {
   const [toolbarEl, setToolbarEl] = useState<HTMLDivElement | null>(null);
   const [folderId, setFolderId] = useState<string | null>(null);
 
-  const listQ = useQuery({ queryKey: ["plant-twins"], queryFn: listPlantTwins, enabled: type !== "image" });
+  // Classic 2D twins live in this browser; the current ones on the server, like the 3D twins.
+  const localImages = type === "image" && FEATURES.liveTwinClassic;
+  const listQ = useQuery({ queryKey: ["plant-twins"], queryFn: listPlantTwins, enabled: !localImages && type !== "map" });
+  const [kiosk, setKiosk] = useState(false);
+  const [cycle, setCycle] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
   const kinds: string[] = type === "asset" ? ["asset", "machine"] : type === "builder" ? ["plant"] : [type];
   // Plant twin and 3D Builder show the same plants, so they share one folder tree.
   const folderType = type === "builder" ? "plant" : type;
@@ -587,7 +599,7 @@ function LiveTwinByType() {
     .filter((t) => (t.kind === "folder" ? t.forType === folderType : kinds.includes(t.kind ?? "plant")))
     .map((t) => ({
       id: t.id, name: t.name, viewOnly: !t.canEdit, folder: t.kind === "folder", parentId: t.parentId ?? null,
-      sub: t.kind === "machine" ? "Detailed pump skid" : (t.kind ?? "plant") === "plant" || t.kind === "asset" ? `${t.machines} machine${t.machines === 1 ? "" : "s"}` : undefined,
+      sub: t.kind === "machine" ? "Detailed pump skid" : (t.kind ?? "plant") === "plant" || t.kind === "asset" ? `${t.machines} machine${t.machines === 1 ? "" : "s"}` : t.kind === "image" || t.kind === "process" ? `${t.machines} point${t.machines === 1 ? "" : "s"}` : undefined,
     // eslint-disable-next-line react-hooks/exhaustive-deps
     })), [listQ.data, kindsKey, folderType, currentProjectId]);
   const folderName = serverItems.find((i) => i.id === folderId && i.folder)?.name ?? null;
@@ -614,7 +626,7 @@ function LiveTwinByType() {
   // ── folders (the twin hierarchy) ─────────────────────────────────────────
   const refresh = () => qc.invalidateQueries({ queryKey: ["plant-twins"] });
   const fail = (title: string) => (err: any) => toast({ title, description: err?.message ?? String(err), variant: "destructive" });
-  const hierarchy = type === "image" ? undefined : {
+  const hierarchy = localImages || type === "map" ? undefined : {
     canEdit: canWrite,
     canDelete: canModule("live_twin", "delete"),
     create: (parentId: string | null) => {
@@ -627,6 +639,28 @@ function LiveTwinByType() {
     move: (id: string, parentId: string | null) => { updatePlantTwin(id, { parentId }).then(() => refresh()).catch(fail(t("Could not move it"))); },
   };
 
+  // ── kiosk: full screen for control-room displays, optionally cycling twins ──
+  const twinIds = useMemo(() => (localImages ? imageItems : serverItems).filter((i) => !i.folder).map((i) => i.id), [localImages, imageItems, serverItems]);
+  useEffect(() => {
+    const onFs = () => { if (!document.fullscreenElement) { setKiosk(false); setCycle(false); } };
+    document.addEventListener("fullscreenchange", onFs);
+    return () => document.removeEventListener("fullscreenchange", onFs);
+  }, []);
+  const enterKiosk = () => { setKiosk(true); rootRef.current?.requestFullscreen?.().catch(() => { /* kiosk still hides the chrome */ }); };
+  const exitKiosk = () => { setKiosk(false); setCycle(false); if (document.fullscreenElement) document.exitFullscreen().catch(() => {}); };
+  const cycleRef = useRef({ twinIds, currentId }); cycleRef.current = { twinIds, currentId };
+  useEffect(() => {
+    if (!kiosk || !cycle) return;
+    const h = window.setInterval(() => {
+      const { twinIds: ids, currentId: cur } = cycleRef.current;
+      if (ids.length < 2) return;
+      const next = ids[(Math.max(0, ids.indexOf(cur ?? "")) + 1) % ids.length];
+      if (type === "asset") setAssetView(listQ.data?.find((x) => x.id === next)?.kind === "machine" ? "skid" : "canvas");
+      setPick((p) => ({ id: next, n: p.n + 1 }));
+    }, 60_000);
+    return () => window.clearInterval(h);
+  }, [kiosk, cycle, type, listQ.data]);
+
   const goBack = () => {
     const prev = trail.current.pop();
     if (!prev) { navigate("/"); return; }
@@ -636,11 +670,23 @@ function LiveTwinByType() {
   };
 
   return (
-    <div className="p-6 h-full flex flex-col gap-3">
-      <button onClick={goBack} className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground shrink-0 self-start">
+    <div ref={rootRef} className={cn("h-full flex flex-col gap-3 bg-background", kiosk ? "p-2" : "p-6")}>
+      {kiosk && (
+        <div className="shrink-0 flex items-center gap-2 text-xs">
+          <span className="font-semibold flex items-center gap-1.5"><Radio className="w-4 h-4 text-primary" /> {t("Live Twin")} · {t(meta.label)}</span>
+          <span className="flex-1" />
+          {type !== "map" && twinIds.length > 1 && (
+            <Button size="sm" variant={cycle ? "default" : "outline"} className="h-7" onClick={() => setCycle((c) => !c)} title={t("Show the next twin every 60 seconds")}>
+              <Repeat className="w-3.5 h-3.5 mr-1" /> {t("Cycle twins")}
+            </Button>
+          )}
+          <Button size="sm" variant="outline" className="h-7" onClick={exitKiosk}><Minimize2 className="w-3.5 h-3.5 mr-1" /> {t("Exit kiosk")}</Button>
+        </div>
+      )}
+      <button onClick={goBack} className={cn("flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground shrink-0 self-start", kiosk && "hidden")}>
         <ArrowLeft className="w-4 h-4" /> {t("Back")}
       </button>
-      <div className="shrink-0 flex flex-wrap items-center gap-3">
+      <div className={cn("shrink-0 flex flex-wrap items-center gap-3", kiosk && "hidden")}>
         <h1 className="text-xl font-bold flex items-center gap-2"><Radio className="w-5 h-5 text-primary" /> {t("Live Twin")}</h1>
         {LIVE_TWIN_TYPES.length > 1 ? (
           <Select value={type} onValueChange={(v) => chooseType(v as LiveTwinType)}>
@@ -655,24 +701,39 @@ function LiveTwinByType() {
           <span className="text-sm font-semibold text-muted-foreground">{t(meta.label)}</span>
         )}
         <div ref={setToolbarEl} className="flex-1 min-w-[20rem]" />
+        <Button size="sm" variant="outline" className="h-8 shrink-0" onClick={enterKiosk} title={t("Full screen for control-room displays")}>
+          <MonitorPlay className="w-4 h-4 mr-1" /> {t("Kiosk")}
+        </Button>
       </div>
-      <p className="text-sm text-muted-foreground shrink-0 -mt-1">{t(meta.about)}</p>
+      <p className={cn("text-sm text-muted-foreground shrink-0 -mt-1", kiosk && "hidden")}>{t(meta.about)}</p>
       <div className="flex-1 min-h-0 flex gap-3">
-        <TwinSidebar
+        {type !== "map" && !kiosk && <TwinSidebar
           title={t(meta.list)}
-          items={type === "image" ? imageItems : serverItems}
+          items={localImages ? imageItems : serverItems}
           currentId={currentId}
-          loading={type !== "image" && listQ.isLoading}
+          loading={!localImages && listQ.isLoading}
           onPick={(id) => onPick(id)}
           folderId={folderName ? folderId : null}
           onFolder={setFolderId}
           hierarchy={hierarchy}
           collapsed={collapsed}
           onCollapse={(c) => { setCollapsed(c); remember(PANEL_KEY, c ? "1" : "0"); }}
-        />
+        />}
         <div className="flex-1 min-w-0 min-h-0 flex flex-col">
-          {type === "image" ? (
+          {type === "map" ? (
+            <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">{t("Loading map…")}</div>}>
+              <SitesMapView />
+            </Suspense>
+          ) : localImages ? (
             <ImageTwins key="image" embedded link={link} onList={setImageItems} />
+          ) : type === "image" ? (
+            <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">{t("Loading…")}</div>}>
+              <Card className="flex-1 min-h-0 overflow-hidden shadow-sm flex flex-col"><ImageTwinView key="image" link={link} /></Card>
+            </Suspense>
+          ) : type === "process" && !FEATURES.liveTwinClassic ? (
+            <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">{t("Loading…")}</div>}>
+              <Card className="flex-1 min-h-0 overflow-hidden shadow-sm flex flex-col"><ProcessTwinView key="process" link={link} /></Card>
+            </Suspense>
           ) : (
             <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">{t("Loading 3D view…")}</div>}>
               <LiveTwin3D

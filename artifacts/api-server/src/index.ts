@@ -16,6 +16,7 @@ import { assertAuthConfigSane } from "./lib/auth-config";
 import { logSecretsReport } from "./lib/secrets";
 import { initSecretBox } from "./lib/secret-box";
 import { ensureUploadRoot } from "./lib/upload/storage";
+import { ensureAuditStore } from "./lib/audit-store";
 import { reportScannerStatus } from "./lib/upload/scanner";
 import { pruneExpiredSessions } from "./lib/sessions";
 import { pruneSecurityEvents } from "./lib/security-log";
@@ -44,6 +45,9 @@ initSecretBox();
 logSecretsReport();
 // Storage directory and scanner reachability are reported at boot, so a
 // misconfiguration surfaces then rather than on the first upload.
+// Audit log: append-only trigger and hash backfill (logs and continues on failure).
+void ensureAuditStore();
+
 ensureUploadRoot().catch((err) => {
   // Uploads then fail per request with a clear error, instead of the whole API
   // stopping at boot (and restarting in a loop under systemd).

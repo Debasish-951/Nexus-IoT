@@ -28,6 +28,7 @@ import { useCurrentUser } from "@/contexts/UserContext";
 import { canGrantRole } from "@/lib/roleRank";
 import { ReadOnlyBanner } from "@/components/RoleGuard";
 import { apiGet, apiPost, apiPut, apiFetch } from "@/lib/auth-api";
+import { HistoryButton } from "@/features/auditLog/shared";
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 
@@ -1172,6 +1173,7 @@ export default function Users() {
                         <td className="px-4 py-3">
                           {can("manage_users") && (
                             <div className="flex items-center gap-2.5 justify-end">
+                              <HistoryButton targetId={user.id} targetName={user.fullName} size="icon" variant="ghost" label={false} className="h-6 w-6 text-muted-foreground" />
                               <UserRowActions user={user} onDone={invalidate} />
                               <button
                                 className="text-muted-foreground hover:text-primary transition-colors"

@@ -16,6 +16,7 @@ import {
 import { validate } from "../middleware/validate";
 import { IdParams } from "../schemas/common";
 import { logActivity } from "./activity_log";
+import { diffFields } from "../lib/audit-core";
 import { logger } from "../lib/logger";
 import { DataSettingsUpdate, getDataSettings, saveDataSettings } from "../lib/data-settings";
 import { maskWebhookUrl } from "./alarm_rules";
@@ -44,7 +45,10 @@ router.put("/system/data-settings", validate({ body: DataSettingsUpdate }), asyn
   const before = await getDataSettings();
   const s = await saveDataSettings(body);
   const changed = (Object.keys(body) as Array<keyof typeof body>).map((k) => k).join(", ");
-  await logActivity("data_settings.updated", "system", null, "Data Management settings", `Changed: ${changed}${before.approval.enabled && !s.approval.enabled ? " (approval switched OFF)" : ""}`, req);
+  // Field-level changes as "section.field".
+  const flat = (o: Record<string, Record<string, unknown>>) => Object.fromEntries(Object.entries(o).flatMap(([sec, v]) => Object.entries(v ?? {}).map(([k, x]) => [`${sec}.${k}`, x])));
+  const changes = diffFields(flat(before as never), flat(s as never));
+  await logActivity("data_settings.updated", "system", null, "Data Management settings", `Changed: ${changed}${before.approval.enabled && !s.approval.enabled ? " (approval switched OFF)" : ""}`, req, { changes });
   res.json({ ...s, alerts: { ...s.alerts, webhookUrl: maskWebhookUrl(s.alerts.webhookUrl), webhookSet: !!s.alerts.webhookUrl } });
 });
 
@@ -65,7 +69,7 @@ router.post("/system/alerts/:id/acknowledge", validate({ params: IdParams }), as
     .where(and(eq(systemAlertsTable.id, id), eq(systemAlertsTable.status, "active"))).returning();
   if (!row) { res.status(404).json({ error: "No active alert with that id" }); return; }
   await logActivity("system_alert.acknowledged", "system", row.id, row.title, null, req);
-  broadcast("system_alerts", { changed: true }, { requireModule: "reports" });
+  broadcast("system_alerts", { changed: true }, { requireModule: "data_management" });
   res.json(row);
 });
 

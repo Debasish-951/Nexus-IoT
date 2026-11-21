@@ -80,12 +80,13 @@ function machineCount(scene: unknown): number {
 
 /**
  * "plant" (whole plant, Builder), "machine" (detailed pump skid), "process"
- * (P&ID), "asset" (machines from the library) or "folder" (a node of the Live
+ * (P&ID), "asset" (machines from the library), "image" (2D twin: a drawing or
+ * photo with mapped readings) or "folder" (a node of the Live
  * Twin hierarchy; holds no scene of its own).
  */
 function kindOf(scene: unknown): string {
   const k = (scene as { kind?: unknown })?.kind;
-  return k === "machine" || k === "process" || k === "asset" || k === "folder" ? k : "plant";
+  return k === "machine" || k === "process" || k === "asset" || k === "image" || k === "folder" ? k : "plant";
 }
 
 /** Hierarchy fields live in the scene document, so they need no extra column. */

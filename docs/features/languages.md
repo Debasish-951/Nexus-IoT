@@ -16,7 +16,8 @@ Translation is rolled out screen by screen. A screen that is not done yet stays 
 | Live Twin: 2D twin point editor (beyond its toolbar) | Not yet |
 | Assets, Asset Templates, Media Library | Not yet |
 | Visualization, dashboard widgets, Asset Template, Live Feed | Not yet |
-| AI Advisor, Event Manager, Integration Hub, Governance, System, Audit Log | Not yet |
+| AI Advisor: mode cards and AI Reports page | Translated (the AI-written text itself is in English) |
+| AI Advisor chat, Event Manager, Integration Hub, Governance, Data Management, Reports, Audit Log | Not yet |
 | Sign-in, activation and password-reset pages | Not yet |
 | Messages that come from the server (errors, validation) | Not yet; shown in English |
 

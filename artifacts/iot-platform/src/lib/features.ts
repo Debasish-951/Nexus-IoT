@@ -125,9 +125,13 @@ export const FEATURES = {
    *
    *   VITE_DISABLE_PLANT_TWIN_3D=true pnpm --filter @workspace/iot-platform build
    *
-   * Not built yet: saving uploaded .glb models (they show for the session only),
-   * per-reading alarm limits (each model's built-in limits are used) and sharing
-   * a twin with edit rights (only the owner or an administrator can change it).
+   * Uploaded .glb models are kept in the upload store and saved with the twin
+   * (storing one needs Visualization write; without it the model shows in that
+   * browser only). A linked reading takes its limits from the asset's enabled
+   * threshold alarm rules when there are any, else the model's built-in limits.
+   *
+   * Not built yet: sharing a twin with edit rights (only the owner or an
+   * administrator can change it) and Draco-compressed .glb models.
    */
   plantTwin3d: import.meta.env.VITE_DISABLE_PLANT_TWIN_3D !== "true",
 
@@ -140,6 +144,45 @@ export const FEATURES = {
    *   VITE_LIVE_TWIN_TABS=true pnpm --filter @workspace/iot-platform build
    */
   liveTwinTabs: envOn(import.meta.env.VITE_LIVE_TWIN_TABS),
+
+  /**
+   * Classic 2D twin and Process twin. Off (default): the 2D twin keeps each
+   * drawing on the server and maps SVG parts or drawn regions to readings, and
+   * the Process twin is a P&ID builder. On: the earlier editors, kept intact
+   * (photo with pins saved in this browser; the one fixed process diagram):
+   *
+   *   VITE_LIVE_TWIN_CLASSIC=true pnpm --filter @workspace/iot-platform build
+   */
+  liveTwinClassic: envOn(import.meta.env.VITE_LIVE_TWIN_CLASSIC),
+
+  /**
+   * Add twin library layout (Asset twin, 3D Builder). Off (default): a left-hand
+   * panel of tiles with 3D thumbnails, dragged onto the view, like the Process
+   * twin symbols. On: the earlier list in the right-hand panel:
+   *
+   *   VITE_TWIN_LIBRARY_LIST=true pnpm --filter @workspace/iot-platform build
+   */
+  twinLibraryList: envOn(import.meta.env.VITE_TWIN_LIBRARY_LIST),
+
+  /**
+   * The classic report builder (Reports: Telemetry Summary, Alarm Event Log,
+   * Asset Status, Alarm Analysis, Operational Health). Off (default): reports are
+   * written by AI Advisor -> AI Reports for the reader's level, and the /reports
+   * page is reachable only by its address. On: Reports is listed in Data Studio
+   * again:
+   *
+   *   VITE_CLASSIC_REPORTS=true pnpm --filter @workspace/iot-platform build
+   */
+  classicReports: envOn(import.meta.env.VITE_CLASSIC_REPORTS),
+
+  /**
+   * The earlier Audit Log page (category filter and a 25-row table). Off
+   * (default): the full audit page with search, filters, summary, export,
+   * entry details, security events, integrity check and alert settings. On:
+   *
+   *   VITE_CLASSIC_AUDIT_LOG=true pnpm --filter @workspace/iot-platform build
+   */
+  classicAuditLog: envOn(import.meta.env.VITE_CLASSIC_AUDIT_LOG),
 
   /**
    * Opaque address-bar tokens (lib/routeSlugs.ts).
@@ -162,11 +205,11 @@ export type FeatureKey = keyof typeof FEATURES;
 
 /**
  * Twin types offered on Live Twin, set per installation to match what the
- * customer has taken: `image` (2D twin: photo with pinned values), `asset`
- * (3D machines), `process` (P&ID), `plant` (saved 3D plants, view only) and
+ * customer has taken: `image` (2D twin: drawing or photo mapped to readings), `asset`
+ * (3D machines), `process` (P&ID builder), `plant` (saved 3D plants, view only),
  * `builder` (3D Builder: lays plants out from industry templates and the
- * machine library). Comma separated, in dropdown order. Unset or empty means
- * all five. With one type the dropdown is replaced by its name. Offer `plant`
+ * machine library) and `map` (every project on a map). Comma separated, in dropdown order. Unset or empty means
+ * all six. With one type the dropdown is replaced by its name. Offer `plant`
  * with `builder` unless plants are built for the customer. Example, asset
  * twin only:
  *
@@ -175,8 +218,8 @@ export type FeatureKey = keyof typeof FEATURES;
  * This only decides what the page shows. Twins of other types already saved
  * stay in the database, and the API does not refuse them.
  */
-export type LiveTwinType = "image" | "asset" | "process" | "plant" | "builder";
-const ALL_TWIN_TYPES: LiveTwinType[] = ["image", "asset", "process", "plant", "builder"];
+export type LiveTwinType = "image" | "asset" | "process" | "plant" | "builder" | "map";
+const ALL_TWIN_TYPES: LiveTwinType[] = ["image", "asset", "process", "plant", "builder", "map"];
 function parseTwinTypes(value: unknown): LiveTwinType[] {
   const picked = String(value ?? "").split(",").map((t) => t.trim().toLowerCase())
     .filter((t, i, a): t is LiveTwinType => (ALL_TWIN_TYPES as string[]).includes(t) && a.indexOf(t) === i);

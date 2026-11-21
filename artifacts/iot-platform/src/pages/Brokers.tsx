@@ -21,6 +21,7 @@ import { useWsEvents } from "@/hooks/useWsEvents";
 import BrokerHistoryTimeline from "@/components/BrokerHistoryTimeline";
 import { Link } from "wouter";
 import { apiGet } from "@/lib/auth-api";
+import { HistoryButton } from "@/features/auditLog/shared";
 
 const TYPE_LABELS: Record<string, string> = {
   mqtt:             "MQTT",
@@ -454,6 +455,7 @@ export default function Brokers() {
                           <History className="w-3.5 h-3.5" />
                           <ChevronDown className={cn("w-3 h-3 transition-transform", isExpanded && "rotate-180")} />
                         </button>
+                        <HistoryButton targetId={broker.id} targetName={broker.name} size="icon" variant="ghost" label={false} className="h-6 w-6 text-muted-foreground" />
                         {canAction("manage_brokers", "brokers") && (
                           <button className="text-muted-foreground hover:text-destructive transition-colors"
                             onClick={() => deleteBroker.mutate({ id: broker.id }, {

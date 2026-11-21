@@ -20,6 +20,8 @@ export interface ModelDef {
   main?: (p: any) => string;
   /** [part, behaviour, reading key]; a key ending in "*" means a numbered set (zones). */
   binds: (p: any, it?: any) => string[][];
+  /** Demo values per plant-wide scenario this model reacts to: scenario → reading key → value. */
+  scen?: (p: any) => Partial<Record<string, Record<string, number>>>;
   build: (p: any, g: THREE.Group, it: any) => Updater | void;
 }
 
@@ -41,6 +43,12 @@ export interface ItemSpec {
   /** Demo mode only. */
   running?: boolean;
   fault?: boolean;
+  /** Uploaded .glb model: id in the upload store (GET /api/uploads/:id/content). */
+  glbId?: string;
+  /** Uploaded .glb model: which part moves with which reading. */
+  gb?: { mesh: string; beh: string; k: string }[];
+  /** Uploaded .glb model: readings pinned onto parts of the model. */
+  gp?: { mesh: string; k: string }[];
 }
 
 /** A machine at runtime: the saved spec plus its 3D objects and current values. */
@@ -64,11 +72,10 @@ export interface Item extends ItemSpec {
   cx: number; cz: number; top: number; w: number; d: number; rad: number;
   feeds?: string[];
   feedMed?: string;
-  /** Uploaded .glb models (session only). */
+  /** Uploaded .glb models: the parsed model, its scale to about 3 m, and its part names. */
   glbObj?: THREE.Object3D;
   glbK?: number;
   glbNames?: string[];
-  gb?: { mesh: string; beh: string; k: string }[];
 }
 
 export interface AreaState {

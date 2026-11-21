@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useLocation } from "wouter";
 import { useListAssets, useListAssetAttributes } from "@workspace/api-client-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -16,8 +17,9 @@ import { describeApiError, formatApiError } from "@/lib/validation";
 import {
   FileText, Download, Play, RefreshCw, Table, BarChart2,
   ClipboardList, AlertTriangle, Blocks, TrendingUp, Activity,
-  ShieldAlert, Clock, CheckCircle2, Gauge,
+  ShieldAlert, Clock, CheckCircle2, Gauge, Sparkles,
 } from "lucide-react";
+import { useT } from "@/i18n";
 import { format, subHours } from "date-fns";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Cell, PieChart, Pie, Legend } from "recharts";
 
@@ -324,8 +326,19 @@ export default function Reports() {
     query: { enabled: assetId !== "all", queryKey: ["report-attrs", assetId] },
   });
 
-  const { session } = useCurrentUser();
+  const { session, canModule } = useCurrentUser();
   const { inScope } = useProjectScope();
+  const t = useT();
+  const [, navigate] = useLocation();
+  // Opens AI Advisor -> AI Reports with this page's asset and period.
+  const canAiReport = canModule("ai_advisor") && !session?.restrictProjects;
+  function openAiSummary() {
+    const p = new URLSearchParams();
+    if (assetId !== "all") p.set("assetId", assetId);
+    const from = new Date(fromDate), to = new Date(toDate);
+    if (!Number.isNaN(from.getTime()) && !Number.isNaN(to.getTime())) { p.set("from", from.toISOString()); p.set("to", to.toISOString()); }
+    navigate(`/ai-reports?${p}`);
+  }
   // A project-restricted user is refused plant-wide figures, so their telemetry
   // report always names one asset instead of offering "All assets".
   const singleAssetOnly = !!session?.restrictProjects;
@@ -681,6 +694,11 @@ export default function Reports() {
             {loading ? <RefreshCw className="w-3.5 h-3.5 animate-spin" /> : <Play className="w-3.5 h-3.5" />}
             {loading ? "Generating…" : "Generate Report"}
           </Button>
+          {canAiReport && (
+            <Button variant="outline" className="w-full gap-2" onClick={openAiSummary} title={t("Open AI Reports for the same asset and period")}>
+              <Sparkles className="w-3.5 h-3.5 text-primary" /> {t("Generate AI summary")}
+            </Button>
+          )}
         </div>
 
         {/* Result panel */}

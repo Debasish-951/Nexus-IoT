@@ -1,11 +1,11 @@
-import { memo } from "react";
+import { lazy, memo, Suspense } from "react";
 import {
   Activity, Gauge as GaugeIcon, Timer, Zap,
   Boxes, Bell, LineChart as LineIcon, BarChart3, AreaChart as AreaIcon, PieChart as PieIcon,
   ScatterChart, Grid3x3, Table as TableIcon, Type, Thermometer, Battery, CircleDot,
   Droplet, TrafficCone, ListOrdered, Image as ImageIcon, ToggleLeft, CreditCard,
   TrendingUp, Wind, Move, Waves, AlertTriangle, Cpu, Package,
-  Radar as RadarIcon, Disc3, Rows3, Waypoints, Layers, ChartNoAxesCombined,
+  Radar as RadarIcon, Disc3, Rows3, Waypoints, Layers, ChartNoAxesCombined, Map as MapIcon, Radio,
 } from "lucide-react";
 import {
   ResponsiveContainer, LineChart, Line, BarChart, Bar, AreaChart, Area, PieChart, Pie, Cell,
@@ -21,6 +21,11 @@ import { FEATURES } from "@/lib/features";
 import { useOpenAlarms } from "@/hooks/useOpenAlarms";
 import { useListAssets } from "@workspace/api-client-react";
 import { PRO_CATEGORIES, PRO_TYPES, PRO_MULTI_TYPES, ProWidgetView } from "./pro";
+
+// Map and Live Twin widgets load Leaflet / three.js, so they are fetched only by
+// dashboards that hold one (features/sitesMap/widgets.tsx).
+const SitesMapWidget = lazy(() => import("@/features/sitesMap/widgets").then((m) => ({ default: m.SitesMapWidget })));
+const LiveTwinWidget = lazy(() => import("@/features/sitesMap/widgets").then((m) => ({ default: m.LiveTwinWidget })));
 
 /**
  * Widget colours. Status colours come from the shared STATUS set; `primary` is the
@@ -187,6 +192,10 @@ const ALL_WIDGET_CATEGORIES: { name: string; items: WidgetDef[] }[] = [
     { type: "table",   label: "Data Grid",       icon: TableIcon,  category: "Tables", w: 6, h: 5 },
     { type: "alarms",  label: "Alarm Table",     icon: Bell,       category: "Tables", w: 6, h: 5 },
     { type: "events",  label: "Events",          icon: ListOrdered,category: "Tables", w: 6, h: 5 },
+  ]},
+  { name: "Maps & twins", items: [
+    { type: "sitesmap", label: "Sites Map",  icon: MapIcon, category: "Maps & twins", w: 6, h: 8, defaults: { siteScope: "all", showLabels: true } },
+    { type: "livetwin", label: "Live Twin",  icon: Radio,   category: "Maps & twins", w: 6, h: 9 },
   ]},
   { name: "Combined", items: [
     { type: "combined", label: "Combined Value", icon: Layers, category: "Combined", w: 4, h: 4, defaults: { op: "sum", sources: [] } },
@@ -411,7 +420,7 @@ export const WidgetView = memo(function WidgetView({ widget, refreshNonce, dashT
   interface SeriesSrc { assetId?: string; tag?: string; color?: string; label?: string; unit?: string }
   const seriesSrc: Record<string, SeriesSrc> = {};
   const typeEnabled = isWidgetTypeEnabled(t);
-  if (!typeEnabled || t === "alarms" || t === "image") {
+  if (!typeEnabled || t === "alarms" || t === "image" || t === "sitesmap" || t === "livetwin") {
     // Nothing to fetch: a hidden type renders a placeholder, the alarm table
     // reads alarms rather than a telemetry series, and an image is an image.
   } else if (isScatter) {
@@ -557,6 +566,13 @@ export const WidgetView = memo(function WidgetView({ widget, refreshNonce, dashT
     );
   }
   if (t === "alarms") return <AlarmTableView assetId={c.assetId} />;
+  if (t === "sitesmap" || t === "livetwin") {
+    return (
+      <Suspense fallback={<div className="h-full w-full flex items-center justify-center text-muted-foreground text-xs">Loading…</div>}>
+        {t === "sitesmap" ? <SitesMapWidget config={c} /> : <LiveTwinWidget config={c} />}
+      </Suspense>
+    );
+  }
   if (PRO_SET.has(t)) {
     // Widgets that load their own history (a fixed window or a reference batch)
     // must not be blanked by the widget-range "no data" check below.

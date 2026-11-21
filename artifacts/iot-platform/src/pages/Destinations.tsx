@@ -21,6 +21,7 @@ import { cn } from "@/lib/utils";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { ReadOnlyBanner } from "@/components/RoleGuard";
 import { apiFetch } from "@/lib/auth-api";
+import { HistoryButton } from "@/features/auditLog/shared";
 
 const DEST_QUERY_KEY = ["destinations"];
 
@@ -160,6 +161,7 @@ export default function Destinations() {
                   {testing === d.id ? <Loader2 className="w-3 h-3 animate-spin" /> : <Webhook className="w-3 h-3" />}
                   Test
                 </button>
+                <HistoryButton targetId={d.id} targetName={d.name} size="icon" variant="ghost" label={false} className="h-6 w-6 text-muted-foreground" />
                 <Switch checked={d.enabled} disabled={!canAction("manage_destinations", "brokers")}
                   onCheckedChange={(enabled) => toggleDest.mutate({ id: d.id, enabled })} />
                 {canAction("manage_destinations", "brokers") && (

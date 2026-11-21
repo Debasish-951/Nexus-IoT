@@ -1343,7 +1343,7 @@ export interface VizNodeAccessFlags {
 }
 
 /**
- * Taken from `scene.kind`; plant when absent. `machine` is the detailed pump skid, `asset` a canvas of machines from the library, `folder` a node of the Live Twin hierarchy.
+ * Taken from `scene.kind`; plant when absent. `machine` is the detailed pump skid, `asset` a canvas of machines from the library, `image` a 2D twin (drawing or photo with mapped readings), `process` a P&ID, `folder` a node of the Live Twin hierarchy.
  */
 export type PlantTwinSummaryKind =
   (typeof PlantTwinSummaryKind)[keyof typeof PlantTwinSummaryKind];
@@ -1353,13 +1353,14 @@ export const PlantTwinSummaryKind = {
   machine: "machine",
   process: "process",
   asset: "asset",
+  image: "image",
   folder: "folder",
 } as const;
 
 export interface PlantTwinSummary {
   id: string;
   name: string;
-  /** Taken from `scene.kind`; plant when absent. `machine` is the detailed pump skid, `asset` a canvas of machines from the library, `folder` a node of the Live Twin hierarchy. */
+  /** Taken from `scene.kind`; plant when absent. `machine` is the detailed pump skid, `asset` a canvas of machines from the library, `image` a 2D twin (drawing or photo with mapped readings), `process` a P&ID, `folder` a node of the Live Twin hierarchy. */
   kind: PlantTwinSummaryKind;
   /** @nullable */
   projectId: string | null;
@@ -1557,6 +1558,27 @@ export interface VizTreeNodeShares {
   /** @nullable */
   ownerName: string | null;
   shares: VizTreeShareGrant[];
+}
+
+export interface Site {
+  projectId: string;
+  name: string;
+  /** @nullable */
+  latitude: number | null;
+  /** @nullable */
+  longitude: number | null;
+  /** @nullable */
+  address: string | null;
+  /** @nullable */
+  latitudeAttrId: string | null;
+  /** @nullable */
+  longitudeAttrId: string | null;
+  /** @nullable */
+  addressAttrId: string | null;
+  assetCount: number;
+  maintenanceCount: number;
+  /** @nullable */
+  lastDataAt: string | null;
 }
 
 export interface VizTag {
@@ -2161,6 +2183,14 @@ export interface AiChatRequest {
    * @maxLength 64
    */
   timeZone?: string;
+  /**
+   * Project or asset the question is about. The assistant then uses only
+   * this asset and the assets beneath it: tools taking an asset id refuse
+   * others, and search, list, alarm and summary tools are filtered.
+   * Omitted or null means all assets.
+   * @nullable
+   */
+  scopeAssetId?: string | null;
   /** Earlier turns; only the last 4 are used, each cut to 1000 characters. */
   history?: AiChatTurn[];
 }
@@ -2179,6 +2209,127 @@ export interface AiChatAnswer {
   truncated?: boolean;
 }
 
+export interface AiReportRequest {
+  /**
+   * Asset or project (root asset); its whole subtree is reported. Omit for all assets the caller may see.
+   * @nullable
+   */
+  assetId?: string | null;
+  range: AiChatRange;
+  /** IANA time zone of the reader, for alarm time-of-day figures. Defaults to UTC. */
+  timeZone?: string;
+  /**
+   * Accepted from older links and ignored; the report's content follows the caller's level.
+   * @deprecated
+   */
+  focus?: string;
+}
+
+export type AiReportLevel = (typeof AiReportLevel)[keyof typeof AiReportLevel];
+
+export const AiReportLevel = {
+  executive: "executive",
+  manager: "manager",
+  engineer: "engineer",
+} as const;
+
+/**
+ * Shape depends on `level`. executive: headline, summary, risks[{title,
+ * what, impact, cause, decision}] (at most 3), improvements[], decisions[],
+ * outlook. manager: summary, problemAreas[{area, issue, impact, cause}],
+ * response, patterns[], priorities[{action, owner}]. engineer: summary,
+ * diagnoses[{asset, observation, correlated, rootCause, confidence
+ * (low|medium|high)}], alarmSequence[], dataIssues[], actions[{action,
+ * urgency (immediate|this_week|planned)}].
+ */
+export interface AiReportNarrative {
+  level: AiReportLevel;
+  summary: string;
+  [key: string]: unknown;
+}
+
+/**
+ * Figures computed by the server: level, scope, range, previous period,
+ * kpis and previousKpis (assets, reporting, stale, readings, coverage,
+ * alarms by severity, MTTA, MTTR, energy used in kWh), healthScore (0-100
+ * with its parts and formula), kpiCards (4-6, value against the previous
+ * period with direction), assetHealth and statusCounts, metrics (min/avg/
+ * max and change), topMovers, trends, correlations (|r| >= 0.7),
+ * leadingSignals (a metric away from normal just before an alarm),
+ * alarmAssets, topAlarms, repeatAlarms (3+ times), alarmTiming (by hour
+ * and weekday in the reader's time zone), alarmTimeline, maintenance,
+ * energy and dataQuality (stale, low coverage, silent, stuck sensors).
+ */
+export type AiReportResponseFacts = { [key: string]: unknown };
+
+/**
+ * unavailable: no AI provider on this installation (licence, internet); failed, rate_limited, unreadable: temporary, try again.
+ */
+export type AiReportResponseNarrativeStatus =
+  (typeof AiReportResponseNarrativeStatus)[keyof typeof AiReportResponseNarrativeStatus];
+
+export const AiReportResponseNarrativeStatus = {
+  ok: "ok",
+  unavailable: "unavailable",
+  failed: "failed",
+  rate_limited: "rate_limited",
+  unreadable: "unreadable",
+} as const;
+
+export type AiReportResponseScope = { [key: string]: unknown };
+
+export interface AiReportResponse {
+  level: AiReportLevel;
+  /**
+   * Figures computed by the server: level, scope, range, previous period,
+   * kpis and previousKpis (assets, reporting, stale, readings, coverage,
+   * alarms by severity, MTTA, MTTR, energy used in kWh), healthScore (0-100
+   * with its parts and formula), kpiCards (4-6, value against the previous
+   * period with direction), assetHealth and statusCounts, metrics (min/avg/
+   * max and change), topMovers, trends, correlations (|r| >= 0.7),
+   * leadingSignals (a metric away from normal just before an alarm),
+   * alarmAssets, topAlarms, repeatAlarms (3+ times), alarmTiming (by hour
+   * and weekday in the reader's time zone), alarmTimeline, maintenance,
+   * energy and dataQuality (stale, low coverage, silent, stuck sensors).
+   */
+  facts: AiReportResponseFacts;
+  narrative: AiReportNarrative | null;
+  /** unavailable: no AI provider on this installation (licence, internet); failed, rate_limited, unreadable: temporary, try again. */
+  narrativeStatus: AiReportResponseNarrativeStatus;
+  /** @nullable */
+  narrativeError: string | null;
+  unverifiedNumbers: string[];
+  alarmsIncluded: boolean;
+  generatedAt: string;
+  range: AiChatRange;
+  scope: AiReportResponseScope;
+  /** @nullable */
+  model: string | null;
+}
+
+export type ActivityLogEntrySource =
+  (typeof ActivityLogEntrySource)[keyof typeof ActivityLogEntrySource];
+
+export const ActivityLogEntrySource = {
+  audit: "audit",
+  security: "security",
+} as const;
+
+export type ActivityLogEntryOutcome =
+  (typeof ActivityLogEntryOutcome)[keyof typeof ActivityLogEntryOutcome];
+
+export const ActivityLogEntryOutcome = {
+  success: "success",
+  failure: "failure",
+  denied: "denied",
+} as const;
+
+export interface AuditChange {
+  field: string;
+  from?: unknown;
+  to?: unknown;
+}
+
 export interface ActivityLogEntry {
   id: string;
   action: string;
@@ -2194,7 +2345,139 @@ export interface ActivityLogEntry {
   /** @nullable */
   detail?: string | null;
   timestamp: string;
+  source?: ActivityLogEntrySource;
+  /** @nullable */
+  actorUserId?: string | null;
+  /** @nullable */
+  changes?: AuditChange[] | null;
+  outcome?: ActivityLogEntryOutcome;
+  /** @nullable */
+  ip?: string | null;
+  /** @nullable */
+  userAgent?: string | null;
+  /** @nullable */
+  correlationId?: string | null;
+  /** @nullable */
+  assetId?: string | null;
+  /** @nullable */
+  projectId?: string | null;
+  /** @nullable */
+  hash?: string | null;
+  /** @nullable */
+  seq?: number | null;
   [key: string]: unknown;
+}
+
+export type AuditSummaryPerDayItem = {
+  day?: string;
+  count?: number;
+};
+
+export type AuditSummaryTopActorsItem = {
+  name?: string;
+  count?: number;
+};
+
+export type AuditSummarySensitive = { [key: string]: unknown };
+
+export type AuditSummaryFailures = {
+  audit?: number;
+  security?: number;
+};
+
+export interface AuditSummary {
+  perDay: AuditSummaryPerDayItem[];
+  topActors: AuditSummaryTopActorsItem[];
+  sensitive: AuditSummarySensitive;
+  failures: AuditSummaryFailures;
+}
+
+/**
+ * @nullable
+ */
+export type AuditVerifyResultCheckpoint = { [key: string]: unknown } | null;
+
+export type AuditVerifyResultBrokenReason =
+  (typeof AuditVerifyResultBrokenReason)[keyof typeof AuditVerifyResultBrokenReason];
+
+export const AuditVerifyResultBrokenReason = {
+  prev_mismatch: "prev_mismatch",
+  hash_mismatch: "hash_mismatch",
+  missing_hash: "missing_hash",
+} as const;
+
+/**
+ * @nullable
+ */
+export type AuditVerifyResultBroken = {
+  id?: string;
+  seq?: number;
+  timestamp?: string;
+  reason?: AuditVerifyResultBrokenReason;
+} | null;
+
+export interface AuditVerifyResult {
+  ok: boolean;
+  checked: number;
+  verifiedAt: string;
+  /** @nullable */
+  checkpoint?: AuditVerifyResultCheckpoint;
+  /** @nullable */
+  broken?: AuditVerifyResultBroken;
+}
+
+export interface AuditAlert {
+  id: string;
+  rule: string;
+  severity: string;
+  title: string;
+  message: string;
+  /** @nullable */
+  entryId?: string | null;
+  status: string;
+  raisedAt: string;
+  /** @nullable */
+  acknowledgedBy?: string | null;
+  /** @nullable */
+  acknowledgedAt?: string | null;
+  [key: string]: unknown;
+}
+
+export type AuditSettingsAlertsItem = {
+  key?: string;
+  title?: string;
+  severity?: string;
+  enabled?: boolean;
+};
+
+/**
+ * @nullable
+ */
+export type AuditSettingsCheckpoint = { [key: string]: unknown } | null;
+
+export interface AuditSettings {
+  /** @nullable */
+  retentionDays?: number | null;
+  effectiveRetentionDays?: number;
+  defaultRetentionDays?: number;
+  minimumRetentionDays?: number;
+  alerts?: AuditSettingsAlertsItem[];
+  /** @nullable */
+  checkpoint?: AuditSettingsCheckpoint;
+  [key: string]: unknown;
+}
+
+export type AuditSettingsUpdateAlerts = { [key: string]: boolean };
+
+export interface AuditSettingsUpdate {
+  /**
+   * 0 keeps entries for ever; other values below 365 are raised to 365
+   * @minimum 0
+   * @maximum 36500
+   * @nullable
+   */
+  retentionDays?: number | null;
+  alerts?: AuditSettingsUpdateAlerts;
 }
 
 export interface ActivityLogPage {
@@ -2753,9 +3036,122 @@ export type ListActivityLogParams = {
   offset?: OffsetQueryParameter;
   /** @maxLength 64 */
   category?: string;
-  /** @maxLength 200 */
+  /**
+   * Earlier name of `actor`
+   * @maxLength 200
+   */
   actorName?: string;
+  /**
+   * Free text over action, target, detail and actor
+   * @maxLength 200
+   */
+  q?: string;
+  /** Earliest time (ISO 8601) */
+  from?: string;
+  /** Latest time (ISO 8601) */
+  to?: string;
+  /**
+   * User id, username or part of the name
+   * @maxLength 200
+   */
+  actor?: string;
+  /**
+   * Action, or its beginning (e.g. `user.`)
+   * @maxLength 200
+   */
+  action?: string;
+  /** success, failure or denied */
+  outcome?: ListActivityLogOutcome;
+  /**
+   * Entries about this item (per-item history)
+   * @maxLength 200
+   */
+  targetId?: string;
+  /**
+   * Entries about this asset or project, or anything under it
+   * @maxLength 200
+   */
+  assetId?: string;
+  /** Merge security events (sign-ins, refusals, rate limits) into the list */
+  includeSecurity?: ListActivityLogIncludeSecurity;
 };
+
+export type ListActivityLogOutcome =
+  (typeof ListActivityLogOutcome)[keyof typeof ListActivityLogOutcome];
+
+export const ListActivityLogOutcome = {
+  success: "success",
+  failure: "failure",
+  denied: "denied",
+} as const;
+
+export type ListActivityLogIncludeSecurity =
+  (typeof ListActivityLogIncludeSecurity)[keyof typeof ListActivityLogIncludeSecurity];
+
+export const ListActivityLogIncludeSecurity = {
+  true: "true",
+  false: "false",
+} as const;
+
+export type ExportActivityLogParams = {
+  /**
+   * Free text over action, target, detail and actor
+   * @maxLength 200
+   */
+  q?: string;
+  /** Earliest time (ISO 8601) */
+  from?: string;
+  /** Latest time (ISO 8601) */
+  to?: string;
+  /**
+   * User id, username or part of the name
+   * @maxLength 200
+   */
+  actor?: string;
+  /**
+   * Action, or its beginning (e.g. `user.`)
+   * @maxLength 200
+   */
+  action?: string;
+  /** success, failure or denied */
+  outcome?: ExportActivityLogOutcome;
+  /**
+   * Entries about this item (per-item history)
+   * @maxLength 200
+   */
+  targetId?: string;
+  /**
+   * Entries about this asset or project, or anything under it
+   * @maxLength 200
+   */
+  assetId?: string;
+  /** Merge security events (sign-ins, refusals, rate limits) into the list */
+  includeSecurity?: ExportActivityLogIncludeSecurity;
+};
+
+export type ExportActivityLogOutcome =
+  (typeof ExportActivityLogOutcome)[keyof typeof ExportActivityLogOutcome];
+
+export const ExportActivityLogOutcome = {
+  success: "success",
+  failure: "failure",
+  denied: "denied",
+} as const;
+
+export type ExportActivityLogIncludeSecurity =
+  (typeof ExportActivityLogIncludeSecurity)[keyof typeof ExportActivityLogIncludeSecurity];
+
+export const ExportActivityLogIncludeSecurity = {
+  true: "true",
+  false: "false",
+} as const;
+
+export type GetActivityLogSummaryParams = {
+  /** @maxLength 64 */
+  timeZone?: string;
+};
+
+export type UpdateAuditSettings200 = { [key: string]: unknown };
 
 export type ExportAssetTelemetryCsvParams = {
   metric?: string;

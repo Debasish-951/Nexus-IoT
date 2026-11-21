@@ -12,6 +12,7 @@ import { AssetPickerDialog } from "./AssetPickerDialog";
 import { AttributeSelect } from "./AttributeSelect";
 import { CombinedFields } from "./CombinedFields";
 import { ProFields, PRO_SINGLE_TYPES, PRO_SCOPE_TYPES, proDef } from "./pro";
+import { SitesMapFields, LiveTwinFields } from "@/features/sitesMap/widgetFields";
 
 // Gauge/Thermometer/Tank/Progress/Battery moved from single assetId+tag binding
 // to the grouped `metrics` model (same as Card) — their editor lives in the
@@ -409,6 +410,8 @@ export function WidgetConfigPanel({
         {type === "button" && (
           <Field label="Button label"><Input value={draft.label ?? ""} onChange={(e) => set({ label: e.target.value })} className="h-8 text-sm" /></Field>
         )}
+        {type === "sitesmap" && <SitesMapFields draft={draft} set={set} />}
+        {type === "livetwin" && <LiveTwinFields draft={draft} set={set} />}
         {GROUPED_SET.has(type) && (
           <div className="pt-2 mt-1 border-t border-border space-y-3">
             <div className="flex items-center justify-between">
@@ -613,7 +616,7 @@ export function WidgetConfigPanel({
 
         {/* Grouped widgets have no single primary color — every metric tile
             picks its own, right in its row above. */}
-        {!GROUPED_SET.has(type) && (
+        {!GROUPED_SET.has(type) && type !== "sitesmap" && type !== "livetwin" && (
           <Field label="Primary Color">
             <ColorField value={draft.color} onChange={(hex) => set({ color: hex })} presets={COLOR_SWATCHES} />
           </Field>

@@ -112,7 +112,7 @@ function DataManagementPage() {
           <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5" onClick={refreshAll}>
             <RefreshCw className={cn("w-3.5 h-3.5", stats.isFetching && "animate-spin")} /> Refresh
           </Button>
-          <RoleGuard permission="manage_assets" module="reports">
+          <RoleGuard permission="manage_assets" module="data_management">
             <Button size="sm" variant="outline" className="h-8 text-xs gap-1.5" onClick={() => setConfirmRun(true)} disabled={running || (policies.data ?? []).length === 0}
               title={(policies.data ?? []).length === 0 ? "Add a retention policy first" : "Delete readings older than the policies allow, now"}>
               <Play className="w-3.5 h-3.5" /> {running ? "Pruning…" : "Run pruning now"}

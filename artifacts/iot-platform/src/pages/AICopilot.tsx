@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from "react";
-import { useSearch } from "wouter";
+import { useLocation, useSearch } from "wouter";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
@@ -12,6 +12,9 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { apiFetch } from "@/lib/auth-api";
+import { useT } from "@/i18n";
+import { useProject } from "@/contexts/ProjectContext";
+import { AssetScopePicker, useAssetTree } from "@/components/AssetScopePicker";
 
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
@@ -68,6 +71,7 @@ const EXAMPLES = [
 ];
 
 export default function AICopilot() {
+  const t = useT();
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -75,6 +79,12 @@ export default function AICopilot() {
   const [rangeFrom, setRangeFrom] = useState(() => toLocalInputValue(new Date(Date.now() - 24 * 3600_000)));
   const [rangeTo, setRangeTo] = useState(() => toLocalInputValue(new Date()));
   const scrollRef = useRef<HTMLDivElement>(null);
+  // Which project or asset the questions are about ("all" = everything the user can see).
+  // Sent with every question, so it can change mid-conversation.
+  const { currentProjectId } = useProject();
+  const [scope, setScope] = useState<string>(() => currentProjectId || "all");
+  const tree = useAssetTree();
+  const scopeName = scope === "all" ? t("All assets") : tree.byId.get(scope)?.name ?? "…";
 
   const fromDate = new Date(rangeFrom);
   const toDate = new Date(rangeTo);
@@ -87,6 +97,16 @@ export default function AICopilot() {
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const search = useSearch();
   const lastAction = useRef<string | null>(null);
+  const [, navigate] = useLocation();
+  // Reports moved to their own page (AI Advisor -> AI Reports); older links such as
+  // /ai-copilot?action=report&assetId=...&from=...&to=... are forwarded with their parameters.
+  useEffect(() => {
+    const p = new URLSearchParams(search);
+    if (p.get("action") !== "report") return;
+    p.delete("action");
+    const rest = p.toString();
+    navigate(rest ? `/ai-reports?${rest}` : "/ai-reports", { replace: true });
+  }, [search, navigate]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -128,6 +148,7 @@ export default function AICopilot() {
           question: q,
           history,
           range: { from: fromDate.toISOString(), to: toDate.toISOString() },
+          scopeAssetId: scope === "all" ? null : scope,
           timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         }),
       });
@@ -150,7 +171,7 @@ export default function AICopilot() {
   }
 
   return (
-    <div className="flex flex-col h-full max-w-5xl mx-auto p-4 gap-4">
+    <div className="flex flex-col h-full p-4 pr-14 pb-12 gap-4">
       {/* Header */}
       <div className="flex items-center gap-3">
         <div className="p-2 rounded-lg bg-primary/10 text-primary">
@@ -167,6 +188,27 @@ export default function AICopilot() {
         </div>
       </div>
 
+      <div className="flex-1 min-h-0 flex flex-col xl:flex-row gap-4">
+      {/* What to ask about: scope and time range, in the free space left of the page */}
+      <Card className="xl:w-60 shrink-0 p-3 space-y-3 self-start w-full">
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{t("Ask about")}</p>
+        <div className="space-y-1">
+          <Label htmlFor="ai-scope" className="text-[11px] text-muted-foreground">{t("Project or asset")}</Label>
+          <AssetScopePicker id="ai-scope" value={scope} onChange={setScope} allLabel={t("All assets")} className="h-8 text-xs w-full" />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="ai-range-from" className="text-[11px] text-muted-foreground">{t("From")}</Label>
+          <Input id="ai-range-from" type="datetime-local" value={rangeFrom} onChange={(e) => setRangeFrom(e.target.value)} disabled={loading} className="h-8 w-full text-xs" />
+        </div>
+        <div className="space-y-1">
+          <Label htmlFor="ai-range-to" className="text-[11px] text-muted-foreground">{t("To")}</Label>
+          <Input id="ai-range-to" type="datetime-local" value={rangeTo} onChange={(e) => setRangeTo(e.target.value)} disabled={loading} className="h-8 w-full text-xs" />
+        </div>
+        {rangeError && <p className="text-[11px] text-destructive">{rangeError}</p>}
+      </Card>
+
+
+      <div className="flex-1 flex flex-col min-h-0 gap-4 min-w-0">
       {/* Quick actions (the 4 submenus) */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-2">
         {QUICK_ACTIONS.map((a) => (
@@ -178,15 +220,19 @@ export default function AICopilot() {
           >
             <div className="flex items-center gap-2 text-sm font-medium">
               <a.icon className="w-4 h-4 text-primary shrink-0" />
-              {a.label}
+              {t(a.label)}
             </div>
-            <p className="text-xs text-muted-foreground mt-1">{a.hint}</p>
+            <p className="text-xs text-muted-foreground mt-1">{t(a.hint)}</p>
           </button>
         ))}
       </div>
 
       {/* Conversation */}
-      <Card className="flex-1 flex flex-col min-h-0">
+      <Card className="flex-1 flex flex-col min-h-0 min-w-0">
+        <div className="border-b px-4 py-2 text-xs text-muted-foreground">
+          {t("Asking about: {name}", { name: scopeName })}
+          {scope !== "all" && <span className="ml-1">{t("(and the assets beneath it)")}</span>}
+        </div>
         <div ref={scrollRef} className="flex-1 min-h-0 overflow-y-auto">
           <div className="p-4 space-y-4">
             {messages.length === 0 && (
@@ -266,31 +312,6 @@ export default function AICopilot() {
 
         {/* Input */}
         <div className="border-t p-3">
-          <div className="flex flex-wrap items-end gap-2 mb-2">
-            <div className="space-y-1">
-              <Label htmlFor="ai-range-from" className="text-[11px] text-muted-foreground">From</Label>
-              <Input
-                id="ai-range-from"
-                type="datetime-local"
-                value={rangeFrom}
-                onChange={(e) => setRangeFrom(e.target.value)}
-                disabled={loading}
-                className="h-8 w-48 text-xs"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="ai-range-to" className="text-[11px] text-muted-foreground">To</Label>
-              <Input
-                id="ai-range-to"
-                type="datetime-local"
-                value={rangeTo}
-                onChange={(e) => setRangeTo(e.target.value)}
-                disabled={loading}
-                className="h-8 w-48 text-xs"
-              />
-            </div>
-            {rangeError && <p className="text-[11px] text-destructive pb-2">{rangeError}</p>}
-          </div>
           <div className="flex gap-2 items-end">
             <Textarea
               ref={inputRef}
@@ -318,6 +339,8 @@ export default function AICopilot() {
           </p>
         </div>
       </Card>
+      </div>
+      </div>
     </div>
   );
 }

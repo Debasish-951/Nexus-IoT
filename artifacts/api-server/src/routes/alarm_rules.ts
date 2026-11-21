@@ -12,6 +12,8 @@ import { correlationIdOf } from "../lib/errors";
 import { closeOpenAlarmsForRule } from "../lib/alarm-lifecycle";
 import { forgetRuleDelays, invalidateAlarmRuleCache } from "./ingest";
 import { hasPermission } from "../lib/rbac";
+import { logActivity } from "./activity_log";
+import { diffFields } from "../lib/audit-core";
 
 const router: IRouter = Router();
 
@@ -90,6 +92,9 @@ router.post("/alarm-rules", async (req, res): Promise<void> => {
     webhookEnabled: typeof body.webhookEnabled === "boolean" ? body.webhookEnabled : false,
   }).returning();
   invalidateAlarmRuleCache();
+  await logActivity("alarm_rule.created", "alarm_rules", rule!.id, rule!.name,
+    `${rule!.severity} ${rule!.alarmType}${rule!.metric ? ` on ${rule!.metric}` : ""}${rule!.operator ? ` ${rule!.operator} ${rule!.threshold}` : ""}`, req,
+    { assetId: rule!.assetId ?? null, changes: diffFields({}, rule as unknown as Record<string, unknown>, { ignore: ["id"] }) });
   res.status(201).json(forClient(req, rule));
 });
 
@@ -152,6 +157,8 @@ router.put("/alarm-rules/:id", async (req, res): Promise<void> => {
     await closeOpenAlarmsForRule(rule.id, rule.name);
     forgetRuleDelays(rule.id);
   }
+  await logActivity("alarm_rule.updated", "alarm_rules", rule.id, rule.name, null, req,
+    { assetId: rule.assetId ?? null, changes: diffFields(before as unknown as Record<string, unknown>, rule as unknown as Record<string, unknown>, { only: Object.keys(updateData) }) });
   res.json(forClient(req, rule));
 });
 
@@ -176,10 +183,12 @@ router.post("/alarm-rules/:id/test-webhook", async (req, res): Promise<void> => 
         metric: rule.metric, timestamp: new Date().toISOString(), source: "iot-platform" }),
       signal: AbortSignal.timeout(5000),
     });
+    await logActivity("alarm_rule.webhook_tested", "alarm_rules", rule.id, rule.name, `test event answered ${resp.status}`, req, { assetId: rule.assetId ?? null, outcome: resp.ok ? "success" : "failure" });
     res.json({ success: resp.ok, statusCode: resp.status });
   } catch (err) {
     // Same as destinations: the connection error names the target host.
     logger.warn({ ruleId: id, err }, "alarm webhook test failed");
+    await logActivity("alarm_rule.webhook_tested", "alarm_rules", rule.id, rule.name, "the webhook could not be reached", req, { assetId: rule.assetId ?? null, outcome: "failure" });
     res.status(502).json({
       success: false,
       error: "The webhook could not be reached.",
@@ -197,6 +206,7 @@ router.delete("/alarm-rules/:id", async (req, res): Promise<void> => {
   // Open alarms of a deleted rule would otherwise stay open for ever.
   await closeOpenAlarmsForRule(rule.id, rule.name);
   forgetRuleDelays(rule.id);
+  await logActivity("alarm_rule.deleted", "alarm_rules", rule.id, rule.name, `${rule.severity} ${rule.alarmType}${rule.metric ? ` on ${rule.metric}` : ""}`, req, { assetId: rule.assetId ?? null });
   res.sendStatus(204);
 });
 

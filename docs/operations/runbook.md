@@ -103,7 +103,7 @@ Run only one copy of the API.
 | Service restarts | `journalctl -u nexus-api \| grep -i "started\|stopped"` | No unexpected restarts |
 | Errors | `journalctl -u nexus-api -p err --since today` | Empty or explained |
 | Data flowing | Integration Hub → API Client / Broker: request counts and "last used" | Increasing |
-| Storage | System → Data Management (or `GET /api/system/storage`, signed in) | Table sizes and largest assets |
+| Storage | Governance → Data Management (or `GET /api/system/storage`, signed in) | Table sizes and largest assets |
 | Security events | Governance → Security Center | No unexplained denials or lockouts |
 | Journal size | `journalctl --disk-usage` | Within the journald limit set in the checklist |
 
@@ -112,7 +112,7 @@ Run only one copy of the API.
 ## Incident response
 
 ### High telemetry volume (storage concern)
-1. Open System → Data Management and find the asset producing the most rows.
+1. Open Governance → Data Management and find the asset producing the most rows.
 2. Add a retention policy there (most specific policy wins: asset+metric over asset,
    asset over metric, metric over global).
 3. Run pruning now with the button on that page (`POST /api/system/retention/run`).
@@ -172,7 +172,7 @@ back without a database restore.
 | Task | Frequency | Method |
 |------|-----------|--------|
 | Telemetry and operational-table pruning | Hourly (automatic) | `setInterval` in the API process; also prunes expired sessions and old security events |
-| Manual prune | On demand | System → Data Management, or `POST /api/system/retention/run` |
+| Manual prune | On demand | Governance → Data Management, or `POST /api/system/retention/run` |
 | Broker reconnect | On disconnect (automatic) | Built-in reconnect of the `mqtt` package |
 | Database and uploads backup | Nightly | [backup-restore.md](backup-restore.md) |
 | `SECRETS_ENC_KEY` rotation | Quarterly, and on suspected exposure | Steps in `.env.example` (`rotate-secrets` script) |

@@ -45,7 +45,7 @@ export function SettingsTab() {
   const { toast } = useToast();
   const qc = useQueryClient();
   const { canAction } = useCurrentUser();
-  const canManage = canAction("manage_assets", "reports");
+  const canManage = canAction("manage_assets", "data_management");
   const q = useQuery({ queryKey: ["system/data-settings"], queryFn: () => getJson<DataSettings>("/api/system/data-settings"), retry: 1 });
   const [d, setD] = useState<DataSettings | null>(null);
   const [webhook, setWebhook] = useState("");

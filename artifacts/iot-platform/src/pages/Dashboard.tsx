@@ -20,7 +20,7 @@ const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 const PAGES: { label: string; path: string }[] = [
   { label: "Dashboard", path: "/" }, { label: "Assets", path: "/assets" },
   { label: "Asset Templates", path: "/asset-templates" }, { label: "Media Library", path: "/media-library" },
-  { label: "Live Feed", path: "/live" }, { label: "Data Insights", path: "/data-explorer" },
+  { label: "Live Feed", path: "/live" }, { label: "Data Studio", path: "/data-explorer" },
   { label: "Visualization", path: "/visualization" }, { label: "Analytics & KPI", path: "/analytics-kpi" },
   { label: "Alarms", path: "/alarms" }, { label: "Alarm History", path: "/alarm-history" },
   { label: "Alarm Rules", path: "/alarm-rules" }, { label: "Brokers", path: "/brokers" },

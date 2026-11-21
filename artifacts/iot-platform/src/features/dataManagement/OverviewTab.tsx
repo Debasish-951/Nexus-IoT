@@ -40,7 +40,7 @@ export function OverviewTab({ stats, onAddPolicy }: { stats: { data?: Storage; i
   const { toast } = useToast();
   const qc = useQueryClient();
   const { canAction } = useCurrentUser();
-  const canManage = canAction("manage_assets", "reports");
+  const canManage = canAction("manage_assets", "data_management");
   const assets = useAssetPaths();
   const [assetFilter, setAssetFilter] = useState("");
   const [showAll, setShowAll] = useState(false);
@@ -110,7 +110,7 @@ export function OverviewTab({ stats, onAddPolicy }: { stats: { data?: Storage; i
               Add a policy to delete raw readings after a set time; summaries keep the long-term trend.
             </p>
           </div>
-          <RoleGuard permission="manage_assets" module="reports">
+          <RoleGuard permission="manage_assets" module="data_management">
             <Button size="sm" className="h-7 text-xs gap-1" onClick={onAddPolicy}><Plus className="w-3.5 h-3.5" /> Add policy</Button>
           </RoleGuard>
         </div>

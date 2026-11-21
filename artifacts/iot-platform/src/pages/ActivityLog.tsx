@@ -1,349 +1,407 @@
-import { useState, useCallback } from "react";
-import { Activity, ChevronLeft, ChevronRight, RefreshCw, Wifi } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Skeleton } from "@/components/ui/skeleton";
+import { useEffect, useMemo, useState } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { format, formatDistanceToNow } from "date-fns";
-import { useQuery } from "@tanstack/react-query";
-import { cn } from "@/lib/utils";
+import {
+  Activity, ChevronLeft, ChevronRight, Download, FileText, RefreshCw, Search, Settings2, ShieldCheck, ShieldAlert, Users, AlertTriangle, XCircle, X,
+} from "lucide-react";
+import { Bar, BarChart, ResponsiveContainer, Tooltip, XAxis } from "recharts";
+import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
+import { Skeleton } from "@/components/ui/skeleton";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { AssetScopePicker } from "@/components/AssetScopePicker";
 import { useWsEvents } from "@/hooks/useWsEvents";
+import { useCurrentUser } from "@/contexts/UserContext";
+import { apiFetch } from "@/lib/auth-api";
+import { FEATURES } from "@/lib/features";
+import { cn } from "@/lib/utils";
+import { useT } from "@/i18n";
+import ActivityLogClassic from "./ActivityLogClassic";
+import {
+  BASE, CATEGORY_LABELS, OUTCOME_COLORS, CategoryBadge, AuditDetailSheet, auditQuery, fetchAudit,
+  type AuditEntry, type AuditFilterState,
+} from "@/features/auditLog/shared";
+import { downloadAuditPdf } from "@/features/auditLog/exportPdf";
 
-interface ActivityLogEntry {
-  id: string;
-  action: string;
-  category: string;
-  actorName: string;
-  actorRole: string;
-  actorUsername: string | null;
-  targetId: string | null;
-  targetName: string | null;
-  detail: string | null;
-  timestamp: string;
+const PAGE_SIZE = 50;
+
+interface Summary {
+  perDay: { day: string; count: number }[];
+  topActors: { name: string; count: number }[];
+  sensitive: { count: number; byRule: Record<string, number>; recent: { action: string; actorName: string; targetName: string | null; timestamp: string; rule: string }[] };
+  failures: { audit: number; security: number };
 }
-
-interface ActivityLogResponse {
-  entries: ActivityLogEntry[];
-  total: number;
-}
-
-const CATEGORY_LABELS: Record<string, string> = {
-  alarm:       "Alarm",
-  asset:       "Asset",
-  user:        "User",
-  broker:      "Broker",
-  api_client:  "API Client",
-  destination: "Destination",
-  system:      "System",
-};
-
-const CATEGORY_COLORS: Record<string, string> = {
-  alarm:       "bg-red-100 text-red-700 border-red-200",
-  asset:       "bg-blue-100 text-blue-700 border-blue-200",
-  user:        "bg-purple-100 text-purple-700 border-purple-200",
-  broker:      "bg-orange-100 text-orange-700 border-orange-200",
-  api_client:  "bg-cyan-100 text-cyan-700 border-cyan-200",
-  destination: "bg-teal-100 text-teal-700 border-teal-200",
-  system:      "bg-gray-100 text-gray-600 border-gray-200",
-};
-
-const ACTION_LABELS: Record<string, string> = {
-  "alarm.acknowledged":   "Alarm acknowledged",
-  "asset.created":        "Asset created",
-  "asset.deleted":        "Asset deleted",
-  "user.created":         "User created",
-  "user.deleted":         "User deleted",
-  "broker.created":       "Broker created",
-  "broker.deleted":       "Broker deleted",
-  "api_client.created":   "API client created",
-  "api_client.deleted":   "API client deleted",
-  "destination.created":  "Destination created",
-  "destination.deleted":  "Destination deleted",
-};
-
-const ACTION_ICON_COLORS: Record<string, string> = {
-  created:      "text-green-600",
-  acknowledged: "text-blue-600",
-  deleted:      "text-red-500",
-};
-
-const ROLE_COLORS: Record<string, string> = {
-  admin:    "bg-purple-100 text-purple-700",
-  engineer: "bg-blue-100 text-blue-700",
-  operator: "bg-green-100 text-green-700",
-  viewer:   "bg-gray-100 text-gray-600",
-  system:   "bg-gray-100 text-gray-500",
-};
-
-const PAGE_SIZE = 25;
-
-function actionVerb(action: string): string {
-  if (action.endsWith(".deleted")) return "deleted";
-  if (action.endsWith(".acknowledged")) return "acknowledged";
-  return "created";
-}
-
-function EntryRow({ entry, isNew }: { entry: ActivityLogEntry; isNew?: boolean }) {
-  const verb = actionVerb(entry.action);
-  const iconColor = ACTION_ICON_COLORS[verb] ?? "text-gray-500";
-
-  return (
-    <tr className={cn(
-      "border-b transition-colors",
-      isNew ? "bg-primary/5 animate-pulse-once" : "hover:bg-muted/30",
-    )}>
-      <td className="px-4 py-3 text-muted-foreground whitespace-nowrap">
-        <div title={format(new Date(entry.timestamp), "PPpp")} className="flex flex-col gap-0.5">
-          <span className="text-xs font-medium text-foreground">
-            {format(new Date(entry.timestamp), "MMM d, HH:mm:ss")}
-          </span>
-          <span className="text-xs">
-            {formatDistanceToNow(new Date(entry.timestamp), { addSuffix: true })}
-          </span>
-        </div>
-      </td>
-      <td className="px-4 py-3">
-        <span className={cn(
-          "inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium border",
-          CATEGORY_COLORS[entry.category] ?? CATEGORY_COLORS.system,
-        )}>
-          {CATEGORY_LABELS[entry.category] ?? entry.category}
-        </span>
-      </td>
-      <td className="px-4 py-3">
-        <span className={cn("font-medium", iconColor)}>
-          {ACTION_LABELS[entry.action] ?? entry.action}
-        </span>
-      </td>
-      <td className="px-4 py-3">
-        {entry.targetName ? (
-          <span className="font-mono text-xs bg-muted px-1.5 py-0.5 rounded">
-            {entry.targetName}
-          </span>
-        ) : (
-          <span className="text-muted-foreground text-xs">—</span>
-        )}
-      </td>
-      <td className="px-4 py-3">
-        <div className="flex items-center gap-2">
-          <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center text-primary font-semibold text-xs">
-            {entry.actorName.charAt(0).toUpperCase()}
-          </div>
-          <div className="flex flex-col gap-0.5">
-            <span className="text-xs font-medium">{entry.actorName}</span>
-            <span className={cn(
-              "inline-flex items-center px-1.5 py-px rounded text-[10px] font-medium",
-              ROLE_COLORS[entry.actorRole] ?? ROLE_COLORS.system,
-            )}>
-              {entry.actorRole}
-            </span>
-          </div>
-        </div>
-      </td>
-      <td className="px-4 py-3 text-xs text-muted-foreground font-mono">
-        {entry.detail ?? "—"}
-      </td>
-    </tr>
-  );
+interface VerifyResult { ok: boolean; checked: number; verifiedAt: string; broken: { id: string; seq: number; timestamp: string; reason: string } | null; checkpoint: { seq: number; prunedAt: string; pruned: number } | null }
+interface AuditSettingsView {
+  retentionDays: number | null; effectiveRetentionDays: number; defaultRetentionDays: number; minimumRetentionDays: number;
+  alerts: { key: string; title: string; severity: string; enabled: boolean }[];
+  checkpoint: { seq: number; prunedAt: string; pruned: number } | null;
 }
 
 export default function ActivityLog() {
+  if (FEATURES.classicAuditLog) return <ActivityLogClassic />;
+  return <AuditLogPage />;
+}
+
+function AuditLogPage() {
+  const t = useT();
+  const qc = useQueryClient();
+  const { can, canModule, session } = useCurrentUser();
+  const isSecurityAdmin = can("manage_security") && canModule("security");
+  const restricted = !!session?.restrictProjects;
+
+  const [draft, setDraft] = useState<AuditFilterState>({ category: "all", outcome: "all" });
+  const [filters, setFilters] = useState<AuditFilterState>({ category: "all", outcome: "all" });
+  const [scope, setScope] = useState("all");
   const [page, setPage] = useState(0);
-  const [category, setCategory] = useState("all");
-  const [search, setSearch] = useState("");
-  const [liveEntries, setLiveEntries] = useState<ActivityLogEntry[]>([]);
-  const [liveCount, setLiveCount] = useState(0);
+  const [detail, setDetail] = useState<AuditEntry | null>(null);
+  const [exporting, setExporting] = useState<"csv" | "pdf" | null>(null);
+  const [verify, setVerify] = useState<VerifyResult | null>(null);
+  const [verifying, setVerifying] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
 
-  const params = new URLSearchParams();
-  if (category && category !== "all") params.set("category", category);
-  params.set("limit", String(PAGE_SIZE));
-  params.set("offset", String(page * PAGE_SIZE));
+  const effective: AuditFilterState = useMemo(() => ({ ...filters, assetId: scope === "all" ? undefined : scope }), [filters, scope]);
 
-  const { data, isLoading, refetch, isFetching } = useQuery<ActivityLogResponse>({
-    queryKey: ["activity-log", category, page],
+  const listQ = useQuery({
+    queryKey: ["audit-log", effective, page],
+    queryFn: () => fetchAudit(effective, PAGE_SIZE, page * PAGE_SIZE),
+    placeholderData: (prev) => prev,
+  });
+  const summaryQ = useQuery({
+    queryKey: ["audit-summary"],
     queryFn: async () => {
-      const res = await fetch(`/api/activity-log?${params.toString()}`);
-      if (!res.ok) throw new Error("Failed to fetch activity log");
-      const result = await res.json();
-      setLiveEntries([]);
-      setLiveCount(0);
-      return result;
+      const r = await apiFetch(`${BASE}/api/activity-log/summary?timeZone=${encodeURIComponent(Intl.DateTimeFormat().resolvedOptions().timeZone)}`);
+      if (!r.ok) throw new Error(String(r.status));
+      return (await r.json()) as Summary;
     },
-    refetchInterval: 60_000,
+    refetchInterval: 120_000,
   });
 
-  const handleActivityLog = useCallback((raw: unknown) => {
-    const entry = raw as ActivityLogEntry;
-    const matchesCategory = category === "all" || entry.category === category;
-    if (page === 0 && matchesCategory) {
-      setLiveEntries((prev) => {
-        if (prev.some((e) => e.id === entry.id)) return prev;
-        return [entry, ...prev];
-      });
-      setLiveCount((c) => c + 1);
-    }
-  }, [page, category]);
+  // New entries arrive over the WebSocket: refresh the first page and the summary.
+  useWsEvents({ activity_log: () => { if (page === 0) void qc.invalidateQueries({ queryKey: ["audit-log"] }); void qc.invalidateQueries({ queryKey: ["audit-summary"] }); } });
 
-  const wsStatus = useWsEvents({ activity_log: handleActivityLog });
+  const apply = () => { setFilters(draft); setPage(0); };
+  const clear = () => { const empty = { category: "all", outcome: "all" }; setDraft(empty); setFilters(empty); setScope("all"); setPage(0); };
+  useEffect(() => { setPage(0); }, [scope]);
 
-  const entries = data?.entries ?? [];
-  const total = (data?.total ?? 0) + liveCount;
-  const totalPages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const total = listQ.data?.total ?? 0;
+  const pages = Math.max(1, Math.ceil(total / PAGE_SIZE));
+  const entries = listQ.data?.entries ?? [];
 
-  const seenIds = new Set(liveEntries.map((e) => e.id));
-  const combined = page === 0
-    ? [...liveEntries, ...entries.filter((e) => !seenIds.has(e.id))]
-    : entries;
+  const filtersText = Object.entries(effective).filter(([, v]) => v && v !== "all").map(([k, v]) => `${k}=${String(v)}`).join(", ");
 
-  const filtered = search.trim()
-    ? combined.filter((e) =>
-        e.actorName.toLowerCase().includes(search.toLowerCase()) ||
-        (e.targetName ?? "").toLowerCase().includes(search.toLowerCase()) ||
-        (ACTION_LABELS[e.action] ?? e.action).toLowerCase().includes(search.toLowerCase()),
-      )
-    : combined;
+  async function exportCsv() {
+    setExporting("csv");
+    try {
+      const r = await apiFetch(`${BASE}/api/activity-log/export?${auditQuery(effective)}`);
+      if (!r.ok) throw new Error(String(r.status));
+      const blob = await r.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob); a.download = `audit-log-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
+      setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    } finally { setExporting(null); }
+  }
+
+  async function exportPdf() {
+    setExporting("pdf");
+    try {
+      const all: AuditEntry[] = [];
+      for (let off = 0; off < 2000; off += 500) {
+        const p = await fetchAudit(effective, 500, off);
+        all.push(...p.entries);
+        if (p.entries.length < 500) break;
+      }
+      await downloadAuditPdf(all, filtersText, total);
+    } finally { setExporting(null); }
+  }
+
+  async function runVerify() {
+    setVerifying(true);
+    try {
+      const r = await apiFetch(`${BASE}/api/activity-log/verify`);
+      if (r.ok) setVerify((await r.json()) as VerifyResult);
+    } finally { setVerifying(false); }
+  }
+
+  const s = summaryQ.data;
 
   return (
-    <div className="p-6 space-y-4">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-xl font-semibold flex items-center gap-2">
-            <Activity className="w-5 h-5 text-primary" />
-            Audit Log
-          </h1>
-          <p className="text-sm text-muted-foreground">
-            Audit trail of platform actions — {total.toLocaleString()} event{total !== 1 ? "s" : ""}
-          </p>
+    <div className="p-4 md:p-6 space-y-4">
+      <div className="flex items-start justify-between gap-3 flex-wrap">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-lg bg-primary/10 text-primary"><Activity className="w-5 h-5" /></div>
+          <div>
+            <h1 className="text-xl font-semibold">{t("Audit Log")}</h1>
+            <p className="text-sm text-muted-foreground">{t("Every change made in the application: who, what, when, from where, and what changed.")}</p>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <span className={cn(
-            "inline-flex items-center gap-1.5 text-xs font-medium px-2.5 py-1 rounded-full border",
-            wsStatus === "connected"
-              ? "bg-green-50 text-green-700 border-green-200"
-              : wsStatus === "reconnecting"
-              ? "bg-yellow-50 text-yellow-700 border-yellow-200"
-              : "bg-muted text-muted-foreground border-border",
-          )}>
-            <span className={cn(
-              "w-1.5 h-1.5 rounded-full",
-              wsStatus === "connected" ? "bg-green-500 animate-pulse" :
-              wsStatus === "reconnecting" ? "bg-yellow-500" : "bg-gray-400",
-            )} />
-            {wsStatus === "connected" ? "Live" : wsStatus === "reconnecting" ? "Reconnecting…" : "Connecting…"}
-          </span>
-          <Button variant="outline" size="sm" onClick={() => refetch()} disabled={isFetching}>
-            <RefreshCw className={cn("w-4 h-4 mr-2", isFetching && "animate-spin")} />
-            Refresh
+        <div className="flex items-center gap-2 flex-wrap">
+          {isSecurityAdmin && (
+            <Button size="sm" variant="outline" className="gap-1.5" onClick={() => void runVerify()} disabled={verifying}>
+              <ShieldCheck className="w-4 h-4" />{verifying ? t("Checking…") : t("Verify integrity")}
+            </Button>
+          )}
+          {isSecurityAdmin && (
+            <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setSettingsOpen(true)}>
+              <Settings2 className="w-4 h-4" />{t("Settings")}
+            </Button>
+          )}
+          <Button size="sm" variant="outline" className="gap-1.5" onClick={() => void exportCsv()} disabled={!!exporting}>
+            <Download className="w-4 h-4" />{exporting === "csv" ? t("Exporting…") : "CSV"}
+          </Button>
+          <Button size="sm" variant="outline" className="gap-1.5" onClick={() => void exportPdf()} disabled={!!exporting}>
+            <FileText className="w-4 h-4" />{exporting === "pdf" ? t("Exporting…") : "PDF"}
           </Button>
         </div>
       </div>
 
-      {/* Filters */}
-      <div className="flex gap-3 flex-wrap">
-        <div className="relative flex-1 min-w-[200px]">
-          <Input
-            placeholder="Search by actor, target or action…"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            className="h-9"
-          />
-        </div>
-        <Select
-          value={category}
-          onValueChange={(v) => { setCategory(v); setPage(0); setLiveEntries([]); setLiveCount(0); }}
-        >
-          <SelectTrigger className="w-44 h-9">
-            <SelectValue placeholder="All Categories" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All Categories</SelectItem>
-            {Object.entries(CATEGORY_LABELS).map(([key, label]) => (
-              <SelectItem key={key} value={key}>{label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </div>
-
-      {/* New live events banner */}
-      {liveCount > 0 && page !== 0 && (
-        <div className="text-xs text-primary font-medium flex items-center gap-2 cursor-pointer" onClick={() => setPage(0)}>
-          <Wifi className="w-3.5 h-3.5" />
-          {liveCount} new event{liveCount !== 1 ? "s" : ""} received — click to go to page 1
+      {verify && (
+        <div className={cn("rounded-lg border px-4 py-3 text-sm flex items-start gap-2", verify.ok ? "border-emerald-500/40 bg-emerald-500/5" : "border-red-500/50 bg-red-500/5")}>
+          {verify.ok ? <ShieldCheck className="w-4 h-4 mt-0.5 text-emerald-600" /> : <ShieldAlert className="w-4 h-4 mt-0.5 text-red-600" />}
+          <div className="flex-1">
+            {verify.ok
+              ? <p>{t("Integrity verified: all {n} entries are unchanged and none is missing.", { n: verify.checked.toLocaleString() })}</p>
+              : <p className="text-red-600 font-medium">{t("Integrity check failed at entry #{seq} ({reason}). An entry was changed or removed outside the application.", { seq: verify.broken?.seq ?? "?", reason: verify.broken?.reason ?? "" })}</p>}
+            {verify.checkpoint && <p className="text-xs text-muted-foreground">{t("Older entries were removed by retention on {date} ({n} entries); the check starts from that point.", { date: format(new Date(verify.checkpoint.prunedAt), "PP"), n: verify.checkpoint.pruned })}</p>}
+          </div>
+          <button onClick={() => setVerify(null)} className="text-muted-foreground hover:text-foreground"><X className="w-4 h-4" /></button>
         </div>
       )}
 
-      {/* Table */}
-      <div className="rounded-md border bg-card overflow-hidden">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="border-b bg-muted/40">
-              <th className="text-left px-4 py-3 font-medium text-muted-foreground w-[180px]">Time</th>
-              <th className="text-left px-4 py-3 font-medium text-muted-foreground w-[120px]">Category</th>
-              <th className="text-left px-4 py-3 font-medium text-muted-foreground">Action</th>
-              <th className="text-left px-4 py-3 font-medium text-muted-foreground">Target</th>
-              <th className="text-left px-4 py-3 font-medium text-muted-foreground">Actor</th>
-              <th className="text-left px-4 py-3 font-medium text-muted-foreground w-[160px]">Detail</th>
-            </tr>
-          </thead>
-          <tbody>
-            {isLoading
-              ? Array.from({ length: 8 }).map((_, i) => (
-                  <tr key={i} className="border-b">
-                    {Array.from({ length: 6 }).map((_, j) => (
-                      <td key={j} className="px-4 py-3"><Skeleton className="h-4 w-full" /></td>
-                    ))}
-                  </tr>
-                ))
-              : filtered.length === 0
-              ? (
-                  <tr>
-                    <td colSpan={6} className="px-4 py-12 text-center text-muted-foreground">
-                      {total === 0
-                        ? "No activity recorded yet. Actions like alarm acknowledgements, asset changes, and user management will appear here."
-                        : "No results match your filter."}
-                    </td>
-                  </tr>
-                )
-              : filtered.map((entry) => (
-                  <EntryRow
-                    key={entry.id}
-                    entry={entry}
-                    isNew={liveEntries.some((e) => e.id === entry.id)}
-                  />
-                ))}
-          </tbody>
-        </table>
+      {/* Summary */}
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
+        <Card className="p-3">
+          <p className="text-xs text-muted-foreground">{t("Changes per day (7 days)")}</p>
+          {s ? (
+            <>
+              <p className="text-2xl font-semibold">{s.perDay.reduce((a, d) => a + d.count, 0).toLocaleString()}</p>
+              <div className="h-12 -mx-1">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart data={s.perDay}><XAxis dataKey="day" hide /><Tooltip formatter={(v) => [v, t("Entries")]} labelFormatter={(l) => String(l)} /><Bar dataKey="count" fill="hsl(var(--primary))" radius={[2, 2, 0, 0]} maxBarSize={18} /></BarChart>
+                </ResponsiveContainer>
+              </div>
+            </>
+          ) : <Skeleton className="h-16 mt-1" />}
+        </Card>
+        <Card className="p-3">
+          <p className="text-xs text-muted-foreground flex items-center gap-1"><Users className="w-3.5 h-3.5" />{t("Most active users (7 days)")}</p>
+          {s ? (s.topActors.length ? (
+            <ul className="mt-1 space-y-0.5 text-sm">{s.topActors.slice(0, 4).map((a) => (
+              <li key={a.name} className="flex justify-between gap-2"><button className="truncate hover:underline text-left" onClick={() => { const f = { ...draft, actor: a.name }; setDraft(f); setFilters(f); setPage(0); }}>{a.name}</button><span className="text-muted-foreground tabular-nums">{a.count}</span></li>
+            ))}</ul>
+          ) : <p className="text-sm text-muted-foreground mt-1">{t("No user activity this week.")}</p>) : <Skeleton className="h-16 mt-1" />}
+        </Card>
+        <Card className="p-3">
+          <p className="text-xs text-muted-foreground flex items-center gap-1"><AlertTriangle className="w-3.5 h-3.5" />{t("Sensitive actions this week")}</p>
+          {s ? (
+            <>
+              <p className={cn("text-2xl font-semibold", s.sensitive.count > 0 && "text-amber-600")}>{s.sensitive.count}</p>
+              {s.sensitive.recent[0] && <p className="text-xs text-muted-foreground truncate">{t("Latest")}: {s.sensitive.recent[0].action} · {s.sensitive.recent[0].actorName} · {formatDistanceToNow(new Date(s.sensitive.recent[0].timestamp), { addSuffix: true })}</p>}
+            </>
+          ) : <Skeleton className="h-16 mt-1" />}
+        </Card>
+        <Card className="p-3">
+          <p className="text-xs text-muted-foreground flex items-center gap-1"><XCircle className="w-3.5 h-3.5" />{t("Failed or denied this week")}</p>
+          {s ? (
+            <>
+              <p className={cn("text-2xl font-semibold", s.failures.audit + s.failures.security > 0 && "text-red-600")}>{(s.failures.audit + s.failures.security).toLocaleString()}</p>
+              <p className="text-xs text-muted-foreground">{t("{a} actions · {b} sign-in and access events", { a: s.failures.audit, b: s.failures.security })}</p>
+            </>
+          ) : <Skeleton className="h-16 mt-1" />}
+        </Card>
       </div>
 
-      {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex items-center justify-between text-sm text-muted-foreground">
-          <span>
-            Showing {page * PAGE_SIZE + 1}–{Math.min((page + 1) * PAGE_SIZE, total)} of {total.toLocaleString()} events
-          </span>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setPage((p) => Math.max(0, p - 1))}
-              disabled={page === 0}
-            >
-              <ChevronLeft className="w-4 h-4" />
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-              disabled={page >= totalPages - 1}
-            >
-              Next
-              <ChevronRight className="w-4 h-4" />
-            </Button>
+      {/* Filters */}
+      <Card className="p-3 space-y-3">
+        <div className="grid gap-3 grid-cols-1 md:grid-cols-2 xl:grid-cols-4">
+          <div className="space-y-1 xl:col-span-2">
+            <Label className="text-xs">{t("Search")}</Label>
+            <div className="relative">
+              <Search className="w-3.5 h-3.5 absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
+              <Input className="pl-8 h-9" placeholder={t("Action, item, detail or person…")} value={draft.q ?? ""} onChange={(e) => setDraft({ ...draft, q: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") apply(); }} />
+            </div>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">{t("From")}</Label>
+            <Input type="datetime-local" className="h-9" value={draft.from ?? ""} onChange={(e) => setDraft({ ...draft, from: e.target.value })} />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">{t("To")}</Label>
+            <Input type="datetime-local" className="h-9" value={draft.to ?? ""} onChange={(e) => setDraft({ ...draft, to: e.target.value })} />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">{t("User")}</Label>
+            <Input className="h-9" placeholder={t("Name or username")} value={draft.actor ?? ""} onChange={(e) => setDraft({ ...draft, actor: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") apply(); }} />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">{t("Action")}</Label>
+            <Input className="h-9" placeholder="user.updated, alarm_rule." value={draft.action ?? ""} onChange={(e) => setDraft({ ...draft, action: e.target.value })} onKeyDown={(e) => { if (e.key === "Enter") apply(); }} />
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">{t("Category")}</Label>
+            <Select value={draft.category ?? "all"} onValueChange={(v) => setDraft({ ...draft, category: v })}>
+              <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t("All categories")}</SelectItem>
+                {Object.entries(CATEGORY_LABELS).map(([k, v]) => <SelectItem key={k} value={k}>{t(v)}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">{t("Result")}</Label>
+            <Select value={draft.outcome ?? "all"} onValueChange={(v) => setDraft({ ...draft, outcome: v })}>
+              <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t("All results")}</SelectItem>
+                <SelectItem value="success">{t("success")}</SelectItem>
+                <SelectItem value="failure">{t("failure")}</SelectItem>
+                <SelectItem value="denied">{t("denied")}</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label className="text-xs">{t("Project or asset")}</Label>
+            <AssetScopePicker value={scope} onChange={setScope} allLabel={t("Everything")} className="h-9 w-full" />
           </div>
         </div>
-      )}
+        <div className="flex items-center justify-between gap-3 flex-wrap">
+          {!restricted ? (
+            <label className="flex items-center gap-2 text-sm cursor-pointer">
+              <Switch checked={!!draft.includeSecurity} onCheckedChange={(v) => { const f = { ...draft, includeSecurity: v }; setDraft(f); setFilters(f); setPage(0); }} />
+              {t("Include security events (sign-ins, refusals, rate limits)")}
+            </label>
+          ) : <span />}
+          <div className="flex gap-2">
+            <Button size="sm" variant="ghost" onClick={clear}>{t("Clear")}</Button>
+            <Button size="sm" onClick={apply} className="gap-1.5"><Search className="w-3.5 h-3.5" />{t("Apply")}</Button>
+          </div>
+        </div>
+      </Card>
+
+      {/* Entries */}
+      <Card className="overflow-hidden">
+        <div className="flex items-center justify-between px-4 py-2 border-b text-sm">
+          <span className="text-muted-foreground">{listQ.isFetching ? t("Loading…") : t("{n} entries", { n: total.toLocaleString() })}</span>
+          <Button size="sm" variant="ghost" className="gap-1.5" onClick={() => void listQ.refetch()}><RefreshCw className={cn("w-3.5 h-3.5", listQ.isFetching && "animate-spin")} />{t("Refresh")}</Button>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/40 text-left text-xs text-muted-foreground">
+              <tr>
+                <th className="px-4 py-2 font-medium">{t("Time")}</th>
+                <th className="px-4 py-2 font-medium">{t("Category")}</th>
+                <th className="px-4 py-2 font-medium">{t("Action")}</th>
+                <th className="px-4 py-2 font-medium">{t("Target")}</th>
+                <th className="px-4 py-2 font-medium">{t("By")}</th>
+                <th className="px-4 py-2 font-medium">{t("Result")}</th>
+                <th className="px-4 py-2 font-medium">{t("Detail")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {listQ.isLoading && Array.from({ length: 6 }).map((_, i) => <tr key={i}><td colSpan={7} className="px-4 py-2"><Skeleton className="h-6" /></td></tr>)}
+              {!listQ.isLoading && entries.length === 0 && <tr><td colSpan={7} className="px-4 py-10 text-center text-muted-foreground">{t("No entries match these filters.")}</td></tr>}
+              {entries.map((e) => (
+                <tr key={`${e.source}-${e.id}`} className={cn("border-t hover:bg-muted/30 cursor-pointer", e.source === "security" && "bg-amber-500/[0.03]")} onClick={() => setDetail(e)}>
+                  <td className="px-4 py-2 whitespace-nowrap" title={format(new Date(e.timestamp), "PPpp")}>
+                    <div className="text-xs font-medium">{format(new Date(e.timestamp), "MMM d, HH:mm:ss")}</div>
+                    <div className="text-[11px] text-muted-foreground">{formatDistanceToNow(new Date(e.timestamp), { addSuffix: true })}</div>
+                  </td>
+                  <td className="px-4 py-2"><CategoryBadge category={e.category} /></td>
+                  <td className="px-4 py-2 font-mono text-xs">{e.action}{e.source === "security" && <span className="ml-1 text-[10px] text-amber-600 font-sans">({t("security")})</span>}</td>
+                  <td className="px-4 py-2 text-xs max-w-[180px] truncate">{e.targetName ?? <span className="text-muted-foreground">—</span>}</td>
+                  <td className="px-4 py-2 text-xs"><div className="font-medium">{e.actorName}</div><div className="text-[11px] text-muted-foreground">{e.actorRole}{e.ip ? ` · ${e.ip}` : ""}</div></td>
+                  <td className={cn("px-4 py-2 text-xs font-medium", OUTCOME_COLORS[e.outcome])}>{t(e.outcome)}</td>
+                  <td className="px-4 py-2 text-xs text-muted-foreground max-w-[320px] truncate">
+                    {e.changes?.length ? e.changes.slice(0, 2).map((c) => `${c.field}: ${fmt(c.from)} → ${fmt(c.to)}`).join(" · ") + (e.changes.length > 2 ? ` +${e.changes.length - 2}` : "") : e.detail ?? "—"}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+        <div className="flex items-center justify-between px-4 py-2 border-t text-sm">
+          <span className="text-muted-foreground">{t("Page {p} of {n}", { p: page + 1, n: pages })}</span>
+          <div className="flex gap-1">
+            <Button size="icon" variant="outline" className="h-8 w-8" disabled={page === 0} onClick={() => setPage(page - 1)}><ChevronLeft className="w-4 h-4" /></Button>
+            <Button size="icon" variant="outline" className="h-8 w-8" disabled={page + 1 >= pages} onClick={() => setPage(page + 1)}><ChevronRight className="w-4 h-4" /></Button>
+          </div>
+        </div>
+      </Card>
+
+      <AuditDetailSheet entry={detail} onClose={() => setDetail(null)} />
+      {isSecurityAdmin && <AuditSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />}
     </div>
+  );
+}
+
+const fmt = (v: unknown) => (v === null || v === undefined || v === "" ? "—" : typeof v === "string" ? v : JSON.stringify(v));
+
+function AuditSettingsDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+  const t = useT();
+  const q = useQuery({
+    queryKey: ["audit-settings"],
+    queryFn: async () => { const r = await apiFetch(`${BASE}/api/activity-log/settings`); if (!r.ok) throw new Error(String(r.status)); return (await r.json()) as AuditSettingsView; },
+    enabled: open,
+  });
+  const [days, setDays] = useState("");
+  const [alerts, setAlerts] = useState<Record<string, boolean>>({});
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!q.data) return;
+    setDays(q.data.retentionDays == null ? "" : String(q.data.retentionDays));
+    setAlerts(Object.fromEntries(q.data.alerts.map((a) => [a.key, a.enabled])));
+  }, [q.data]);
+
+  async function save() {
+    setSaving(true); setError(null);
+    try {
+      const n = days.trim() === "" ? null : Number(days);
+      if (n != null && (!Number.isInteger(n) || n < 0)) { setError(t("Enter a whole number of days, 0 to keep for ever, or leave empty for the default.")); return; }
+      const r = await apiFetch(`${BASE}/api/activity-log/settings`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ retentionDays: n, alerts }) });
+      if (!r.ok) { setError(t("The settings could not be saved.")); return; }
+      await q.refetch();
+      onOpenChange(false);
+    } finally { setSaving(false); }
+  }
+
+  const d = q.data;
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg">
+        <DialogHeader>
+          <DialogTitle>{t("Audit log settings")}</DialogTitle>
+          <DialogDescription>{t("How long entries are kept, and which sensitive actions raise an alert in the notification bell.")}</DialogDescription>
+        </DialogHeader>
+        {!d ? <Skeleton className="h-40" /> : (
+          <div className="space-y-4">
+            <div className="space-y-1">
+              <Label>{t("Keep entries for (days)")}</Label>
+              <Input type="number" min={0} placeholder={t("Default: {n}", { n: d.defaultRetentionDays })} value={days} onChange={(e) => setDays(e.target.value)} />
+              <p className="text-xs text-muted-foreground">{t("At least {min} days; 0 keeps them for ever. Now kept: {cur}.", { min: d.minimumRetentionDays, cur: d.effectiveRetentionDays === 0 ? t("for ever") : `${d.effectiveRetentionDays}` })}</p>
+              {d.checkpoint && <p className="text-xs text-muted-foreground">{t("Last retention run removed entries up to #{seq} on {date}.", { seq: d.checkpoint.seq, date: format(new Date(d.checkpoint.prunedAt), "PP") })}</p>}
+            </div>
+            <div className="space-y-2">
+              <Label>{t("Alerts on sensitive actions")}</Label>
+              {d.alerts.map((a) => (
+                <label key={a.key} className="flex items-center justify-between gap-3 text-sm">
+                  <span>{t(a.title)} <span className={cn("text-[11px] ml-1", a.severity === "critical" ? "text-red-600" : a.severity === "high" ? "text-orange-600" : "text-yellow-600")}>{t(a.severity)}</span></span>
+                  <Switch checked={alerts[a.key] ?? true} onCheckedChange={(v) => setAlerts({ ...alerts, [a.key]: v })} />
+                </label>
+              ))}
+            </div>
+            {error && <p className="text-sm text-destructive">{error}</p>}
+          </div>
+        )}
+        <DialogFooter>
+          <Button variant="ghost" onClick={() => onOpenChange(false)}>{t("Cancel")}</Button>
+          <Button onClick={() => void save()} disabled={saving || !d}>{saving ? t("Saving…") : t("Save")}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

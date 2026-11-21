@@ -60,10 +60,26 @@ const AI_ADVISOR_CHILDREN: NavItem[] = [
 ];
 void AI_ADVISOR_CHILDREN;
 
+/**
+ * The earlier "System" group (before November 2026). Data Management now sits in
+ * Governance with its own module; Reports is behind VITE_CLASSIC_REPORTS. Put this group back
+ * into navItems (and remove those two entries) to restore the old menu.
+ */
+const SYSTEM_GROUP: NavItem = {
+  label: "System",
+  icon: Database,
+  module: "reports",
+  children: [
+    { label: "Data Management", href: "/data-management", icon: Database,      module: "data_management", plantWide: true },
+    { label: "Reports",         href: "/reports",         icon: ClipboardList, module: "reports" },
+  ],
+};
+void SYSTEM_GROUP;
+
 const navItems: NavItem[] = [
   { label: "Home", href: "/", icon: Home, module: "dashboard" },
   {
-    // No `href`: the header only toggles, like Data Insights. The /asset-management
+    // No `href`: the header only toggles, like Data Studio. The /asset-management
     // card page still exists; restoring the href here brings it back.
     label: "Asset Hub",
     icon: LayoutDashboard,
@@ -80,20 +96,34 @@ const navItems: NavItem[] = [
     // and Live Feed already show, so the group header only toggles — matching
     // every other pure grouping in this nav. The route still exists and is
     // still reachable directly; it is simply not advertised.
-    label: "Data Insights",
+    // Named "Data Insights" until November 2026 (owner renamed it Data Studio).
+    label: "Data Studio",
     icon: BarChart2,
     children: [
       { label: "Visualization",   href: "/visualization",       icon: LayoutDashboard, module: "visualization" },
       { label: "Asset Template",  href: "/dashboard-templates", icon: LayoutTemplate,  module: "visualization" },
       { label: "Live Feed",       href: "/live",                icon: Activity,        module: "live" },
+      // The classic report builder is replaced by AI Advisor -> AI Reports; it shows
+      // here again only when VITE_CLASSIC_REPORTS=true (the /reports route still works).
+      { label: "Reports",         href: "/reports",             icon: ClipboardList,   module: "reports", feature: "classicReports" },
     ],
   },
-  // Live Twin is its own section (moved out of Data Insights at the owner's request).
+  // Live Twin is its own section (moved out of Data Insights, now Data Studio, at the owner's request).
   { label: "Live Twin", href: "/live-twin", icon: Radio, module: "live_twin" },
-  // AI Advisor is one entry: its four modes are already cards at the top of the
-  // page, so the menu no longer repeats them (owner's request). The old sub-items
-  // are kept in AI_ADVISOR_CHILDREN below; put them back as `children` to restore.
-  { label: "AI Advisor", href: "/ai-copilot", icon: BrainCircuit, module: "ai_advisor", plantWide: true },
+  // AI Advisor: the Advisor page (its four modes are cards at the top of that page)
+  // and AI Reports, written for the reader's level. Before November 2026 this was a
+  // single entry ({ label: "AI Advisor", href: "/ai-copilot", ... }); the older
+  // per-mode sub-items are kept in AI_ADVISOR_CHILDREN.
+  {
+    label: "AI Advisor",
+    icon: BrainCircuit,
+    module: "ai_advisor",
+    plantWide: true,
+    children: [
+      { label: "Advisor",    href: "/ai-copilot", icon: MessageSquare, module: "ai_advisor", plantWide: true },
+      { label: "AI Reports", href: "/ai-reports", icon: FileText,      module: "ai_advisor", plantWide: true },
+    ],
+  },
   {
     label: "Event Manager",
     icon: Bell,
@@ -129,15 +159,8 @@ const navItems: NavItem[] = [
       { label: "User",                href: "/users",               icon: Users,  module: "users" },
       { label: "Security Center",     href: "/security",            icon: Shield, module: "security" },
       { label: "Notification Groups", href: "/notification-groups", icon: Users,  module: "alarms", feature: "notificationChannels" },
-    ],
-  },
-  {
-    label: "System",
-    icon: Database,
-    module: "reports",
-    children: [
-      { label: "Data Management", href: "/data-management", icon: Database,      module: "reports", plantWide: true },
-      { label: "Reports",         href: "/reports",         icon: ClipboardList, module: "reports" },
+      // Moved here from the former System group (November 2026); its own module since then.
+      { label: "Data Management",     href: "/data-management",     icon: Database, module: "data_management", plantWide: true },
     ],
   },
   { label: "Audit Log",         href: "/activity-log", icon: Activity, module: "activity_log" },

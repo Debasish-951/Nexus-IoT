@@ -92,7 +92,9 @@ for this company only.
       lookups need Alarms, for example), and each question is written to the Activity
       Log as "sent to Groq" with the lookups it made, not the question text. Questions
       are capped at 2,000 characters and 20 per user per 10 minutes (`AI_RL_MAX`,
-      `AI_RL_WINDOW_MINUTES`).
+      `AI_RL_WINDOW_MINUTES`). AI Reports sends asset names, metric names and computed
+      figures (no raw readings) and is logged as `ai.report`; without a key it still shows
+      the figures.
 - [ ] **Encrypt the server disk and backups.** The application does not encrypt telemetry
       in the database.
 - [ ] **Limit database access.** Allow connections only from this company's server.

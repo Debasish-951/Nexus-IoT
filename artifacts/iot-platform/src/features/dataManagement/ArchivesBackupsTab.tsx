@@ -21,7 +21,7 @@ export function ArchivesBackupsTab() {
   const { toast } = useToast();
   const qc = useQueryClient();
   const { canAction } = useCurrentUser();
-  const canManage = canAction("manage_assets", "reports");
+  const canManage = canAction("manage_assets", "data_management");
   const backups = useQuery({ queryKey: ["system/backups"], queryFn: () => getJson<Backups>("/api/system/backups"), refetchInterval: 5 * 60_000, retry: 1 });
   const archives = useQuery({ queryKey: ["system/archives"], queryFn: () => getJson<Archives>("/api/system/archives"), retry: 1 });
   const [restore, setRestore] = useState<ArchiveFile | null>(null);

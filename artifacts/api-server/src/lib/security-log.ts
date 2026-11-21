@@ -174,6 +174,11 @@ export async function pruneSecurityEvents(): Promise<number> {
   return removed;
 }
 
+type SecurityListener = (type: string, username: string | null) => void;
+const listeners: SecurityListener[] = [];
+/** Called after each stored event (the audit log uses it for repeated failed sign-ins). */
+export function onSecurityEvent(fn: SecurityListener): void { listeners.push(fn); }
+
 export async function logSecurityEvent(input: SecurityEventInput): Promise<void> {
   const outcome = input.outcome ?? (input.type.endsWith(".failure") || input.type.endsWith(".denied") ? "failure" : "success");
 
@@ -234,6 +239,7 @@ export async function logSecurityEvent(input: SecurityEventInput): Promise<void>
       // Live-tail in the Security Center, same channel the Activity Log uses.
       broadcast("security_event", { ...row, createdAt: row.createdAt.toISOString() });
     }
+    for (const fn of listeners) { try { fn(input.type, input.username ?? null); } catch { /* a listener must not break logging */ } }
   } catch (err) {
     logger.error({ err, securityEvent: input.type }, "failed to persist security event");
   }

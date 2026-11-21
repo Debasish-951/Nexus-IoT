@@ -2,6 +2,8 @@ import { Router, type IRouter } from "express";
 import { respondInvalid } from "../lib/respond";
 import { eq, sql } from "drizzle-orm";
 import { db, attributesTable, assetsTable } from "@workspace/db";
+import { logActivity } from "./activity_log";
+import { diffFields } from "../lib/audit-core";
 import {
   CreateAssetAttributeBody,
   CreateAssetAttributeParams,
@@ -71,6 +73,8 @@ router.post("/assets/:id/attributes", async (req, res): Promise<void> => {
     .set({ attributeCount: sql`${assetsTable.attributeCount} + 1` })
     .where(eq(assetsTable.id, params.data.id));
 
+  await logActivity("attribute.created", "attributes", attr!.id, attr!.name, `${attr!.type} ${attr!.dataType}`, req,
+    { assetId: params.data.id, changes: diffFields({}, attr as unknown as Record<string, unknown>, { ignore: ["id", "assetId", "sortOrder"] }) });
   res.status(201).json(attr);
 });
 
@@ -89,6 +93,7 @@ router.put("/attributes/:id", async (req, res): Promise<void> => {
 
   const body = req.body as Record<string, unknown>;
 
+  const [before] = await db.select().from(attributesTable).where(eq(attributesTable.id, params.data.id));
   const [attr] = await db
     .update(attributesTable)
     .set({
@@ -111,6 +116,8 @@ router.put("/attributes/:id", async (req, res): Promise<void> => {
     return;
   }
 
+  await logActivity("attribute.updated", "attributes", attr.id, attr.name, null, req,
+    { assetId: attr.assetId, changes: diffFields(before as unknown as Record<string, unknown>, attr as unknown as Record<string, unknown>, { ignore: ["id", "assetId", "sortOrder"] }) });
   res.json(attr);
 });
 
@@ -136,6 +143,7 @@ router.delete("/attributes/:id", async (req, res): Promise<void> => {
     .set({ attributeCount: sql`GREATEST(${assetsTable.attributeCount} - 1, 0)` })
     .where(eq(assetsTable.id, attr.assetId));
 
+  await logActivity("attribute.deleted", "attributes", attr.id, attr.name, attr.value != null ? `value was ${String(attr.value).slice(0, 100)}` : null, req, { assetId: attr.assetId });
   res.sendStatus(204);
 });
 

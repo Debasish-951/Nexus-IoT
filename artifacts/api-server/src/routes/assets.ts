@@ -7,6 +7,7 @@ import {
 } from "@workspace/db";
 import { forgetRuleDelays, invalidateAlarmRuleCache, forgetAssetDelays } from "./ingest";
 import { logActivity } from "./activity_log";
+import { diffFields } from "../lib/audit-core";
 import { hasSeenDevice, removeSeenDevice } from "../lib/seen-devices";
 import { deviceClaimedOutsideScope, DEVICE_IN_USE } from "../lib/project-access";
 import {
@@ -102,7 +103,7 @@ router.post("/assets", async (req, res): Promise<void> => {
       .where(eq(assetsTable.id, asset.parentId));
   }
 
-  void logActivity("asset.created", "asset", asset.id, asset.name, asset.parentId ? `parentId=${asset.parentId}` : null, req);
+  void logActivity("asset.created", "asset", asset.id, asset.name, asset.parentId ? `parentId=${asset.parentId}` : null, req, { assetId: asset.id });
   res.status(201).json(asset);
 });
 
@@ -158,6 +159,7 @@ router.put("/assets/:id", async (req, res): Promise<void> => {
     res.json(asset);
     return;
   }
+  const [beforeAsset] = await db.select().from(assetsTable).where(eq(assetsTable.id, params.data.id));
   try {
     [asset] = await db.update(assetsTable).set(updateData).where(eq(assetsTable.id, params.data.id)).returning();
   } catch (err) {
@@ -165,6 +167,8 @@ router.put("/assets/:id", async (req, res): Promise<void> => {
   }
 
   if (!asset) { res.status(404).json({ error: "Asset not found" }); return; }
+  await logActivity("asset.updated", "asset", asset.id, asset.name, null, req,
+    { assetId: asset.id, changes: diffFields(beforeAsset as unknown as Record<string, unknown>, asset as unknown as Record<string, unknown>, { only: Object.keys(updateData) }) });
   res.json(asset);
 });
 
@@ -359,6 +363,7 @@ router.post("/assets/:id/attributes/bulk", async (req, res): Promise<void> => {
     .set({ attributeCount: sql`${assetsTable.attributeCount} + ${created}` })
     .where(eq(assetsTable.id, id));
 
+  await logActivity("asset.attributes_imported", "asset", asset.id, asset.name, `${created} attributes created, ${skipped} skipped`, req, { assetId: asset.id });
   res.json({ created, skipped, skippedItems });
 });
 
@@ -500,6 +505,9 @@ router.post("/assets/:id/apply-template", async (req, res): Promise<void> => {
     })
     .where(eq(assetsTable.id, id));
 
+  await logActivity("asset.template_applied", "asset", asset.id, asset.name,
+    `template "${template.name}": ${created} attributes created, ${skipped} skipped${deviceIdBound ? `, bound to device ${deviceIdBound}` : ""}`, req,
+    { assetId: asset.id, changes: asset.templateId !== templateId ? [{ field: "templateId", from: asset.templateId ?? null, to: templateId }] : null });
   res.json({
     created, skipped, skippedItems, templateName: template.name,
     // So the UI can say "bound to energy", and mention any section assets sharing it.

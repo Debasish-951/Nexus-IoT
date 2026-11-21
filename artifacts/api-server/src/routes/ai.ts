@@ -16,6 +16,14 @@ import { authConfig } from "../lib/auth-config";
 import { hasModuleAccess, type EffectiveAccess } from "../lib/rbac";
 import { rateLimit } from "../middleware/rateLimit";
 import { logActivity } from "./activity_log";
+import { assetScope } from "../lib/project-access";
+import { parseScopeAssetId, scopeNote, scopeRefusal, subtree, type ChatScope } from "../lib/ai-scope";
+import {
+  buildFacts, parseNarrative, parseReportRequest, previousRange, reportLevelFor, reportMessages, unverifiedNumbers,
+  NARRATIVE_MESSAGES, type ReportFacts, type ReportInput, type ReportNarrative,
+} from "../lib/ai-report";
+import { LlmRateLimitError, llmComplete, llmConfigured, llmModel } from "../lib/llm";
+import { hourlyWatermark, loadPeriod, reportBucketMs } from "../lib/report-telemetry";
 
 const router: IRouter = Router();
 
@@ -105,7 +113,7 @@ function queryWords(query: unknown): string[] {
 const RESOLVE_MAX_METRICS = 40;
 const COMPARE_MAX_METRICS = 40;
 
-async function resolveAsset(args: { query: string }) {
+async function resolveAsset(args: { query: string }, ctx?: ToolContext) {
   const words = queryWords(args.query);
   if (words.length === 0) return { matches: [], metricMatches: [] };
 
@@ -117,7 +125,7 @@ async function resolveAsset(args: { query: string }) {
       maintenanceMode: assetsTable.maintenanceMode,
     })
     .from(assetsTable)
-    .where(and(...words.map((w) => or(ilike(assetsTable.name, `%${w}%`), ilike(assetsTable.identifier, `%${w}%`)))))
+    .where(and(scopeCond(ctx, assetsTable.id), ...words.map((w) => or(ilike(assetsTable.name, `%${w}%`), ilike(assetsTable.identifier, `%${w}%`)))))
     .limit(10);
 
   // Words are matched against "<asset name> <metric name>" so a question that
@@ -128,6 +136,7 @@ async function resolveAsset(args: { query: string }) {
     .innerJoin(assetsTable, eq(assetsTable.id, attributesTable.assetId))
     .where(and(
       eq(attributesTable.type, "dynamic"),
+      scopeCond(ctx, attributesTable.assetId),
       ...words.map((w) => ilike(sql<string>`${assetsTable.name} || ' ' || ${attributesTable.name}`, `%${w}%`)),
     ))
     .limit(RESOLVE_MAX_METRICS + 1);
@@ -150,7 +159,7 @@ async function resolveAsset(args: { query: string }) {
   };
 }
 
-async function listAssets() {
+async function listAssets(_args?: unknown, ctx?: ToolContext) {
   const rows = await db
     .select({
       id: assetsTable.id,
@@ -161,6 +170,7 @@ async function listAssets() {
       maintenanceMode: assetsTable.maintenanceMode,
     })
     .from(assetsTable)
+    .where(scopeCond(ctx, assetsTable.id))
     .orderBy(assetsTable.name)
     .limit(500);
   return { count: rows.length, assets: rows };
@@ -273,6 +283,13 @@ interface ToolContext {
   to: Date;
   /** The caller's access, for tools whose result depends on more than one module. */
   access?: EffectiveAccess;
+  /** The project or asset the user selected; every tool keeps to it. Absent = all assets. */
+  scope?: ChatScope;
+}
+
+/** SQL condition limiting a column to the selected scope, or undefined (ignored by and()) without one. */
+function scopeCond(ctx: ToolContext | undefined, col: Parameters<typeof inArray>[0]) {
+  return ctx?.scope ? inArray(col, [...ctx.scope.assetIds]) : undefined;
 }
 
 // When the whole history of a metric sits outside the selected range, the model
@@ -425,8 +442,10 @@ async function assetHealth(args: { assetId: string }) {
   };
 }
 
-async function getAlarms(args: { status?: string; severity?: string }) {
+async function getAlarms(args: { status?: string; severity?: string }, ctx?: ToolContext) {
   const conds = [];
+  const limit = scopeCond(ctx, alarmsTable.assetId);
+  if (limit) conds.push(limit);
   if (args.status) conds.push(eq(alarmsTable.status, args.status));
   else conds.push(inArray(alarmsTable.status, ["active", "acknowledged"]));
   if (args.severity) conds.push(eq(alarmsTable.severity, args.severity));
@@ -458,7 +477,7 @@ async function getAlarmHistory(_args: Record<string, never>, ctx: ToolContext) {
       clearedAt: alarmHistoryTable.clearedAt,
     })
     .from(alarmHistoryTable)
-    .where(and(gte(alarmHistoryTable.triggeredAt, ctx.from), lte(alarmHistoryTable.triggeredAt, ctx.to)))
+    .where(and(gte(alarmHistoryTable.triggeredAt, ctx.from), lte(alarmHistoryTable.triggeredAt, ctx.to), scopeCond(ctx, alarmHistoryTable.assetId)))
     .orderBy(desc(alarmHistoryTable.triggeredAt))
     .limit(200);
   return { count: rows.length, history: rows };
@@ -470,21 +489,23 @@ async function fleetSummary(_args: Record<string, never>, ctx: ToolContext) {
   // status, neither of which their role shows them anywhere else.
   const can = (module: string) => !!ctx.access && hasModuleAccess(ctx.access, module, "read");
 
-  const [assets] = await db.select({ c: sql<number>`count(*)::int` }).from(assetsTable);
+  const [assets] = await db.select({ c: sql<number>`count(*)::int` }).from(assetsTable).where(scopeCond(ctx, assetsTable.id));
   const [recent] = await db
     .select({ c: sql<number>`count(*)::int` })
     .from(telemetryTable)
-    .where(gte(telemetryTable.timestamp, new Date(Date.now() - 5 * 60_000)));
+    .where(and(gte(telemetryTable.timestamp, new Date(Date.now() - 5 * 60_000)), scopeCond(ctx, telemetryTable.assetId)));
   const summary: Record<string, unknown> = {
+    ...(ctx.scope ? { scope: ctx.scope.name } : {}),
     totalAssets: assets?.c ?? 0,
     telemetryRatePerMin: (recent?.c ?? 0) / 5,
   };
 
-  if (can("users")) {
+  // Users and brokers are installation-wide, not part of a selected project or asset.
+  if (can("users") && !ctx.scope) {
     const [users] = await db.select({ c: sql<number>`count(*)::int` }).from(usersTable);
     summary.totalUsers = users?.c ?? 0;
   }
-  if (can("brokers")) {
+  if (can("brokers") && !ctx.scope) {
     const [connectedBrokers] = await db
       .select({ c: sql<number>`count(*)::int` })
       .from(brokersTable)
@@ -495,7 +516,7 @@ async function fleetSummary(_args: Record<string, never>, ctx: ToolContext) {
     summary.activeAlarmsBySeverity = await db
       .select({ severity: alarmsTable.severity, c: sql<number>`count(*)::int` })
       .from(alarmsTable)
-      .where(eq(alarmsTable.status, "active"))
+      .where(and(eq(alarmsTable.status, "active"), scopeCond(ctx, alarmsTable.assetId)))
       .groupBy(alarmsTable.severity);
   }
   return summary;
@@ -524,7 +545,7 @@ async function compareMetrics(args: { parameter: string; scope?: string }, ctx: 
     .select({ assetId: attributesTable.assetId, metric: attributesTable.name, assetName: assetsTable.name })
     .from(attributesTable)
     .innerJoin(assetsTable, eq(assetsTable.id, attributesTable.assetId))
-    .where(eq(attributesTable.type, "dynamic"));
+    .where(and(eq(attributesTable.type, "dynamic"), scopeCond(ctx, attributesTable.assetId)));
 
   const matched = attributes.filter((a) => {
     const [machine, leaf] = splitMetric(a.metric);
@@ -580,6 +601,23 @@ async function compareMetrics(args: { parameter: string; scope?: string }, ctx: 
       ? { note: `Only the first ${COMPARE_MAX_METRICS} of ${matched.length} matching metrics are included; narrow the scope.` }
       : {}),
   };
+}
+
+/**
+ * Runs one tool inside the selected scope. A tool that takes an asset id is
+ * refused for an asset outside it (the list and search tools filter their own
+ * results), so the model cannot step outside the scope by naming another asset.
+ */
+export async function runScopedTool(
+  tool: { fn: (args: any, ctx: any) => Promise<unknown>; def: { parameters?: { properties?: Record<string, unknown> } } },
+  args: any,
+  ctx: { scope?: ChatScope },
+): Promise<unknown> {
+  if (ctx.scope && tool.def.parameters?.properties && "assetId" in tool.def.parameters.properties) {
+    const refusal = scopeRefusal(ctx.scope, args?.assetId);
+    if (refusal) return refusal;
+  }
+  return tool.fn(args, ctx);
 }
 
 // ── Tool registry: executor + JSON-schema definition for the model ──────────────
@@ -927,6 +965,30 @@ router.post("/ai/chat", aiLimiter, async (req, res): Promise<void> => {
   }
   const timeZone = validTimeZone(req.body?.timeZone);
 
+  // The project or asset the question is about: that asset and everything beneath it.
+  const scopeArg = parseScopeAssetId(req.body?.scopeAssetId);
+  if ("error" in scopeArg) {
+    res.status(400).json({ error: scopeArg.error, code: "invalid_scope" });
+    return;
+  }
+  let scope: ChatScope | undefined;
+  if (scopeArg.id) {
+    const all = await db.select({ id: assetsTable.id, name: assetsTable.name, parentId: assetsTable.parentId }).from(assetsTable);
+    const root = all.find((a) => a.id === scopeArg.id);
+    if (!root) {
+      res.status(404).json({ error: "The selected project or asset no longer exists.", code: "scope_not_found" });
+      return;
+    }
+    const allowed = await assetScope(req);
+    if (allowed && !allowed.assetIds.has(root.id)) {
+      res.status(403).json({ error: "This is outside the projects assigned to you.", code: "project_forbidden" });
+      return;
+    }
+    let ids = subtree(root.id, all);
+    if (allowed) ids = new Set([...ids].filter((id) => allowed.assetIds.has(id)));
+    scope = { rootId: root.id, name: root.name, assetIds: ids };
+  }
+
   // Optional prior turns: [{ role: "user"|"assistant", content }]
   const history = Array.isArray(req.body?.history) ? req.body.history : [];
 
@@ -935,7 +997,8 @@ router.post("/ai/chat", aiLimiter, async (req, res): Promise<void> => {
   // towards the rate limit.
   const rangeNote =
     `\n\nTIME RANGE selected by the user: ${range.from.toISOString()} to ${range.to.toISOString()}` +
-    (timeZone ? ` (the user's time zone is ${timeZone}; present times in it).` : ".");
+    (timeZone ? ` (the user's time zone is ${timeZone}; present times in it).` : ".") +
+    scopeNote(scope);
 
   const messages: any[] = [
     { role: "system", content: SYSTEM_PROMPT },
@@ -952,7 +1015,7 @@ router.post("/ai/chat", aiLimiter, async (req, res): Promise<void> => {
   ];
 
   const toolTrace: { tool: string; args: unknown }[] = [];
-  const ctx: ToolContext = { ...range, access };
+  const ctx: ToolContext = { ...range, access, scope };
   let toolCalls = 0;
   let toolLimitReached = false;
   const usage: QuestionUsage = {
@@ -1001,7 +1064,7 @@ router.post("/ai/chat", aiLimiter, async (req, res): Promise<void> => {
         } else {
           toolCalls++;
           try {
-            result = await tool.fn(args, ctx);
+            result = await runScopedTool(tool, args, ctx);
             toolTrace.push({ tool: name, args });
           } catch (err) {
             // The model sees this string and may repeat it verbatim to the user,
@@ -1069,11 +1132,157 @@ router.post("/ai/chat", aiLimiter, async (req, res): Promise<void> => {
     // external provider. The question text is not stored; its length is.
     void logActivity(
       "ai.question", "ai", null, null,
-      `sent to Groq (${GROQ_MODEL}); question_chars=${question.length}; ` +
+      `sent to Groq (${GROQ_MODEL}); scope=${scope ? scope.name : "all assets"}; question_chars=${question.length}; ` +
       `tools=${[...new Set(toolTrace.map((t) => t.tool))].join(",") || "none"}`,
       req,
     );
   }
+});
+
+// ── AI Reports ───────────────────────────────────────────────────────────────
+//
+// The report's numbers are computed here from the database, limited to the
+// assets the caller may see (lib/ai-report.ts). The report is written for the
+// caller's level, decided from their role (REPORT_LEVEL_BY_ROLE). The model only
+// receives the facts its level needs, through lib/llm.ts; without a provider, or
+// when the model fails, the report is still returned with `narrative: null`,
+// `narrativeStatus` and the reason.
+
+const reportLimiter = rateLimit({
+  name: "ai:report",
+  limits: { user: authConfig.rateLimit.ai },
+  eventType: "ratelimit.tripped",
+  message: "You have generated a lot of reports in a short time. Please wait a few minutes and try again.",
+});
+
+
+type LoadedReport = Pick<ReportInput, "stats" | "prevStats" | "alarms" | "prevAlarms" | "coverage" | "prevCoverage" | "lastSeen" | "buckets" | "bucketMs">;
+
+/**
+ * Everything a report reads from the database, one query at a time so a report
+ * never holds several pool connections. Telemetry comes mostly from the hourly
+ * summaries (lib/report-telemetry.ts); raw telemetry is read only for the first
+ * partial hour and the recent hours after the summaries' watermark. Alarms are
+ * capped per period and the newest reading per asset is one index lookup each.
+ */
+async function loadReportInput(ids: string[], range: { from: Date; to: Date }, withAlarms: boolean): Promise<LoadedReport> {
+  const bucketMs = reportBucketMs(range);
+  if (ids.length === 0) return { stats: [], prevStats: [], alarms: [], prevAlarms: [], coverage: [], prevCoverage: [], lastSeen: [], buckets: [], bucketMs };
+  const prev = previousRange(range);
+  const watermark = await hourlyWatermark();
+  const now = await loadPeriod(ids, range, bucketMs, watermark);
+  const before = await loadPeriod(ids, prev, reportBucketMs(prev), watermark);
+  const idList = sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `);
+  const last = await db.execute<{ asset_id: string; ts: string | null }>(sql`
+    SELECT a.id AS asset_id,
+           (SELECT max(t.timestamp) FROM telemetry t WHERE t.asset_id = a.id AND t.timestamp <= ${range.to}) AS ts
+    FROM unnest(ARRAY[${idList}]) AS a(id)
+  `);
+  const alarmCols = {
+    assetId: alarmsTable.assetId, assetName: alarmsTable.assetName, name: alarmsTable.name, severity: alarmsTable.severity,
+    triggeredAt: alarmsTable.triggeredAt, acknowledgedAt: alarmsTable.acknowledgedAt, clearedAt: alarmsTable.clearedAt,
+  };
+  const alarmsIn = (r: { from: Date; to: Date }) => db.select(alarmCols).from(alarmsTable)
+    .where(and(inArray(alarmsTable.assetId, ids), gte(alarmsTable.triggeredAt, r.from), lte(alarmsTable.triggeredAt, r.to)))
+    .limit(20_000);
+  const alarms = withAlarms ? await alarmsIn(range) : [];
+  const prevAlarms = withAlarms ? await alarmsIn(prev) : [];
+  return {
+    stats: now.stats,
+    prevStats: before.stats,
+    coverage: now.coverage,
+    prevCoverage: before.coverage,
+    lastSeen: last.rows.map((r) => ({ assetId: r.asset_id, ts: r.ts })),
+    buckets: now.buckets,
+    bucketMs,
+    alarms,
+    prevAlarms,
+  };
+}
+
+export type NarrativeStatus = "ok" | "unavailable" | "failed" | "rate_limited" | "unreadable";
+
+/** Writes the narrative; null with a status and reason when the model's answer is unusable or the call fails. */
+export async function reportNarrative(
+  facts: ReportFacts,
+  ask: (messages: { role: "system" | "user"; content: string }[]) => Promise<string | null>,
+): Promise<{ narrative: ReportNarrative | null; unverified: string[]; status: NarrativeStatus; narrativeError: string | null }> {
+  try {
+    const text = await ask(reportMessages(facts));
+    const narrative = parseNarrative(text, facts.level);
+    if (!narrative) return { narrative: null, unverified: [], status: "unreadable", narrativeError: NARRATIVE_MESSAGES.unreadable };
+    return { narrative, unverified: unverifiedNumbers(narrative, facts), status: "ok", narrativeError: null };
+  } catch (err) {
+    if (err instanceof LlmRateLimitError) {
+      return { narrative: null, unverified: [], status: "rate_limited", narrativeError: `The AI service has reached its usage limit. Try again in about ${err.retryAfterSec} seconds. The figures below are complete.` };
+    }
+    logger.error({ err }, "AI report narrative failed");
+    return { narrative: null, unverified: [], status: "failed", narrativeError: NARRATIVE_MESSAGES.failed };
+  }
+}
+
+router.post("/ai/report", reportLimiter, async (req, res): Promise<void> => {
+  const parsed = parseReportRequest(req.body);
+  if (typeof parsed === "string") { res.status(400).json({ error: parsed, code: "invalid_report_request" }); return; }
+  const access = req.principal!.access;
+  const level = reportLevelFor(req.principal!.user.role);
+  const scope = await assetScope(req);
+
+  const all = await db.select({
+    id: assetsTable.id, name: assetsTable.name, parentId: assetsTable.parentId,
+    maintenanceMode: assetsTable.maintenanceMode, maintenanceSince: assetsTable.maintenanceSince,
+  }).from(assetsTable);
+  let ids: Set<string>;
+  let scopeName: string;
+  if (parsed.assetId) {
+    const root = all.find((a) => a.id === parsed.assetId);
+    if (!root) { res.status(404).json({ error: "Asset not found." }); return; }
+    if (scope && !scope.assetIds.has(root.id)) {
+      res.status(403).json({ error: "This is outside the projects assigned to you.", code: "project_forbidden" });
+      return;
+    }
+    ids = subtree(root.id, all);
+    scopeName = root.name;
+  } else {
+    ids = scope ? new Set(scope.assetIds) : new Set(all.map((a) => a.id));
+    scopeName = scope ? "Your projects" : "All assets";
+  }
+  if (scope) ids = new Set([...ids].filter((id) => scope.assetIds.has(id)));
+  const assets = all.filter((a) => ids.has(a.id)).map((a) => ({ id: a.id, name: a.name, maintenanceMode: a.maintenanceMode, maintenanceSince: a.maintenanceSince }));
+  // Alarm figures only for callers who may see alarms elsewhere.
+  const withAlarms = hasModuleAccess(access, "alarms", "read");
+
+  const loaded = await loadReportInput([...ids], parsed.range, withAlarms);
+  const facts = buildFacts({
+    scope: { assetId: parsed.assetId, name: scopeName }, range: parsed.range, level, timeZone: parsed.timeZone,
+    assets, alarmsIncluded: withAlarms, ...loaded,
+  });
+
+  const configured = llmConfigured();
+  const story = configured
+    ? await reportNarrative(facts, (messages) => llmComplete(messages, { json: true, maxTokens: 2500 }))
+    : { narrative: null, unverified: [], status: "unavailable" as const, narrativeError: NARRATIVE_MESSAGES.unavailable };
+
+  void logActivity(
+    "ai.report", "ai", parsed.assetId, scopeName,
+    `level=${level}; hours=${facts.range.hours}; assets=${assets.length}; ` +
+    (configured ? `facts sent to the AI provider (${llmModel()}); narrative=${story.status}` : "no AI provider; facts only"),
+    req,
+  );
+
+  res.json({
+    level,
+    facts,
+    narrative: story.narrative,
+    narrativeStatus: story.status,
+    narrativeError: story.narrativeError,
+    unverifiedNumbers: story.unverified,
+    alarmsIncluded: withAlarms,
+    generatedAt: new Date().toISOString(),
+    range: { from: facts.range.from, to: facts.range.to },
+    scope: facts.scope,
+    model: configured ? llmModel() : null,
+  });
 });
 
 export default router;

@@ -14,7 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog";
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
-import { ArrowLeft, Radio, Plus, Trash2, Pencil, Maximize2, Minimize2, Wifi, WifiOff, Crosshair, RotateCw, Check, X, Save, FilePlus } from "lucide-react";
+import { ArrowLeft, Radio, Plus, Trash2, Pencil, Maximize2, Minimize2, Wifi, WifiOff, Crosshair, RotateCw, Check, X, Save, FilePlus, Camera } from "lucide-react";
 import { createPortal } from "react-dom";
 import { useListAssets } from "@workspace/api-client-react";
 import { useProjectScope } from "@/hooks/useProjectScope";
@@ -25,8 +25,13 @@ import { REFRESH_INTERVALS } from "@/features/dashboards/timeRange";
 import { createPlantEngine, type LabelMode, type PlantEngine, type Scenario } from "./engine/engine";
 import { PACKS } from "./engine/packs";
 import { listPlantTwins, getPlantTwin, createPlantTwin, updatePlantTwin, deletePlantTwin, fetchPlantValues, type PlantTwinSummary } from "./api";
-import { FlowBar, ProcessTree, Inspector, AddMachine } from "./panels";
+import { FlowBar, ProcessTree, Inspector, AddMachine, GlbUpload, DuplicateDialog, fetchGlbBytes } from "./panels";
+import { MODELS } from "./engine/models";
+import { useAlarmLimits } from "./shared/alarmLimits";
+import { usePlayback, PlaybackButton } from "./shared/playback";
+import { TwinAlarms } from "./shared/TwinAlarms";
 import { TwinLibrary, DRAG_TYPE } from "./TwinLibrary";
+import { FEATURES } from "@/lib/features";
 import { LiveTags } from "./LiveTags";
 import type { SceneDoc } from "./engine/types";
 import "./plantTwin.css";
@@ -47,7 +52,7 @@ const readLast = (project: string | null) => { try { return localStorage.getItem
 const writeLast = (project: string | null, id: string) => { try { localStorage.setItem(`${LAST_KEY}:${project ?? "-"}`, id); } catch { /* per-browser convenience only */ } };
 
 /** Plant-wide demo scenarios, as on the concept demo. */
-const SCENARIOS: [Scenario, string][] = [["normal", "Normal running"], ["fault", "Machine fault"], ["cavitation", "Cavitation"], ["overheat", "Bearing overheat"], ["trip", "Pump trip"]];
+const SCENARIOS: [Scenario, string][] = [["normal", "Normal running"], ["fault", "Machine fault"], ["cavitation", "Cavitation"], ["overheat", "Bearing overheat"], ["trip", "Pump trip"], ["cloud", "Cloud cover"], ["storm", "Storm / high wind"], ["lowwind", "Low wind"], ["charge", "Battery charging"], ["discharge", "Battery discharging"]];
 
 /** An asset twin starts as an empty floor; machines come from the library. */
 const EMPTY_SCENE: SceneDoc = { version: 1, pack: "textile", demo: true, areas: [], flows: [], items: [], conns: [] };
@@ -67,6 +72,12 @@ export default function PlantTwinView({ variant = "builder", onOpenBuilder, link
   const assetRef = useRef(asset); assetRef.current = asset;
   const sceneOut = useCallback((e: PlantEngine): SceneDoc => (assetRef.current ? ({ ...e.serialize(), kind: "asset" } as SceneDoc & { kind: string }) : e.serialize()), []);
   const [libOpen, setLibOpen] = useState(false);
+  // Library as a left-hand tile grid (default), or the earlier list on the right (VITE_TWIN_LIBRARY_LIST=true).
+  const gridLib = !FEATURES.twinLibraryList;
+  const [palOpen, setPalOpenState] = useState(() => { try { return localStorage.getItem("plant-twin:palette") !== "0"; } catch { return true; } });
+  const setPalOpen = (v: boolean) => { setPalOpenState(v); try { localStorage.setItem("plant-twin:palette", v ? "1" : "0"); } catch { /* per browser only */ } };
+  const listLib = !gridLib && libOpen;
+  const libShown = gridLib ? palOpen : libOpen;
   const floorRef = useRef(floor); floorRef.current = floor;
   const [, navigate] = useLocation();
   const { toast } = useToast();
@@ -77,7 +88,11 @@ export default function PlantTwinView({ variant = "builder", onOpenBuilder, link
   const canDelete = canModule("live_twin", "delete");
   const { inScope } = useProjectScope();
   const { data: assetsData } = useListAssets();
-  const assets = useMemo(() => ((assetsData as any[] | undefined) ?? []).filter((a: any) => inScope(a.id, { strict: true })).map((a: any) => ({ id: a.id as string, name: a.name as string })), [assetsData, inScope]);
+  const assets = useMemo(() => ((assetsData as any[] | undefined) ?? []).filter((a: any) => inScope(a.id, { strict: true })).map((a: any) => ({ id: a.id as string, name: a.name as string, identifier: (a.identifier ?? null) as string | null })), [assetsData, inScope]);
+  // Alarm rules give the limits of linked readings; history playback replaces live values.
+  const limits = useAlarmLimits();
+  const limitsRef = useRef(limits); limitsRef.current = limits;
+  const playbackRef = useRef<ReturnType<typeof usePlayback> | null>(null);
 
   const listQ = useQuery({ queryKey: ["plant-twins"], queryFn: listPlantTwins });
   const twins = useMemo(() => (listQ.data ?? []).filter((t) => (t.kind ?? "plant") === twinKind && (!t.projectId || !currentProjectId || t.projectId === currentProjectId)), [listQ.data, currentProjectId, twinKind]);
@@ -120,7 +135,9 @@ export default function PlantTwinView({ variant = "builder", onOpenBuilder, link
   useEffect(() => {
     const e = createPlantEngine({
       canvas: canvasRef.current!, host: stageRef.current!, overlay: overlayRef.current!,
-      getLive: (a, m) => valuesRef.current.get(a + "\u0000" + m),
+      getLive: (a, m) => { const pb = playbackRef.current; return pb?.active ? pb.valueAt(a, m) : valuesRef.current.get(a + "\u0000" + m); },
+      getLimits: (a, m) => limitsRef.current(a, m),
+      fetchGlb: fetchGlbBytes,
       onChange: bump, onEdit: scheduleSave,
     });
     engineRef.current = e; setEngine(e); e.start();
@@ -148,6 +165,7 @@ export default function PlantTwinView({ variant = "builder", onOpenBuilder, link
       canEditRef.current = false;
       engine.setReadOnly(floorRef.current);
       if (assetRef.current || !floorRef.current) engine.loadScene(EMPTY_SCENE); else engine.loadPack(engine.pack || "textile");
+      placeDetail(engine);
       return;
     }
     let cancelled = false; setLoading(true);
@@ -164,6 +182,22 @@ export default function PlantTwinView({ variant = "builder", onOpenBuilder, link
     return () => { cancelled = true; };
   }, [currentId, engine, currentProjectId, toast]);
 
+  // Detailed close-up: a new, unsaved twin with just one machine, framed close,
+  // with demo values on, to link to its asset and save as a POC.
+  const detailRef = useRef<string | null>(null);
+  function placeDetail(e: PlantEngine) {
+    const type = detailRef.current; if (!type) return;
+    detailRef.current = null;
+    e.loadScene(EMPTY_SCENE);
+    const id = e.addMachine(type, "");
+    if (id) { e.select(id); e.frameClose(id); }
+  }
+  const openDetailed = async (type: string) => {
+    if (!engine || !MODELS[type]) return;
+    await flushSave(); setLibOpen(false); detailRef.current = type;
+    if (!currentId) { currentRef.current = null; setDraftMode(true); placeDetail(engine); return; }
+    engine.select(null); currentRef.current = null; canEditRef.current = false; setDraftMode(true); setCurrentId(null);
+  };
   const switchTo = async (id: string) => { await flushSave(); engine?.select(null); setDraftMode(false); setCurrentId(id); };
   const startDraft = async () => { await flushSave(); engine?.select(null); setDraftMode(true); setCurrentId(null); };
   // The side panel picks twins; the floor view has no drafts of its own to start.
@@ -178,6 +212,22 @@ export default function PlantTwinView({ variant = "builder", onOpenBuilder, link
   useEffect(() => { if (!autoRefresh) return; const id = setInterval(() => setNonce((n) => n + 1), refreshMs); return () => clearInterval(id); }, [autoRefresh, refreshMs]);
   const pairs = engine?.pairs() ?? [];
   const pairsKey = pairs.map((p) => p.assetId + ":" + p.metric).sort().join("|");
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const playbackPairs = useMemo(() => pairs, [pairsKey]);
+  const playback = usePlayback(playbackPairs);
+  playbackRef.current = playback;
+  useEffect(() => { engine?.setPlayback(playback.active); }, [engine, playback.active]);
+  const [dupId, setDupId] = useState<string | null>(null);
+  const linkedAssetIds = useMemo(() => Array.from(new Set((engine?.items ?? []).map((i) => i.assetId).filter((x): x is string => !!x))),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [engine, engine?.items.map((i) => i.assetId ?? "").join("|")]);
+  const focusAsset = (assetId: string) => { const it = engine?.items.find((i) => i.assetId === assetId); if (it && engine) { engine.select(it.id); engine.fitItem(it.id); } };
+  const snapshot = () => {
+    if (!engine) return;
+    const a = document.createElement("a"); a.href = engine.snapshot();
+    a.download = `${(current?.name ?? (asset ? "asset-twin" : "plant-twin")).replace(/[^\w.-]+/g, "_")}-${new Date().toISOString().slice(0, 16).replace(/[:T]/g, "-")}.png`;
+    document.body.appendChild(a); a.click(); a.remove();
+  };
   useEffect(() => {
     if (!pairs.length) { valuesRef.current = new Map(); return; }
     let cancelled = false;
@@ -194,7 +244,7 @@ export default function PlantTwinView({ variant = "builder", onOpenBuilder, link
     const onKey = (ev: KeyboardEvent) => {
       const tgt = ev.target as HTMLElement;
       if (!engine || /INPUT|SELECT|TEXTAREA/.test(tgt.tagName) || tgt.isContentEditable || tgt.closest("[role=dialog],[role=listbox]")) return;
-      if (ev.key === "Escape") { engine.startConnect(null); return; }
+      if (ev.key === "Escape") { engine.startConnect(null); engine.pickPart(null); return; }
       const sel = engine.selected; if (!sel || engine.readOnly) return;
       if (ev.key === "Delete" || ev.key === "Backspace") { ev.preventDefault(); engine.removeItem(sel.id); }
       else if (ev.key === "r" || ev.key === "R") engine.rotateItem(sel.id);
@@ -278,7 +328,8 @@ export default function PlantTwinView({ variant = "builder", onOpenBuilder, link
     ? { cls: "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300", icon: Wifi, label: t("Live") }
     : { cls: "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300", icon: WifiOff, label: wsStatus === "connecting" ? t("Connecting") : t("Reconnecting") };
   const saveText = { saved: t("Saved"), dirty: t("Unsaved changes…"), saving: t("Saving…"), error: t("Not saved: {err}", { err: saveErr }), readonly: t("View only: owned by someone else") }[saveState];
-  const openSave = () => { setNewName(asset ? t("Asset twin {n}", { n: twins.length + 1 }) : `${PACKS[engine?.pack ?? "textile"]?.name ?? "Plant"} ${twins.length + 1}`); setNewOpen(true); };
+  const single = engine && engine.items.length === 1 ? MODELS[engine.items[0].type] : undefined;
+  const openSave = () => { setNewName(asset ? (single ? `${t(single.name)} ${twins.length + 1}` : t("Asset twin {n}", { n: twins.length + 1 })) : `${PACKS[engine?.pack ?? "textile"]?.name ?? "Plant"} ${twins.length + 1}`); setNewOpen(true); };
   const toolbar = (
     <div className="flex items-center gap-2 flex-wrap">
       {link
@@ -289,7 +340,7 @@ export default function PlantTwinView({ variant = "builder", onOpenBuilder, link
       </Select>}
       {floor && onOpenBuilder && <Button size="sm" variant="outline" onClick={onOpenBuilder}><Pencil className="w-4 h-4 mr-1" /> {isDraft ? t("Build your plant") : t("Edit in 3D Builder")}</Button>}
       {!floor && !isDraft && canCreate && <Button size="sm" variant="outline" className="border-orange-500 text-orange-600 hover:bg-orange-500/10 hover:text-orange-600 dark:text-orange-400" onClick={() => void startDraft()} title={t("Start a new, empty twin")}><FilePlus className="w-4 h-4 mr-1" /> {t("New")}</Button>}
-      {!floor && !readOnly && hasTwin && <Button size="sm" variant={libOpen ? "default" : "outline"} onClick={() => setLibOpen(!libOpen)}><Plus className="w-4 h-4 mr-1" /> {t("Add twin")}</Button>}
+      {!floor && !readOnly && hasTwin && <Button size="sm" variant={libShown ? "default" : "outline"} onClick={() => (gridLib ? setPalOpen(!palOpen) : setLibOpen(!libOpen))}><Plus className="w-4 h-4 mr-1" /> {t("Add twin")}</Button>}
       {!floor && current?.canEdit && !renaming && (
         <>
           <Button size="icon" variant="ghost" className="h-8 w-8" onClick={() => { setNameDraft(current.name); setRenaming(true); }} aria-label={t("Rename twin")} title={t("Rename")}><Pencil className="w-4 h-4" /></Button>
@@ -326,6 +377,8 @@ export default function PlantTwinView({ variant = "builder", onOpenBuilder, link
           </SelectContent>
         </Select>
         <Button size="sm" variant="outline" className="h-8" onClick={() => engine?.fitAll()} title={t("Frame everything and return to the starting angle")}><Crosshair className="w-3.5 h-3.5 mr-1" />{t("Fit")}</Button>
+        {hasTwin && <PlaybackButton playback={playback} />}
+        {hasTwin && <Button size="icon" variant="outline" className="h-8 w-8" onClick={snapshot} aria-label={t("Save a PNG picture of the 3D view")} title={t("Save a PNG picture of the 3D view")}><Camera className="w-4 h-4" /></Button>}
         <Button size="icon" variant="outline" className="h-8 w-8" onClick={() => setFullscreen(!fullscreen)} aria-label={fullscreen ? t("Exit full screen") : t("Full screen")}>
           {fullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
         </Button>
@@ -368,9 +421,20 @@ export default function PlantTwinView({ variant = "builder", onOpenBuilder, link
               : t("{n} reading(s) not linked to an asset show \"not linked\".", { n: unlinked })}
           </div>
         )}
+        {hasTwin && playback.bar && <div className="px-3 pt-2 shrink-0">{playback.bar}</div>}
+        {hasTwin && engine && (() => { const g = engine.glbStatus(); return g.loading || g.failed.length ? (
+          <div className="px-3 py-1.5 text-xs border-b border-border shrink-0 text-muted-foreground">
+            {g.loading > 0 && t("Loading {n} uploaded 3D model(s)…", { n: g.loading })} {g.failed.length > 0 && <span className="text-red-500">{t("Could not load: {names}. They stay in the twin; check access to Visualization uploads.", { names: g.failed.join(", ") })}</span>}
+          </div>) : null; })()}
         {hasTwin && engine && !asset && <div className="px-3 pt-2 shrink-0"><FlowBar engine={engine} stats={stats} plantName={PACKS[engine.pack]?.name ?? "Plant"} /></div>}
 
         <div className="flex-1 min-h-0 flex">
+          {gridLib && !floor && !readOnly && hasTwin && engine && palOpen && (
+            <div className="w-72 shrink-0 border-r border-border overflow-y-auto p-3">
+              <TwinLibrary layout="grid" onAdd={(type) => { addingRef.current = true; engine.addMachine(type, asset ? "" : engine.focusId ?? ""); if (asset) engine.frameView(); }} onClose={() => setPalOpen(false)} onDetailedSkid={asset ? onDetailedSkid : undefined} onDetailed={asset ? (type) => void openDetailed(type) : undefined}
+                industry={asset ? undefined : { current: engine.items.length ? engine.pack : null, onLoad: (key) => { addingRef.current = true; loadTemplate(key); } }} />
+            </div>
+          )}
           <div ref={stageRef} className="pt-stage flex-1 min-w-0 m-3 mt-2 rounded-md"
             onDragOver={(e) => { if (!readOnly && e.dataTransfer.types.includes(DRAG_TYPE)) { e.preventDefault(); e.dataTransfer.dropEffect = "copy"; } }}
             onDrop={(e) => {
@@ -394,20 +458,20 @@ export default function PlantTwinView({ variant = "builder", onOpenBuilder, link
               </button>
             )}
             <div className="absolute left-3 bottom-2 text-[11px] font-mono text-slate-400 pointer-events-none">
-              {engine?.connectingFrom ? t("Click the machine that {name} feeds · Esc cancels", { name: engine.connectingFrom.name }) : readOnly ? t("Drag to rotate · scroll to zoom · click a machine") : t("Click to select · drag a machine to move it · drag the floor to rotate · scroll to zoom")}
+              {engine?.pickingPart ? t("Click a part of the model · Esc cancels") : engine?.connectingFrom ? t("Click the machine that {name} feeds · Esc cancels", { name: engine.connectingFrom.name }) : readOnly ? t("Drag to rotate · scroll to zoom · click a machine") : t("Click to select · drag a machine to move it · drag the floor to rotate · scroll to zoom")}
             </div>
             {!floor && engine && engine.items.length === 0 && !loading && (
               <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 text-center text-slate-300 pointer-events-none">
-                <p className="text-sm max-w-xs">{readOnly ? t("This twin has no machines yet.") : libOpen ? (asset ? t("Drag a machine here from the library, or click it.") : t("Load an industry template, or drag single machines here.")) : asset ? t("Click Add twin above to choose machines: pumps, motors, gearboxes, valves, conveyors, tanks and more.") : t("Click Add twin above, then pick an industry template or single machines.")}</p>
+                <p className="text-sm max-w-xs">{readOnly ? t("This twin has no machines yet.") : libShown ? (asset ? t("Drag a machine here from the library, or click it.") : t("Load an industry template, or drag single machines here.")) : asset ? t("Click Add twin above to choose machines: pumps, motors, gearboxes, valves, conveyors, tanks and more.") : t("Click Add twin above, then pick an industry template or single machines.")}</p>
               </div>
             )}
             {loading && <div className="absolute inset-0 flex items-center justify-center text-sm text-slate-300 bg-black/30">{t("Loading…")}</div>}
           </div>
 
-          {hasTwin && engine && !(!floor && engine.items.length === 0 && !libOpen) && (
+          {hasTwin && engine && !(!floor && engine.items.length === 0 && !listLib) && (
             <div className="w-80 shrink-0 border-l border-border overflow-y-auto p-3 space-y-5">
-              {libOpen && !readOnly ? (
-                <TwinLibrary onAdd={(type) => { addingRef.current = true; engine.addMachine(type, asset ? "" : engine.focusId ?? ""); if (asset) engine.frameView(); }} onClose={() => setLibOpen(false)} onDetailedSkid={asset ? onDetailedSkid : undefined}
+              {listLib && !readOnly ? (
+                <TwinLibrary onAdd={(type) => { addingRef.current = true; engine.addMachine(type, asset ? "" : engine.focusId ?? ""); if (asset) engine.frameView(); }} onClose={() => setLibOpen(false)} onDetailedSkid={asset ? onDetailedSkid : undefined} onDetailed={asset ? (type) => void openDetailed(type) : undefined}
                   industry={asset ? undefined : { current: engine.items.length ? engine.pack : null, onLoad: (key) => { addingRef.current = true; loadTemplate(key); } }} />
               ) : <>
               {engine.demo && engine.items.length > 0 && (
@@ -420,8 +484,15 @@ export default function PlantTwinView({ variant = "builder", onOpenBuilder, link
                   <p className="text-[11px] text-muted-foreground">{t("Moves demo values only. Linked readings always show plant data.")}</p>
                 </div>
               )}
-              <Inspector engine={engine} assets={assets} readOnly={readOnly} />
+              <Inspector engine={engine} assets={assets} readOnly={readOnly} onDuplicate={setDupId} />
+              {!engine.selected && <TwinAlarms assetIds={linkedAssetIds} onFocus={focusAsset} label={(id) => engine.items.find((i) => i.assetId === id)?.name} />}
               {!engine.selected && <LiveTags engine={engine} title={asset ? t("Live tags") : t("Live tags · plant")} />}
+              {!readOnly && asset && !engine.selected && (
+                <div className="space-y-2">
+                  <h3 className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{t("Your own 3D model")}</h3>
+                  <GlbUpload engine={engine} areaId="" onMessage={(text, error) => toast({ title: error ? t("Upload failed") : t("Model added"), description: text, variant: error ? "destructive" : undefined })} />
+                </div>
+              )}
               {!asset && <ProcessTree engine={engine} readOnly={readOnly} />}
               {floor && (
                 <div className="rounded-md border border-border p-3 space-y-1.5 text-xs">
@@ -441,6 +512,8 @@ export default function PlantTwinView({ variant = "builder", onOpenBuilder, link
           )}
         </div>
       </div>
+
+      {engine && <DuplicateDialog engine={engine} itemId={dupId} assets={assets} onClose={() => setDupId(null)} onDone={(text) => toast({ title: t("Copies added"), description: text })} />}
 
       <Dialog open={newOpen} onOpenChange={setNewOpen}>
         <DialogContent>

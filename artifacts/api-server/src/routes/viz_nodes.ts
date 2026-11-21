@@ -3,6 +3,8 @@ import { and, eq, inArray } from "drizzle-orm";
 import { db, assetsTable, usersTable, vizNodesTable, vizNodeSharesTable } from "@workspace/db";
 import { z } from "zod";
 import { logActivity } from "./activity_log";
+import { diffFields } from "../lib/audit-core";
+import { markAudited } from "../lib/audit-context";
 import { validate } from "../middleware/validate";
 import { recordSecurityEvent } from "../lib/security-log";
 import { hasModuleAccess } from "../lib/rbac";
@@ -193,6 +195,8 @@ router.put("/viz-nodes/:id", validate({ params: VizNodeParams, body: UpdateVizNo
     }
   }
 
+  const [beforeNode] = await db.select({ name: vizNodesTable.name, parentId: vizNodesTable.parentId, projectId: vizNodesTable.projectId })
+    .from(vizNodesTable).where(eq(vizNodesTable.id, id));
   let row: NodeRow | undefined;
   if (expectedUpdatedAt === undefined) {
     [row] = await db.update(vizNodesTable).set(update).where(eq(vizNodesTable.id, id)).returning();
@@ -224,7 +228,12 @@ router.put("/viz-nodes/:id", validate({ params: VizNodeParams, body: UpdateVizNo
   // Only structural edits are logged. A dashboard save happens on every layout
   // tweak, and logging those would bury every other entry in the activity feed.
   if (update.name !== undefined || "parentId" in update || "projectId" in update) {
-    await logActivity("viz.node.updated", "visualization", row.id, row.name, null, req);
+    await logActivity("viz.node.updated", "visualization", row.id, row.name, null, req, {
+      changes: diffFields(beforeNode as unknown as Record<string, unknown>, row as unknown as Record<string, unknown>, { only: ["name", "parentId", "projectId"].filter((k) => k in update) }),
+    });
+  } else {
+    // A layout save: deliberately not recorded (see above), nor by the safety net.
+    markAudited();
   }
   res.json(toClient(row, current, !!row.parentId && !!access.get(row.parentId)?.read));
 });

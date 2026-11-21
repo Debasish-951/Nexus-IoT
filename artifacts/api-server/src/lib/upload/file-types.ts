@@ -48,10 +48,13 @@ const T = {
   webp: { mime: "image/webp", extension: ".webp", isImage: true,  label: "WebP image" },
   pdf:  { mime: "application/pdf", extension: ".pdf", isImage: false, label: "PDF document" },
   csv:  { mime: "text/csv",   extension: ".csv",  isImage: false, label: "CSV file" },
+  // Binary glTF: customer 3D models placed in a Live Twin. Rendered by three.js
+  // in the browser from the downloaded bytes; never executed or served inline.
+  glb:  { mime: "model/gltf-binary", extension: ".glb", isImage: false, label: "glTF 3D model" },
 } as const satisfies Record<string, DetectedType>;
 
 /** Every type this application will accept. Anything not here is refused. */
-export const ALLOWED_TYPES: readonly DetectedType[] = [T.png, T.jpeg, T.gif, T.webp, T.pdf, T.csv];
+export const ALLOWED_TYPES: readonly DetectedType[] = [T.png, T.jpeg, T.gif, T.webp, T.pdf, T.csv, T.glb];
 
 const ascii = (s: string) => [...s].map((c) => c.charCodeAt(0));
 
@@ -69,7 +72,27 @@ const SIGNATURES: Signature[] = [
     bytes: [...ascii("RIFF"), null, null, null, null, ...ascii("WEBP")],
   },
   { type: T.pdf,  offset: 0, bytes: ascii("%PDF-") },
+  // GLB: "glTF", container version 2, then a JSON chunk ("JSON" at byte 16).
+  {
+    type: T.glb, offset: 0,
+    bytes: [...ascii("glTF"), 0x02, 0x00, 0x00, 0x00, null, null, null, null, null, null, null, null, ...ascii("JSON")],
+  },
 ];
+
+/**
+ * How much of the head the polyglot check reads. A GLB is binary geometry after
+ * its JSON chunk, and random vertex bytes contain short markers such as "MZ" by
+ * chance, so for a GLB only the 20-byte header and the JSON chunk are scanned:
+ * the part a second parser could read as markup.
+ */
+function polyglotWindow(head: Buffer): Buffer {
+  const all = head.subarray(0, Math.min(head.length, 4096));
+  if (head.length >= 20 && head.subarray(0, 4).toString("latin1") === "glTF" && head.subarray(16, 20).toString("latin1") === "JSON") {
+    const jsonLen = head.readUInt32LE(12);
+    return head.subarray(0, Math.min(all.length, 20 + jsonLen));
+  }
+  return all;
+}
 
 function matches(buf: Buffer, sig: Signature): boolean {
   if (buf.length < sig.offset + sig.bytes.length) return false;
@@ -142,7 +165,7 @@ export interface DetectionResult {
 export function detectType(head: Buffer, declaredMime?: string): DetectionResult {
   // Polyglot check first: a file that carries executable markup is refused even
   // if its header would otherwise identify it as an allowed image.
-  const scanWindow = head.subarray(0, Math.min(head.length, 4096));
+  const scanWindow = polyglotWindow(head);
   const lower = Buffer.from(scanWindow.toString("latin1").toLowerCase(), "latin1");
   for (const marker of POLYGLOT_MARKERS) {
     const needle = Buffer.from(marker.pattern.toString("latin1").toLowerCase(), "latin1");
@@ -163,7 +186,7 @@ export function detectType(head: Buffer, declaredMime?: string): DetectionResult
 
   return {
     ok: false,
-    reason: "That file type is not supported. Allowed: PNG, JPEG, GIF, WebP, PDF and CSV.",
+    reason: "That file type is not supported. Allowed: PNG, JPEG, GIF, WebP, PDF, CSV and GLB (3D model).",
   };
 }
 

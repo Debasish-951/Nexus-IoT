@@ -366,6 +366,10 @@ instead of adjusted. Two directives are the likely candidates:
   blocked until you either widen this to `img-src *` (weakens it meaningfully,
   since it re-enables tracking-pixel style exfiltration) or proxy external media
   through the API. Prefer the proxy.
+  Live Twin's **Map view** works without any change (its base map is bundled).
+  Its optional **Street map** loads OpenStreetMap tiles; to allow it, add
+  `https://tile.openstreetmap.org` to `img-src` (and make sure the browsers can
+  reach the internet). Without it the map falls back to the bundled outlines.
 - **`connect-src 'self'`** must cover the WebSocket at `/api/ws`. It does when
   the socket is same-origin, which it is in this deployment. If you ever move the
   API to a different host, this needs that origin added explicitly.

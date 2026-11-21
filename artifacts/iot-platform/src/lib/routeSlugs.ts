@@ -58,6 +58,7 @@ const SLUGS: Record<string, string> = {
   "/dashboard-templates": "o6b5r8vn",
   "/live":                "i4t1p7dc",
   "/settings":            "k9v6z2ws",
+  "/ai-reports":          "q2f7k9wd",
 };
 
 const TOKEN_TO_PATH: Record<string, string> = Object.fromEntries(

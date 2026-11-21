@@ -6,6 +6,7 @@ import {
   alarmsTable, alarmHistoryTable, brokersTable,
 } from "@workspace/db";
 import { apiKeyAuth } from "../middleware/apiKeyAuth";
+import { logActivity } from "./activity_log";
 import { csvCell, safeFilename } from "../lib/validation";
 import { validate } from "../middleware/validate";
 import { z } from "zod";
@@ -15,6 +16,19 @@ import {
 } from "../schemas/common";
 
 const router: IRouter = Router();
+
+// Data leaving the platform is audited: one entry per successful export
+// download (who, which dataset, the filters used). Nothing of the data itself.
+router.use((req, res, next) => {
+  const kind = req.path.match(/^\/export\/(assets|telemetry|alarms|alarm-history)$/)?.[1];
+  if (!kind) { next(); return; }
+  res.on("finish", () => {
+    if (req.method !== "GET" || res.statusCode !== 200) return;
+    const q = Object.entries(req.query).filter(([k]) => !/key|token|secret/i.test(k)).map(([k, v]) => `${k}=${String(v).slice(0, 60)}`).join(" ");
+    void logActivity("export.downloaded", "export", null, kind, q || null, req, { assetId: typeof req.query.assetId === "string" ? req.query.assetId : null });
+  });
+  next();
+});
 
 // ── CSV helper ────────────────────────────────────────────────────────────────
 //

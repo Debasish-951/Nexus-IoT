@@ -9,8 +9,11 @@ import {
   BROWN, heatTo, spinVis, T, VIB, zoneTags, zoneProfile, fanRotor, holder, smoke, legs4, lathe, wheel, setMat, stripeTex, sparks,
 } from "./kit";
 import type { ModelDef } from "./types";
+import { RENEWABLES } from "./renewables";
+import { INSTRUMENTS } from "./instruments";
+import { STORAGE } from "./storage";
 
-export const FAM: Record<string, string> = { rotating: "Rotating", vessel: "Vessels & tanks", thermal: "Thermal & heat transfer", linear: "Material handling", textile: "Textile", metals: "Iron & steel", oilgas: "Oil & gas", pharma: "Pharma", water: "Water & effluent", electrical: "Electrical & energy", hvac: "HVAC & refrigeration", other: "Other" };
+export const FAM: Record<string, string> = { rotating: "Rotating", vessel: "Vessels & tanks", thermal: "Thermal & heat transfer", linear: "Material handling", textile: "Textile", metals: "Iron & steel", oilgas: "Oil & gas", pharma: "Pharma", water: "Water & effluent", electrical: "Electrical & energy", instruments: "Instruments & meters", renewable: "Renewable energy", hvac: "HVAC & refrigeration", other: "Other" };
 export const MODELS: Record<string, ModelDef> = {
   pump: { fam: "rotating", name: "Pump", pre: "P", params: { size: { l: "Size", min: 0.6, max: 1.8, step: 0.1, v: 1 } },
     tags: () => [T("speed", "Speed", "rpm", 1480, { noise: 6, d: 0 }), VIB(), T("flow", "Flow", "m³/h", 120, { noise: 1.5, fault: 95 })],
@@ -418,20 +421,6 @@ export const MODELS: Record<string, ModelDef> = {
         lamps.forEach(({ gm, rm }, i) => { gm.emissiveIntensity = it.running ? 1 : 0.05; rm.emissiveIntensity = it.status === "crit" && i % 2 === 0 ? (Math.sin(t * 9) > 0 ? 1.4 : 0) : 0; });
         leds.forEach(m => { if (Math.random() < 0.06) m.emissiveIntensity = it.running ? 0.3 + Math.random() : 0; });
       };
-    } },
-  solar: { fam: "electrical", name: "Solar array", pre: "PV", params: { rows: { l: "Rows", min: 1, max: 6, step: 1, v: 3 }, panels: { l: "Panels per row", min: 4, max: 16, step: 1, v: 8 } },
-    tags: p => [T("kw", "Output", "kW", Math.round((p.rows | 0) * (p.panels | 0) * 0.42), { noise: 0.6, d: 0 }), T("irr", "Irradiance", "W/m²", 780, { off: 780, noise: 5, d: 0 }), T("pr", "Performance ratio", "%", 82, { off: 82, noise: 0.2, d: 0, low: true, warn: 75, crit: 70, fault: 64 })],
-    binds: () => [["Panels", "Brightness by irradiance", "irr"], ["Faulty string", "Blink red", "pr"]],
-    build(p, g) {
-      const R = p.rows | 0, N = p.panels | 0;
-      const pm = M(0x1e3a8a, { metalness: 0.6, roughness: 0.25, emissive: 0x1d4ed8, emissiveIntensity: 0.1 }), bad = M(0x1e3a8a, { metalness: 0.6, roughness: 0.25 });
-      for (let r = 0; r < R; r++) {
-        const z = -(R * 2.6) / 2 + (r + 0.5) * 2.6;
-        for (let i = 0; i < N; i++) { const pan = box(1, 0.04, 1.6, r === 0 && i === N - 1 ? bad : pm); pan.position.set(-(N * 1.05) / 2 + (i + 0.5) * 1.05, 1, z); pan.rotation.x = -0.5; g.add(pan); }
-        [-1, 1].forEach(sd => { const post = cyl(0.05, 0.05, 1, M(C.steel), 8); post.position.set(sd * (N * 1.05) / 2, 0.5, z); g.add(post); });
-        const rail = box(N * 1.05, 0.06, 0.06, M(C.steel)); rail.position.set(0, 0.9, z); g.add(rail);
-      }
-      return (dt, t, it) => { pm.emissiveIntensity = 0.05 + 0.25 * clamp(it.r.irr / 1000, 0, 1); if (it.r.pr < 75) { bad.emissive.setHex(0xef4444); bad.emissiveIntensity = Math.sin(t * 8) > 0 ? 0.9 : 0.1; } else { bad.emissive.copy(pm.emissive); bad.emissiveIntensity = pm.emissiveIntensity; } };
     } },
   battery: { fam: "electrical", name: "Battery / UPS", pre: "UPS", params: { racks: { l: "Racks", min: 1, max: 6, step: 1, v: 3 } },
     tags: () => [T("soc", "State of charge", "%", 86, { off: 86, noise: 0.02, d: 0, low: true, warn: 30, crit: 20, fault: 18 }), T("temp", "Cell temp", "°C", 28, { off: 25, noise: 0.05, warn: 40, crit: 45, fault: 47 }), T("kw", "Power", "kW", 120, { noise: 1, d: 0 })],
@@ -1177,5 +1166,8 @@ export const MODELS: Record<string, ModelDef> = {
         else if (bd.beh === "Blink on alarm") mesh.visible = it2.status === "crit" ? Math.sin(t * 10) > 0 : true;
       });
     } },
+  ...RENEWABLES,
+  ...STORAGE,
+  ...INSTRUMENTS,
 };
 export const GBEH = ["Rotate X", "Rotate Y", "Rotate Z", "Heat colour", "Blink on alarm"];

@@ -1738,6 +1738,22 @@ paths:
                 items:
                   $ref: "#/components/schemas/VizTag"
 
+  /sites:
+    get:
+      operationId: listSites
+      tags: [visualization]
+      summary: Projects the caller may open, with map location, asset count and newest data time
+      description: Location comes from the static attributes Latitude, Longitude and Address on the project (root) asset. Alarms are not included; read them from /alarms.
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Site"
+
   /plant-twins:
     get:
       operationId: listPlantTwins
@@ -2977,7 +2993,19 @@ paths:
               schema:
                 $ref: "#/components/schemas/AiChatAnswer"
         "400":
-          description: Missing question, `question_too_long` or `invalid_time_range`
+          description: Missing question, `question_too_long`, `invalid_time_range` or `invalid_scope`
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: "`project_forbidden`: the selected scope is outside the caller's projects"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: "`scope_not_found`: the selected project or asset does not exist"
           content:
             application/json:
               schema:
@@ -3001,12 +3029,68 @@ paths:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
 
+  /ai/report:
+    post:
+      operationId: generateAiReport
+      tags: [ai]
+      summary: Generate an AI report for an asset, a project or all visible assets
+      description: |
+        AI Reports. The report is written for the caller's level, decided from
+        their role: executive (super_admin, company_admin, project_manager),
+        manager (admin, team_lead, viewer and any other role) or engineer
+        (engineer, developer, operator). Every figure is computed by the server
+        from the database, limited to the assets the caller may see (project
+        access) and to alarm data only when the caller has the Alarms module.
+        When an AI provider is configured (GROQ_API_KEY), only the figures the
+        level needs are sent to the model, which writes the narrative in that
+        level's shape. Without a provider, or when the model fails, the figures
+        are still returned with `narrative: null`, `narrativeStatus` and
+        `narrativeError`. Numbers in the narrative that are not in the figures
+        are listed in `unverifiedNumbers`. Rate limited per user.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AiReportRequest"
+      responses:
+        "200":
+          description: Report
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AiReportResponse"
+        "400":
+          description: "`invalid_report_request`: bad range (at most 92 days) or asset id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: "`project_forbidden`: the asset is outside the caller's projects"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: Asset not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "429":
+          description: "`rate_limited` (platform limiter)"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+
   # ─── Activity log ──────────────────────────────────────────────────────────
   /activity-log:
     get:
       operationId: listActivityLog
       tags: [activity-log]
-      summary: Activity log, newest first (limited to the caller's project assets when project-restricted)
+      summary: Audit log search, newest first (limited to the caller's project assets when project-restricted)
       parameters:
         - $ref: "#/components/parameters/LimitQuery"
         - $ref: "#/components/parameters/OffsetQuery"
@@ -3019,9 +3103,73 @@ paths:
         - name: actorName
           in: query
           required: false
+          description: Earlier name of `actor`
           schema:
             type: string
             maxLength: 200
+        - name: q
+          in: query
+          required: false
+          description: Free text over action, target, detail and actor
+          schema:
+            type: string
+            maxLength: 200
+        - name: from
+          in: query
+          required: false
+          description: Earliest time (ISO 8601)
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: false
+          description: Latest time (ISO 8601)
+          schema:
+            type: string
+            format: date-time
+        - name: actor
+          in: query
+          required: false
+          description: User id, username or part of the name
+          schema:
+            type: string
+            maxLength: 200
+        - name: action
+          in: query
+          required: false
+          description: Action, or its beginning (e.g. `user.`)
+          schema:
+            type: string
+            maxLength: 200
+        - name: outcome
+          in: query
+          required: false
+          description: success, failure or denied
+          schema:
+            type: string
+            enum: [success, failure, denied]
+        - name: targetId
+          in: query
+          required: false
+          description: Entries about this item (per-item history)
+          schema:
+            type: string
+            maxLength: 200
+        - name: assetId
+          in: query
+          required: false
+          description: Entries about this asset or project, or anything under it
+          schema:
+            type: string
+            maxLength: 200
+        - name: includeSecurity
+          in: query
+          required: false
+          description: Merge security events (sign-ins, refusals, rate limits) into the list
+          schema:
+            type: string
+            enum: ["true", "false"]
       responses:
         "200":
           description: OK
@@ -3029,6 +3177,181 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ActivityLogPage"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+
+  /activity-log/export:
+    get:
+      operationId: exportActivityLog
+      tags: [activity-log]
+      summary: The filtered audit log as CSV (at most 50,000 rows); takes the same filters as /activity-log
+      parameters:
+        - name: q
+          in: query
+          required: false
+          description: Free text over action, target, detail and actor
+          schema:
+            type: string
+            maxLength: 200
+        - name: from
+          in: query
+          required: false
+          description: Earliest time (ISO 8601)
+          schema:
+            type: string
+            format: date-time
+        - name: to
+          in: query
+          required: false
+          description: Latest time (ISO 8601)
+          schema:
+            type: string
+            format: date-time
+        - name: actor
+          in: query
+          required: false
+          description: User id, username or part of the name
+          schema:
+            type: string
+            maxLength: 200
+        - name: action
+          in: query
+          required: false
+          description: Action, or its beginning (e.g. `user.`)
+          schema:
+            type: string
+            maxLength: 200
+        - name: outcome
+          in: query
+          required: false
+          description: success, failure or denied
+          schema:
+            type: string
+            enum: [success, failure, denied]
+        - name: targetId
+          in: query
+          required: false
+          description: Entries about this item (per-item history)
+          schema:
+            type: string
+            maxLength: 200
+        - name: assetId
+          in: query
+          required: false
+          description: Entries about this asset or project, or anything under it
+          schema:
+            type: string
+            maxLength: 200
+        - name: includeSecurity
+          in: query
+          required: false
+          description: Merge security events (sign-ins, refusals, rate limits) into the list
+          schema:
+            type: string
+            enum: ["true", "false"]
+      responses:
+        "200":
+          description: CSV file
+          content:
+            text/csv:
+              schema:
+                type: string
+
+  /activity-log/summary:
+    get:
+      operationId: getActivityLogSummary
+      tags: [activity-log]
+      summary: Last 7 days - changes per day, most active users, sensitive actions, failed or denied actions
+      parameters:
+        - name: timeZone
+          in: query
+          required: false
+          schema:
+            type: string
+            maxLength: 64
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditSummary"
+
+  /activity-log/verify:
+    get:
+      operationId: verifyActivityLog
+      tags: [activity-log]
+      summary: Walk the hash chain and report the first broken entry, if any (security administrators)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditVerifyResult"
+
+  /activity-log/alerts:
+    get:
+      operationId: listAuditAlerts
+      tags: [activity-log]
+      summary: Active sensitive-action alerts (Security Settings module)
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuditAlert"
+
+  /activity-log/alerts/{id}/acknowledge:
+    post:
+      operationId: acknowledgeAuditAlert
+      tags: [activity-log]
+      summary: Acknowledge a sensitive-action alert
+      parameters:
+        - $ref: "#/components/parameters/IdPath"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditAlert"
+        "404":
+          description: Not found or already acknowledged
+
+  /activity-log/settings:
+    get:
+      operationId: getAuditSettings
+      tags: [activity-log]
+      summary: Audit retention (minimum 365 days) and which sensitive-action alerts are on
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditSettings"
+    put:
+      operationId: updateAuditSettings
+      tags: [activity-log]
+      summary: Change audit retention or switch sensitive-action alerts on or off
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AuditSettingsUpdate"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties: true
         "400":
           $ref: "#/components/responses/ValidationFailed"
 
@@ -5390,8 +5713,8 @@ components:
           type: string
         kind:
           type: string
-          enum: [plant, machine, process, asset, folder]
-          description: Taken from `scene.kind`; plant when absent. `machine` is the detailed pump skid, `asset` a canvas of machines from the library, `folder` a node of the Live Twin hierarchy.
+          enum: [plant, machine, process, asset, image, folder]
+          description: Taken from `scene.kind`; plant when absent. `machine` is the detailed pump skid, `asset` a canvas of machines from the library, `image` a 2D twin (drawing or photo with mapped readings), `process` a P&ID, `folder` a node of the Live Twin hierarchy.
         projectId:
           type: string
           nullable: true
@@ -5658,6 +5981,41 @@ components:
           items:
             $ref: "#/components/schemas/VizTreeShareGrant"
       required: [ownerId, ownerName, shares]
+
+    Site:
+      type: object
+      properties:
+        projectId:
+          type: string
+        name:
+          type: string
+        latitude:
+          type: number
+          nullable: true
+        longitude:
+          type: number
+          nullable: true
+        address:
+          type: string
+          nullable: true
+        latitudeAttrId:
+          type: string
+          nullable: true
+        longitudeAttrId:
+          type: string
+          nullable: true
+        addressAttrId:
+          type: string
+          nullable: true
+        assetCount:
+          type: integer
+        maintenanceCount:
+          type: integer
+        lastDataAt:
+          type: string
+          format: date-time
+          nullable: true
+      required: [projectId, name, latitude, longitude, address, latitudeAttrId, longitudeAttrId, addressAttrId, assetCount, maintenanceCount, lastDataAt]
 
     VizTag:
       type: object
@@ -6451,6 +6809,15 @@ components:
           type: string
           maxLength: 64
           description: IANA time zone for presenting times; ignored when invalid.
+        scopeAssetId:
+          type: string
+          nullable: true
+          format: uuid
+          description: |
+            Project or asset the question is about. The assistant then uses only
+            this asset and the assets beneath it: tools taking an asset id refuse
+            others, and search, list, alarm and summary tools are filtered.
+            Omitted or null means all assets.
         history:
           type: array
           description: Earlier turns; only the last 4 are used, each cut to 1000 characters.
@@ -6505,6 +6872,96 @@ components:
         args: {}
       required: [tool]
 
+    AiReportRequest:
+      type: object
+      properties:
+        assetId:
+          type: string
+          format: uuid
+          nullable: true
+          description: Asset or project (root asset); its whole subtree is reported. Omit for all assets the caller may see.
+        range:
+          $ref: "#/components/schemas/AiChatRange"
+        timeZone:
+          type: string
+          description: IANA time zone of the reader, for alarm time-of-day figures. Defaults to UTC.
+        focus:
+          type: string
+          deprecated: true
+          description: Accepted from older links and ignored; the report's content follows the caller's level.
+      required: [range]
+
+    AiReportNarrative:
+      type: object
+      additionalProperties: true
+      description: |
+        Shape depends on `level`. executive: headline, summary, risks[{title,
+        what, impact, cause, decision}] (at most 3), improvements[], decisions[],
+        outlook. manager: summary, problemAreas[{area, issue, impact, cause}],
+        response, patterns[], priorities[{action, owner}]. engineer: summary,
+        diagnoses[{asset, observation, correlated, rootCause, confidence
+        (low|medium|high)}], alarmSequence[], dataIssues[], actions[{action,
+        urgency (immediate|this_week|planned)}].
+      properties:
+        level:
+          $ref: "#/components/schemas/AiReportLevel"
+        summary:
+          type: string
+      required: [level, summary]
+
+    AiReportLevel:
+      type: string
+      enum: [executive, manager, engineer]
+
+    AiReportResponse:
+      type: object
+      properties:
+        level:
+          $ref: "#/components/schemas/AiReportLevel"
+        facts:
+          type: object
+          additionalProperties: true
+          description: |
+            Figures computed by the server: level, scope, range, previous period,
+            kpis and previousKpis (assets, reporting, stale, readings, coverage,
+            alarms by severity, MTTA, MTTR, energy used in kWh), healthScore (0-100
+            with its parts and formula), kpiCards (4-6, value against the previous
+            period with direction), assetHealth and statusCounts, metrics (min/avg/
+            max and change), topMovers, trends, correlations (|r| >= 0.7),
+            leadingSignals (a metric away from normal just before an alarm),
+            alarmAssets, topAlarms, repeatAlarms (3+ times), alarmTiming (by hour
+            and weekday in the reader's time zone), alarmTimeline, maintenance,
+            energy and dataQuality (stale, low coverage, silent, stuck sensors).
+        narrative:
+          allOf:
+            - $ref: "#/components/schemas/AiReportNarrative"
+          nullable: true
+        narrativeStatus:
+          type: string
+          enum: [ok, unavailable, failed, rate_limited, unreadable]
+          description: "unavailable: no AI provider on this installation (licence, internet); failed, rate_limited, unreadable: temporary, try again."
+        narrativeError:
+          type: string
+          nullable: true
+        unverifiedNumbers:
+          type: array
+          items:
+            type: string
+        alarmsIncluded:
+          type: boolean
+        generatedAt:
+          type: string
+          format: date-time
+        range:
+          $ref: "#/components/schemas/AiChatRange"
+        scope:
+          type: object
+          additionalProperties: true
+        model:
+          type: string
+          nullable: true
+      required: [level, facts, narrative, narrativeStatus, narrativeError, unverifiedNumbers, alarmsIncluded, generatedAt, range, scope, model]
+
     # ─── Activity log ────────────────────────────────────────────────────────
     ActivityLogEntry:
       type: object
@@ -6534,8 +6991,152 @@ components:
         timestamp:
           type: string
           format: date-time
+        source:
+          type: string
+          enum: [audit, security]
+        actorUserId:
+          type: string
+          nullable: true
+        changes:
+          type: array
+          nullable: true
+          items:
+            $ref: "#/components/schemas/AuditChange"
+        outcome:
+          type: string
+          enum: [success, failure, denied]
+        ip:
+          type: string
+          nullable: true
+        userAgent:
+          type: string
+          nullable: true
+        correlationId:
+          type: string
+          nullable: true
+        assetId:
+          type: string
+          nullable: true
+        projectId:
+          type: string
+          nullable: true
+        hash:
+          type: string
+          nullable: true
+        seq:
+          type: integer
+          nullable: true
       required: [id, action, category, timestamp]
       additionalProperties: true
+
+    AuditChange:
+      type: object
+      properties:
+        field:
+          type: string
+        from: {}
+        to: {}
+      required: [field]
+
+    AuditSummary:
+      type: object
+      properties:
+        perDay:
+          type: array
+          items:
+            type: object
+            properties:
+              day: { type: string }
+              count: { type: integer }
+        topActors:
+          type: array
+          items:
+            type: object
+            properties:
+              name: { type: string }
+              count: { type: integer }
+        sensitive:
+          type: object
+          additionalProperties: true
+        failures:
+          type: object
+          properties:
+            audit: { type: integer }
+            security: { type: integer }
+      required: [perDay, topActors, sensitive, failures]
+
+    AuditVerifyResult:
+      type: object
+      properties:
+        ok: { type: boolean }
+        checked: { type: integer }
+        verifiedAt: { type: string, format: date-time }
+        checkpoint:
+          type: object
+          nullable: true
+          additionalProperties: true
+        broken:
+          type: object
+          nullable: true
+          properties:
+            id: { type: string }
+            seq: { type: integer }
+            timestamp: { type: string }
+            reason: { type: string, enum: [prev_mismatch, hash_mismatch, missing_hash] }
+      required: [ok, checked, verifiedAt]
+
+    AuditAlert:
+      type: object
+      properties:
+        id: { type: string }
+        rule: { type: string }
+        severity: { type: string }
+        title: { type: string }
+        message: { type: string }
+        entryId: { type: string, nullable: true }
+        status: { type: string }
+        raisedAt: { type: string, format: date-time }
+        acknowledgedBy: { type: string, nullable: true }
+        acknowledgedAt: { type: string, format: date-time, nullable: true }
+      required: [id, rule, severity, title, message, status, raisedAt]
+      additionalProperties: true
+
+    AuditSettings:
+      type: object
+      properties:
+        retentionDays: { type: integer, nullable: true }
+        effectiveRetentionDays: { type: integer }
+        defaultRetentionDays: { type: integer }
+        minimumRetentionDays: { type: integer }
+        alerts:
+          type: array
+          items:
+            type: object
+            properties:
+              key: { type: string }
+              title: { type: string }
+              severity: { type: string }
+              enabled: { type: boolean }
+        checkpoint:
+          type: object
+          nullable: true
+          additionalProperties: true
+      additionalProperties: true
+
+    AuditSettingsUpdate:
+      type: object
+      properties:
+        retentionDays:
+          type: integer
+          minimum: 0
+          maximum: 36500
+          nullable: true
+          description: 0 keeps entries for ever; other values below 365 are raised to 365
+        alerts:
+          type: object
+          additionalProperties:
+            type: boolean
+      additionalProperties: false
 
     ActivityLogPage:
       type: object
