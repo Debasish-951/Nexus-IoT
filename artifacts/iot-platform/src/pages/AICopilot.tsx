@@ -108,6 +108,16 @@ export default function AICopilot() {
     navigate(rest ? `/ai-reports?${rest}` : "/ai-reports", { replace: true });
   }, [search, navigate]);
 
+  // Deep link from other pages (e.g. Live Feed "Ask AI Advisor"):
+  // /ai-copilot?scope=<assetId>&q=<question> selects the scope and prefills the question, without sending it.
+  useEffect(() => {
+    const p = new URLSearchParams(search);
+    const s = p.get("scope");
+    const q = p.get("q");
+    if (s && /^[0-9a-f-]{36}$/i.test(s)) setScope(s);
+    if (q) { setInput(q.slice(0, 1000)); inputRef.current?.focus(); }
+  }, [search]);
+
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
   }, [messages, loading]);

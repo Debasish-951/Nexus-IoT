@@ -47,7 +47,7 @@ const DOC_VERSIONS: DocVersion[] = [
       { title: "Introduction & Navigation", desc: "Capabilities, sign-in, menus, top bar, languages" },
       { title: "Home & Asset Hub", desc: "Projects, assets, attributes, templates, maintenance, Media Library" },
       { title: "Data Studio & Visualization", desc: "Dashboard templates, widgets, SPC lines, layout, time range" },
-      { title: "Live Feed & Live Twin", desc: "Live operations view; twin types, library, scenarios" },
+      { title: "Live Feed & Live Twin", desc: "Live operations: online/delayed/offline, attention list, machine tree, event stream; twin types, library, scenarios" },
       { title: "Event Manager", desc: "Alarm list, history, threshold & rate-of-change rules, webhooks" },
       { title: "Integration Hub", desc: "Brokers, destinations, API clients, scopes, ingest URLs" },
       { title: "Governance & RBAC", desc: "Users, nine roles, modules, project access, Security Center" },

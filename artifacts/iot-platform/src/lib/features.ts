@@ -185,6 +185,16 @@ export const FEATURES = {
   classicAuditLog: envOn(import.meta.env.VITE_CLASSIC_AUDIT_LOG),
 
   /**
+   * The earlier Live Feed page (two count cards, a paginated latest-values table
+   * and a separate timeline). Off (default): the page with one online/delayed/
+   * offline rule, status tiles, "Needs attention now", assets grouped by machine
+   * and a live event stream. On:
+   *
+   *   VITE_CLASSIC_LIVE_FEED=true pnpm --filter @workspace/iot-platform build
+   */
+  classicLiveFeed: envOn(import.meta.env.VITE_CLASSIC_LIVE_FEED),
+
+  /**
    * Opaque address-bar tokens (lib/routeSlugs.ts).
    *
    * ON by default, unlike everything else here — this one was asked for, and

@@ -649,21 +649,33 @@ export function buildDocumentContent_v22(): ContentItem[] {
     // ─── CHAPTER 11 ───────────────────────────────────────────────────────────
     h1("Chapter 11: Live Feed"),
     h2("11.1 Overview"),
-    p("Data Studio > Live Feed (Live Operations Center) shows telemetry as it arrives over the live connection, without polling. Use it to watch data flow during commissioning and operation."),
+    p("Data Studio > Live Feed (Live Operations Center) answers one question: what is happening in the plant right now, and what needs attention? Values arrive over the live connection; the latest stored values and asset health are refreshed every 30 seconds."),
 
-    h2("11.2 Layout"),
+    h2("11.2 Online, delayed and offline"),
+    p("Every part of the page uses the same rule, based on the newest reading of the asset (live data, the newest stored reading or a dynamic attribute):"),
+    table(
+      ["Status", "Meaning"],
+      [
+        ["Online", "Newest reading within the asset's expected interval: 5 minutes, or the value of the static attribute 'Expected interval (min)' on the asset (for example 1 for a pump, 60 for a meter)"],
+        ["Delayed", "Older than the expected interval, but within 1 hour"],
+        ["Offline", "No reading for more than 1 hour"],
+        ["No data yet", "The asset has a device id but has never reported"],
+      ]
+    ),
+
+    h2("11.3 Layout"),
     table(
       ["Element", "Content"],
       [
-        ["Status badge", "Live or 'No live data'"],
-        ["KPIs", "Assets Online, Connected Devices"],
-        ["Live Asset Status", "Each asset with its latest values; stale after 30 s without data"],
-        ["Live Sensor Feed", "Time, Asset, Sensor, Value, Status; search, asset filter, Export; 8 rows per page"],
-        ["Asset Health Ranking", "Top Healthy and Needs Attention"],
-        ["Live Event Timeline", "Recent platform events (not shown to project-restricted users)"],
+        ["Header", "'Receiving data - N assets - readings per minute - last message' or 'No data for <time>'; the live-connection state is shown separately"],
+        ["Filters", "Project or asset, machine, reading search, Only problems, Export CSV of the latest values"],
+        ["Status tiles", "Assets online / delayed / offline; active alarms (critical or high); messages per minute over 15 minutes; data quality (readings outside alarm limits, possibly stuck sensors)"],
+        ["Needs attention now", "Assets in alarm, readings over warning or alarm limits, assets delayed or offline, possibly stuck sensors and the fastest-changing readings, most urgent first. Each row opens the asset, the Live Twin, or AI Advisor with the asset selected and a question prefilled. 'All clear' when nothing needs attention"],
+        ["Assets by machine", "Each asset expands into its machine tree (metric names are split at the dots, e.g. Unit 2 > Spinning > Spinning Machine). Each reading shows its short name, value and unit, a small trend and the limit colour from the alarm rules. Groups with problems open automatically"],
+        ["Event stream", "Alarms raised, acknowledged and cleared, assets going online, delayed or offline, readings crossing limits and user actions (for users who can read the audit log), newest first; filter by type and pause"],
       ]
     ),
-    p("The page keeps the latest 1000 events in the browser."),
+    p("Limits come from the enabled threshold alarm rules (Event Manager): critical and high rules give the alarm limit, other severities the warning limit. A sensor is 'possibly stuck' when its last 20 or more values are identical. The event stream keeps the latest 200 events in the browser. The earlier page can be restored with VITE_CLASSIC_LIVE_FEED=true."),
     pb(),
 
     // ─── CHAPTER 12 ───────────────────────────────────────────────────────────
@@ -1619,6 +1631,7 @@ viewer: view`),
         ["VITE_TWIN_LIBRARY_LIST", "off", "true shows the machine library as the earlier list on the right instead of the tile panel on the left"],
         ["VITE_CLASSIC_REPORTS", "off", "true lists the classic Reports page in Data Studio again"],
         ["VITE_CLASSIC_AUDIT_LOG", "off", "true restores the earlier Audit Log page"],
+        ["VITE_CLASSIC_LIVE_FEED", "off", "true restores the earlier Live Feed page"],
         ["VITE_DISABLE_PRO_WIDGETS", "off", "true hides the 104 Pro widgets"],
         ["VITE_DISABLE_PLANT_TWIN_3D", "off", "true offers only 2D twins"],
         ["VITE_DISABLE_NOTIFICATION_CHANNELS", "off", "true hides Email/WhatsApp/SMS and Notification Groups"],
