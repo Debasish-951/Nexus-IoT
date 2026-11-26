@@ -209,6 +209,13 @@ export const DEFAULT_JSON_LIMITS: JsonLimits = {
 };
 
 /**
+ * Live Twin scenes (POST/PUT /plant-twins): a large plant has far more keys than
+ * a dashboard. The global request guard allows the same key count on those two
+ * routes, so the per-route limit is the one that applies (audit M-15).
+ */
+export const PLANT_SCENE_JSON_LIMITS = { maxKeys: 40_000, maxArrayLength: 5000 };
+
+/**
  * Keys that must never appear in an object that will be spread, merged or used
  * to build a database update.
  *
@@ -224,6 +231,12 @@ const FORBIDDEN_KEYS = new Set(["__proto__", "constructor", "prototype"]);
 export interface JsonCheckResult {
   ok: boolean;
   error?: string;
+  /**
+   * "size": too many keys, too long an array or string; a big legitimate
+   * document can hit these. "structure": nesting depth, a forbidden key or a
+   * non-finite number; nothing produces these by accident.
+   */
+  kind?: "size" | "structure";
 }
 
 /** Walk a parsed JSON value and enforce the structural limits. Iterative, so the checker itself cannot blow the stack. */
@@ -235,20 +248,20 @@ export function checkJsonStructure(root: unknown, limits: JsonLimits = DEFAULT_J
     const { value, depth } = stack.pop()!;
 
     if (depth > limits.maxDepth) {
-      return { ok: false, error: `nesting is deeper than ${limits.maxDepth} levels` };
+      return { ok: false, error: `nesting is deeper than ${limits.maxDepth} levels`, kind: "structure" };
     }
     if (typeof value === "string") {
       if (value.length > limits.maxStringLength) {
-        return { ok: false, error: `a string value exceeds ${limits.maxStringLength} characters` };
+        return { ok: false, error: `a string value exceeds ${limits.maxStringLength} characters`, kind: "size" };
       }
       continue;
     }
     if (typeof value === "number" && !Number.isFinite(value)) {
-      return { ok: false, error: "numeric values must be finite" };
+      return { ok: false, error: "numeric values must be finite", kind: "structure" };
     }
     if (Array.isArray(value)) {
       if (value.length > limits.maxArrayLength) {
-        return { ok: false, error: `an array exceeds ${limits.maxArrayLength} items` };
+        return { ok: false, error: `an array exceeds ${limits.maxArrayLength} items`, kind: "size" };
       }
       for (const v of value) stack.push({ value: v, depth: depth + 1 });
       continue;
@@ -258,10 +271,10 @@ export function checkJsonStructure(root: unknown, limits: JsonLimits = DEFAULT_J
       // what a pollution attempt wants us to do.
       for (const key of Object.keys(value)) {
         if (FORBIDDEN_KEYS.has(key)) {
-          return { ok: false, error: `the key "${key}" is not allowed` };
+          return { ok: false, error: `the key "${key}" is not allowed`, kind: "structure" };
         }
         if (++keyCount > limits.maxKeys) {
-          return { ok: false, error: `the payload has more than ${limits.maxKeys} keys` };
+          return { ok: false, error: `the payload has more than ${limits.maxKeys} keys`, kind: "size" };
         }
         stack.push({ value: (value as Record<string, unknown>)[key], depth: depth + 1 });
       }

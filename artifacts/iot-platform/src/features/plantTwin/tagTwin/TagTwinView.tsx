@@ -93,7 +93,13 @@ export function TagTwinView({ kind, keys, Stage, demoValve, link }: {
   const current: PlantTwinSummary | null = twins.find((t) => t.id === currentId) ?? null;
   const [bind, setBind] = useState<Bind>({});
   const [demo, setDemo] = useState(true);
-  const readOnly = current ? !current.canEdit : false;
+  // The twin whose bindings are on screen and the version they were loaded at.
+  // Set only after a load succeeds, so a failed or pending load can never save
+  // the previous twin's bindings under the new id (audit M-18).
+  const [loadedId, setLoadedId] = useState<string | null>(null);
+  const loadedIdRef = useRef<string | null>(null), versionRef = useRef<string | null>(null);
+  const loaded = !!currentId && loadedId === currentId;
+  const readOnly = current ? !current.canEdit || !loaded : false;
   useTwinLink(link, currentId, (id) => { setDraft(!id); setCurrentId(id); });
 
   useEffect(() => {
@@ -103,13 +109,15 @@ export function TagTwinView({ kind, keys, Stage, demoValve, link }: {
   }, [listQ.isSuccess, twins, currentId, draft]);
   const loading = useRef(false);
   useEffect(() => {
+    loadedIdRef.current = null; versionRef.current = null; setLoadedId(null);
     if (!currentId) { setBind({}); setDemo(true); return; }
     let cancelled = false; loading.current = true;
     getPlantTwin(currentId).then((t) => {
       if (cancelled) return;
       const s = t.scene as Partial<TagScene>;
       setBind((s.bind as Bind) ?? {}); setDemo(s.demo !== false);
-    }).catch((err) => toast({ title: t("Could not open this twin"), description: err?.message ?? String(err), variant: "destructive" }))
+      loadedIdRef.current = t.id; versionRef.current = t.updatedAt; setLoadedId(t.id);
+    }).catch((err) => { if (!cancelled) toast({ title: t("Could not open this twin"), description: err?.message ?? String(err), variant: "destructive" }); })
       .finally(() => { setTimeout(() => { loading.current = false; }, 0); });
     return () => { cancelled = true; };
   }, [currentId, toast]);
@@ -122,7 +130,7 @@ export function TagTwinView({ kind, keys, Stage, demoValve, link }: {
   const pending = useRef<{ id: string; body: any } | null>(null);
   useEffect(() => {
     if (first.current) { first.current = false; return; }
-    if (!current?.canEdit || loading.current) return;
+    if (!current?.canEdit || loading.current || loadedIdRef.current !== current.id) return;
     // No timer: the Save button stays light orange until it is pressed.
     setSaveState("dirty");
     pending.current = { id: current.id, body: scene() };
@@ -131,7 +139,8 @@ export function TagTwinView({ kind, keys, Stage, demoValve, link }: {
   // Unsaved changes are still written when another twin opens or the view closes.
   useEffect(() => () => {
     const p = pending.current; if (!p) return; pending.current = null;
-    updatePlantTwin(p.id, { scene: p.body }).catch(() => { /* best effort on leave */ });
+    if (loadedIdRef.current !== p.id) return;
+    updatePlantTwin(p.id, { scene: p.body, expectedUpdatedAt: versionRef.current ?? undefined }).catch(() => { /* best effort on leave */ });
   }, [currentId]);
   useEffect(() => {
     const warn = (e: BeforeUnloadEvent) => { if (pending.current) { e.preventDefault(); e.returnValue = ""; } };
@@ -223,10 +232,13 @@ export function TagTwinView({ kind, keys, Stage, demoValve, link }: {
 
   const openSave = () => { setName(kind === "machine" ? `Pump ${twins.length + 1}` : `Process unit ${twins.length + 1}`); setSaveOpen(true); };
   const saveNow = () => {
-    if (!current) return;
+    if (!current || loadedIdRef.current !== current.id) return;
     pending.current = null;
     setSaveState("saving");
-    updatePlantTwin(current.id, { scene: scene() as any }).then(() => { setSaveState("saved"); setSaveErr(""); }).catch((err) => { setSaveState("error"); setSaveErr(err?.message ?? String(err)); });
+    updatePlantTwin(current.id, { scene: scene() as any, expectedUpdatedAt: versionRef.current ?? undefined }).then((row) => {
+      if (loadedIdRef.current === row.id) versionRef.current = row.updatedAt;
+      setSaveState("saved"); setSaveErr("");
+    }).catch((err) => { setSaveState("error"); setSaveErr(err?.message ?? String(err)); });
   };
   const toolbar = (
     <div className="flex items-center gap-2 flex-wrap">
@@ -254,7 +266,7 @@ export function TagTwinView({ kind, keys, Stage, demoValve, link }: {
       {current && (saveState === "error" || !current.canEdit) && <span className={cn("text-xs", saveState === "error" ? "text-red-500" : "text-muted-foreground")}>{current.canEdit ? saveText : t("View only: owned by someone else")}</span>}
       <span className={cn("ml-auto inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full", wsStatus === "connected" ? "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300" : "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300")}>{wsStatus === "connected" ? t("Live") : t("Reconnecting")}</span>
       {canCreate && (isDraft || current?.canEdit) && (
-        <Button size="sm" onClick={() => { if (isDraft) openSave(); else saveNow(); }} disabled={saveState === "saving"} className={cn("h-8", saveTone(isDraft ? "new" : saveState))}
+        <Button size="sm" onClick={() => { if (isDraft) openSave(); else saveNow(); }} disabled={saveState === "saving" || (!isDraft && !loaded)} className={cn("h-8", saveTone(isDraft ? "new" : saveState))}
           title={isDraft ? t("Not saved yet: save this twin") : saveState === "saved" ? t("All changes saved") : saveState === "error" ? t("Not saved: {err}", { err: saveErr }) : saveState === "saving" ? t("Saving…") : t("Unsaved changes: press Save")}><Save className="w-4 h-4 mr-1" /> {t("Save")}</Button>
       )}
     </div>

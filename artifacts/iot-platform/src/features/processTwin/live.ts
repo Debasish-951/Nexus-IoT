@@ -79,7 +79,7 @@ export function useProcessRuntime(scene: ProcessScene, opts: { demo: boolean; sc
   registerMine(scene.custom);
   const pairs = useMemo(() => {
     const seen = new Set<string>();
-    return sceneBindings(scene).filter((b) => { const k = `${b.assetId}\u0000${b.metric}`; if (seen.has(k)) return false; seen.add(k); return true; }).slice(0, 500);
+    return sceneBindings(scene).filter((b) => { const k = `${b.assetId}\u0000${b.metric}`; if (seen.has(k)) return false; seen.add(k); return true; });
   }, [scene]);
   const pairsKey = pairs.map((p) => `${p.assetId}:${p.metric}`).join("|");
 

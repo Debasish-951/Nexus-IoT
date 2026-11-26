@@ -11,6 +11,7 @@ import { hasModuleAccess } from "../lib/rbac";
 import { isSuperAdmin, loadVizAccess, ownsInChain, NO_ACCESS, type VizNodeAccess } from "../lib/viz-access";
 import { assetScope } from "../lib/project-access";
 import { tagsForViewer } from "../lib/viz-tags";
+import { wouldCreateCycle } from "../lib/twin-rules";
 import {
   CreateVizNodeBody, UpdateVizNodeBody, VizNodeParams, ImportVizNodesBody, ImportVizNode,
   VizNodeShareParams, PutVizNodeShareBody,
@@ -200,6 +201,17 @@ router.put("/viz-nodes/:id", validate({ params: VizNodeParams, body: UpdateVizNo
     if (node?.parentId) { res.status(400).json({ error: "Only a top-level dashboard can be assigned to a project." }); return; }
     if (update.projectId && !(await canUseProject(req, update.projectId))) {
       deny(req, res, "viz_project_denied", "You cannot assign a dashboard to that project.");
+      return;
+    }
+  }
+
+  // Moving a node under one of its own descendants would cut that subtree off
+  // in a loop that no tree view can reach (audit L-23).
+  if (update.parentId) {
+    const tree = await db.select({ id: vizNodesTable.id, parentId: vizNodesTable.parentId }).from(vizNodesTable);
+    const parents = new Map(tree.map((n) => [n.id, n.parentId]));
+    if (wouldCreateCycle((x) => parents.get(x), id, update.parentId)) {
+      res.status(400).json({ error: "A dashboard cannot be moved into one of its own sub-dashboards.", code: "viz_node_cycle" });
       return;
     }
   }

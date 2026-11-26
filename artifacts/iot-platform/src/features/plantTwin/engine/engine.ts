@@ -80,6 +80,12 @@ export function autoMap(tags: TagDef[], metrics: string[]): Record<string, strin
   return out;
 }
 
+/** Frees a material, and with `withTextures` every texture it holds (map, normalMap, …). */
+function disposeMaterial(m: THREE.Material, withTextures: boolean) {
+  if (withTextures) for (const v of Object.values(m)) if (v && (v as THREE.Texture).isTexture) (v as THREE.Texture).dispose();
+  m.dispose();
+}
+
 export function createPlantEngine(o: EngineOptions) {
   const { canvas, host, overlay } = o;
   const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
@@ -137,12 +143,24 @@ export function createPlantEngine(o: EngineOptions) {
     return { x0: cx - w / 2, x1: cx + w / 2, z0: cz - d / 2, z1: cz + d / 2, cx, cz };
   }
   function boundsOf(list: Item[]) { let x0 = 1e9, x1 = -1e9, z0 = 1e9, z1 = -1e9; list.forEach((i) => { const b = ib(i); x0 = Math.min(x0, b.x0); x1 = Math.max(x1, b.x1); z0 = Math.min(z0, b.z0); z1 = Math.max(z1, b.z1); }); return { x0, x1, z0, z1 }; }
-  function disposeTree(obj: THREE.Object3D) { obj.traverse((c: any) => { if (c.geometry) c.geometry.dispose(); }); }
+  /**
+   * Frees what a removed object holds on the GPU: geometry, materials and their
+   * textures (audit M-19; geometry alone was freed before). Meshes of an
+   * uploaded model share geometry and textures with the cached model (glbCache),
+   * so only their own cloned materials are freed here.
+   */
+  function disposeTree(obj: THREE.Object3D) {
+    obj.traverse((c: any) => {
+      const shared = !!c.userData?.glbShared;
+      if (c.geometry && !shared) c.geometry.dispose();
+      if (c.material) (Array.isArray(c.material) ? c.material : [c.material]).forEach((m: THREE.Material) => disposeMaterial(m, !shared));
+    });
+  }
 
   /* ---------- machines ---------- */
   function build(it: Item) {
     const m = MODELS[it.type];
-    if (it.root) { world.remove(it.root); if (it.type !== "glb") disposeTree(it.root); }
+    if (it.root) { world.remove(it.root); disposeTree(it.root); }
     const root = new THREE.Group(), inner = new THREE.Group(); root.add(inner);
     it.update = (m.build(it.params, inner, it) as any) || null;
     inner.updateMatrixWorld(true);
@@ -267,7 +285,7 @@ export function createPlantEngine(o: EngineOptions) {
     return [P(a.cx, 0, a.z1), P(a.cx, 0, zd), P(b.cx, 0, zd), P(b.cx, 0, b.z1)];
   }
   function rebuildAreas() {
-    while (areaG.children.length) { const c = areaG.children.pop()!; c.traverse((q: any) => { if (q.geometry) q.geometry.dispose(); if (q.material?.map) q.material.map.dispose(); }); }
+    while (areaG.children.length) { const c = areaG.children.pop()!; disposeTree(c); }
     flowTex = []; flowLbls.forEach((l) => l.el.remove()); flowLbls = [];
     areas.forEach((A) => {
       A.rect = null; if (!A.enabled) return;
@@ -360,12 +378,36 @@ export function createPlantEngine(o: EngineOptions) {
   function structureChanged(edit = true) { sizeFloor(); rebuildConns(); rebuildAreas(); applyIso(); o.onChange(); if (edit) o.onEdit(); }
 
   /* ---------- loading and saving ---------- */
-  function clearAll() { loadGen++; pendingGlb = []; partPick = null; items.slice().forEach((i) => { world.remove(i.root); if (i.type !== "glb") disposeTree(i.root); i.pin.remove(); dropPartPins(i); }); items = []; conns = []; sel = null; connectFrom = null; rebuildConns(); }
+  function clearAll() { loadGen++; pendingGlb = []; partPick = null; items.slice().forEach((i) => { world.remove(i.root); disposeTree(i.root); i.pin.remove(); dropPartPins(i); }); items = []; conns = []; sel = null; connectFrom = null; rebuildConns(); trimGlbCache(); }
 
   /* ---------- uploaded .glb models ---------- */
   /** Saved models still downloading: kept as specs so a save meanwhile does not drop them. */
   let pendingGlb: ItemSpec[] = [], loadGen = 0;
-  const glbCache = new Map<string, Promise<{ obj: THREE.Object3D; names: string[]; k: number }>>();
+  type GlbModel = { obj: THREE.Object3D; names: string[]; k: number };
+  /**
+   * Parsed uploaded models by upload id, least recently used first. Bounded, and
+   * an evicted model's geometry, materials and textures are freed, unless a
+   * machine on the floor still shows it (audit M-19).
+   */
+  const glbCache = new Map<string, Promise<GlbModel>>();
+  const GLB_CACHE_MAX = 6;
+  function cacheGlb(id: string, p: Promise<GlbModel>) { glbCache.delete(id); glbCache.set(id, p); trimGlbCache(); }
+  function freeGlb(p: Promise<GlbModel>) {
+    p.then((m) => m.obj.traverse((c: any) => {
+      c.geometry?.dispose();
+      if (c.material) (Array.isArray(c.material) ? c.material : [c.material]).forEach((mm: THREE.Material) => disposeMaterial(mm, true));
+    })).catch(() => { /* never loaded: nothing to free */ });
+  }
+  function trimGlbCache() {
+    if (glbCache.size <= GLB_CACHE_MAX) return;
+    const inUse = new Set(items.map((i) => i.glbId).filter(Boolean));
+    pendingGlb.forEach((s) => { if (s.glbId) inUse.add(s.glbId); });
+    for (const [id, p] of glbCache) {
+      if (glbCache.size <= GLB_CACHE_MAX) break;
+      if (inUse.has(id)) continue;
+      glbCache.delete(id); freeGlb(p);
+    }
+  }
   function parseGlb(buf: ArrayBuffer) {
     return new Promise<any>((res, rej) => new GLTFLoader().parse(buf, "", res, rej)).then((gltf) => {
       const obj: THREE.Object3D = gltf.scene, names: string[] = []; let n = 0;
@@ -379,7 +421,8 @@ export function createPlantEngine(o: EngineOptions) {
     pendingGlb.push(spec);
     const gen = loadGen;
     let p = glbCache.get(spec.glbId);
-    if (!p) { p = o.fetchGlb(spec.glbId).then(parseGlb); glbCache.set(spec.glbId, p); p.catch(() => glbCache.delete(spec.glbId!)); }
+    if (!p) { p = o.fetchGlb(spec.glbId).then(parseGlb); p.catch(() => { if (glbCache.get(spec.glbId!) === p) glbCache.delete(spec.glbId!); }); }
+    cacheGlb(spec.glbId, p);
     p.then((m) => {
       if (gen !== loadGen || disposed) return;
       pendingGlb = pendingGlb.filter((s) => s !== spec);
@@ -642,7 +685,8 @@ export function createPlantEngine(o: EngineOptions) {
       canvas.removeEventListener("pointerdown", onDown); canvas.removeEventListener("pointermove", onMove);
       canvas.removeEventListener("pointerup", onUp); canvas.removeEventListener("pointercancel", onCancel); canvas.removeEventListener("wheel", onWheel);
       clearAll(); flowLbls.forEach((l) => l.el.remove());
-      scene.traverse((q: any) => { if (q.geometry) q.geometry.dispose(); if (q.material) { (Array.isArray(q.material) ? q.material : [q.material]).forEach((m: any) => { m.map?.dispose(); m.dispose(); }); } });
+      scene.traverse((q: any) => { if (q.geometry) q.geometry.dispose(); if (q.material) { (Array.isArray(q.material) ? q.material : [q.material]).forEach((m: any) => disposeMaterial(m, true)); } });
+      glbCache.forEach((p) => freeGlb(p)); glbCache.clear();
       renderer.dispose();
     },
     loadScene, loadPack: (key: string) => { demo = true; loadPack(key); o.onChange(); },
@@ -707,7 +751,7 @@ export function createPlantEngine(o: EngineOptions) {
     },
     removeItem(id: string) {
       const it = byId(id); if (!it) return;
-      world.remove(it.root); if (it.type !== "glb") disposeTree(it.root); it.pin.remove(); dropPartPins(it);
+      world.remove(it.root); disposeTree(it.root); it.pin.remove(); dropPartPins(it);
       items = items.filter((i) => i !== it); conns = conns.filter((c) => c.a !== it.id && c.b !== it.id);
       if (sel === it) sel = null; if (connectFrom === it) connectFrom = null;
       structureChanged();
@@ -805,7 +849,7 @@ export function createPlantEngine(o: EngineOptions) {
      */
     async addGlb(file: File, areaId: string, uploadId?: string): Promise<string> {
       const m = await parseGlb(await file.arrayBuffer());
-      if (uploadId) glbCache.set(uploadId, Promise.resolve(m));
+      if (uploadId) cacheGlb(uploadId, Promise.resolve(m));
       const A = areaById(areaId);
       const it = createItem({ type: "glb", name: file.name.replace(/\.glb$/i, ""), glbObj: m.obj, glbK: m.k, glbNames: m.names, glbId: uploadId, gb: [{ mesh: m.names[0] || "", beh: "Rotate Y", k: "speed" }], area: A ? areaId : "", sub: A ? "Added" : "" });
       if (!it) throw new Error("model could not be created");

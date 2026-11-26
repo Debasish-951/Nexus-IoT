@@ -33,7 +33,9 @@ export interface SiteView extends Site {
 export const FRESH_MS = 15 * 60_000;
 const RED = new Set(["critical", "high"]);
 const SEV_RANK: Record<string, number> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
-const ALARM_PARAMS = { status: "active", limit: 200 } as const;
+// The server's maximum: with only the newest 200, a site whose alarms are older
+// than 200 others showed green (audit L-23).
+const ALARM_PARAMS = { status: "active", limit: 5000 } as const;
 
 export function useSites(onlyIds?: string[]) {
   const qc = useQueryClient();

@@ -36,7 +36,9 @@ import { emptyScene, newItemId, normaliseScene, type ImageScene, type TwinItem }
 import type { Part } from "./sanitize";
 
 const CLASSIC_KEY = "wsviz:twins";
+/** In bytes (UTF-8), as the server's 1 MB body limit counts them; not characters. */
 const MAX_SCENE = 990_000;
+const utf8Bytes = (s: string) => new TextEncoder().encode(s).length;
 let instance = 0;
 
 function useProjectAssets(): AssetChoice[] {
@@ -151,19 +153,30 @@ export default function ImageTwinView({ link }: { link: TwinLink }) {
 
   const loading = useRef(false);
   const [opening, setOpening] = useState(false);
+  // The twin whose scene is on screen and the version it was loaded at. Set only
+  // after a load succeeds: while another twin loads, or after a failed load, the
+  // previous scene is still shown and must not be saved under the new id (audit H-6).
+  const [loadedId, setLoadedId] = useState<string | null>(null);
+  const loadedIdRef = useRef<string | null>(null), versionRef = useRef<string | null>(null);
   useEffect(() => {
     setSelectedId(null); setTool("select");
+    loadedIdRef.current = null; versionRef.current = null; setLoadedId(null);
     if (!currentId) { setScene(emptyScene()); return; }
     let cancelled = false; loading.current = true; setOpening(true);
-    getPlantTwin(currentId).then((row) => { if (!cancelled) setScene(normaliseScene(row.scene)); })
-      .catch((err) => toast({ title: t("Could not open this twin"), description: err?.message ?? String(err), variant: "destructive" }))
+    getPlantTwin(currentId).then((row) => {
+      if (cancelled) return;
+      setScene(normaliseScene(row.scene));
+      loadedIdRef.current = row.id; versionRef.current = row.updatedAt; setLoadedId(row.id);
+    })
+      .catch((err) => { if (!cancelled) toast({ title: t("Could not open this twin"), description: err?.message ?? String(err), variant: "destructive" }); })
       .finally(() => { if (!cancelled) setOpening(false); setTimeout(() => { loading.current = false; }, 0); });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentId]);
 
   const isDraft = !currentId;
-  const editable = isDraft || !!current?.canEdit;
+  const loaded = !!currentId && loadedId === currentId;
+  const editable = isDraft || (!!current?.canEdit && loaded);
 
   // ── saving ────────────────────────────────────────────────────────────────
   const [saveState, setSaveState] = useState<"saved" | "dirty" | "saving" | "error">("saved");
@@ -173,25 +186,29 @@ export default function ImageTwinView({ link }: { link: TwinLink }) {
   const change = useCallback((fn: (s: ImageScene) => ImageScene) => {
     setScene((s) => {
       const next = fn(s);
-      if (!loading.current && current?.canEdit) { setSaveState("dirty"); pending.current = { id: current.id, body: next }; }
+      if (!loading.current && current?.canEdit && loadedIdRef.current === current.id) { setSaveState("dirty"); pending.current = { id: current.id, body: next }; }
       return next;
     });
   }, [current]);
   useEffect(() => () => {
     const p = pending.current; if (!p) return; pending.current = null;
-    updatePlantTwin(p.id, { scene: sceneOut(p.body) as any }).catch(() => { /* best effort on leave */ });
+    if (loadedIdRef.current !== p.id) return;
+    updatePlantTwin(p.id, { scene: sceneOut(p.body) as any, expectedUpdatedAt: versionRef.current ?? undefined }).catch(() => { /* best effort on leave */ });
   }, [currentId, sceneOut]);
   useEffect(() => { setSaveState("saved"); setSaveErr(""); }, [currentId]);
   useEffect(() => {
     const warn = (e: BeforeUnloadEvent) => { if (pending.current) { e.preventDefault(); e.returnValue = ""; } };
     window.addEventListener("beforeunload", warn); return () => window.removeEventListener("beforeunload", warn);
   }, []);
-  const tooBig = (s: ImageScene) => JSON.stringify(sceneOut(s)).length > MAX_SCENE;
+  const tooBig = (s: ImageScene) => utf8Bytes(JSON.stringify(sceneOut(s))) > MAX_SCENE;
   const saveNow = () => {
-    if (!current) return;
+    if (!current || loadedIdRef.current !== current.id) return;
     if (tooBig(scene)) { setSaveState("error"); setSaveErr(t("the twin is larger than 1 MB; use a smaller background")); return; }
     pending.current = null; setSaveState("saving");
-    updatePlantTwin(current.id, { scene: sceneOut(scene) as any }).then(() => { setSaveState("saved"); setSaveErr(""); qc.invalidateQueries({ queryKey: ["plant-twins"] }); })
+    updatePlantTwin(current.id, { scene: sceneOut(scene) as any, expectedUpdatedAt: versionRef.current ?? undefined }).then((row) => {
+      if (loadedIdRef.current === row.id) versionRef.current = row.updatedAt;
+      setSaveState("saved"); setSaveErr(""); qc.invalidateQueries({ queryKey: ["plant-twins"] });
+    })
       .catch((err) => { setSaveState("error"); setSaveErr(err?.message ?? String(err)); });
   };
   const [saveOpen, setSaveOpen] = useState(false), [name, setName] = useState(""), [busy, setBusy] = useState(false);
@@ -353,7 +370,7 @@ export default function ImageTwinView({ link }: { link: TwinLink }) {
       {current && (saveState === "error" || !current.canEdit) && <span className={cn("text-xs", saveState === "error" ? "text-red-500" : "text-muted-foreground")}>{current.canEdit ? saveText : t("View only: owned by someone else")}</span>}
       <span className={cn("ml-auto inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full", wsStatus === "connected" ? "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300" : "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300")}>{wsStatus === "connected" ? t("Live") : t("Reconnecting")}</span>
       {canCreate && (isDraft || current?.canEdit) && (
-        <Button size="sm" onClick={() => { if (isDraft) { setName(t("2D twin {n}", { n: twins.length + 1 })); setSaveOpen(true); } else saveNow(); }} disabled={saveState === "saving"} className={cn("h-8", saveTone(isDraft ? "new" : saveState))}
+        <Button size="sm" onClick={() => { if (isDraft) { setName(t("2D twin {n}", { n: twins.length + 1 })); setSaveOpen(true); } else saveNow(); }} disabled={saveState === "saving" || (!isDraft && !loaded)} className={cn("h-8", saveTone(isDraft ? "new" : saveState))}
           title={isDraft ? t("Not saved yet: save this twin") : saveState === "saved" ? t("All changes saved") : saveState === "error" ? t("Not saved: {err}", { err: saveErr }) : saveState === "saving" ? t("Saving…") : t("Unsaved changes: press Save")}><Save className="w-4 h-4 mr-1" /> {t("Save")}</Button>
       )}
     </div>

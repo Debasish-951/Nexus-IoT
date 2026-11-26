@@ -13,13 +13,16 @@
  * - href / xlink:href only as "#id" (use, textPath, gradients, patterns,
  *   filters) or, on <image>, a data:image/png|jpeg|webp URL
  * - url(…) only as url(#id); values or styles with javascript:, expression(),
- *   @import, behavior or -moz-binding are dropped
+ *   @import, behavior or -moz-binding are dropped. Both checks also run on the
+ *   value with CSS escapes decoded, and image-set() and the other fetching
+ *   functions are refused (cssUrl.ts)
  * - every id is prefixed, and references rewritten, so a drawing cannot clash
  *   with ids of the page or of a second twin on the same page
  *
  * It uses only basic DOM calls (childNodes, attributes, getAttribute, …) so it
  * runs the same in the browser and in a node test with @xmldom/xmldom.
  */
+import { cssUrlsOk, decodeCssEscapes } from "./cssUrl";
 
 export interface Part {
   /** Stable reference: the element's own id, or a generated `part-N` for a labelled element without one. */
@@ -75,12 +78,6 @@ const RASTER_DATA = /^data:image\/(png|jpe?g|webp);base64,[a-z0-9+/=\s]+$/i;
 /** Ids editors give every element (path123, g45, layer1, …): not parts unless asked. */
 const AUTO_ID = /^(path|rect|circle|ellipse|line|polyline|polygon|g|text|tspan|layer|svg|defs|use|image|stop|lineargradient|radialgradient|clippath|mask|pattern|filter|metadata|namedview|group|shape|object|vector|surface)[-_]?\d+(-\d+)?$/i;
 
-function urlsOk(v: string): boolean {
-  const re = /url\(\s*(['"]?)([^)'"]*)\1\s*\)/gi;
-  let m: RegExpExecArray | null;
-  while ((m = re.exec(v))) if (!m[2].trim().startsWith("#")) return false;
-  return true;
-}
 const rewriteUrls = (v: string, p: string) => v.replace(/url\(\s*(['"]?)#([^)'"]*)\1\s*\)/gi, (_s, _q, id) => `url(#${p}${id})`);
 
 function num(v: string | null): number | null {
@@ -124,15 +121,17 @@ export function sanitizeSvgDocument(text: string, opts: SanitizeOptions = {}): S
     for (let i = 0; i < el.attributes.length; i++) { const a = el.attributes[i]; attrs.push({ name: a.name, value: a.value }); }
     for (const a of attrs) {
       const n = a.name.toLowerCase();
-      let keep = ATTRS.has(n) && !n.startsWith("on") && !BAD_VALUE.test(a.value);
+      let keep = ATTRS.has(n) && !n.startsWith("on") && !BAD_VALUE.test(a.value) && !BAD_VALUE.test(decodeCssEscapes(a.value));
       if (keep && (n === "href" || n === "xlink:href")) {
         const v = a.value.trim();
         keep = (HREF_LOCAL.has(name) && v.startsWith("#")) || (name === "image" && RASTER_DATA.test(v));
         if (keep && v.startsWith("#")) { el.setAttribute(a.name, `#${prefix}${v.slice(1)}`); continue; }
       }
-      if (keep && (URL_ATTRS.has(n) || n === "style") && /url\(/i.test(a.value)) {
-        keep = urlsOk(a.value);
-        if (keep) { el.setAttribute(a.name, rewriteUrls(a.value, prefix)); continue; }
+      // Every value that CSS reads is checked, not only those with a literal "url(":
+      // escapes (u\72l) and image-set() do not contain one.
+      if (keep && (URL_ATTRS.has(n) || n === "style")) {
+        keep = cssUrlsOk(a.value);
+        if (keep && /url\(/i.test(a.value)) { el.setAttribute(a.name, rewriteUrls(a.value, prefix)); continue; }
       }
       if (!keep) el.removeAttribute(a.name);
     }

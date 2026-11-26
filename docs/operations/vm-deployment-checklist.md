@@ -369,7 +369,7 @@ Add to the `server` block that serves the SPA:
 # Content-Security-Policy is the important one. The production bundle contains
 # ZERO inline <script> tags (verified against the built index.html), so the
 # strict form works — no 'unsafe-inline' for scripts is required.
-add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'" always;
+add_header Content-Security-Policy "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' blob:; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'" always;
 
 add_header X-Content-Type-Options    "nosniff" always;
 add_header Referrer-Policy           "strict-origin-when-cross-origin" always;
@@ -400,6 +400,15 @@ instead of adjusted. Two directives are the likely candidates:
 - **`connect-src 'self'`** must cover the WebSocket at `/api/ws`. It does when
   the socket is same-origin, which it is in this deployment. If you ever move the
   API to a different host, this needs that origin added explicitly.
+- **`connect-src … blob:`** is there for Live Twin's uploaded 3D models (.glb).
+  The model loader (three.js GLTFLoader) turns each texture packed inside the
+  file into a `blob:` URL and, in Chrome and Edge, reads it with `fetch()`, which
+  `connect-src` governs; without `blob:` those models show untextured. A `blob:`
+  URL can only point at data the page itself created, so this does not open a
+  path to other hosts. Do not add `data:` unless your models reference textures
+  as `data:` URIs (rare in `.glb` files): it is not needed for embedded textures.
+  An installation that already copied the older header should add `blob:` to its
+  `connect-src`.
 
 Verify with:
 

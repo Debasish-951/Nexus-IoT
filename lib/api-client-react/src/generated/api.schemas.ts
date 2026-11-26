@@ -1423,6 +1423,8 @@ export interface PlantTwinUpdate {
    * @nullable
    */
   parentId?: string | null;
+  /** The `updatedAt` the editor loaded. When the twin has changed since, the write is refused with 409 `plant_twin_conflict`. Omitted means no check (older clients; logged by the server). `updatedAt` is the scene's version, so renames, project changes and folder moves keep it. */
+  expectedUpdatedAt?: string;
 }
 
 export type PlantTwinValuesRequestPairsItem = {

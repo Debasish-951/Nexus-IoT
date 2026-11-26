@@ -1156,7 +1156,8 @@ export const MODELS: Record<string, ModelDef> = {
     binds: (p, it) => (it.gb || []).map((b: any) => [b.mesh, b.beh, b.k]),
     build(p, g, it) {
       const o = it.glbObj.clone(true);
-      o.traverse((c: any) => { if (c.isMesh && c.material) c.material = Array.isArray(c.material) ? c.material.map((m: any) => m.clone()) : c.material.clone(); });
+      // Geometry and textures stay shared with the cached model; glbShared tells the engine not to free them with this machine.
+      o.traverse((c: any) => { if (c.isMesh) c.userData.glbShared = true; if (c.isMesh && c.material) c.material = Array.isArray(c.material) ? c.material.map((m: any) => m.clone()) : c.material.clone(); });
       o.scale.setScalar(it.glbK * p.scale); g.add(o); o.updateMatrixWorld(true);
       const b = new THREE.Box3().setFromObject(o); o.position.set(-(b.min.x + b.max.x) / 2, -b.min.y, -(b.min.z + b.max.z) / 2);
       return (dt, t, it2) => (it2.gb || []).forEach(bd => {

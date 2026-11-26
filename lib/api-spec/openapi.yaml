@@ -1795,7 +1795,7 @@ paths:
         "400":
           $ref: "#/components/responses/ValidationFailed"
         "403":
-          description: "`plant_twin_access_denied` — project not allowed"
+          description: "`plant_twin_access_denied` — project not allowed; `plant_twin_all_projects_denied` — no project (shown in all projects) by a user limited to some projects"
           content:
             application/json:
               schema:
@@ -1872,13 +1872,19 @@ paths:
         "400":
           $ref: "#/components/responses/ValidationFailed"
         "403":
-          description: "`plant_twin_access_denied`"
+          description: "`plant_twin_access_denied`; `plant_twin_all_projects_denied` when a user limited to some projects sets `projectId` to null"
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/ErrorResponse"
         "404":
           $ref: "#/components/responses/NotFound"
+        "409":
+          description: "`plant_twin_conflict` — `expectedUpdatedAt` is older than the stored twin"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
     delete:
       operationId: deletePlantTwin
       tags: [visualization]
@@ -5832,6 +5838,10 @@ components:
           type: string
           nullable: true
           description: Move into this folder (a twin of kind `folder`); null moves to the top level. Omitted keeps the current folder, also when a scene is saved.
+        expectedUpdatedAt:
+          type: string
+          format: date-time
+          description: The `updatedAt` the editor loaded. When the twin has changed since, the write is refused with 409 `plant_twin_conflict`. Omitted means no check (older clients; logged by the server). `updatedAt` is the scene's version, so renames, project changes and folder moves keep it.
 
     PlantTwinValuesRequest:
       type: object

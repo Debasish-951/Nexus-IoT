@@ -7,6 +7,11 @@ import { MODELS } from "./models";
  * PNG for the tile grid of the Add twin library. One shared renderer draws one
  * model per animation frame (so opening the library never freezes the page), and
  * results are kept in memory for the rest of the session.
+ *
+ * The renderer's WebGL context is released once the queue has been idle for a
+ * few seconds (browsers allow only a handful of contexts per page), and is made
+ * again on the next request. A render made while the context is lost is blank:
+ * it is never cached, and the model is tried again with a fresh context (audit L-12).
  */
 const W = 160, H = 112;
 const cache = new Map<string, string>();
@@ -17,10 +22,29 @@ let scene: THREE.Scene | null = null;
 let camera: THREE.PerspectiveCamera | null = null;
 let busy = false;
 let broken = false;
+let lost = false;
+let idleTimer: ReturnType<typeof setTimeout> | undefined;
+const IDLE_MS = 5000;
+const MAX_TRIES = 3;
+const tries = new Map<string, number>();
+/** Thrown by renderOne when the context was lost: the picture would be blank. */
+const LOST = new Error("WebGL context lost");
+const onLost = (e: Event) => { e.preventDefault(); lost = true; };
+
+/** Gives the WebGL context back to the browser; the next request makes a new one. */
+function release() {
+  clearTimeout(idleTimer); idleTimer = undefined;
+  const r = renderer;
+  renderer = null; scene = null; camera = null; lost = false;
+  if (!r) return;
+  r.domElement.removeEventListener("webglcontextlost", onLost);
+  try { r.dispose(); r.forceContextLoss(); } catch { /* already gone */ }
+}
 
 function setup() {
   const canvas = document.createElement("canvas");
   canvas.width = W; canvas.height = H;
+  canvas.addEventListener("webglcontextlost", onLost);
   renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true, preserveDrawingBuffer: true });
   renderer.setPixelRatio(2);
   renderer.setSize(W, H, false);
@@ -57,27 +81,51 @@ function renderOne(type: string): string {
   camera!.position.copy(c).addScaledVector(dir, dist);
   camera!.near = dist / 100; camera!.far = dist * 10; camera!.updateProjectionMatrix();
   camera!.lookAt(c);
-  renderer!.render(scene!, camera!);
-  const url = renderer!.domElement.toDataURL("image/png");
-  scene!.remove(g);
-  g.traverse((o: any) => { o.geometry?.dispose?.(); });
-  return url;
+  try {
+    if (lost || renderer!.getContext().isContextLost()) throw LOST;
+    renderer!.render(scene!, camera!);
+    if (lost || renderer!.getContext().isContextLost()) throw LOST;
+    return renderer!.domElement.toDataURL("image/png");
+  } finally {
+    scene?.remove(g);
+    g.traverse((o: any) => {
+      o.geometry?.dispose?.();
+      (Array.isArray(o.material) ? o.material : o.material ? [o.material] : []).forEach((m: any) => {
+        Object.values(m).forEach((v: any) => { if (v?.isTexture) v.dispose(); });
+        m.dispose?.();
+      });
+    });
+  }
+}
+
+function settle(type: string, url: string) {
+  waiting.get(type)?.forEach((f) => f(url));
+  waiting.delete(type);
 }
 
 function pump() {
   if (busy) return;
   busy = true;
+  clearTimeout(idleTimer); idleTimer = undefined;
   requestAnimationFrame(() => {
     const type = queue.shift();
     if (type && !cache.has(type)) {
       let url = "";
-      try { url = broken ? "" : renderOne(type); } catch { broken = true; }
-      cache.set(type, url);
-      waiting.get(type)?.forEach((f) => f(url));
-      waiting.delete(type);
+      if (!broken) {
+        try { url = renderOne(type); }
+        catch (e) { if (e === LOST) release(); else broken = true; }
+      }
+      if (url) { tries.delete(type); cache.set(type, url); settle(type, url); }
+      else {
+        // Not cached: a later request draws it again.
+        const n = (tries.get(type) ?? 0) + 1; tries.set(type, n);
+        if (!broken && n < MAX_TRIES && waiting.has(type)) queue.push(type);
+        else settle(type, "");
+      }
     }
     busy = false;
     if (queue.length) pump();
+    else idleTimer = setTimeout(release, IDLE_MS);
   });
 }
 

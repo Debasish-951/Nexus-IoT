@@ -191,6 +191,8 @@ export const UpdatePlantTwinBody = z.object({
   scene: plantScene.optional(),
   /** Folder in the Live Twin hierarchy (a twin whose scene.kind is "folder"); null = top level. */
   parentId: v.nodeId().nullable().optional(),
+  /** The `updatedAt` the editor loaded; a newer row refuses the write with 409. Absent = no check (older clients). */
+  expectedUpdatedAt: z.string().max(64).refine((s) => !Number.isNaN(Date.parse(s)), "must be a timestamp").optional(),
 });
 
 export const PlantTwinParams = z.object({ id: v.nodeId() });

@@ -73,7 +73,7 @@ export default function PlantTwinEmbed({ twinId, refreshMs = 20_000 }: { twinId:
   useEffect(() => {
     if (!pairs.length) { valuesRef.current = new Map(); return; }
     let cancelled = false;
-    fetchPlantValues(pairs.slice(0, 500)).then((rows) => {
+    fetchPlantValues(pairs).then((rows) => {
       if (cancelled) return;
       const m = new Map<string, number | null>(); rows.forEach((r) => m.set(r.assetId + "\u0000" + r.metric, r.value)); valuesRef.current = m;
     }).catch(() => { /* keep the last values */ });
