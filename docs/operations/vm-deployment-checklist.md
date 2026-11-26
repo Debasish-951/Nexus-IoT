@@ -342,7 +342,7 @@ This is the most common first-post failure after a move.
 | Password-reset links point at localhost | `AUTH_PUBLIC_URL` not set |
 | Every API-key request returns 500 after an upgrade | `push` was not run before restarting (column `previous_secret_hash` does not exist) |
 | Queued destination never receives anything | Receiver on a private address without `ALLOW_PRIVATE_WEBHOOK_TARGETS=true`; see Destinations → Delivery log for the error |
-| MQTT broker shows `error` after an upgrade, history says "Refusing broker address" | The broker address is refused by the broker policy: `localhost`/`127.0.0.1` needs `ALLOW_LOOPBACK_BROKER_TARGETS=true`; link-local, metadata, multicast and reserved addresses are always refused; private addresses are refused only with `ALLOW_PRIVATE_BROKER_TARGETS=false` |
+| MQTT broker shows `error` after an upgrade, history says "Refusing broker address" | The broker address is refused by the broker policy: `localhost`/`127.0.0.1` is refused only with `ALLOW_LOOPBACK_BROKER_TARGETS=false`; link-local, metadata, multicast and reserved addresses are always refused; private addresses are refused only with `ALLOW_PRIVATE_BROKER_TARGETS=false` |
 | Sign-in fails with `origin_not_allowed` | The browser's address is not in `AUTH_PUBLIC_URL`/`CORS_ORIGINS` and nginx is not passing the original `Host` (`proxy_set_header Host $host;`) |
 
 ---

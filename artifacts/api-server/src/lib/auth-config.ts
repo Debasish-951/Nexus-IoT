@@ -60,8 +60,8 @@ export const authConfig = {
    * Link-local (cloud metadata), multicast and reserved ranges are always refused.
    */
   allowPrivateBrokerTargets: bool("ALLOW_PRIVATE_BROKER_TARGETS", true),
-  /** A broker on this same machine (localhost / 127.0.0.1). Refused unless set true. */
-  allowLoopbackBrokerTargets: bool("ALLOW_LOOPBACK_BROKER_TARGETS", false),
+  /** A broker on this same machine (localhost / 127.0.0.1). Allowed unless set false (a local Mosquitto is common). */
+  allowLoopbackBrokerTargets: bool("ALLOW_LOOPBACK_BROKER_TARGETS", true),
 
   /**
    * Accept an API client secret in the query string (`?key=…`).

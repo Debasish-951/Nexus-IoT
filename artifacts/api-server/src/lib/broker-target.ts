@@ -15,8 +15,8 @@ import { classifyHost, guardedLookup, parseIPv6 } from "./outbound-url";
  * Policy:
  * - always refused: link-local (incl. the cloud metadata endpoint), multicast,
  *   reserved and documentation ranges, unspecified, and unix sockets;
- * - loopback (a broker on this same machine): refused unless
- *   ALLOW_LOOPBACK_BROKER_TARGETS=true;
+ * - loopback (a broker on this same machine): allowed by default, because a
+ *   local Mosquitto is a common setup; ALLOW_LOOPBACK_BROKER_TARGETS=false refuses it;
  * - private / plant-LAN addresses: allowed, because that is where brokers
  *   usually live; ALLOW_PRIVATE_BROKER_TARGETS=false refuses them too.
  *
@@ -55,7 +55,7 @@ export function brokerAddressRefusal(host: string, policy: BrokerPolicy = authCo
   if (isLoopbackHost(host)) {
     return policy.allowLoopbackBrokerTargets
       ? null
-      : "it is this server itself (loopback). Set ALLOW_LOOPBACK_BROKER_TARGETS=true to use a broker on the same machine.";
+      : "it is this server itself (loopback). ALLOW_LOOPBACK_BROKER_TARGETS=false is set on this server.";
   }
   const c = classifyHost(host);
   if (c === "forbidden") return "it is a link-local, cloud-metadata, multicast or reserved address.";
