@@ -97,7 +97,13 @@ export default function ProcessTwinView({ link }: { link: TwinLink }) {
   const [draft, setDraft] = useState(false);
   const current: PlantTwinSummary | null = twins.find((x) => x.id === currentId) ?? null;
   const isDraft = !currentId;
-  const readOnly = isDraft ? !canCreate : !current?.canEdit;
+  // The twin whose scene is on screen and the version it was loaded at. Set only
+  // after a load succeeds, so a failed or pending load can never save the previous
+  // twin's scene under the new id (audit H-6 / M-18).
+  const [loadedId, setLoadedId] = useState<string | null>(null);
+  const loadedIdRef = useRef<string | null>(null), twinVersionRef = useRef<string | null>(null);
+  const loaded = !!currentId && loadedId === currentId;
+  const readOnly = isDraft ? !canCreate : !current?.canEdit || !loaded;
   const hist = useHistory();
   const { scene, change } = hist;
   const [edit, setEdit] = useState(false);
@@ -124,6 +130,7 @@ export default function ProcessTwinView({ link }: { link: TwinLink }) {
   const pending = useRef<{ id: string; body: ProcessScene } | null>(null);
   useEffect(() => {
     setSel(new Set());
+    loadedIdRef.current = null; twinVersionRef.current = null; setLoadedId(null);
     if (!currentId) {
       hist.reset(blankScene()); loadedVersion.current = versionRef.current; setSaveState("saved"); setEdit(canCreate); setCanvasKey((k) => k + 1);
       return;
@@ -135,9 +142,10 @@ export default function ProcessTwinView({ link }: { link: TwinLink }) {
       hist.reset(s); setCanvasKey((k) => k + 1);
       setEdit(row.canEdit && canCreate);
       loadedVersion.current = versionRef.current;
+      loadedIdRef.current = row.id; twinVersionRef.current = row.updatedAt; setLoadedId(row.id);
       if (converted && row.canEdit) { setSaveState("dirty"); pending.current = { id: row.id, body: s }; }
       else setSaveState("saved");
-    }).catch((err) => toast({ title: t("Could not open this twin"), description: err?.message ?? String(err), variant: "destructive" }));
+    }).catch((err) => { if (!cancelled) { setEdit(false); toast({ title: t("Could not open this twin"), description: err?.message ?? String(err), variant: "destructive" }); } });
     return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentId]);
@@ -145,12 +153,13 @@ export default function ProcessTwinView({ link }: { link: TwinLink }) {
   // Mark unsaved after any edit of an opened twin (the first version after a load is the load itself).
   useEffect(() => {
     if (hist.version === loadedVersion.current) return;
-    if (current?.canEdit) { setSaveState("dirty"); pending.current = { id: current.id, body: hist.cur.current }; }
+    if (current?.canEdit && loadedIdRef.current === current.id) { setSaveState("dirty"); pending.current = { id: current.id, body: hist.cur.current }; }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [hist.version]);
   useEffect(() => () => {
     const p = pending.current; if (!p) return; pending.current = null;
-    updatePlantTwin(p.id, { scene: serializeScene(p.body) as any }).catch(() => { /* best effort on leave */ });
+    if (loadedIdRef.current !== p.id) return;
+    updatePlantTwin(p.id, { scene: serializeScene(p.body) as any, expectedUpdatedAt: twinVersionRef.current ?? undefined }).catch(() => { /* best effort on leave */ });
   }, [currentId]);
   useEffect(() => {
     const warn = (e: BeforeUnloadEvent) => { if (pending.current) { e.preventDefault(); e.returnValue = ""; } };
@@ -402,10 +411,11 @@ export default function ProcessTwinView({ link }: { link: TwinLink }) {
     setBusy(false);
   }
   const saveNow = () => {
-    if (!current) return;
+    if (!current || loadedIdRef.current !== current.id) return;
     pending.current = null; setSaveState("saving");
     const body = sceneOut();
-    updatePlantTwin(current.id, { scene: body as any }).then((row) => {
+    updatePlantTwin(current.id, { scene: body as any, expectedUpdatedAt: twinVersionRef.current ?? undefined }).then((row) => {
+      if (loadedIdRef.current === row.id) twinVersionRef.current = row.updatedAt;
       setSaveState("saved"); setSaveErr("");
       qc.setQueryData<PlantTwinSummary[]>(["plant-twins"], (old) => (old ?? []).map((x) => (x.id === row.id ? { ...x, machines: row.machines, updatedAt: row.updatedAt } : x)));
     }).catch((err) => { setSaveState("error"); setSaveErr(err?.message ?? String(err)); pending.current = { id: current.id, body }; });
@@ -499,7 +509,7 @@ export default function ProcessTwinView({ link }: { link: TwinLink }) {
       {current && (saveState === "error" || !current.canEdit) && <span className={cn("text-xs", saveState === "error" ? "text-red-500" : "text-muted-foreground")}>{current.canEdit ? saveText : t("View only: owned by someone else")}</span>}
       <span className={cn("ml-auto inline-flex items-center gap-1 text-xs font-medium px-2 py-0.5 rounded-full", rt.ws === "connected" ? "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300" : "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-300")}>{rt.ws === "connected" ? t("Live") : t("Reconnecting")}</span>
       {canCreate && (isDraft || current?.canEdit) && (
-        <Button size="sm" onClick={() => { if (isDraft) openSave(); else saveNow(); }} disabled={saveState === "saving"} className={cn("h-8", saveTone(isDraft ? "new" : saveState))}
+        <Button size="sm" onClick={() => { if (isDraft) openSave(); else saveNow(); }} disabled={saveState === "saving" || (!isDraft && !loaded)} className={cn("h-8", saveTone(isDraft ? "new" : saveState))}
           title={isDraft ? t("Not saved yet: save this twin") : saveState === "saved" ? t("All changes saved") : saveState === "error" ? t("Not saved: {err}", { err: saveErr }) : saveState === "saving" ? t("Saving…") : t("Unsaved changes: press Save")}><Save className="w-4 h-4 mr-1" /> {t("Save")}</Button>
       )}
       <input ref={fileRef} type="file" accept="application/json,.json" className="hidden" onChange={(e) => { const f = e.target.files?.[0]; e.target.value = ""; if (f) void importJson(f); }} />

@@ -2868,6 +2868,12 @@ export const UpdatePlantTwinBody = zod.object({
     .describe(
       "Move into this folder (a twin of kind `folder`); null moves to the top level. Omitted keeps the current folder, also when a scene is saved.",
     ),
+  expectedUpdatedAt: zod.coerce
+    .date()
+    .optional()
+    .describe(
+      "The `updatedAt` the editor loaded. When the twin has changed since, the write is refused with 409 `plant_twin_conflict`. Omitted means no check (older clients; logged by the server). `updatedAt` is the scene's version, so renames, project changes and folder moves keep it.",
+    ),
 });
 
 export const UpdatePlantTwinResponse = zod

@@ -109,6 +109,12 @@ export default function PlantTwinView({ variant = "builder", onOpenBuilder, link
   const [saveState, setSaveState] = useState<SaveState>("saved");
   const [saveErr, setSaveErr] = useState("");
   const currentRef = useRef<string | null>(null), canEditRef = useRef(false), loadingRef = useRef(false), engineRef = useRef<PlantEngine | null>(null);
+  // The twin whose scene the engine actually holds, and the version it was loaded
+  // at. Set only after a load succeeds: while another twin loads, or after a load
+  // failed, the engine still shows the previous scene, and saving it would write
+  // that layout into the newly selected twin (audit H-6).
+  const loadedIdRef = useRef<string | null>(null), versionRef = useRef<string | null>(null);
+  const [loadFailed, setLoadFailed] = useState(false);
   // Set while there are unsaved changes. Edits no longer save on a timer: the
   // Save button stays light orange until it is pressed. Pending changes are
   // still written when another twin is opened or the view closes, so nothing is
@@ -117,8 +123,13 @@ export default function PlantTwinView({ variant = "builder", onOpenBuilder, link
   const doSave = useCallback(async () => {
     clearTimeout(saveTimer.current as any); saveTimer.current = undefined;
     const id = currentRef.current, e = engineRef.current; if (!id || !e || !canEditRef.current) return;
+    if (loadingRef.current || loadedIdRef.current !== id) return;
     setSaveState("saving");
-    try { await updatePlantTwin(id, { scene: sceneOut(e) }); setSaveState("saved"); setSaveErr(""); }
+    try {
+      const row = await updatePlantTwin(id, { scene: sceneOut(e), expectedUpdatedAt: versionRef.current ?? undefined });
+      if (loadedIdRef.current === row.id) versionRef.current = row.updatedAt;
+      setSaveState("saved"); setSaveErr("");
+    }
     catch (err: any) { setSaveState("error"); setSaveErr(err?.message ?? String(err)); }
   }, [sceneOut]);
   const scheduleSave = useCallback(() => {
@@ -160,24 +171,36 @@ export default function PlantTwinView({ variant = "builder", onOpenBuilder, link
   const [loading, setLoading] = useState(false);
   useEffect(() => {
     currentRef.current = currentId;
+    // Until the new twin has loaded, nothing may be saved under its id.
+    canEditRef.current = false; loadedIdRef.current = null; versionRef.current = null; setLoadFailed(false);
     if (!engine) return;
     if (!currentId) {
-      canEditRef.current = false;
+      loadingRef.current = false;
       engine.setReadOnly(floorRef.current);
       if (assetRef.current || !floorRef.current) engine.loadScene(EMPTY_SCENE); else engine.loadPack(engine.pack || "textile");
       placeDetail(engine);
       return;
     }
     let cancelled = false; setLoading(true);
+    loadingRef.current = true;
     writeLast(currentProjectId, currentId);
     getPlantTwin(currentId).then((t) => {
       if (cancelled) return;
       loadingRef.current = true;
-      canEditRef.current = t.canEdit && !floorRef.current; engine.setReadOnly(!t.canEdit || floorRef.current);
+      engine.setReadOnly(!t.canEdit || floorRef.current);
       engine.loadScene(t.scene, t.scene?.pack);
+      loadedIdRef.current = currentId; versionRef.current = t.updatedAt;
+      canEditRef.current = t.canEdit && !floorRef.current;
       loadingRef.current = false;
       setSaveState(t.canEdit ? "saved" : "readonly");
-    }).catch((err) => toast({ title: t("Could not open this twin"), description: err?.message ?? String(err), variant: "destructive" }))
+    }).catch((err) => {
+      if (cancelled) return;
+      // The engine still holds the previous twin: make it view only and keep Save off.
+      loadingRef.current = false;
+      engine.setReadOnly(true);
+      setLoadFailed(true);
+      toast({ title: t("Could not open this twin"), description: err?.message ?? String(err), variant: "destructive" });
+    })
       .finally(() => { if (!cancelled) setLoading(false); });
     return () => { cancelled = true; };
   }, [currentId, engine, currentProjectId, toast]);
@@ -231,7 +254,7 @@ export default function PlantTwinView({ variant = "builder", onOpenBuilder, link
   useEffect(() => {
     if (!pairs.length) { valuesRef.current = new Map(); return; }
     let cancelled = false;
-    fetchPlantValues(pairs.slice(0, 500)).then((rows) => {
+    fetchPlantValues(pairs).then((rows) => {
       if (cancelled) return;
       const m = new Map<string, number | null>(); rows.forEach((r) => m.set(r.assetId + "\u0000" + r.metric, r.value)); valuesRef.current = m;
     }).catch(() => { /* keep the last values; the badge shows the connection state */ });
@@ -319,7 +342,8 @@ export default function PlantTwinView({ variant = "builder", onOpenBuilder, link
   useEffect(() => { engine?.setHeat(heat); }, [engine, heat]);
 
   const isDraft = !currentId && (listQ.isSuccess || listQ.isError);
-  const readOnly = floor || (isDraft ? false : !current?.canEdit);
+  const readOnly = floor || (isDraft ? false : !current?.canEdit || loadFailed);
+  const saveBlocked = !isDraft && (loading || loadFailed);
   const stats = engine?.areaStats() ?? [];
   const alarm = engine?.topAlarm() ?? null;
   const unlinked = engine?.unlinkedCount() ?? 0;
@@ -383,9 +407,9 @@ export default function PlantTwinView({ variant = "builder", onOpenBuilder, link
           {fullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
         </Button>
         {!floor && canCreate && (isDraft || current?.canEdit) && (
-          <Button size="sm" onClick={() => { if (isDraft) openSave(); else void doSave(); }} disabled={saveState === "saving"}
+          <Button size="sm" onClick={() => { if (isDraft) openSave(); else void doSave(); }} disabled={saveState === "saving" || saveBlocked}
             className={cn("h-8", saveTone(isDraft ? "new" : saveState))}
-            title={isDraft ? t("Not saved yet: save this twin") : saveState === "saved" ? t("All changes saved") : saveState === "error" ? t("Not saved: {err}", { err: saveErr }) : saveState === "saving" ? t("Saving…") : t("Unsaved changes: press Save")}>
+            title={isDraft ? t("Not saved yet: save this twin") : loadFailed ? t("This twin could not be opened, so it cannot be saved. Open it again.") : loading ? t("Loading…") : saveState === "saved" ? t("All changes saved") : saveState === "error" ? t("Not saved: {err}", { err: saveErr }) : saveState === "saving" ? t("Saving…") : t("Unsaved changes: press Save")}>
             <Save className="w-4 h-4 mr-1" /> {t("Save")}
           </Button>
         )}

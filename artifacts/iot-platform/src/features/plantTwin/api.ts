@@ -21,12 +21,24 @@ export const listPlantTwins = () => apiFetch(`${BASE}/api/plant-twins`).then((r)
 export const getPlantTwin = (id: string) => apiFetch(`${BASE}/api/plant-twins/${encodeURIComponent(id)}`).then((r) => ok<PlantTwin>(r));
 export const createPlantTwin = (body: { id: string; name: string; projectId: string | null; scene: SceneDoc | Record<string, unknown> }) =>
   apiFetch(`${BASE}/api/plant-twins`, { method: "POST", body: JSON.stringify(body) }).then((r) => ok<PlantTwin>(r));
-export const updatePlantTwin = (id: string, body: { name?: string; scene?: SceneDoc; parentId?: string | null }) =>
+/**
+ * `expectedUpdatedAt`: the `updatedAt` of the version the editor loaded. The
+ * server refuses (409) a scene save over a newer version instead of replacing it.
+ */
+export const updatePlantTwin = (id: string, body: { name?: string; scene?: SceneDoc; parentId?: string | null; expectedUpdatedAt?: string }) =>
   apiFetch(`${BASE}/api/plant-twins/${encodeURIComponent(id)}`, { method: "PUT", body: JSON.stringify(body) }).then((r) => ok<PlantTwin>(r));
 export const deletePlantTwin = (id: string) =>
   apiFetch(`${BASE}/api/plant-twins/${encodeURIComponent(id)}`, { method: "DELETE" }).then((r) => ok<void>(r));
-export const fetchPlantValues = (pairs: { assetId: string; metric: string }[]) =>
+/** The server answers at most 500 pairs per request; larger twins are asked for in batches. */
+const VALUES_BATCH = 500;
+const fetchValuesBatch = (pairs: { assetId: string; metric: string }[]) =>
   apiFetch(`${BASE}/api/plant-twins/values`, { method: "POST", body: JSON.stringify({ pairs }) }).then((r) => ok<PlantValue[]>(r));
+export const fetchPlantValues = (pairs: { assetId: string; metric: string }[]): Promise<PlantValue[]> => {
+  if (pairs.length <= VALUES_BATCH) return fetchValuesBatch(pairs);
+  const batches: { assetId: string; metric: string }[][] = [];
+  for (let i = 0; i < pairs.length; i += VALUES_BATCH) batches.push(pairs.slice(i, i + VALUES_BATCH));
+  return Promise.all(batches.map(fetchValuesBatch)).then((all) => all.flat());
+};
 /** Every metric an asset has reported, for linking readings. */
 export const fetchAssetMetrics = (assetId: string) =>
   apiFetch(`${BASE}/api/telemetry/${encodeURIComponent(assetId)}/metrics`).then((r) => (r.ok ? r.json() : [])).then((x) => (Array.isArray(x) ? (x as string[]) : []));

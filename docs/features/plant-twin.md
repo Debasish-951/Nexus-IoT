@@ -130,7 +130,7 @@ Table `plant_twins` (`lib/db/src/schema/plant_twins.ts`); routes in `artifacts/a
 | Action | Needs |
 |---|---|
 | See a twin, fetch live values | Live Twin read, and the twin's project must be one the user may open (no project = every project) |
-| Create | Live Twin write; the creator is the owner |
+| Create | Live Twin write; the creator is the owner. A twin with no project (shown in every project) only by a user who may open every project |
 | Change | Live Twin write, and the owner or a Super Admin / Company Admin |
 | Delete | Live Twin delete, and the owner or a Super Admin / Company Admin |
 
@@ -139,6 +139,13 @@ Live Twin is its own module in Access Control (Read / Write / Delete) since Nove
 Others see a twin read-only ("View only" in the toolbar). Live values are returned only for assets in the caller's projects.
 
 Scenes are saved with **Save** (and when another twin is opened or the view is closed). Renames, project moves, creation and deletion are written to the activity log; ordinary scene saves are not.
+
+Saving is safe against two mistakes (audit H-6, M-18):
+
+- **Save is off until the selected twin has loaded**, and stays off if it could not be opened (the view then becomes view only). All twin types (3D, asset, 2D, machine, process) keep the id of the twin they actually loaded and save only into that one, so the previous twin's layout or links can never be written into the newly selected twin.
+- **Conflict check.** A save sends the `updatedAt` it loaded as `expectedUpdatedAt`; if the twin was saved elsewhere since, the server refuses with 409 (`plant_twin_conflict`) and the Save button shows "Not saved: … changed somewhere else"; open the twin again to get the latest version. A browser tab still running the previous version sends no `expectedUpdatedAt` and is accepted as before (the API logs a warning). `updatedAt` is the version of the scene: renames, project changes and folder moves keep it, so they never make an open editor's save fail.
+
+Lists, folder moves and folder deletes read only the twins' names and hierarchy, never the scenes; a folder delete and the move of its contents happen in one transaction, and a folder cannot be moved into its own subfolder (checked on the server, under a lock). A scene may have up to 40,000 keys; the global request guard allows that on the plant-twin save routes, and a body refused only for its size is not recorded as a security event. Live values are fetched in batches of 500, so a twin with more readings shows them all.
 
 After pulling this change, apply the new table: `pnpm --filter @workspace/db run push`.
 
@@ -180,7 +187,7 @@ A 2D twin is a drawing or picture with live readings mapped onto it, stored on t
 
 **Background.** Upload or drop an SVG drawing, or any image the browser opens (PNG, JPEG, GIF, WebP, BMP, AVIF, ICO), or give an image address. Pictures are reduced to at most 2400 px and saved as WebP (JPEG where WebP is not available); a picture still above about 900 KB is refused. The drawing is stored inside the twin itself, not in the uploads store.
 
-**SVG safety.** An SVG is cleaned with an allow-list when it is imported and again every time it is shown: scripts, styles, `foreignObject`, frames, animation, event handlers and links are removed, `href` is kept only for in-drawing references (`#id`) and embedded PNG/JPEG/WebP pictures, and `url()` only as `url(#id)`.
+**SVG safety.** An SVG is cleaned with an allow-list when it is imported and again every time it is shown: scripts, styles, `foreignObject`, frames, animation, event handlers and links are removed, `href` is kept only for in-drawing references (`#id`) and embedded PNG/JPEG/WebP pictures, and `url()` only as `url(#id)`. That check runs on the value as the browser reads it (CSS escapes such as `u\72l(` decoded), and `image-set()`, `@import` and the other functions that fetch are refused (`imageTwin/cssUrl.ts`, tested in `api-server/src/tests/twin-fixes.test.ts`). The 1 MB limit of a 2D twin is counted in bytes.
 
 **Mapping.**
 1. Every SVG element with an id or layer name is a part: hover highlights it, click selects it. Generated ids (`path123`) are hidden unless **All ids** is on.
@@ -254,7 +261,7 @@ Visualization has a **Maps & twins** widget category:
 
 ## Not built yet
 
-- **Sharing with edit rights**: only the owner or an administrator can change a twin. Two people editing the same twin overwrite each other on save.
+- **Sharing with edit rights**: only the owner or an administrator can change a twin. When two of them edit the same twin, the second save is refused (see the conflict check above); merging their changes is not built.
 - **Playback and alarm list on the detailed pump skid.**
 - **Pipe auto-routing** in the Process twin, and editing polygon corners after drawing in the 2D twin.
 - **Detailed street map offline**: the bundled map has country outlines only.
