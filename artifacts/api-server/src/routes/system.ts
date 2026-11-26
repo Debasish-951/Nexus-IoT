@@ -23,6 +23,7 @@ import { activeHolds, heldRowsSql, heldFraction, expireHolds, type HoldLike } fr
 import { archiveUntil, archivedUntil } from "../services/archive";
 import { isPartitioned, conversionState, dropExpiredPartitions, ensureFuturePartitions, listPartitions } from "../services/partitions";
 import { flushIngestRejections } from "../services/ingest-rejections";
+import { series } from "../lib/series";
 
 const router: IRouter = Router();
 
@@ -54,6 +55,7 @@ const PAIR_CACHE_MS = 60_000;
 /** Forget cached counts, e.g. after pruning or when the summaries moved on. */
 export function invalidateStorageCache(): void {
   pairCache = null;
+  storageLast = null;
 }
 onRollupsAdvanced(invalidateStorageCache);
 
@@ -193,26 +195,44 @@ const OPERATIONAL_LABELS: Record<keyof ReturnType<typeof operationalRetentionDay
   retentionRuns:   { label: "Pruning history",             env: "RETENTION_RUNS_DAYS" },
 };
 
-/** Everything the Storage tab and the alert checks need. */
+/**
+ * Everything the Storage tab and the alert checks need. Callers arriving while a
+ * computation runs share it, and a result is reused for a few seconds: the
+ * Storage tab, Data health and the alert job all ask for it (audit L-25).
+ */
+let storageInFlight: Promise<Awaited<ReturnType<typeof computeStorageNow>>> | null = null;
+let storageLast: { at: number; value: Awaited<ReturnType<typeof computeStorageNow>> } | null = null;
+const STORAGE_REUSE_MS = 5_000;
+
 export async function computeStorage() {
+  if (storageLast && Date.now() - storageLast.at < STORAGE_REUSE_MS) return storageLast.value;
+  if (!storageInFlight) {
+    storageInFlight = computeStorageNow()
+      .then((value) => { storageLast = { at: Date.now(), value }; return value; })
+      .finally(() => { storageInFlight = null; });
+  }
+  return storageInFlight;
+}
+
+async function computeStorageNow() {
   const now = new Date();
-  const [size, oldestRow, newestRow, policies, state, summaryRow, lastRunRows, assets, disk, settings, tierRows, holds] = await Promise.all([
-    telemetrySize(),
-    db.select({ ts: telemetryTable.timestamp }).from(telemetryTable).orderBy(telemetryTable.timestamp).limit(1),
-    db.select({ ts: telemetryTable.timestamp }).from(telemetryTable).orderBy(sql`${telemetryTable.timestamp} DESC`).limit(1),
-    db.select().from(dataRetentionTable),
-    getRollupState(),
-    pool.query<{ n: string; oldest: Date | null; pretty: string }>(`
+  const [size, oldestRow, newestRow, policies, state, summaryRow, lastRunRows, assets, disk, settings, tierRows, holds] = await series(
+    () => telemetrySize(),
+    () => db.select({ ts: telemetryTable.timestamp }).from(telemetryTable).orderBy(telemetryTable.timestamp).limit(1),
+    () => db.select({ ts: telemetryTable.timestamp }).from(telemetryTable).orderBy(sql`${telemetryTable.timestamp} DESC`).limit(1),
+    () => db.select().from(dataRetentionTable),
+    () => getRollupState(),
+    () => pool.query<{ n: string; oldest: Date | null; pretty: string }>(`
       -- The estimate is -1 until the table is first analysed; count then (it is still small).
       SELECT (SELECT CASE WHEN reltuples < 0 THEN (SELECT count(*) FROM telemetry_rollups) ELSE reltuples::bigint END
               FROM pg_class WHERE oid = 'telemetry_rollups'::regclass) AS n,
              (SELECT min(bucket) FROM telemetry_rollups) AS oldest,
              pg_size_pretty(pg_total_relation_size('telemetry_rollups')) AS pretty`),
-    db.select().from(retentionRunsTable).orderBy(desc(retentionRunsTable.startedAt)).limit(1),
-    db.select({ id: assetsTable.id, name: assetsTable.name, parentId: assetsTable.parentId }).from(assetsTable),
-    diskSpace(),
-    getDataSettings(),
-    Promise.all(TIERS.map(async (t) => {
+    () => db.select().from(retentionRunsTable).orderBy(desc(retentionRunsTable.startedAt)).limit(1),
+    () => db.select({ id: assetsTable.id, name: assetsTable.name, parentId: assetsTable.parentId }).from(assetsTable),
+    () => diskSpace(),
+    () => getDataSettings(),
+    () => series(...TIERS.map((t) => async () => {
       const st = await getRollupState(t);
       const r = await pool.query<{ n: string; oldest: Date | null; pretty: string }>(`
         SELECT (SELECT CASE WHEN reltuples < 0 THEN (SELECT count(*) FROM ${t.table}) ELSE reltuples::bigint END
@@ -221,8 +241,8 @@ export async function computeStorage() {
                pg_size_pretty(pg_total_relation_size('${t.table}')) AS pretty`);
       return { tier: t, state: st, row: r.rows[0] };
     })),
-    activeHolds(),
-  ]);
+    () => activeHolds(),
+  );
   const pairs = rollupsEnabled() ? await loadPairs() : [];
   const assetNames = new Map(assets.map((a) => [a.id, a.name]));
 
@@ -325,6 +345,10 @@ export async function computeStorage() {
 
   const opDays = operationalRetentionDays();
   if (settings.tiers.hourDays !== null) opDays.telemetryRollups = settings.tiers.hourDays;
+  // The audit log is pruned by its own setting (Audit Log page, never under 365
+  // days), not by the variable alone; show what pruning really uses (audit L-20).
+  const envActivityDays = opDays.activityLogs;
+  opDays.activityLogs = await auditRetentionDays(envActivityDays).catch(() => envActivityDays);
   const lastRun = lastRunRows[0] ?? null;
   const tierTarget = (stepSec: number) => Math.floor(now.getTime() / (stepSec * 1000)) * stepSec * 1000;
   const activeKeys = new Set((await activeTiers()).map((t) => t.key));
@@ -384,7 +408,8 @@ export async function computeStorage() {
       operational: [
         ...(Object.keys(OPERATIONAL_LABELS) as Array<keyof typeof OPERATIONAL_LABELS>).map((k) => ({
           key: k, label: OPERATIONAL_LABELS[k].label,
-          env: k === "telemetryRollups" && settings.tiers.hourDays !== null ? "Data Management settings" : OPERATIONAL_LABELS[k].env,
+          env: k === "telemetryRollups" && settings.tiers.hourDays !== null ? "Data Management settings"
+            : k === "activityLogs" && opDays.activityLogs !== envActivityDays ? "Audit Log settings" : OPERATIONAL_LABELS[k].env,
           days: opDays[k],
         })),
         { key: "telemetryRollups15m", label: "15-minute summaries", env: "Data Management settings", days: settings.tiers.m15Days },
@@ -425,21 +450,34 @@ export async function deleteLimit(wanted?: Date): Promise<Date | null> {
 /** Readings the next pruning run would delete with `policies`, and how many with the current ones. */
 async function estimateFor(policies: RetentionPolicyLike[]): Promise<{ rows: number; current: number; byAsset: Map<string, number>; limited: boolean; bytesPerRow: number | null }> {
   const now = new Date();
-  const [current, pairs, limit, size, holds] = await Promise.all([
-    db.select().from(dataRetentionTable), loadPairs(), rawPruneLimit(), telemetrySize(), activeHolds(),
-  ]);
+  const [current, pairs, limit, size, holds] = await series(
+    () => db.select().from(dataRetentionTable), () => loadPairs(), () => rawPruneLimit(), () => telemetrySize(), () => activeHolds(),
+  );
   const before = estimatePrune(pairs, current, now, limit, holds);
   const after = estimatePrune(pairs, policies, now, limit, holds);
   return { rows: after.rows, current: before.rows, byAsset: after.byAsset, limited: after.limited, bytesPerRow: size.estRows > 0 ? size.bytes / size.estRows : null };
 }
 
 /** Whether a deletion of this size must wait for a second administrator. */
-async function approvalRequired(rows: number): Promise<boolean> {
+export async function approvalRequired(rows: number): Promise<boolean> {
   const s = await getDataSettings();
   return s.approval.enabled && rows > s.approval.thresholdRows;
 }
 
-async function requestApproval(req: Request, kind: string, payload: unknown, summary: string, rows: number) {
+/**
+ * Whether a change must wait for a second administrator, given a way to
+ * estimate the readings it would delete. Fails closed (audit H-2): with
+ * approval on and no estimate possible (summaries switched off), it waits.
+ */
+export async function approvalNeeded(estimate: () => Promise<number>): Promise<{ required: boolean; rows: number; estimated: boolean }> {
+  const s = await getDataSettings();
+  if (!s.approval.enabled) return { required: false, rows: 0, estimated: false };
+  if (!rollupsEnabled()) return { required: true, rows: 0, estimated: false };
+  const rows = await estimate();
+  return { required: rows > s.approval.thresholdRows, rows, estimated: true };
+}
+
+export async function requestApproval(req: Request, kind: string, payload: unknown, summary: string, rows: number) {
   const [row] = await db.insert(dataChangeRequestsTable).values({
     kind, payload, summary, estimatedRows: rows,
     requestedById: req.principal?.user.id ?? null, requestedBy: req.principal?.user.username ?? null,
@@ -449,7 +487,12 @@ async function requestApproval(req: Request, kind: string, payload: unknown, sum
 }
 
 /** Create or update a policy. Used directly and when an approved request is carried out. */
-export async function applyPolicyChange(op: "create" | "update", id: string | null, body: Record<string, unknown>, req?: Request) {
+export async function applyPolicyChange(op: "create" | "update" | "delete", id: string | null, body: Record<string, unknown>, req?: Request) {
+  if (op === "delete") {
+    const [policy] = await db.delete(dataRetentionTable).where(eq(dataRetentionTable.id, id!)).returning();
+    if (policy) await logActivity("retention.deleted", "system", policy.id, policy.name, describePolicy(policy), req);
+    return policy ?? null;
+  }
   if (op === "create") {
     const b = body as z.infer<typeof RetentionBody>;
     const [policy] = await db.insert(dataRetentionTable).values({
@@ -497,11 +540,11 @@ router.post("/system/retention/preview", validate({ body: RetentionPreviewBody }
     res.json({ available: false, rows: 0, bytes: null, current: { rows: 0, bytes: null }, byAsset: [], complete: false, limited: false });
     return;
   }
-  const [pairs, limit, size, state, assets, holds, settings] = await Promise.all([
-    loadPairs(), rawPruneLimit(), telemetrySize(), getRollupState(),
-    db.select({ id: assetsTable.id, name: assetsTable.name }).from(assetsTable),
-    activeHolds(), getDataSettings(),
-  ]);
+  const [pairs, limit, size, state, assets, holds, settings] = await series(
+    () => loadPairs(), () => rawPruneLimit(), () => telemetrySize(), () => getRollupState(),
+    () => db.select({ id: assetsTable.id, name: assetsTable.name }).from(assetsTable),
+    () => activeHolds(), () => getDataSettings(),
+  );
   const bytesPerRow = size.estRows > 0 ? size.bytes / size.estRows : null;
   const before = estimatePrune(pairs, current, now, limit, holds);
   const after = estimatePrune(pairs, proposed, now, limit, holds);
@@ -571,12 +614,14 @@ router.get("/system/retention", async (_req, res): Promise<void> => {
 
 router.post("/system/retention", validate({ body: RetentionBody }), async (req, res): Promise<void> => {
   const body = req.body as z.infer<typeof RetentionBody>;
-  if (body.enabled !== false && rollupsEnabled()) {
-    const current = await db.select().from(dataRetentionTable);
-    const est = await estimateFor([...current, { id: "proposed", assetId: body.assetId ?? null, metric: body.metric ?? null, retentionDays: body.retentionDays, enabled: true }]);
-    const extra = Math.max(0, est.rows - est.current);
-    if (await approvalRequired(extra)) {
-      const request = await requestApproval(req, "policy_change", { op: "create", body }, `Create retention policy "${body.name}" (${body.retentionDays} days)`, extra);
+  if (body.enabled !== false) {
+    const need = await approvalNeeded(async () => {
+      const current = await db.select().from(dataRetentionTable);
+      const est = await estimateFor([...current, { id: "proposed", assetId: body.assetId ?? null, metric: body.metric ?? null, retentionDays: body.retentionDays, enabled: true }]);
+      return Math.max(0, est.rows - est.current);
+    });
+    if (need.required) {
+      const request = await requestApproval(req, "policy_change", { op: "create", body }, `Create retention policy "${body.name}" (${body.retentionDays} days)${need.estimated ? "" : NO_ESTIMATE}`, need.rows);
       res.status(202).json({ pendingApproval: true, request });
       return;
     }
@@ -591,7 +636,7 @@ router.put("/system/retention/:id", validate({ params: IdParams, body: UpdateRet
   const current = await db.select().from(dataRetentionTable);
   const existing = current.find((p) => p.id === id);
   if (!existing) { res.status(404).json({ error: "Policy not found" }); return; }
-  if (rollupsEnabled()) {
+  {
     const merged = {
       ...existing,
       ...(body.retentionDays !== undefined ? { retentionDays: body.retentionDays } : {}),
@@ -599,10 +644,16 @@ router.put("/system/retention/:id", validate({ params: IdParams, body: UpdateRet
       ...(body.metric !== undefined ? { metric: body.metric ?? null } : {}),
       ...(body.assetId !== undefined ? { assetId: body.assetId ?? null } : {}),
     };
-    const est = await estimateFor([...current.filter((p) => p.id !== id), merged]);
-    const extra = Math.max(0, est.rows - est.current);
-    if (await approvalRequired(extra)) {
-      const request = await requestApproval(req, "policy_change", { op: "update", id, body }, `Change retention policy "${existing.name}"`, extra);
+    const need = await approvalNeeded(async () => {
+      const est = await estimateFor([...current.filter((p) => p.id !== id), merged]);
+      return Math.max(0, est.rows - est.current);
+    });
+    // Without an estimate, only a change that could delete more waits: a rename,
+    // a longer period or switching a policy off cannot.
+    const mayDeleteMore = (merged.enabled && !existing.enabled) || merged.retentionDays < existing.retentionDays
+      || merged.assetId !== existing.assetId || merged.metric !== existing.metric;
+    if (need.required && (need.estimated || mayDeleteMore)) {
+      const request = await requestApproval(req, "policy_change", { op: "update", id, body }, `Change retention policy "${existing.name}"${need.estimated ? "" : NO_ESTIMATE}`, need.rows);
       res.status(202).json({ pendingApproval: true, request });
       return;
     }
@@ -612,21 +663,37 @@ router.put("/system/retention/:id", validate({ params: IdParams, body: UpdateRet
   res.json(policy);
 });
 
-router.delete("/system/retention/:id", async (req, res): Promise<void> => {
-  const { id } = req.params;
-  const [policy] = await db.delete(dataRetentionTable).where(eq(dataRetentionTable.id, id)).returning();
+// Deleting a policy can delete readings: those it kept fall back to a less specific,
+// shorter policy. It is approval-governed like create and update (audit H-2).
+router.delete("/system/retention/:id", validate({ params: IdParams }), async (req, res): Promise<void> => {
+  const { id } = req.params as unknown as z.infer<typeof IdParams>;
+  const current = await db.select().from(dataRetentionTable);
+  const existing = current.find((p) => p.id === id);
+  if (!existing) { res.status(404).json({ error: "Policy not found" }); return; }
+  if (existing.enabled) {
+    const need = await approvalNeeded(async () => {
+      const est = await estimateFor(current.filter((p) => p.id !== id));
+      return Math.max(0, est.rows - est.current);
+    });
+    if (need.required) {
+      const request = await requestApproval(req, "policy_change", { op: "delete", id, body: {} }, `Delete retention policy "${existing.name}"${need.estimated ? "" : NO_ESTIMATE}`, need.rows);
+      res.status(202).json({ pendingApproval: true, request });
+      return;
+    }
+  }
+  const policy = await applyPolicyChange("delete", id, {}, req);
   if (!policy) { res.status(404).json({ error: "Policy not found" }); return; }
-  await logActivity("retention.deleted", "system", policy.id, policy.name, describePolicy(policy), req);
   res.sendStatus(204);
 });
 
+const NO_ESTIMATE = " (no estimate: summaries are switched off)";
+
 // ── Manual pruning trigger ────────────────────────────────────────────────────
 router.post("/system/retention/run", async (req, res): Promise<void> => {
-  if (rollupsEnabled()) {
-    const current = await db.select().from(dataRetentionTable);
-    const est = await estimateFor(current);
-    if (await approvalRequired(est.rows)) {
-      const request = await requestApproval(req, "manual_prune", {}, "Run pruning now", est.rows);
+  {
+    const need = await approvalNeeded(async () => (await estimateFor(await db.select().from(dataRetentionTable))).rows);
+    if (need.required) {
+      const request = await requestApproval(req, "manual_prune", {}, `Run pruning now${need.estimated ? "" : NO_ESTIMATE}`, need.rows);
       res.status(202).json({ pendingApproval: true, request });
       return;
     }
@@ -785,6 +852,11 @@ export interface PruneResult {
 
 let pruningInProgress = false;
 
+/** Whether a telemetry pruning run is going on right now. */
+export function pruningBusy(): boolean {
+  return pruningInProgress;
+}
+
 export interface RunRecord { trigger: "manual" | "hourly"; userId: string | null; username: string | null }
 
 async function recordRun(rec: RunRecord, startedAt: Date, fields: {
@@ -843,7 +915,11 @@ export async function runScheduledRetention(): Promise<void> {
   } else {
     notes.push({ note: `outside the pruning window (${settings.pruneWindow.start}–${settings.pruneWindow.end}); telemetry not pruned` });
   }
-  try { operational = (await runOperationalPruning()).deleted; } catch (err) { errors.push(`records: ${msg(err)}`); }
+  try {
+    const r = await runOperationalPruning();
+    operational = r.deleted;
+    for (const e of r.errors ?? []) errors.push(`records: ${e}`);
+  } catch (err) { errors.push(`records: ${msg(err)}`); }
   const days = operationalRetentionDays();
   const hourDays = settings.tiers.hourDays ?? days.telemetryRollups;
   try { operational.telemetryRollups = await pruneRollups(hourDays); } catch (err) { errors.push(`summaries: ${msg(err)}`); }
@@ -867,6 +943,39 @@ export async function runScheduledRetention(): Promise<void> {
     telemetryDeleted: telemetry?.totalRowsDeleted ?? 0, details: [...notes, ...(telemetry?.details ?? [])], operational,
     error: errors.length ? errors.join("; ") : null,
   });
+  lastScheduledRunAt = startedAt.getTime();
+  if (telemetry && !telemetry.skipped) lastTelemetryPruneAt = startedAt.getTime();
+}
+
+// The scheduler ticks every RETENTION_TICK_MS (index.ts). It used to fire once an
+// hour counted from boot, so a pruning window shorter than an hour could be missed
+// every day (18 Nov FN-9). Now the full run happens about hourly, and when a
+// window is set, a telemetry-only run is added as soon as the window opens if
+// telemetry was not pruned in the last hour.
+export const RETENTION_TICK_MS = 10 * 60_000;
+const HOUR_MS = 3_600_000;
+let lastScheduledRunAt = 0;
+let lastTelemetryPruneAt = 0;
+
+/** Pure: what a scheduler tick should do. */
+export function retentionTickAction(now: number, lastFull: number, lastTelemetry: number, windowOpen: boolean, windowEnabled: boolean): "full" | "telemetry" | "none" {
+  // A little slack so a run that took a few seconds is not pushed a whole tick later.
+  const due = (last: number) => now - last >= HOUR_MS - RETENTION_TICK_MS / 2;
+  if (due(lastFull)) return "full";
+  if (windowEnabled && windowOpen && due(lastTelemetry)) return "telemetry";
+  return "none";
+}
+
+export async function retentionTick(): Promise<void> {
+  const now = new Date();
+  const settings = await getDataSettings();
+  const open = insideWindow(now, settings.pruneWindow, PLANT_TIME_ZONE);
+  const action = retentionTickAction(now.getTime(), lastScheduledRunAt, lastTelemetryPruneAt, open, settings.pruneWindow.enabled);
+  if (action === "full") { await runScheduledRetention(); return; }
+  if (action === "telemetry") {
+    const r = await runPruning({ record: { trigger: "hourly", userId: null, username: null } });
+    if (!r.skipped) lastTelemetryPruneAt = now.getTime();
+  }
 }
 
 async function pruneTelemetry(): Promise<PruneResult> {
@@ -967,45 +1076,56 @@ let operationalPruningInProgress = false;
  * These tables used to grow for ever. Open alarms (active or acknowledged) and
  * the history of open alarms are never deleted.
  */
-export async function runOperationalPruning(): Promise<{ deleted: Record<string, number>; skipped?: boolean }> {
+export async function runOperationalPruning(): Promise<{ deleted: Record<string, number>; errors?: string[]; skipped?: boolean }> {
   if (operationalPruningInProgress) return { deleted: {}, skipped: true };
   operationalPruningInProgress = true;
   try {
     const days = operationalRetentionDays();
     const cutoff = (d: number) => new Date(Date.now() - d * 86_400_000);
     const deleted: Record<string, number> = {};
+    const errors: string[] = [];
+    // Each table on its own: a failure on one used to stop the rest and lose the
+    // counts of those already done (audit M-20).
+    const step = async (key: string, fn: () => Promise<number>) => {
+      try { deleted[key] = await fn(); } catch (err) {
+        errors.push(`${key}: ${err instanceof Error ? err.message : String(err)}`);
+        logger.warn({ err, table: key }, "Operational pruning failed for one table; the others continue");
+      }
+    };
 
     if (days.clearedAlarms > 0) {
       const c = cutoff(days.clearedAlarms);
-      deleted.alarms = await deleteInBatches(alarmsTable, sql`${alarmsTable.status} = 'cleared'
-        AND COALESCE(${alarmsTable.clearedAt}, ${alarmsTable.triggeredAt}) < ${c}`);
+      await step("alarms", () => deleteInBatches(alarmsTable, sql`${alarmsTable.status} = 'cleared'
+        AND COALESCE(${alarmsTable.clearedAt}, ${alarmsTable.triggeredAt}) < ${c}`));
     }
     if (days.alarmHistory > 0) {
       const c = cutoff(days.alarmHistory);
-      deleted.alarmHistory = await deleteInBatches(alarmHistoryTable, sql`${alarmHistoryTable.triggeredAt} < ${c}
+      await step("alarmHistory", () => deleteInBatches(alarmHistoryTable, sql`${alarmHistoryTable.triggeredAt} < ${c}
         AND NOT EXISTS (
           SELECT 1 FROM ${alarmsTable} open_alarm
           WHERE open_alarm.id = ${alarmHistoryTable.alarmId}
             AND open_alarm.status IN ('active', 'acknowledged')
-        )`);
+        )`));
     }
     {
       // The audit log is append-only and hash-chained: lib/audit-store.ts prunes it
       // oldest-first with a checkpoint, never under 365 days (setting on the Audit Log page).
-      const auditDays = await auditRetentionDays(days.activityLogs);
-      if (auditDays > 0) deleted.activityLogs = await pruneAuditLog(auditDays);
+      await step("activityLogs", async () => {
+        const auditDays = await auditRetentionDays(days.activityLogs);
+        return auditDays > 0 ? pruneAuditLog(auditDays) : 0;
+      });
     }
     if (days.brokerEvents > 0) {
-      deleted.brokerEvents = await deleteInBatches(brokerEventsTable,
-        sql`${brokerEventsTable.timestamp} < ${cutoff(days.brokerEvents)}`);
+      await step("brokerEvents", () => deleteInBatches(brokerEventsTable,
+        sql`${brokerEventsTable.timestamp} < ${cutoff(days.brokerEvents)}`));
     }
     if (days.authTokens > 0) {
       // Only tokens that can no longer be used: expired, redeemed or revoked that long ago.
       const c = cutoff(days.authTokens);
-      deleted.authTokens = await deleteInBatches(authTokensTable, sql`(${authTokensTable.expiresAt} < ${c}
-        OR ${authTokensTable.consumedAt} < ${c} OR ${authTokensTable.revokedAt} < ${c})`);
+      await step("authTokens", () => deleteInBatches(authTokensTable, sql`(${authTokensTable.expiresAt} < ${c}
+        OR ${authTokensTable.consumedAt} < ${c} OR ${authTokensTable.revokedAt} < ${c})`));
     }
-    return { deleted };
+    return { deleted, errors };
   } finally {
     operationalPruningInProgress = false;
   }

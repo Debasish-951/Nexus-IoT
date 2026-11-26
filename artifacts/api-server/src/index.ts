@@ -5,7 +5,8 @@ import { logger } from "./lib/logger";
 import { startMqttSubscribers, stopMqttSubscribers } from "./services/mqtt.js";
 import { pool } from "@workspace/db";
 import { initWebSocketServer, closeWebSocketServer } from "./lib/ws-broadcast";
-import { runPruning, runOperationalPruning, runScheduledRetention } from "./routes/system";
+import { runPruning, runOperationalPruning, runScheduledRetention, retentionTick, RETENTION_TICK_MS } from "./routes/system";
+import { recoverInterruptedChanges } from "./routes/data_ops";
 import { startRollupJob } from "./services/rollups";
 import { computeStorage } from "./routes/system";
 import { startAlertJob } from "./services/system-alerts";
@@ -115,13 +116,18 @@ server.listen(port, host, () => {
   startConnectorScheduler();
   startRequestLogFlush();
   ensureFuturePartitions().catch((e) => logger.warn({ err: e }, "Partition maintenance failed"));
+  // Bad-data removals that were running when the API stopped are marked failed.
+  recoverInterruptedChanges().catch((e) => logger.warn({ err: e }, "Could not mark interrupted data changes"));
+  // Telemetry policies, then alarms, history, logs, broker events, auth tokens,
+  // old summaries and the pruning history; recorded as one pruning-history row.
+  // Ticks every 10 minutes: the full run is hourly, and a pruning window shorter
+  // than an hour is no longer missed (routes/system.ts retentionTick).
   setInterval(() => {
-    // Telemetry policies, then alarms, history, logs, broker events, auth tokens,
-    // old summaries and the pruning history; recorded as one pruning-history row.
-    runScheduledRetention()
-      .catch((e) => logger.warn({ err: e }, "Retention run error"));
-    // Previous direct calls, now made inside runScheduledRetention:
-    void runPruning; void runOperationalPruning;
+    retentionTick().catch((e) => logger.warn({ err: e }, "Retention run error"));
+  }, RETENTION_TICK_MS);
+  setInterval(() => {
+    // Previous direct calls, now made inside retentionTick → runScheduledRetention:
+    void runPruning; void runOperationalPruning; void runScheduledRetention;
 
     // Sessions that can never authenticate again are kept for 7 days (so recent
     // activity stays reviewable in the Security Center) and then dropped.

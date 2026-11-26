@@ -154,11 +154,13 @@ export default function DataManagementClassic() {
 
   // The server requires manage_assets plus the reports module for every
   // retention write (see ROUTE_RULES for /system/retention in authorize.ts).
-  const { canAction, session } = useCurrentUser();
+  const { canAction, can, session } = useCurrentUser();
   // Storage and retention cover every project, so the server refuses them to
   // project-restricted users; nothing is requested for them.
   const restricted = !!session?.restrictProjects;
   const canManageRetention = canAction("manage_assets", "data_management") && !restricted;
+  // Deleting a policy needs approve_data_changes (administrators), as on the server.
+  const canDeletePolicy = canManageRetention && can("approve_data_changes");
 
   async function getJson<T>(path: string): Promise<T> {
     const r = await apiFetch(`${BASE}${path}`);
@@ -209,7 +211,7 @@ export default function DataManagementClassic() {
       return;
     }
     refetchPolicies();
-    toast({ title: "Policy deleted" });
+    toast({ title: r.status === 202 ? "Waiting for approval" : "Policy deleted" });
   }
 
   async function togglePolicy(policy: RetentionPolicy) {
@@ -404,9 +406,9 @@ export default function DataManagementClassic() {
                     <Button size="sm" variant="ghost" className="h-7 w-7 p-0" onClick={() => { setEditPolicy(policy); setPolicyDialogOpen(true); }}>
                       <Pencil className="w-3.5 h-3.5" />
                     </Button>
-                    <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive hover:text-destructive" onClick={() => deletePolicy(policy.id)}>
+                    {canDeletePolicy && <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive hover:text-destructive" onClick={() => deletePolicy(policy.id)}>
                       <Trash2 className="w-3.5 h-3.5" />
-                    </Button>
+                    </Button>}
                   </div>
                   )}
                 </div>

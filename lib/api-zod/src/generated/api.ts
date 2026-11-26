@@ -3367,7 +3367,7 @@ export const GetDataSettingsResponse = zod
   );
 
 /**
- * @summary Change Data Management settings (any subset)
+ * @summary Change Data Management settings (any subset; needs approve_data_changes). While approval is on, changes that weaken the safeguards wait for a second administrator (202).
  */
 export const UpdateDataSettingsBody = zod
   .record(zod.string(), zod.unknown())
@@ -3470,7 +3470,7 @@ export const CreateDataHoldResponse = zod
   );
 
 /**
- * @summary Release a legal hold
+ * @summary Release a legal hold (needs approve_data_changes; waits for a second administrator while approval is on)
  */
 export const ReleaseDataHoldParams = zod.object({
   id: zod.coerce.string().uuid(),
@@ -3542,7 +3542,7 @@ export const PreviewRangeDeleteResponse = zod
   );
 
 /**
- * @summary Remove readings of one asset (and metric) in a time range; 202 when it waits for approval
+ * @summary Remove readings of one asset (and metric) in a time range. Always 202, either waiting for approval ('pendingApproval') or started in the background ('started'); the outcome appears in /system/changes.
  */
 export const RequestRangeDeleteBody = zod
   .record(zod.string(), zod.unknown())
@@ -3557,7 +3557,7 @@ export const RequestRangeDeleteResponse = zod
   );
 
 /**
- * @summary Approve and carry out a pending request (not your own)
+ * @summary Approve and carry out a pending request (not your own; needs approve_data_changes). Removals and pruning runs start in the background (202).
  */
 export const ApproveDataChangeParams = zod.object({
   id: zod.coerce.string().uuid(),
@@ -3576,7 +3576,7 @@ export const ApproveDataChangeResponse = zod
   );
 
 /**
- * @summary Reject or withdraw a pending request
+ * @summary Reject (needs approve_data_changes) or withdraw (the requester) a pending request
  */
 export const RejectDataChangeParams = zod.object({
   id: zod.coerce.string().uuid(),
@@ -3669,13 +3669,17 @@ export const UpdateRetentionPolicyResponse = zod.object({
 });
 
 /**
- * @summary Delete a retention policy
+ * @summary Delete a retention policy (needs approve_data_changes; 202 when it waits for approval)
  */
 export const DeleteRetentionPolicyParams = zod.object({
-  id: zod.coerce.string(),
+  id: zod.coerce.string().uuid(),
 });
 
-export const DeleteRetentionPolicyResponse = zod.void();
+export const DeleteRetentionPolicyResponse = zod
+  .record(zod.string(), zod.unknown())
+  .describe(
+    "A JSON object; the shape is described in docs/features/data-management.md.",
+  );
 
 /**
  * Public. Anonymous callers and project-restricted users get only status and timestamp; platform, version and stats are returned to an unrestricted signed-in user.

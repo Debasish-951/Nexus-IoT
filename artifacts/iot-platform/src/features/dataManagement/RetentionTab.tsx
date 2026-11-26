@@ -17,6 +17,7 @@ import {
 import { RoleGuard } from "@/components/RoleGuard";
 import { useToast } from "@/hooks/use-toast";
 import { useCurrentUser } from "@/contexts/UserContext";
+import { useT } from "@/i18n";
 import { useMetricChoices } from "@/features/dashboards/useWidgetData";
 import { Plus, Trash2, Pencil, Database, AlertTriangle, CheckCircle2, Download, ShieldCheck, Eraser, Check, X, Clock } from "lucide-react";
 import { ALL, PolicyDialog, PreviewBox, postPreview, useAssetPaths } from "./policy";
@@ -30,7 +31,7 @@ export interface ChangeRequest {
 }
 interface Hold { id: string; name: string; reason: string | null; assetId: string | null; metric: string | null; fromTs: string | null; toTs: string | null; createdBy: string | null; createdAt: string; expiresAt: string | null; releasedAt: string | null; releasedBy: string | null }
 
-const KIND_LABEL: Record<string, string> = { range_delete: "Remove bad data", manual_prune: "Run pruning now", policy_change: "Policy change" };
+const KIND_LABEL: Record<string, string> = { range_delete: "Remove bad data", manual_prune: "Run pruning now", policy_change: "Policy change", settings_change: "Settings change", hold_release: "Release legal hold" };
 
 function localInput(d: Date): string {
   const pad = (n: number) => String(n).padStart(2, "0");
@@ -44,8 +45,11 @@ export function RetentionTab({ operational, pruneWindow, onChanged }: {
 }) {
   const { toast } = useToast();
   const qc = useQueryClient();
-  const { canAction, session } = useCurrentUser();
+  const { canAction, can, session } = useCurrentUser();
+  const t = useT();
   const canManage = canAction("manage_assets", "data_management");
+  // Approving, rejecting, releasing holds and deleting policies: administrators (approve_data_changes).
+  const canApprove = canManage && can("approve_data_changes");
   const assets = useAssetPaths();
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState<RetentionPolicy | null>(null);
@@ -72,7 +76,8 @@ export function RetentionTab({ operational, pruneWindow, onChanged }: {
     try {
       const r = await fn();
       const pending = r.status === 202 && (r.data as { pendingApproval?: boolean })?.pendingApproval;
-      toast({ title: pending ? "Waiting for approval" : ok, description: pending ? pendingMsg : undefined });
+      const started = r.status === 202 && (r.data as { started?: boolean })?.started;
+      toast({ title: pending ? "Waiting for approval" : started ? t("Started") : ok, description: pending ? pendingMsg : started ? t("It runs in the background. The result appears under Bad-data removals and approvals.") : undefined });
       refresh();
       return true;
     } catch (err) {
@@ -101,15 +106,17 @@ export function RetentionTab({ operational, pruneWindow, onChanged }: {
                   <Clock className="w-4 h-4 text-amber-500 shrink-0" />
                   <div className="flex-1 min-w-0 text-xs">
                     <p className="text-sm font-medium">{KIND_LABEL[c.kind] ?? c.kind}: {c.summary}</p>
-                    <p className="text-muted-foreground">About {fmtCount(c.estimatedRows)} readings · requested by {c.requestedBy ?? "?"} {ago(c.requestedAt)}{typeof c.payload?.reason === "string" ? ` · reason: ${c.payload.reason}` : ""}</p>
+                    <p className="text-muted-foreground">{c.kind === "hold_release" || c.kind === "settings_change" ? "" : `About ${fmtCount(c.estimatedRows)} readings · `}requested by {c.requestedBy ?? "?"} {ago(c.requestedAt)}{typeof c.payload?.reason === "string" ? ` · reason: ${c.payload.reason}` : ""}</p>
                   </div>
                   {canManage && (
                     <div className="flex gap-1.5">
-                      {!mine && <Button size="sm" className="h-7 text-xs gap-1 bg-red-600 hover:bg-red-700" onClick={() => act(() => send("POST", `/api/system/changes/${c.id}/approve`, {}), "Approved and carried out")}><Check className="w-3.5 h-3.5" /> Approve</Button>}
-                      <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => act(() => send("POST", `/api/system/changes/${c.id}/reject`, {}), mine ? "Request withdrawn" : "Request rejected")}><X className="w-3.5 h-3.5" /> {mine ? "Withdraw" : "Reject"}</Button>
+                      {!mine && canApprove && <Button size="sm" className="h-7 text-xs gap-1 bg-red-600 hover:bg-red-700" onClick={() => act(() => send("POST", `/api/system/changes/${c.id}/approve`, {}), "Approved and carried out")}><Check className="w-3.5 h-3.5" /> Approve</Button>}
+                      {(mine || canApprove) && <Button size="sm" variant="outline" className="h-7 text-xs gap-1" onClick={() => act(() => send("POST", `/api/system/changes/${c.id}/reject`, {}), mine ? "Request withdrawn" : "Request rejected")}><X className="w-3.5 h-3.5" /> {mine ? "Withdraw" : "Reject"}</Button>}
                     </div>
                   )}
                   {mine && <span className="text-[11px] text-muted-foreground w-full">You made this request, so another administrator has to approve it.</span>}
+                  {!mine && !canApprove && <span className="text-[11px] text-muted-foreground w-full">{t("Only an administrator with the Approve data changes permission can approve or reject this.")}</span>}
+                  {c.error && <span className="text-[11px] text-amber-600 dark:text-amber-400 w-full">{c.error}</span>}
                 </div>
               );
             })}
@@ -152,7 +159,7 @@ export function RetentionTab({ operational, pruneWindow, onChanged }: {
                 {canManage && (
                   <div className="flex items-center gap-1 shrink-0">
                     <Button size="sm" variant="ghost" className="h-7 w-7 p-0" aria-label="Edit policy" onClick={() => { setEditing(p); setDialogOpen(true); }}><Pencil className="w-3.5 h-3.5" /></Button>
-                    <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive hover:text-destructive" aria-label="Delete policy" onClick={() => setConfirmDelete(p)}><Trash2 className="w-3.5 h-3.5" /></Button>
+                    {canApprove && <Button size="sm" variant="ghost" className="h-7 w-7 p-0 text-destructive hover:text-destructive" aria-label="Delete policy" onClick={() => setConfirmDelete(p)}><Trash2 className="w-3.5 h-3.5" /></Button>}
                   </div>
                 )}
               </div>
@@ -181,7 +188,7 @@ export function RetentionTab({ operational, pruneWindow, onChanged }: {
                 <td className={td}>{h.fromTs ? format(new Date(h.fromTs), "PPp") : "any time"} – {h.toTs ? format(new Date(h.toTs), "PPp") : "now and later"}</td>
                 <td className={td}>{h.createdBy ?? "?"}, {ago(h.createdAt)}{h.expiresAt && !h.releasedAt ? <div className="text-muted-foreground">ends {format(new Date(h.expiresAt), "PP")}</div> : null}</td>
                 <td className={td}>{h.releasedAt ? <span className="text-muted-foreground">Released {ago(h.releasedAt)}{h.releasedBy ? ` by ${h.releasedBy}` : ""}</span> : <span className="inline-flex items-center gap-1 text-emerald-600 dark:text-emerald-400"><ShieldCheck className="w-3 h-3" /> Active</span>}</td>
-                <td className={tdr}>{!h.releasedAt && canManage && <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => act(() => send("POST", `/api/system/holds/${h.id}/release`), "Hold released")}>Release</Button>}</td>
+                <td className={tdr}>{!h.releasedAt && canApprove && <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => act(() => send("POST", `/api/system/holds/${h.id}/release`), "Hold released")}>Release</Button>}</td>
               </tr>
             ))}
           </Table>
@@ -226,7 +233,7 @@ export function RetentionTab({ operational, pruneWindow, onChanged }: {
                 <td className={td}>{c.requestedBy ?? "?"}</td>
                 <td className={td}>{c.decidedBy ? `${c.decidedBy}${c.decisionNote ? `: ${c.decisionNote}` : ""}` : "under the limit, no approval needed"}</td>
                 <td className={tdr}>{c.rowsDeleted != null ? whole.format(c.rowsDeleted) : "—"}</td>
-                <td className={td}>{c.status === "done" ? <span className="text-emerald-600 dark:text-emerald-400">Done</span> : c.status === "failed" ? <span className="text-red-500" title={c.error ?? undefined}>Failed</span> : <span className="text-muted-foreground capitalize">{c.status}</span>}</td>
+                <td className={td}>{c.status === "done" ? <span className="text-emerald-600 dark:text-emerald-400">Done</span> : c.status === "failed" ? <span className="text-red-500" title={c.error ?? undefined}>Failed</span> : c.status === "running" ? <span className="text-amber-600 dark:text-amber-400">{t("Running")}</span> : <span className="text-muted-foreground capitalize">{c.status}</span>}</td>
               </tr>
             ))}
           </Table>
@@ -284,19 +291,21 @@ function BadDataDialog({ open, onOpenChange, onDone }: { open: boolean; onOpenCh
   const [includeSummaries, setIncludeSummaries] = useState(true);
   const [busy, setBusy] = useState(false);
   const metrics = useMetricChoices(assetId || undefined);
+  const t = useT();
   useEffect(() => { if (open) { setReason(""); setBusy(false); } }, [open]);
   const body = assetId && from && to ? { assetId, metric: metric || null, from: new Date(from).toISOString(), to: new Date(to).toISOString(), includeSummaries, reason: reason.trim() || "preview" } : null;
   const valid = !!body && new Date(from) < new Date(to);
   const preview = useQuery({
     queryKey: ["system/changes/range-preview", body && { ...body, reason: "" }],
-    queryFn: () => send<{ rows: number; heldBy: string | null; needsApproval: boolean }>("POST", "/api/system/changes/range-preview", body).then((r) => r.data),
+    queryFn: () => send<{ rows: number; capped?: boolean; heldBy: string | null; needsApproval: boolean }>("POST", "/api/system/changes/range-preview", body).then((r) => r.data),
     enabled: open && valid, retry: false,
   });
   async function submit() {
     setBusy(true);
     try {
-      const r = await send<{ pendingApproval?: boolean; rowsDeleted?: number; status?: string; error?: string }>("POST", "/api/system/changes/range-delete", { ...body, reason: reason.trim() });
-      if (r.status === 202) toast({ title: "Waiting for approval", description: "A second administrator must approve this removal." });
+      const r = await send<{ pendingApproval?: boolean; started?: boolean; rowsDeleted?: number; status?: string; error?: string }>("POST", "/api/system/changes/range-delete", { ...body, reason: reason.trim() });
+      if (r.status === 202 && r.data.started) toast({ title: t("Removal started"), description: t("It runs in the background. The result appears under Bad-data removals and approvals.") });
+      else if (r.status === 202) toast({ title: "Waiting for approval", description: "A second administrator must approve this removal." });
       else if (r.data.status === "failed") toast({ title: "Removal failed", description: r.data.error ?? undefined, variant: "destructive" });
       else toast({ title: "Readings removed", description: `${whole.format(r.data.rowsDeleted ?? 0)} readings deleted.` });
       onDone(); onOpenChange(false);
@@ -332,7 +341,7 @@ function BadDataDialog({ open, onOpenChange, onDone }: { open: boolean; onOpenCh
           <label className="flex items-start gap-2 text-xs"><Switch checked={includeSummaries} onCheckedChange={setIncludeSummaries} className="mt-0.5" /> <span>Also remove these hours from the summaries, so long-term charts drop the bad values too. Hours that still have raw readings are recounted either way.</span></label>
           {valid && (preview.isFetching ? <p className="text-xs text-muted-foreground">Counting…</p> : preview.error ? <p className="text-xs text-red-500">{(preview.error as Error).message}</p> : preview.data && (
             <div className="rounded-md border border-border bg-muted/30 p-3 text-xs space-y-1">
-              <p><b className="tabular-nums">{whole.format(preview.data.rows)}</b> readings in this range.</p>
+              <p>{preview.data.capped && <>{t("More than")} </>}<b className="tabular-nums">{whole.format(preview.data.rows)}</b> readings in this range.</p>
               {preview.data.heldBy && <p className="text-red-500">Part of this range is under the legal hold "{preview.data.heldBy}". Release it first.</p>}
               {preview.data.needsApproval && <p className="text-amber-600 dark:text-amber-400 font-medium">Above the approval limit: a second administrator must approve it.</p>}
             </div>

@@ -15,6 +15,32 @@ import { logger } from "../lib/logger";
 
 export const PART_SCHEMA = "telemetry_parts";
 
+// ── DDL failures (audit H-5) ───────────────────────────────────────────────────
+// Creating and dropping partitions is DDL. A runtime role without the right to
+// run it (docs/operations/backup-restore.md) used to fail on every hourly run,
+// for ever, with only a log line. The failure is now kept here, shown as a system
+// alert ("partitions_failed", services/system-alerts.ts), and a refused statement
+// is not retried for DDL_RETRY_MS: the owner fixes the grants or runs maintenance.
+const DDL_RETRY_MS = 6 * 3_600_000;
+const ddlErrors: Record<"create" | "drop", { message: string; at: Date } | null> = { create: null, drop: null };
+let ddlBlockedUntil = 0;
+
+/** The last partition DDL failure, or null when the last attempts worked. */
+export function partitionError(): { message: string; at: Date } | null {
+  return ddlErrors.create ?? ddlErrors.drop;
+}
+
+function noteDdlFailure(err: unknown, kind: "create" | "drop", what: string): void {
+  const message = `${what}: ${err instanceof Error ? err.message : String(err)}`;
+  ddlErrors[kind] = { message, at: new Date() };
+  // 42501 = insufficient_privilege; 42P01 and others may clear by themselves.
+  if ((err as { code?: string })?.code === "42501") ddlBlockedUntil = Date.now() + DDL_RETRY_MS;
+}
+
+function ddlAllowed(): boolean {
+  return Date.now() >= ddlBlockedUntil;
+}
+
 export interface PartitionInfo { name: string; from: Date | null; to: Date | null; isDefault: boolean; estRows: number; bytes: number }
 
 export async function isPartitioned(): Promise<boolean> {
@@ -62,7 +88,9 @@ export function partitionName(d: Date): string {
 /** Create the current and next two monthly partitions if they are missing. */
 export async function ensureFuturePartitions(): Promise<string[]> {
   if (!(await isPartitioned())) return [];
+  if (!ddlAllowed()) return [];
   const existing = new Set((await listPartitions()).map((p) => p.name));
+  let failed = false;
   const created: string[] = [];
   let m = monthStart(new Date());
   for (let i = 0; i < 3; i++) {
@@ -75,10 +103,14 @@ export async function ensureFuturePartitions(): Promise<string[]> {
       } catch (err) {
         // Usually rows for that month already sit in the default partition.
         logger.warn({ err, partition: name }, "Could not create telemetry partition");
+        noteDdlFailure(err, "create", `Could not create partition ${name}`);
+        failed = true;
+        if (!ddlAllowed()) break;
       }
     }
     m = next;
   }
+  if (!failed) ddlErrors.create = null;
   return created;
 }
 
@@ -90,6 +122,7 @@ export async function ensureFuturePartitions(): Promise<string[]> {
  */
 export async function dropExpiredPartitions(safeBefore: Date, holdsTouch: (from: Date, to: Date) => boolean): Promise<Array<{ name: string; estRows: number }>> {
   if (!(await isPartitioned())) return [];
+  if (!ddlAllowed()) return [];
   const dropped: Array<{ name: string; estRows: number }> = [];
   for (const p of await listPartitions()) {
     if (p.isDefault || !p.from || !p.to) continue;
@@ -97,7 +130,15 @@ export async function dropExpiredPartitions(safeBefore: Date, holdsTouch: (from:
     if (holdsTouch(p.from, p.to)) continue;
     // Exact count for the record; the partition is old and no longer written to.
     const c = await pool.query<{ n: string }>(`SELECT count(*)::bigint AS n FROM ${PART_SCHEMA}.${p.name}`);
-    await pool.query(`DROP TABLE ${PART_SCHEMA}.${p.name}`);
+    // A refused DROP must not stop pruning: the row deletes after it still run.
+    try {
+      await pool.query(`DROP TABLE ${PART_SCHEMA}.${p.name}`);
+    } catch (err) {
+      logger.warn({ err, partition: p.name }, "Could not drop expired telemetry partition; its rows are pruned row by row instead");
+      noteDdlFailure(err, "drop", `Could not drop partition ${p.name}`);
+      break;
+    }
+    ddlErrors.drop = null;
     dropped.push({ name: p.name, estRows: Number(c.rows[0]?.n ?? 0) });
     logger.info({ partition: p.name, rows: c.rows[0]?.n }, "Dropped expired telemetry partition");
   }

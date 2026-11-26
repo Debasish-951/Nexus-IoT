@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import { respondInvalid } from "../lib/respond";
 import { eq, isNull, sql, and, or, inArray } from "drizzle-orm";
 import {
-  db, assetsTable, attributesTable, assetTemplatesTable, telemetryTable, telemetryRollupsTable, alarmsTable,
+  db, pool, assetsTable, attributesTable, assetTemplatesTable, telemetryTable, alarmsTable,
   alarmHistoryTable, alarmRulesTable,
 } from "@workspace/db";
 import { forgetRuleDelays, invalidateAlarmRuleCache, forgetAssetDelays } from "./ingest";
@@ -11,6 +11,10 @@ import { emitLater, projectOf, forgetAssetTree } from "../lib/integration/events
 import { diffFields } from "../lib/audit-core";
 import { hasSeenDevice, removeSeenDevice } from "../lib/seen-devices";
 import { deviceClaimedOutsideScope, DEVICE_IN_USE } from "../lib/project-access";
+import { subtreeHoldConflict, deleteUnheldTelemetry } from "../services/holds";
+import { TIERS, forgetLateReadings } from "../services/rollups";
+import { invalidateStorageCache } from "./system";
+import { logger } from "../lib/logger";
 import {
   CreateAssetBody,
   UpdateAssetBody,
@@ -222,27 +226,35 @@ router.delete("/assets/:id", async (req, res): Promise<void> => {
   // Resolved before the delete: afterwards the asset is no longer in the tree.
   const deletedProjectId = await projectOf(rootId).catch(() => null);
 
-  // One transaction: a failure part-way used to leave the subtree half deleted,
-  // with assets gone but their attributes, alarms or rules still in place.
-  const { allIds, identifiers, ruleIds } = await db.transaction(async (tx) => {
-    // Collect full subtree via recursive CTE (root + all descendants). UNION, not
-    // UNION ALL, so a parent cycle in bad data cannot recurse for ever.
-    const subtree = await tx.execute<{ id: string; identifier: string | null }>(sql`
-      WITH RECURSIVE tree AS (
-        SELECT id, identifier FROM assets WHERE id = ${rootId}
-        UNION
-        SELECT a.id, a.identifier FROM assets a INNER JOIN tree t ON a.parent_id = t.id
-      )
-      SELECT id, identifier FROM tree
-    `);
-    const allIds = subtree.rows.map((r) => r.id);
-    const identifiers = subtree.rows.map((r) => r.identifier).filter((x): x is string => !!x);
+  // Collect full subtree via recursive CTE (root + all descendants). UNION, not
+  // UNION ALL, so a parent cycle in bad data cannot recurse for ever.
+  const subtree = await db.execute<{ id: string; identifier: string | null }>(sql`
+    WITH RECURSIVE tree AS (
+      SELECT id, identifier FROM assets WHERE id = ${rootId}
+      UNION
+      SELECT a.id, a.identifier FROM assets a INNER JOIN tree t ON a.parent_id = t.id
+    )
+    SELECT id, identifier FROM tree
+  `);
+  const allIds = subtree.rows.map((r) => r.id);
+  const identifiers = subtree.rows.map((r) => r.identifier).filter((x): x is string => !!x);
+
+  // Readings under a legal hold are never deleted, so neither is an asset whose
+  // readings are held (audit H-3).
+  const heldBy = await subtreeHoldConflict(allIds);
+  if (heldBy) {
+    res.status(409).json({ error: `Readings of this asset or one below it are under the legal hold "${heldBy}". Release the hold first.`, code: "hold_conflict" });
+    return;
+  }
+
+  // One transaction for the metadata: a failure part-way used to leave the subtree
+  // half deleted, with assets gone but their attributes, alarms or rules still in
+  // place. Telemetry and summaries follow after it, in batches (below).
+  const { ruleIds } = await db.transaction(async (tx) => {
     const now = new Date();
 
-    // Remove dependent rows first — telemetry/attributes/alarms have no FK cascade,
+    // Remove dependent rows first — attributes/alarms have no FK cascade,
     // so without this they'd be orphaned and keep showing up (e.g. in the Live Feed).
-    await tx.delete(telemetryTable).where(inArray(telemetryTable.assetId, allIds));
-    await tx.delete(telemetryRollupsTable).where(inArray(telemetryRollupsTable.assetId, allIds));
     await tx.delete(attributesTable).where(inArray(attributesTable.assetId, allIds));
 
     // History rows are records and are kept, but any still open are closed:
@@ -271,8 +283,13 @@ router.delete("/assets/:id", async (req, res): Promise<void> => {
         .set({ childCount: sql`GREATEST(${assetsTable.childCount} - 1, 0)` })
         .where(eq(assetsTable.id, rootAsset.parentId));
     }
-    return { allIds, identifiers, ruleIds: rules.map((r) => r.id) };
+    return { ruleIds: rules.map((r) => r.id) };
   });
+  forgetLateReadings(allIds);
+  // Readings and summaries of a big project take far longer than a request may:
+  // deleted in batches in the background, readings first (a hold placed meanwhile
+  // still protects its readings), then every summary level.
+  void purgeAssetData(allIds, rootAsset.name);
 
   // In-memory rule state, only once the transaction has committed.
   for (const id of ruleIds) forgetRuleDelays(id);
@@ -291,6 +308,39 @@ router.delete("/assets/:id", async (req, res): Promise<void> => {
   emitLater("asset.deleted", { assetId: rootId, projectId: deletedProjectId, payload: { assetId: rootId, name: rootAsset.name, identifier: rootAsset.identifier, assetsRemoved: allIds.length } });
   res.sendStatus(204);
 });
+
+/**
+ * Delete the telemetry and summaries of deleted assets. Telemetry goes in
+ * batches outside any transaction, so a project with tens of millions of
+ * readings no longer hits the statement timeout and rolls back (audit H-3).
+ * If the API stops part-way, the remaining rows belong to no asset and are
+ * shown as "Deleted asset" in Data Management until retention prunes them.
+ */
+async function purgeAssetData(assetIds: string[], name: string): Promise<void> {
+  try {
+    const readings = await deleteUnheldTelemetry(inArray(telemetryTable.assetId, assetIds));
+    let summaries = 0;
+    for (const tier of TIERS) {
+      const client = await pool.connect();
+      try {
+        await client.query("BEGIN");
+        await client.query("SET LOCAL statement_timeout = 300000");
+        const r = await client.query(`DELETE FROM ${tier.table} WHERE asset_id = ANY($1::uuid[])`, [assetIds]);
+        await client.query("COMMIT");
+        summaries += r.rowCount ?? 0;
+      } catch (err) {
+        await client.query("ROLLBACK").catch(() => {});
+        throw err;
+      } finally {
+        client.release();
+      }
+    }
+    invalidateStorageCache();
+    if (readings > 0 || summaries > 0) logger.info({ assets: assetIds.length, name, readings, summaries }, "Deleted the readings and summaries of a deleted asset");
+  } catch (err) {
+    logger.error({ err, name, assets: assetIds.length }, "Could not delete all readings of a deleted asset; the rest remain as 'Deleted asset'");
+  }
+}
 
 // ── Bulk attribute import ─────────────────────────────────────────────────────
 router.post("/assets/:id/attributes/bulk", async (req, res): Promise<void> => {

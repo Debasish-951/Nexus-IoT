@@ -56,12 +56,17 @@ export const PERMISSIONS = [
   // Added: previously implied by `manage_users`, split out so a role
   // can manage users without seeing platform-wide security telemetry.
   "manage_security",
+  // Approve or reject Data Management deletions, release legal holds, change
+  // Data Management settings and delete retention policies. Administrators only:
+  // the people the two-person rule restrains must not be the ones who run it.
+  "approve_data_changes",
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 
 const ADMIN_PERMISSIONS: Permission[] = [
   "view", "manage_assets", "manage_templates", "manage_alarms", "acknowledge_alarms",
   "manage_users", "manage_brokers", "manage_destinations", "manage_api_clients", "manage_security",
+  "approve_data_changes",
 ];
 
 export const ROLE_PERMISSIONS: Record<Role, Permission[]> = {

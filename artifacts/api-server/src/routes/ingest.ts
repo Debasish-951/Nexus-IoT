@@ -16,6 +16,7 @@ import { ingestScope, recordIngestOutOfScope } from "../lib/project-access";
 import { csvCell } from "../lib/validation";
 import { forwardToDestinations } from "./destinations";
 import { emitLater } from "../lib/integration/events";
+import { noteLateReadings } from "../services/rollups";
 
 const router: IRouter = Router();
 
@@ -870,6 +871,8 @@ export async function processNormalised(
     quality: isBlankReading(value) ? "bad" : "good",
   }));
   await db.insert(telemetryTable).values(records as any[]);
+  // Readings too late for the summary job's recount window still get summarised.
+  noteLateReadings(records);
 
   // Update dynamic attributes — match either the full "deviceId.metric" tag OR the
   // bare metric name (case-insensitive; telemetry keys are camelCase, tagNames lower).

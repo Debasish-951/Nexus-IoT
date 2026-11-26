@@ -17,12 +17,14 @@ import path from "node:path";
 import { createGzip, createGunzip } from "node:zlib";
 import { createHash } from "node:crypto";
 import { createReadStream, createWriteStream } from "node:fs";
+import { Writable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import { mkdir, rename, stat, unlink } from "node:fs/promises";
-import { createInterface } from "node:readline";
 import { once } from "node:events";
-import { pool, db, dataArchivesTable, dataHoldsTable } from "@workspace/db";
+import { pool, db, dataArchivesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { logger } from "../lib/logger";
+import { insertHold } from "./holds";
 
 const DAY = 86_400_000;
 const STATE_KEY = "telemetry_archive";
@@ -144,14 +146,46 @@ export function archiveFilePath(rel: string): string {
 }
 
 /**
+ * Throws a 410 `archive_file_missing` when the file is gone and a 422
+ * `archive_checksum_mismatch` when its SHA-256 differs from the recorded one.
+ * One extra read of the compressed file, cheap next to inserting its rows.
+ */
+export async function verifyArchiveFile(file: string, sha256: string | null): Promise<void> {
+  try { await stat(file); } catch {
+    throw Object.assign(new Error("The archive file is no longer in the archive folder."), { status: 410, code: "archive_file_missing" });
+  }
+  const hash = createHash("sha256");
+  try {
+    await pipeline(createReadStream(file), new Writable({ write(chunk: Buffer, _enc, cb) { hash.update(chunk); cb(); } }));
+  } catch (err) {
+    throw Object.assign(new Error(`The archive file could not be read: ${err instanceof Error ? err.message : String(err)}`), { status: 410, code: "archive_file_missing" });
+  }
+  if (sha256 && hash.digest("hex") !== sha256) {
+    throw Object.assign(new Error("The archive file has changed since it was written (checksum mismatch). Nothing was restored."), { status: 422, code: "archive_checksum_mismatch" });
+  }
+}
+
+/**
  * Re-insert the readings of an archived day. Readings still in the database are
  * skipped. A legal hold is placed on the day so pruning keeps them.
+ *
+ * A missing file is a 410 and a file whose SHA-256 no longer matches the one
+ * recorded when it was written is a 422; nothing is inserted in either case.
+ * Every stream error becomes a rejected promise: an unhandled stream error used
+ * to crash the whole API (audit H-4). The hold is placed before any row goes
+ * back, so a pruning run during the restore cannot delete what was restored.
  */
 export async function restoreArchive(id: string, by: string): Promise<{ inserted: number; holdId: string }> {
   const [a] = await db.select().from(dataArchivesTable).where(eq(dataArchivesTable.id, id));
   if (!a) throw Object.assign(new Error("Archive not found"), { status: 404 });
   const file = archiveFilePath(a.path);
-  const rl = createInterface({ input: createReadStream(file).pipe(createGunzip()), crlfDelay: Infinity });
+  await verifyArchiveFile(file, a.sha256);
+  const start = dayStart(a.day);
+  const hold = await insertHold({
+    name: `Restored archive ${a.day}`,
+    reason: "Readings restored from the archive. Release this hold to let pruning delete them again.",
+    fromTs: start, toTs: new Date(start.getTime() + DAY - 1), createdBy: by,
+  });
   let batch: Array<Record<string, unknown>> = [];
   let inserted = 0;
   const flush = async () => {
@@ -167,18 +201,35 @@ export async function restoreArchive(id: string, by: string): Promise<{ inserted
     inserted += res.rowCount ?? 0;
     batch = [];
   };
-  for await (const line of rl) {
-    if (!line.trim()) continue;
-    batch.push(JSON.parse(line));
-    if (batch.length >= 1000) await flush();
+  const gunzip = createGunzip();
+  gunzip.setEncoding("utf8");
+  const reading = pipeline(createReadStream(file), gunzip);
+  reading.catch(() => {}); // surfaced by the loop below or the await after it
+  const take = (line: string) => {
+    if (!line.trim()) return;
+    try { batch.push(JSON.parse(line)); } catch {
+      throw Object.assign(new Error("The archive file holds a line that is not valid JSON."), { status: 422, code: "archive_unreadable" });
+    }
+  };
+  try {
+    let rest = "";
+    for await (const chunk of gunzip as AsyncIterable<string>) {
+      rest += chunk;
+      let nl: number;
+      while ((nl = rest.indexOf("\n")) >= 0) {
+        take(rest.slice(0, nl));
+        rest = rest.slice(nl + 1);
+        if (batch.length >= 1000) await flush();
+      }
+    }
+    take(rest);
+    await flush();
+    await reading;
+  } catch (err) {
+    gunzip.destroy();
+    if ((err as { status?: number }).status) throw err;
+    throw Object.assign(new Error(`The archive file could not be read: ${err instanceof Error ? err.message : String(err)}`), { status: 422, code: "archive_unreadable" });
   }
-  await flush();
-  const start = dayStart(a.day);
-  const [hold] = await db.insert(dataHoldsTable).values({
-    name: `Restored archive ${a.day}`,
-    reason: "Readings restored from the archive. Release this hold to let pruning delete them again.",
-    fromTs: start, toTs: new Date(start.getTime() + DAY - 1), createdBy: by,
-  }).returning();
   await db.update(dataArchivesTable).set({ restoredAt: new Date(), restoredBy: by, restoredRows: inserted }).where(eq(dataArchivesTable.id, id));
   return { inserted, holdId: hold.id };
 }

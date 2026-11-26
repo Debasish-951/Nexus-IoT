@@ -164,7 +164,7 @@ cd lib/api-spec && pnpm exec orval --config ./orval.config.ts
 
 ### RBAC (Role-Based Access Control)
 - The server is authoritative. `artifacts/api-server/src/lib/rbac.ts` defines nine roles (super_admin, company_admin, admin, project_manager, team_lead, developer, engineer, operator, viewer), the permission verbs, module defaults and role rank. `middleware/authorize.ts` holds the deny-by-default `ROUTE_RULES` table; every denial is written to `security_events`
-- Permissions: super_admin, company_admin, admin = all (including `manage_users`, `manage_security`); engineer and developer = view + assets + templates + alarms + ack + brokers + destinations + api_clients (developer only on assigned projects); project_manager, team_lead, operator = view + ack; viewer = view
+- Permissions: super_admin, company_admin, admin = all (including `manage_users`, `manage_security`, `approve_data_changes`); engineer and developer = view + assets + templates + alarms + ack + brokers + destinations + api_clients (developer only on assigned projects); project_manager, team_lead, operator = view + ack; viewer = view
 - Identity comes from the session cookie or API key; `middleware/principal.ts` overwrites `X-Actor-*` headers so clients cannot forge Activity Log identity
 - Frontend: `UserContext.tsx` (`can(permission)` against the catalogue the server sends), `RoleGuard` (mode="hide" removes, mode="disable" grays out) and `ReadOnlyBanner` mirror the server rules for usability only
 

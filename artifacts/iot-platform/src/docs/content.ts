@@ -1034,6 +1034,7 @@ export function buildDocumentContent(): ContentItem[] {
         ["manage_destinations (create, edit, delete destinations)", "✓", "✓", "✗", "✗", "✗"],
         ["manage_api_clients (create, rotate, revoke API clients)", "✓", "✓", "✗", "✗", "✗"],
         ["manage_security (Security Center, sessions, security events)", "✓", "✗", "✗", "✗", "✗"],
+        ["approve_data_changes (approve or reject Data Management deletions, release legal holds, change Data Management settings, delete retention policies)", "✓", "✗", "✗", "✗", "✗"],
       ]
     ),
     p("Projects: Project Managers see every project; Team Leads and Developers see only the projects assigned to them; all other roles follow a per-user project setting. Administrators can also override module access per user (User → Access)."),
@@ -1795,7 +1796,8 @@ router.get('/export/alarms', apiKeyAuth('read:alarms'), async (req, res) => {
     code("typescript", `// artifacts/api-server/src/lib/rbac.ts (abridged)
 super_admin, company_admin, admin:
   view, manage_assets, manage_templates, manage_alarms, acknowledge_alarms,
-  manage_users, manage_brokers, manage_destinations, manage_api_clients, manage_security
+  manage_users, manage_brokers, manage_destinations, manage_api_clients, manage_security,
+  approve_data_changes
 engineer, developer:
   view, manage_assets, manage_templates, manage_alarms, acknowledge_alarms,
   manage_brokers, manage_destinations, manage_api_clients
