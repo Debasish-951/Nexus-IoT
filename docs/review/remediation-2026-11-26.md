@@ -13,7 +13,8 @@ Covers the fixes for every finding of the [23 November 2026 audit](audit-2026-11
 **Automated gates** (merged code):
 - `tsc --build` (libraries): passes.
 - Typecheck of api-server, iot-platform and mockup-sandbox: passes.
-- API regression tests: **212 of 212 pass**, up from 128. 84 new tests are in `access-identity`, `data-safeguards`, `audit-log-integrity`, `live-feed-ingest`, `ai-limits`, `twin-fixes` and `audit-g`.
+- API regression tests: **219 of 219 pass**, up from 128. 91 new tests are in `access-identity`, `data-safeguards`, `audit-log-integrity`, `live-feed-ingest`, `ai-limits`, `twin-fixes`, `audit-g` and `zod4-upgrade`.
+- `pnpm audit --prod`: no known vulnerabilities.
 - API (esbuild) and SPA (vite) production builds: succeed.
 
 **Live check on a throwaway database.** This was a separate database, `nexus_audit_scratch`, created and dropped for the test. The working database was not touched. Steps: schema `push` and `seed`, then the merged API was started and exercised over HTTP. Results:
@@ -131,7 +132,13 @@ Covers the fixes for every finding of the [23 November 2026 audit](audit-2026-11
 | I-6 | Fixed | The GLB scan covers the whole file |
 | I-7 | Docs | The privacy notes say user deletion cannot remove entries from the append-only log |
 | I-8 | Fixed | `pages/AnalyticsKpi.tsx` deleted |
-| zod advisory | See below | zod 4 upgrade |
+| zod advisory | Fixed | zod 4.6.7 (GHSA-mrhx-c7xc-m3w5 cleared, before the 2026-12-10 deadline). Orval now emits zod 4. `format: uuid` maps to the `z.guid()` pattern, so the seed's fixed ids still validate. Partial updates no longer fill defaults (`partialUpdate()`). Optional query parameters stay absent as before. `@hookform/resolvers` 5.9.2 |
+
+### Found during the work, still open
+
+- **Array length limits inside request bodies are not enforced.** The validator's strictness pass rebuilds arrays without their `.min()`/`.max()`. This was already true under zod 3. It affects, for example, `boundedArray(…, 32)`, dashboard widgets (500) and the live-summary ids (500); the SPA itself sends at most 200. It is left unchanged because enforcing it could start refusing requests that work today. Fix: keep the array checks in the strictness pass, after checking the largest real payloads.
+- **Validation messages changed wording with zod 4.** The response shape (`error`, `code: "invalid_request"`, `errors[].field`) is unchanged, but zod's own texts differ: "Required" now reads "Invalid input: expected string, received undefined". Custom messages are unchanged. Integrations that match on message text, which they should not, would notice.
+- **Creating an asset needs a registered device id.** This is existing behaviour, not a regression; it is noted because the live check met it.
 
 ## Upgrade steps
 
