@@ -2652,6 +2652,40 @@ export interface AssetHealthReport {
   keyMetrics: AssetHealthMetric[];
 }
 
+export interface AssetLiveSummaryRequest {
+  /** @maxItems 500 */
+  ids: string[];
+}
+
+export interface AssetLiveAttribute {
+  name: string;
+  type: string;
+  /** @nullable */
+  tagName: string | null;
+  /** @nullable */
+  sourceMetric: string | null;
+  value: unknown;
+  /** @nullable */
+  uom: string | null;
+  /** @nullable */
+  decimalPlaces: number | null;
+  /** @nullable */
+  timestamp: string | null;
+}
+
+export interface AssetLiveSummary {
+  assetId: string;
+  /**
+   * Newest stored reading of the asset; null when it never reported.
+   * @nullable
+   */
+  lastSeen: string | null;
+  activeAlarms: number;
+  /** Raw value of the static attribute "Expected interval (min)", if the asset has one. */
+  expectedInterval: unknown;
+  attributes: AssetLiveAttribute[];
+}
+
 export interface SeenDevice {
   deviceId: string;
   lastSeen: string;
@@ -2800,6 +2834,7 @@ export type GetTelemetryParams = {
   metric?: string;
   from?: string;
   to?: string;
+  /** Newest rows to return. Values above 10000 are treated as 10000. */
   limit?: number;
 };
 

@@ -18,8 +18,8 @@ import { useT } from "@/i18n";
 import { useLiveData, type AssetLive, type LiveEvent, type LiveEventKind, type Reading } from "./useLiveData";
 import { fmtDuration, fmtValue, looksStuck, ratePerMin, readable, splitMetric, type DataStatus } from "./status";
 
-const STATUS_LABEL: Record<DataStatus, string> = { online: "Online", delayed: "Delayed", offline: "Offline", never: "No data yet" };
-const STATUS_DOT: Record<DataStatus, string> = { online: "bg-emerald-500", delayed: "bg-amber-500", offline: "bg-slate-400", never: "bg-slate-300 dark:bg-slate-600" };
+const STATUS_LABEL: Record<DataStatus, string> = { online: "Online", delayed: "Delayed", offline: "Offline", never: "No data yet", unknown: "Status unknown" };
+const STATUS_DOT: Record<DataStatus, string> = { online: "bg-emerald-500", delayed: "bg-amber-500", offline: "bg-slate-400", never: "bg-slate-300 dark:bg-slate-600", unknown: "border border-dashed border-slate-400 bg-transparent" };
 const LEVEL_TEXT = { ok: "text-emerald-600 dark:text-emerald-400", warn: "text-amber-600 dark:text-amber-400", crit: "text-red-600 dark:text-red-400" } as const;
 const TONE_DOT: Record<LiveEvent["tone"], string> = { red: "bg-red-500", amber: "bg-amber-500", green: "bg-emerald-500", blue: "bg-blue-500", grey: "bg-slate-400" };
 /** Readings shown per machine group before "Show all". */
@@ -62,7 +62,7 @@ export default function LiveFeedPage() {
     return out;
   }, [scoped]);
 
-  const counts = { online: 0, delayed: 0, offline: 0, never: 0 } as Record<DataStatus, number>;
+  const counts = { online: 0, delayed: 0, offline: 0, never: 0, unknown: 0 } as Record<DataStatus, number>;
   for (const a of reporting) counts[a.status]++;
   const newestSeen = Math.max(0, ...scoped.map((a) => a.lastSeen));
   const receiving = counts.online > 0;
@@ -187,6 +187,15 @@ export default function LiveFeedPage() {
         </Button>
       </Card>
 
+      {live.refresh.failed && (
+        <p role="status" className="text-xs flex items-center gap-2 rounded-md border border-amber-500/30 px-3 py-2 text-amber-700 dark:text-amber-400">
+          <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+          {live.refresh.retryAt > now
+            ? t("Could not refresh data: the server is limiting requests. Status is shown as unknown; retrying in {d}.", { d: fmtDuration(live.refresh.retryAt - now) })
+            : t("Could not refresh data from the server. Status is shown as unknown until it recovers.")}
+        </p>
+      )}
+
       {/* Status strip */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         <Tile icon={Box} label={t("Assets")}>
@@ -196,6 +205,7 @@ export default function LiveFeedPage() {
             <Count n={counts.offline} label={t("offline")} dot="bg-slate-400" />
           </div>
           {counts.never > 0 && <p className="text-[11px] text-muted-foreground mt-1">{t("{n} never reported", { n: counts.never })}</p>}
+          {counts.unknown > 0 && <p className="text-[11px] text-muted-foreground mt-1">{t("{n} status unknown", { n: counts.unknown })}</p>}
         </Tile>
         {live.can.alarms ? (
           <Tile icon={ShieldAlert} label={t("Active alarms")}>

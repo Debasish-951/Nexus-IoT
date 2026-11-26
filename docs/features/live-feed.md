@@ -12,19 +12,19 @@ Data Studio > Live Feed (`/live`, module `live`) shows what is happening in the 
 | Delayed | older than the expected interval, within 1 hour |
 | Offline | older than 1 hour |
 | No data yet | never reported |
+| Status unknown | the page could not refresh the asset from the server (error or rate limit) and has no recent reading for it |
 
 - **Expected interval:** 5 minutes by default. An asset can override it with a static attribute named `Expected interval (min)`. The name is matched without case, spaces or units, and the value may carry a unit ("10", "10 min"). The value is capped at 1 hour.
-- **Newest reading:** the latest of live WebSocket telemetry, the asset health endpoint's `lastSeen` (newest stored reading) and the timestamps of its dynamic attributes.
+- **Newest reading:** the latest of live WebSocket telemetry, the live summary's `lastSeen` (newest stored reading) and the timestamps of its dynamic attributes.
+- **Refresh failures:** an asset whose last refresh failed is never aged to Delayed or Offline from the page's old copy; it shows "Status unknown" (an asset with a recent reading stays Online), no status change is recorded for it, and a banner says the data could not be refreshed. On a 429 the page waits at least a minute (doubling up to five) before polling again.
 - **Timestamps:** these are reading timestamps as stored by ingest. The API keeps no separate receive time, and ingest refuses future-dated readings.
 
 ## Data sources
 
-No new endpoints. Everything comes from existing endpoints, and the project scope is applied as before.
+The project scope is applied as before.
 
 - **Asset list:** `useListAssets`.
-- **Per asset, every 30 s, six at a time:**
-  - `GET /assets/:id/health`: newest stored reading and active alarms.
-  - `GET /assets/:id/attributes`: latest value, unit, decimals and timestamp of each dynamic, metric or runtime attribute, plus the expected-interval attribute.
+- **Every 30 s, up to 200 assets per request:** `POST /assets/live-summary` with the asset ids. It returns the newest stored reading, active alarms, the expected-interval attribute and the latest value, unit, decimals and timestamp of each dynamic, metric or runtime attribute. It replaced one `/assets/:id/health` and one `/assets/:id/attributes` request per asset per poll, which used up the per-user API limit (600 a minute) at about 150 assets (audit H-8). The server enforces the project scope on the ids.
 - **Once per asset, for users with Explorer or Visualization access (first 25 assets):** `GET /telemetry/:id?limit=300`. It seeds the sparklines and the messages-per-minute chart.
 - **WebSocket:** `telemetry`, `alarm` and `activity_log` events. Audit events are used only for users who can read the audit log and are not project-restricted.
 - **Alarms:** open alarms come from `useOpenAlarms`. Limits come from `useAlarmLimits` (enabled threshold rules: critical and high are the alarm limit, other severities the warning limit).

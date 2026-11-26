@@ -8,6 +8,9 @@
  *   delayed  older than that, but within one hour
  *   offline  older than one hour
  *   never    no reading known at all
+ *   unknown  the page could not refresh this asset from the server (error or
+ *            rate limit), so "delayed" / "offline" / "never" would only reflect
+ *            the page's own old copy; shown as unknown until a refresh succeeds
  *
  * "Newest reading" is the latest of: live WebSocket telemetry, the newest stored
  * reading the server reports for the asset (asset health `lastSeen`) and the
@@ -18,7 +21,7 @@
  * Pure functions only, no React, so the rule is easy to test and reuse.
  */
 
-export type DataStatus = "online" | "delayed" | "offline" | "never";
+export type DataStatus = "online" | "delayed" | "offline" | "never" | "unknown";
 
 export const DEFAULT_INTERVAL_MIN = 5;
 export const OFFLINE_AFTER_MS = 60 * 60_000;
@@ -47,6 +50,15 @@ export function dataStatus(lastSeen: number | null | undefined, intervalMs: numb
   if (age <= intervalMs) return "online";
   if (age <= OFFLINE_AFTER_MS) return "delayed";
   return "offline";
+}
+
+/**
+ * Status when the last refresh of the asset failed. A reading known to be recent
+ * still means online; anything else is not known, rather than ageing the asset
+ * towards offline while its data may well be arriving.
+ */
+export function statusWhenRefreshFailed(base: DataStatus): DataStatus {
+  return base === "online" ? "online" : "unknown";
 }
 
 /** Newest of several timestamps (ms), ignoring missing ones; 0 when none. */

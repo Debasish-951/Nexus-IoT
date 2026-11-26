@@ -109,6 +109,8 @@ const ROUTE_RULES: Rule[] = [
   // ── Assets, attributes, templates ──────────────────────────────────────────
   { path: "/assets",                      methods: READ,       module: "assets", level: "read" },
   { path: "/assets",                      methods: ["POST"],   permission: "manage_assets", module: "assets", level: "write" },
+  // Live Feed: health + latest attributes for many assets in one read (POST only to carry the id list).
+  { path: "/assets/live-summary",         methods: ["POST"],   module: "assets", level: "read" },
   { path: "/assets/:id",                  methods: READ,       module: "assets", level: "read" },
   { path: "/assets/:id",                  methods: ["PUT", "PATCH"], permission: "manage_assets", module: "assets", level: "write" },
   { path: "/assets/:id",                  methods: ["DELETE"], permission: "manage_assets", module: "assets", level: "delete" },

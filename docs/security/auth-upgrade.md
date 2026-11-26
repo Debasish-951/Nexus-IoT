@@ -693,7 +693,11 @@ Executed against a live server (port 8099) on the real PostgreSQL database, afte
   driven in a browser. UAT-1…5 in §5.4 remain to be walked through manually.
 - **MFA/TOTP.** Schema seam only — `mfa_enabled` / `mfa_secret` exist and are
   carried through the session payload, but there is **no TOTP verification**.
-  Do not describe the platform as MFA-capable yet.
+  Do not describe the platform as MFA-capable yet. `mfa_secret` would hold a
+  plaintext secret: nothing writes it, the API never returns it, and the
+  per-request principal no longer reads it (audit L-26). Drop it, or replace it
+  with an encrypted column, when TOTP is built
+  ([database-migrations.md](../operations/database-migrations.md#other-notes)).
 - **SSO/OIDC/Entra ID.** `auth_provider` / `external_id` columns and the config
   seam exist; no protocol implementation.
 

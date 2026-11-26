@@ -423,6 +423,7 @@ paths:
             format: date-time
         - name: limit
           in: query
+          description: Newest rows to return. Values above 10000 are treated as 10000.
           schema:
             type: integer
             default: 100
@@ -3537,6 +3538,36 @@ paths:
                 $ref: "#/components/schemas/AssetHealthReport"
         "404":
           $ref: "#/components/responses/NotFound"
+
+  /assets/live-summary:
+    post:
+      operationId: getAssetsLiveSummary
+      tags: [assets]
+      summary: Live Feed data for many assets in one request
+      description: >-
+        Newest stored reading, active alarm count, expected reporting interval and
+        latest live attributes of each asset named in `ids`. A read sent as POST to
+        carry the id list. Ids outside the caller's projects are refused (403);
+        unknown ids are left out of the answer.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AssetLiveSummaryRequest"
+      responses:
+        "200":
+          description: OK
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AssetLiveSummary"
+        "400":
+          $ref: "#/components/responses/ValidationFailed"
+        "429":
+          $ref: "#/components/responses/RateLimited"
 
   # ─── Ingest helpers and per-client ingest URLs ─────────────────────────────
   /ingest/seen-devices:
@@ -7339,6 +7370,65 @@ components:
           items:
             $ref: "#/components/schemas/AssetHealthMetric"
       required: [assetId, assetName, health, freshnessPct, activeAlarms, lastSeen, totalAttributes, dynamicAttributes, freshAttributes, keyMetrics]
+
+    AssetLiveSummaryRequest:
+      type: object
+      properties:
+        ids:
+          type: array
+          maxItems: 500
+          items:
+            type: string
+            format: uuid
+      required: [ids]
+
+    AssetLiveSummary:
+      type: object
+      properties:
+        assetId:
+          type: string
+        lastSeen:
+          type: string
+          format: date-time
+          nullable: true
+          description: Newest stored reading of the asset; null when it never reported.
+        activeAlarms:
+          type: integer
+        expectedInterval:
+          nullable: true
+          description: Raw value of the static attribute "Expected interval (min)", if the asset has one.
+        attributes:
+          type: array
+          items:
+            $ref: "#/components/schemas/AssetLiveAttribute"
+      required: [assetId, lastSeen, activeAlarms, expectedInterval, attributes]
+
+    AssetLiveAttribute:
+      type: object
+      properties:
+        name:
+          type: string
+        type:
+          type: string
+        tagName:
+          type: string
+          nullable: true
+        sourceMetric:
+          type: string
+          nullable: true
+        value:
+          nullable: true
+        uom:
+          type: string
+          nullable: true
+        decimalPlaces:
+          type: integer
+          nullable: true
+        timestamp:
+          type: string
+          format: date-time
+          nullable: true
+      required: [name, type, tagName, sourceMetric, value, uom, decimalPlaces, timestamp]
 
     AssetHealthMetric:
       type: object

@@ -2,7 +2,7 @@ import { useMemo, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
   useListSites, getListSitesQueryKey, useListAlarms, getListAlarmsQueryKey, useListAssets, getListAssetsQueryKey,
-  createAssetAttribute, updateAttribute, getListAssetAttributesQueryKey, type Site,
+  createAssetAttribute, updateAttribute, listAssetAttributes, getListAssetAttributesQueryKey, type Site,
 } from "@workspace/api-client-react";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { useWsEvents } from "@/hooks/useWsEvents";
@@ -86,20 +86,39 @@ export function useSites(onlyIds?: string[]) {
  * Writes a site's location as static attributes on the project asset: updates
  * the existing Latitude / Longitude / Address attributes, or creates them. Needs
  * Asset write permission; the generated client sends the CSRF header.
+ *
+ * The attribute ids are looked up fresh from the server at save time, and saves
+ * of one project run one after another. Relying on the ids in the cached site
+ * list created a second Latitude / Longitude pair when a site was placed again
+ * before that list had refetched, or saved twice in quick succession.
  */
+const saving = new Map<string, Promise<unknown>>();
+
 export function useSaveLocation() {
   const qc = useQueryClient();
-  return async (site: Site, lat: number, lng: number, address?: string) => {
-    const put = (attrId: string | null, name: string, dataType: "double" | "text", value: number | string) =>
-      attrId ? updateAttribute(attrId, { value })
-        : createAssetAttribute(site.projectId, { name, type: "static", dataType, value });
-    await put(site.latitudeAttrId, "Latitude", "double", Math.round(lat * 1e6) / 1e6);
-    await put(site.longitudeAttrId, "Longitude", "double", Math.round(lng * 1e6) / 1e6);
-    if (address !== undefined && (address.trim() || site.addressAttrId)) await put(site.addressAttrId, "Address", "text", address.trim());
-    await Promise.all([
-      qc.invalidateQueries({ queryKey: getListSitesQueryKey() }),
-      qc.invalidateQueries({ queryKey: getListAssetAttributesQueryKey(site.projectId) }),
-    ]);
+  return (site: Site, lat: number, lng: number, address?: string): Promise<void> => {
+    const run = async () => {
+      const attrs = await listAssetAttributes(site.projectId);
+      const idsOf = (name: string) => attrs.filter((a) => a.name.trim().toLowerCase() === name.toLowerCase()).map((a) => a.id);
+      // Every copy is updated, so a project that already holds duplicates from
+      // before this fix shows the new location whichever copy the map reads.
+      const put = async (name: string, dataType: "double" | "text", value: number | string) => {
+        const ids = idsOf(name);
+        if (ids.length === 0) { await createAssetAttribute(site.projectId, { name, type: "static", dataType, value }); return; }
+        for (const id of ids) await updateAttribute(id, { value });
+      };
+      await put("Latitude", "double", Math.round(lat * 1e6) / 1e6);
+      await put("Longitude", "double", Math.round(lng * 1e6) / 1e6);
+      if (address !== undefined && (address.trim() || idsOf("Address").length)) await put("Address", "text", address.trim());
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: getListSitesQueryKey() }),
+        qc.invalidateQueries({ queryKey: getListAssetAttributesQueryKey(site.projectId) }),
+      ]);
+    };
+    const next = (saving.get(site.projectId) ?? Promise.resolve()).catch(() => {}).then(run);
+    saving.set(site.projectId, next);
+    void next.finally(() => { if (saving.get(site.projectId) === next) saving.delete(site.projectId); }).catch(() => {});
+    return next;
   };
 }
 

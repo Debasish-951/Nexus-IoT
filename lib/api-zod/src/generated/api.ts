@@ -452,7 +452,13 @@ export const GetTelemetryQueryParams = zod.object({
   metric: zod.coerce.string().optional(),
   from: zod.coerce.date().optional(),
   to: zod.coerce.date().optional(),
-  limit: zod.coerce.number().int().default(getTelemetryQueryLimitDefault),
+  limit: zod.coerce
+    .number()
+    .int()
+    .default(getTelemetryQueryLimitDefault)
+    .describe(
+      "Newest rows to return. Values above 10000 are treated as 10000.",
+    ),
 });
 
 export const GetTelemetryResponseItem = zod.object({
@@ -4999,6 +5005,47 @@ export const GetAssetHealthResponse = zod.object({
     }),
   ),
 });
+
+/**
+ * Newest stored reading, active alarm count, expected reporting interval and latest live attributes of each asset named in `ids`. A read sent as POST to carry the id list. Ids outside the caller's projects are refused (403); unknown ids are left out of the answer.
+ * @summary Live Feed data for many assets in one request
+ */
+export const getAssetsLiveSummaryBodyIdsMax = 500;
+
+export const GetAssetsLiveSummaryBody = zod.object({
+  ids: zod.array(zod.string().uuid()).max(getAssetsLiveSummaryBodyIdsMax),
+});
+
+export const GetAssetsLiveSummaryResponseItem = zod.object({
+  assetId: zod.string(),
+  lastSeen: zod.coerce
+    .date()
+    .nullable()
+    .describe(
+      "Newest stored reading of the asset; null when it never reported.",
+    ),
+  activeAlarms: zod.number().int(),
+  expectedInterval: zod
+    .unknown()
+    .describe(
+      'Raw value of the static attribute "Expected interval (min)", if the asset has one.',
+    ),
+  attributes: zod.array(
+    zod.object({
+      name: zod.string(),
+      type: zod.string(),
+      tagName: zod.string().nullable(),
+      sourceMetric: zod.string().nullable(),
+      value: zod.unknown(),
+      uom: zod.string().nullable(),
+      decimalPlaces: zod.number().int().nullable(),
+      timestamp: zod.coerce.date().nullable(),
+    }),
+  ),
+});
+export const GetAssetsLiveSummaryResponse = zod.array(
+  GetAssetsLiveSummaryResponseItem,
+);
 
 /**
  * @summary Device ids seen in telemetry or registered, most recent first

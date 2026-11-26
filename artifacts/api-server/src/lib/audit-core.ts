@@ -158,6 +158,7 @@ const WRITE_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 const SKIP = [
   /^\/api\/ingest(\/|$)/, /^\/api\/v\d+\/ingest/, /^\/api\/telemetry\/ingest/, /^\/api\/devices\/[^/]+\/telemetry/,
   /^\/api\/plant-twins\/values$/, /^\/api\/ai\/chat$/, /^\/api\/ws(\/|$)/,
+  /^\/api\/assets\/live-summary\/?$/, // Live Feed poll: a read sent as POST
   /^\/api\/auth\//, /^\/api\/csrf/, /^\/api\/client-errors?/, /^\/api\/health/,
   /^\/api\/telemetry\/query/, /^\/api\/telemetry\/batch/, /^\/api\/export\/query/,
 ];
