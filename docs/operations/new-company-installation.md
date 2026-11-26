@@ -95,6 +95,10 @@ for this company only.
       `AI_RL_WINDOW_MINUTES`). AI Reports sends asset names, metric names and computed
       figures (no raw readings) and is logged as `ai.report`; without a key it still shows
       the figures.
+- [ ] **Say that the audit log is kept.** The Audit Log records names, user names, IP
+      addresses and devices. Deleting a user does not remove their entries: the log is
+      append-only and entries leave only through retention (at least 365 days) and backup
+      expiry. Put this in the privacy notice.
 - [ ] **Encrypt the server disk and backups.** The application does not encrypt telemetry
       in the database.
 - [ ] **Limit database access.** Allow connections only from this company's server.

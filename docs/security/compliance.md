@@ -16,7 +16,7 @@ This document describes the platform's current security controls and their align
 |---------|------------|-------------|-------|
 | Access control | All frameworks | Partial | UI-layer RBAC; no server-side enforcement |
 | Authentication | All frameworks | No | No login system; profile switcher only |
-| Audit logging | IEC 62443, SOC 2, ISO 27001 A.8.15, 21 CFR Part 11 | Yes | `activity_logs`: actor from the session, IP, device, request id, outcome, field-level before/after; append-only trigger and SHA-256 hash chain with an integrity check; sensitive-action alerts (docs/features/audit-log.md) |
+| Audit logging | IEC 62443, SOC 2, ISO 27001 A.8.15, 21 CFR Part 11 | Partial | `activity_logs`: actor from the session, IP, device, request id, outcome, field-level before/after; hash chain with an integrity check (keyed HMAC from `SECRETS_ENC_KEY` for new entries, plain SHA-256 for older ones), append-only triggers, hourly chain-head anchors kept outside the database, sensitive-action alerts. Tamper-evident, not tamper-proof: the guarantees against someone holding the application's database login apply only when the application uses a separate login limited by `audit-guard --runtime-role` and a key is set; in the default single-login install that login can switch the triggers off. No electronic signatures, so not a 21 CFR Part 11 control on its own (docs/features/audit-log.md) |
 | Data encryption at rest | GDPR, ISO 27001 | Partial | DB encryption is managed by the database host; secrets not encrypted at app level |
 | Data encryption in transit | All frameworks | Yes | HTTPS/TLS via the reverse proxy |
 | Session management | OWASP | No | No sessions; localStorage-based |
@@ -25,7 +25,7 @@ This document describes the platform's current security controls and their align
 | Incident response | SOC 2, ISO 27001 | No | No formal incident response process |
 | Data retention | GDPR | Partial | Configurable retention policies for telemetry; audit log kept at least 365 days (configurable, pruned with a chain checkpoint) |
 | Data minimisation | GDPR | No | All telemetry stored indefinitely without default limits |
-| Right to erasure | GDPR | No | No user data deletion workflow |
+| Right to erasure | GDPR | No | No user data deletion workflow. Deleting a user does not remove their audit log entries (append-only, kept until retention) |
 
 ---
 
@@ -51,7 +51,7 @@ If this platform is used to process data about individuals (e.g., operator activ
 |------------|--------------|---------------|
 | Lawful basis for processing | Not documented | Define and document |
 | Data subject access | Not implemented | Build user data export |
-| Right to erasure | Not implemented | Build user data deletion |
+| Right to erasure | Not implemented | Build user data deletion. Audit log entries cannot be erased early (append-only); document this in the privacy notice |
 | Data retention limits | Partial (telemetry only) | Extend to activity_logs, user records |
 | Data breach notification | Not automated | Define incident response process |
 

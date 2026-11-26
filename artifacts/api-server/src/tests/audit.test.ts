@@ -60,7 +60,7 @@ test("audit: an intact chain verifies; an edit, a removal or a bad link is found
   const r1 = row(1, "");
   const r2 = row(2, r1.hash!);
   const r3 = row(3, r2.hash!);
-  assert.deepEqual(verifyChain([r1, r2, r3], ""), { ok: true, lastHash: r3.hash });
+  assert.deepEqual(verifyChain([r1, r2, r3], ""), { ok: true, lastHash: r3.hash, keyedSeen: false });
   // Batches continue from the last hash.
   assert.equal(verifyChain([r3], r2.hash!).ok, true);
   // Edited field.
@@ -154,7 +154,7 @@ test("audit: route rules for the new endpoints", () => {
 test("audit: wiring — safety net, retention, trigger and unlogged routes", () => {
   assert.match(src("app.ts"), /stripForgedActorHeaders, auditSafetyNet, csrfGuard/);
   assert.match(src("routes/system.ts"), /pruneAuditLog\(auditDays\)/);
-  assert.match(src("lib/audit-store.ts"), /BEFORE UPDATE OR DELETE ON activity_logs/);
+  assert.match(src("../../../lib/db/src/audit-guard-sql.ts"), /BEFORE UPDATE OR DELETE ON activity_logs/);
   assert.match(src("lib/audit-store.ts"), /pg_advisory_xact_lock/);
   for (const [file, action] of [["routes/alarm_rules.ts", "alarm_rule.deleted"], ["routes/alarm_rules.ts", "alarm_rule.updated"], ["routes/attributes.ts", "attribute.updated"],
     ["routes/assets.ts", "asset.updated"], ["routes/assets.ts", "asset.template_applied"], ["routes/destinations.ts", "destination.updated"], ["routes/export.ts", "export.downloaded"]] as const) {
