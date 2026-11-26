@@ -1,5 +1,5 @@
 import { toCsv, downloadCsvText } from "@/lib/csv";
-import { INVESTIGATION_MODE_LABEL, LEVEL_LABEL, STATUS_LABEL, TOOL_LABEL, URGENCY_LABEL, type AiReport, type KpiCard, type ReportNarrative } from "./types";
+import { INVESTIGATION_MODE_LABEL, LEVEL_LABEL, STATUS_LABEL, TOOL_LABEL, URGENCY_LABEL, incompleteMessages, type AiReport, type KpiCard, type ReportNarrative } from "./types";
 
 const fmtDate = (s: string | null) => (s ? new Date(s).toLocaleString() : "-");
 const num = (v: number | null | undefined, d = 2) => (v == null ? "" : Number.isInteger(v) ? String(v) : v.toFixed(d));
@@ -18,6 +18,7 @@ export function downloadFactsCsv(r: AiReport): void {
     ["Data coverage %", f.kpis.dataCoveragePct ?? ""], ["Energy used kWh", f.kpis.energyUsedKwh ?? ""],
     ["Plant health score", f.healthScore.score ?? ""], ["Previous health score", f.healthScore.prevScore ?? ""],
     ["Health score formula", f.healthScore.formula],
+    ...incompleteMessages(f).map((m) => ["Incomplete", m]),
     ...(r.alarmsIncluded ? [
       ["Alarms", f.kpis.alarms], ...Object.entries(f.kpis.alarmsBySeverity).map(([k, v]) => [`Alarms ${k}`, v]),
       ["Still open", f.kpis.stillOpen], ["MTTA minutes", f.kpis.mttaMinutes ?? ""], ["MTTR minutes", f.kpis.mttrMinutes ?? ""],
@@ -169,6 +170,7 @@ export async function downloadReportPdf(r: AiReport, narrative: ReportNarrative 
   if (narrative && r.unverifiedNumbers.length) {
     text(`Check before sharing: these numbers in the AI text were not found in the computed figures or the database lookups: ${r.unverifiedNumbers.join(", ")}`, 8.5, "italic", [146, 64, 14]);
   }
+  for (const m of incompleteMessages(f)) text(m, 8.5, "italic", [146, 64, 14]);
 
   if (r.level === "executive") {
     const n = narrative?.level === "executive" ? narrative : null;

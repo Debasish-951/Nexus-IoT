@@ -69,7 +69,19 @@ export interface ReportFacts {
     silent: { assetId: string; assetName: string }[];
     stuck: { assetName: string; metric: string; value: number; readings: number }[];
   };
-  truncated: { metrics: boolean };
+  /** What is incomplete; the fields after `metrics` are missing on servers built before the 23 Nov 2026 audit fixes. */
+  truncated: { metrics: boolean; telemetryRows?: boolean; rawTimedOut?: boolean; alarms?: boolean; prevAlarms?: boolean };
+}
+
+/** The reader-facing note for each incomplete part of the figures (English; the page translates them). */
+export function incompleteMessages(f: ReportFacts): string[] {
+  const t = f.truncated;
+  const out: string[] = [];
+  if (t.telemetryRows) out.push("Telemetry figures are incomplete: this scope has more metrics than one report can read, and the metrics past the limit are left out. Choose a smaller project or asset.");
+  if (t.rawTimedOut) out.push("Telemetry figures are incomplete: raw readings not covered by the hourly summaries could not be read in time. With hourly summaries switched on this does not happen; otherwise choose a shorter period.");
+  if (t.alarms) out.push("Alarm figures are incomplete: the period has more than 20,000 alarms and only the newest 20,000 are counted.");
+  if (t.prevAlarms) out.push("Previous-period alarm figures are incomplete: more than 20,000 alarms, only the newest 20,000 are counted.");
+  return out;
 }
 
 export type Confidence = "low" | "medium" | "high";

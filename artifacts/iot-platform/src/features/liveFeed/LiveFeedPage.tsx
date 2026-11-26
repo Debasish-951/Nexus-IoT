@@ -85,7 +85,7 @@ export default function LiveFeedPage() {
       }
       if (a.status === "offline" || a.status === "delayed") {
         items.push({ key: `st-${a.id}`, score: a.status === "offline" ? 60 : 50, asset: a, icon: "silent", title: a.name, tone: a.status === "offline" ? "grey" : "amber",
-          detail: a.status === "offline" ? t("Offline: no data for {d}", { d: fmtDuration(now - a.lastSeen) }) : t("Data delayed: last reading {d} ago", { d: fmtDuration(now - a.lastSeen) }) });
+          detail: a.status === "offline" ? t("Offline: no data for {d}", { d: fmtDuration(now - a.lastSeen, t) }) : t("Data delayed: last reading {d} ago", { d: fmtDuration(now - a.lastSeen, t) }) });
       }
     }
     for (const x of rows) {
@@ -147,9 +147,9 @@ export default function LiveFeedPage() {
           <p className={cn("text-sm flex items-center gap-2", receiving ? "text-emerald-600 dark:text-emerald-400" : "text-muted-foreground")}>
             <span className={cn("w-2 h-2 rounded-full", receiving ? "bg-emerald-500 animate-pulse" : "bg-slate-400")} />
             {receiving
-              ? t("Receiving data · {n} assets · {r} readings/min · last message {d} ago", { n: counts.online, r: live.readingsPerMin, d: fmtDuration(now - newestSeen) })
+              ? t("Receiving data · {n} assets · {r} readings/min · last message {d} ago", { n: counts.online, r: live.readingsPerMin, d: fmtDuration(now - newestSeen, t) })
               : newestSeen
-                ? t("No data for {d}", { d: fmtDuration(now - newestSeen) })
+                ? t("No data for {d}", { d: fmtDuration(now - newestSeen, t) })
                 : live.ready ? t("No data received yet") : t("Loading…")}
           </p>
         </div>
@@ -336,7 +336,7 @@ function AssetBlock({ asset, rows, now, forceOpen }: { asset: AssetLive; rows: R
         {isOpen ? <ChevronDown className="w-4 h-4 text-muted-foreground" /> : <ChevronRight className="w-4 h-4 text-muted-foreground" />}
         <span className="font-medium text-sm">{asset.name}</span>
         <span className="flex items-center gap-1 text-xs text-muted-foreground"><span className={cn("w-2 h-2 rounded-full", STATUS_DOT[asset.status])} />{t(STATUS_LABEL[asset.status])}</span>
-        {asset.lastSeen > 0 && <span className="text-xs text-muted-foreground">{t("last reading {d} ago", { d: fmtDuration(now - asset.lastSeen) })}</span>}
+        {asset.lastSeen > 0 && <span className="text-xs text-muted-foreground">{t("last reading {d} ago", { d: fmtDuration(now - asset.lastSeen, t) })}</span>}
         <span className="ml-auto text-xs text-muted-foreground">
           {t("{n} readings", { n: rows.length })}{tree.problems ? <span className="text-amber-600 dark:text-amber-400"> · {t("{n} need attention", { n: tree.problems })}</span> : null}
         </span>
@@ -436,7 +436,12 @@ function EventStream({ events, canAudit }: { events: LiveEvent[]; canAudit: bool
               <li key={e.id} className="px-4 py-2 flex gap-2.5">
                 <span className={cn("mt-1.5 w-2 h-2 rounded-full shrink-0", TONE_DOT[e.tone])} />
                 <div className="min-w-0 flex-1">
-                  <p className="text-xs"><span className="font-medium">{e.kind === "limit" ? readable(splitMetric(e.title).reading) : e.title}</span>{e.detail ? <span className="text-muted-foreground"> {t(e.detail)}</span> : null}</p>
+                  <p className="text-xs">
+                    <span className="font-medium">
+                      {e.kind === "limit" ? readable(splitMetric(e.title).reading) : e.kind === "alarm" ? `${e.title || t("Alarm")}${e.severity ? ` (${t(e.severity)})` : ""}` : e.title}
+                    </span>
+                    {e.detail ? <span className="text-muted-foreground"> {e.detailIsData ? e.detail : t(e.detail)}</span> : null}
+                  </p>
                   <p className="text-[11px] text-muted-foreground">
                     {new Date(e.at).toLocaleTimeString()}{e.assetName && e.kind !== "status" ? ` · ${e.assetName}` : ""}
                   </p>

@@ -15,6 +15,12 @@
  * Queries run one after another, never all at once, so one report cannot take
  * over the connection pool. The split of a period and the merge of the parts
  * are pure functions, unit-tested.
+ *
+ * Limits are reported, never silent: bucket rows are capped per query part in a
+ * fixed order (asset, metric, time) and a metric cut by the cap is dropped
+ * whole, so what is kept is complete and the same on every run; raw reads share
+ * a time budget (`RawBudget`) and a part that runs out of it is skipped. Both
+ * set a flag the report shows (`ReadLimits`).
  */
 import { pool } from "@workspace/db";
 import { activeTiers, getRollupState } from "../services/rollups";
@@ -22,8 +28,19 @@ import type { BucketRow, CoverageRow, MetricStatRow } from "./ai-report";
 
 const HOUR = 3_600_000;
 const NUMERIC = "'^-?[0-9]+(\\.[0-9]+)?$'";
-/** Bucket rows per query part; a scope with very many metrics keeps the first ones. */
-const MAX_ROWS = 80_000;
+/** Bucket rows per query part; a scope with very many metrics keeps the first ones (by asset and metric) and says so. */
+export const MAX_ROWS = 80_000;
+/** Total time the raw-telemetry reads of one report may take; past it the rest is skipped and flagged. */
+export const RAW_BUDGET_MS = (() => {
+  const v = Number(process.env.AI_REPORT_RAW_BUDGET_MS);
+  return Number.isFinite(v) && v >= 1000 ? Math.floor(v) : 25_000;
+})();
+
+/** Shared time budget of the raw reads of one report (or one tool call). Set when a read was skipped or cancelled. */
+export interface RawBudget { deadline: number; timedOut: boolean }
+export const rawBudget = (ms: number = RAW_BUDGET_MS): RawBudget => ({ deadline: Date.now() + ms, timedOut: false });
+/** What a read left out: bucket rows past MAX_ROWS, or raw spans skipped for time. */
+export interface ReadLimits { rowsCapped: boolean; rawTimedOut: boolean }
 
 /** A time span; `open` spans exclude their end instant (it belongs to the next part). */
 export interface Span { from: Date; to: Date; open?: boolean }
@@ -102,13 +119,29 @@ export function mergeCoverage(parts: CoverageRow[][]): CoverageRow[] {
   return [...by.entries()].map(([assetId, hours]) => ({ assetId, hours }));
 }
 
+/**
+ * Keep at most `max` rows of a result ordered by (asset, metric, time) and
+ * fetched with one row more than `max`. When the cap was hit, the rows of the
+ * metric the cap cut through are dropped too, so every metric kept is complete.
+ */
+export function capRows<T extends { asset_id: string; metric: string }>(rows: T[], max: number): { rows: T[]; capped: boolean } {
+  if (rows.length <= max) return { rows, capped: false };
+  const cut = rows[max]!;
+  let end = max;
+  while (end > 0 && rows[end - 1]!.asset_id === cut.asset_id && rows[end - 1]!.metric === cut.metric) end--;
+  return { rows: rows.slice(0, end), capped: true };
+}
+
 type Raw = { asset_id: string; metric: string; t: string | number; n: string | number; sum: string | number | null; min: string | number | null; max: string | number | null };
 const toAgg = (r: Raw): BucketAgg => ({
   assetId: r.asset_id, metric: r.metric, t: Number(r.t) * 1000, n: Number(r.n),
   sum: r.sum == null ? null : Number(r.sum), min: r.min == null ? null : Number(r.min), max: r.max == null ? null : Number(r.max),
 });
 
-async function rollupPart(ids: string[], span: Span, bucketSec: number, origin: number, metrics: string[] | null = null): Promise<{ buckets: BucketAgg[]; coverage: CoverageRow[] }> {
+type Part = { buckets: BucketAgg[]; coverage: CoverageRow[]; capped: boolean };
+
+async function rollupPart(ids: string[], span: Span, bucketSec: number, origin: number, metrics: string[] | null = null): Promise<Part> {
+  // Ordered, so the rows a cap keeps are the same on every run.
   const b = await pool.query<Raw>(`
     SELECT asset_id, metric,
            ($4::float8 + floor((extract(epoch from bucket) - $4::float8) / $5) * $5) AS t,
@@ -117,18 +150,60 @@ async function rollupPart(ids: string[], span: Span, bucketSec: number, origin: 
     WHERE asset_id = ANY($1::uuid[]) AND bucket >= $2 AND bucket < $3 AND n > 0
       AND ($6::text[] IS NULL OR metric = ANY($6::text[]))
     GROUP BY asset_id, metric, 3
-    LIMIT ${MAX_ROWS}`, [ids, span.from, span.to, origin, bucketSec, metrics]);
+    ORDER BY asset_id, metric, 3
+    LIMIT ${MAX_ROWS + 1}`, [ids, span.from, span.to, origin, bucketSec, metrics]);
+  const kept = capRows(b.rows, MAX_ROWS);
   const c = await pool.query<{ asset_id: string; hours: string }>(`
     SELECT asset_id, COUNT(DISTINCT bucket)::int AS hours
     FROM telemetry_rollups
     WHERE asset_id = ANY($1::uuid[]) AND bucket >= $2 AND bucket < $3 AND "rows" > 0
     GROUP BY asset_id`, [ids, span.from, span.to]);
-  return { buckets: b.rows.map(toAgg), coverage: c.rows.map((r) => ({ assetId: r.asset_id, hours: Number(r.hours) })) };
+  return { buckets: kept.rows.map(toAgg), coverage: c.rows.map((r) => ({ assetId: r.asset_id, hours: Number(r.hours) })), capped: kept.capped };
 }
 
-async function rawPart(ids: string[], span: Span, bucketSec: number, origin: number, metrics: string[] | null = null): Promise<{ buckets: BucketAgg[]; coverage: CoverageRow[] }> {
+/** Postgres "canceling statement due to statement timeout". */
+const QUERY_CANCELED = "57014";
+const EMPTY_PART: Part = { buckets: [], coverage: [], capped: false };
+type Query = (text: string, values: unknown[]) => Promise<{ rows: any[] }>;
+
+/**
+ * Run raw reads on one connection with a statement timeout taken from the
+ * budget, so a long period without hourly summaries ends in time instead of
+ * running into the pool's 30 s limit (and failing the whole report). Returns
+ * null, and marks the budget, when the budget is spent or a statement ran out
+ * of it.
+ */
+async function withinBudget<T>(budget: RawBudget | undefined, fn: (q: Query) => Promise<T>): Promise<T | null> {
+  if (!budget) return fn((text, values) => pool.query(text, values));
+  const left = () => budget.deadline - Date.now();
+  if (left() < 500) { budget.timedOut = true; return null; }
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN READ ONLY");
+    const r = await fn(async (text, values) => {
+      const ms = Math.floor(left());
+      if (ms < 500) throw Object.assign(new Error("raw read budget spent"), { code: QUERY_CANCELED });
+      await client.query(`SET LOCAL statement_timeout = ${ms}`);
+      return client.query(text, values);
+    });
+    await client.query("COMMIT");
+    return r;
+  } catch (err) {
+    await client.query("ROLLBACK").catch(() => {});
+    if ((err as { code?: string })?.code === QUERY_CANCELED) { budget.timedOut = true; return null; }
+    throw err;
+  } finally {
+    client.release();
+  }
+}
+
+async function rawPart(ids: string[], span: Span, bucketSec: number, origin: number, metrics: string[] | null = null, budget?: RawBudget): Promise<Part> {
+  return (await withinBudget(budget, (q) => rawQueries(q, ids, span, bucketSec, origin, metrics))) ?? EMPTY_PART;
+}
+
+async function rawQueries(q: Query, ids: string[], span: Span, bucketSec: number, origin: number, metrics: string[] | null): Promise<Part> {
   const end = span.open ? "<" : "<=";
-  const b = await pool.query<Raw>(`
+  const b: { rows: Raw[] } = await q(`
     SELECT asset_id, metric,
            ($4::float8 + floor((extract(epoch from "timestamp") - $4::float8) / $5) * $5) AS t,
            COUNT(*)::bigint AS n,
@@ -137,13 +212,15 @@ async function rawPart(ids: string[], span: Span, bucketSec: number, origin: num
     WHERE asset_id = ANY($1::uuid[]) AND "timestamp" >= $2 AND "timestamp" ${end} $3 AND value::text ~ ${NUMERIC}
       AND ($6::text[] IS NULL OR metric = ANY($6::text[]))
     GROUP BY asset_id, metric, 3
-    LIMIT ${MAX_ROWS}`, [ids, span.from, span.to, origin, bucketSec, metrics]);
-  const c = await pool.query<{ asset_id: string; hours: string }>(`
+    ORDER BY asset_id, metric, 3
+    LIMIT ${MAX_ROWS + 1}`, [ids, span.from, span.to, origin, bucketSec, metrics]);
+  const kept = capRows(b.rows, MAX_ROWS);
+  const c: { rows: { asset_id: string; hours: string }[] } = await q(`
     SELECT asset_id, COUNT(DISTINCT date_trunc('hour', "timestamp"))::int AS hours
     FROM telemetry
     WHERE asset_id = ANY($1::uuid[]) AND "timestamp" >= $2 AND "timestamp" ${end} $3
     GROUP BY asset_id`, [ids, span.from, span.to]);
-  return { buckets: b.rows.map(toAgg), coverage: c.rows.map((r) => ({ assetId: r.asset_id, hours: Number(r.hours) })) };
+  return { buckets: kept.rows.map(toAgg), coverage: c.rows.map((r) => ({ assetId: r.asset_id, hours: Number(r.hours) })), capped: kept.capped };
 }
 
 /** The hourly summaries' watermark, or null when they are off or not built yet. */
@@ -159,17 +236,23 @@ export async function hourlyWatermark(): Promise<Date | null> {
  * Bucket boundaries are counted from `range.from` floored to the hour, so the
  * hourly summaries fall into whole buckets.
  */
-export async function loadPeriod(ids: string[], range: Span, bucketMs: number, watermark: Date | null): Promise<{ stats: MetricStatRow[]; buckets: BucketRow[]; coverage: CoverageRow[] }> {
-  if (ids.length === 0) return { stats: [], buckets: [], coverage: [] };
+export async function loadPeriod(
+  ids: string[], range: Span, bucketMs: number, watermark: Date | null, budget: RawBudget = rawBudget(),
+): Promise<{ stats: MetricStatRow[]; buckets: BucketRow[]; coverage: CoverageRow[]; limits: ReadLimits }> {
+  if (ids.length === 0) return { stats: [], buckets: [], coverage: [], limits: { rowsCapped: false, rawTimedOut: false } };
   const plan = planRead(range, watermark);
   const bucketSec = Math.round(bucketMs / 1000);
   const origin = floorHour(range.from.getTime()) / 1000;
-  const parts: { buckets: BucketAgg[]; coverage: CoverageRow[] }[] = [];
+  const parts: Part[] = [];
   // One query at a time: a report must not hold several pool connections.
   if (plan.rollup) parts.push(await rollupPart(ids, plan.rollup, bucketSec, origin));
-  for (const span of plan.raw) parts.push(await rawPart(ids, span, bucketSec, origin));
+  for (const span of plan.raw) parts.push(await rawPart(ids, span, bucketSec, origin, null, budget));
   const merged = mergeBuckets(parts.map((p) => p.buckets));
-  return { ...merged, coverage: mergeCoverage(parts.map((p) => p.coverage)) };
+  return {
+    ...merged,
+    coverage: mergeCoverage(parts.map((p) => p.coverage)),
+    limits: { rowsCapped: parts.some((p) => p.capped), rawTimedOut: budget.timedOut },
+  };
 }
 
 /**
@@ -178,7 +261,7 @@ export async function loadPeriod(ids: string[], range: Span, bucketMs: number, w
  * tail. Serves the AI tools on ranges too long to scan raw (see routes/ai.ts).
  * Buckets are whole hours, counted from the range start floored to the hour.
  */
-export async function loadBucketAggs(ids: string[], metrics: string[], range: Span, bucketMs: number): Promise<BucketAgg[]> {
+export async function loadBucketAggs(ids: string[], metrics: string[], range: Span, bucketMs: number, budget?: RawBudget): Promise<BucketAgg[]> {
   if (ids.length === 0 || metrics.length === 0) return [];
   const watermark = await hourlyWatermark();
   const plan = planRead(range, watermark);
@@ -186,6 +269,6 @@ export async function loadBucketAggs(ids: string[], metrics: string[], range: Sp
   const origin = floorHour(range.from.getTime()) / 1000;
   const parts: BucketAgg[][] = [];
   if (plan.rollup) parts.push((await rollupPart(ids, plan.rollup, bucketSec, origin, metrics)).buckets);
-  for (const span of plan.raw) parts.push((await rawPart(ids, span, bucketSec, origin, metrics)).buckets);
+  for (const span of plan.raw) parts.push((await rawPart(ids, span, bucketSec, origin, metrics, budget)).buckets);
   return mergeBucketAggs(parts).sort((a, b) => a.t - b.t);
 }

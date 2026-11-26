@@ -110,8 +110,8 @@ it comes from the role.
 3. **Narrative.** The model then answers with the level's JSON.
 4. **Checks.** The answer must be the level's JSON, or it is discarded. Numbers in the text
    that are found neither in the figures nor in a tool result (allowing rounding; dates, tag
-   numbers and small counts are ignored) are listed on the page and in the PDF as "check
-   before sharing".
+   numbers and small counts are ignored; "12,345" is read as twelve thousand three hundred and
+   forty-five) are listed on the page and in the PDF as "check before sharing".
 
 **Budgets.** At most 8 tool calls, 6 model turns and about 38 seconds for the investigation
 (12 seconds of it kept for the final answer); all AI work of a report ends within 48 seconds,
@@ -150,18 +150,36 @@ fails, is rate limited or answers with something unreadable (`failed`, `rate_lim
   The menu group is hidden from project-restricted users, like the rest of AI Advisor.
 - Rate limited per user with the same limits as AI chat (`AI_RL_MAX`, `AI_RL_WINDOW_MINUTES`).
 - Queries are bounded and run one at a time, so a report never holds several database
-  connections: at most 92 days, 20 000 alarms per period, 80 000 bucket rows per part.
+  connections: at most 92 days, 20 000 alarms per period (the newest), 80 000 bucket rows per
+  part (in a fixed asset and metric order; a metric cut by the cap is left out whole).
+  **Nothing is cut silently:** when a cap is hit, or raw readings could not be read in time,
+  `facts.truncated` says so (`telemetryRows`, `rawTimedOut`, `alarms`, `prevAlarms`), the page
+  and the PDF show an "incomplete" note, the CSV has an `Incomplete` row, and the AI is told to
+  say which figures are incomplete.
   Telemetry figures come from the hourly summaries (`telemetry_rollups`) for every whole hour
   before the summaries' watermark; raw telemetry is read only for the first partial hour and
   the recent hours after the watermark (`lib/report-telemetry.ts`). With summaries switched
   off (`TELEMETRY_ROLLUPS=false`) or not built yet, the whole period is read from raw
-  telemetry, which can hit the statement timeout for large projects and long periods.
+  telemetry, bounded by the time budget below.
+- Raw-telemetry reads of one report share a time budget (`AI_REPORT_RAW_BUDGET_MS`, default
+  25 000 ms; each statement gets the time left as its timeout). A read that runs out of it is
+  skipped and flagged (`rawTimedOut`) instead of failing the report on the pool's 30 s statement
+  timeout. The Advisor's long-range lookups use 15 s per lookup and say so in their result.
+- "Last data" of an asset is its newest raw reading up to the period end; when the raw readings
+  of that time were already removed by retention, it is the start of the newest hourly summary
+  (so assets in an old period show a time, not "never").
 - Each report is written to the Activity Log (`ai.report`) with the scope, level, period,
   asset count, how the text was written (`mode`), the tools used and the narrative status.
-- What leaves the server: the computed figures (asset and metric names, no ids), and the
-  results of the investigation's lookups: asset ids and names, metric names and bucketed or
-  summary values, alarm names and messages, alarm limits, attribute values, and change
-  records with the user name and role of whoever made them. Never secrets, URLs or keys.
+- What leaves the server (a third-party data transfer to Groq; see "Third-Party Data Transfer"
+  in `docs/security/compliance.md`): the computed figures (asset and metric names, no ids), the
+  report's asset list with ids, and the results of the investigation's lookups: asset ids and
+  names, metric names and bucketed or summary values, alarm names and messages, alarm limits,
+  attribute values, and change records with the display name and role of whoever made them.
+  Never usernames, email addresses, passwords, secrets, URLs or keys. The Advisor chat also
+  sends the question and up to four earlier messages of the conversation.
+- An asset or project outside the caller's projects is refused (`project_forbidden`) and the
+  refusal is written to the security log (`authz.denied`, reason `out_of_project_scope`), for
+  the report and for the Advisor chat.
 
 ## Older pages and links
 
@@ -172,6 +190,11 @@ fails, is rate limited or answers with something unreadable (`failed`, `rate_lim
   summary** button opens AI Reports with the same asset and period.
 - `/ai-copilot?action=report&...` (the earlier fifth card) forwards to `/ai-reports` with the
   same parameters. A `focus` parameter is accepted and ignored.
+- `/ai-copilot?action=health|failure|recommend` (the sidebar shortcuts) asks that question once
+  and then removes `action` from the address, so reloading the page does not ask it again.
+  Leaving the Advisor page, or starting another question, cancels the question in flight. An
+  error page from the proxy (for example nginx's 502 or 504) is shown as a plain message, not
+  as a parse error.
 
 ## Files
 

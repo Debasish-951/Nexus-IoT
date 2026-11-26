@@ -1,4 +1,4 @@
-import { Router, type IRouter } from "express";
+import { Router, type IRouter, type Request as ExpressRequest, type Response as ExpressResponse } from "express";
 import { correlationIdOf } from "../lib/errors";
 import { eq, and, or, ilike, sql, desc, gte, lte, inArray } from "drizzle-orm";
 import {
@@ -22,11 +22,12 @@ import { assetScope } from "../lib/project-access";
 import { parseScopeAssetId, scopeNote, scopeRefusal, subtree, type ChatScope } from "../lib/ai-scope";
 import {
   buildFacts, parseReportRequest, previousRange, reportLevelFor,
-  REPORT_MAX_DAYS, type ReportFacts, type ReportInput, type ReportNarrative,
+  REPORT_MAX_ALARMS, REPORT_MAX_DAYS, type ReportFacts, type ReportInput, type ReportNarrative,
 } from "../lib/ai-report";
 import { writeReportNarrative, type AgentDeps, type NarrativeStatus } from "../lib/ai-report-agent";
 import { llmChat, llmComplete, llmConfigured, llmModel } from "../lib/llm";
-import { hourlyWatermark, loadBucketAggs, loadPeriod, reportBucketMs, type BucketAgg } from "../lib/report-telemetry";
+import { hourlyWatermark, loadBucketAggs, loadPeriod, rawBudget, reportBucketMs, type BucketAgg } from "../lib/report-telemetry";
+import { recordSecurityEvent } from "../lib/security-log";
 
 const router: IRouter = Router();
 
@@ -318,6 +319,12 @@ const LONG_RANGE_MS = 2 * 86_400_000;
 const HOUR_MS = 3_600_000;
 const SUMMARY_SOURCE = "hourly summaries (long range)";
 const isLongRange = (ctx: ToolContext) => ctx.to.getTime() - ctx.from.getTime() > LONG_RANGE_MS;
+// Raw head and tail of a long-range read (all of it while the summaries are off
+// or not built yet) get this much time per tool call; past it they are skipped
+// and the result says so, instead of the lookup failing on the pool's timeout.
+const TOOL_RAW_BUDGET_MS = 15_000;
+const RAW_SKIPPED_NOTE = "Raw readings not covered by the hourly summaries could not be read in time; the figures may miss the most recent hours. Narrow the range for exact figures.";
+const rawNote = (b: { timedOut: boolean }) => (b.timedOut ? { note: RAW_SKIPPED_NOTE } : {});
 const r3 = (v: number) => Math.round(v * 1000) / 1000;
 
 /** Count, average, min and max of bucket aggregates, and the regression slope of their averages per hour. */
@@ -348,9 +355,11 @@ async function queryTelemetry(args: { assetId: string; metric: string }, ctx: To
   if (Array.isArray(resolved)) return ambiguousMetric(args.metric, resolved);
   const metric = resolved;
 
-  if (isLongRange(ctx)) {
+  const long = isLongRange(ctx);
+  if (long) {
     const span = ctx.to.getTime() - ctx.from.getTime();
-    const aggs = await loadBucketAggs([args.assetId], [metric], { from: ctx.from, to: ctx.to }, Math.ceil(span / QUERY_TELEMETRY_MAX_POINTS));
+    const budget = rawBudget(TOOL_RAW_BUDGET_MS);
+    const aggs = await loadBucketAggs([args.assetId], [metric], { from: ctx.from, to: ctx.to }, Math.ceil(span / QUERY_TELEMETRY_MAX_POINTS), budget);
     if (aggs.length > 0) {
       return {
         metric,
@@ -358,13 +367,17 @@ async function queryTelemetry(args: { assetId: string; metric: string }, ctx: To
         buckets: aggs.map((a) => [new Date(a.t).toISOString(), a.sum == null ? null : r3(a.sum / a.n), a.min, a.max, a.n]),
         dataAvailable: await metricDataSpan(args.assetId, metric),
         source: SUMMARY_SOURCE,
+        ...rawNote(budget),
       };
     }
+    if (budget.timedOut) return { metric, error: RAW_SKIPPED_NOTE, dataAvailable: await metricDataSpan(args.assetId, metric) };
   }
 
   // Averaged into buckets spread evenly over the range. Returning the latest N raw
-  // points showed only the final minutes of a long range.
-  const rows = await db.execute<{ bucket_start: string; avg: number; min: number; max: number; n: number }>(sql`
+  // points showed only the final minutes of a long range. Not repeated for a long
+  // range: the summaries plus raw head and tail above already covered all of it.
+  type NumericBucket = { bucket_start: string; avg: number; min: number; max: number; n: number };
+  const rows = long ? { rows: [] as NumericBucket[] } : await db.execute<NumericBucket>(sql`
     SELECT
       MIN(timestamp) AS bucket_start,
       ROUND(AVG(v), 3)::float8 AS avg,
@@ -424,7 +437,8 @@ async function aggregateTelemetry(args: { assetId: string; metric: string }, ctx
   if (Array.isArray(resolved)) return ambiguousMetric(args.metric, resolved);
   const metric = resolved;
   if (isLongRange(ctx)) {
-    const s = summariseAggs(await loadBucketAggs([args.assetId], [metric], { from: ctx.from, to: ctx.to }, HOUR_MS));
+    const budget = rawBudget(TOOL_RAW_BUDGET_MS);
+    const s = summariseAggs(await loadBucketAggs([args.assetId], [metric], { from: ctx.from, to: ctx.to }, HOUR_MS, budget));
     return {
       metric,
       stats: s && {
@@ -435,7 +449,8 @@ async function aggregateTelemetry(args: { assetId: string; metric: string }, ctx
       },
       dataAvailable: await metricDataSpan(args.assetId, metric),
       source: SUMMARY_SOURCE,
-      note: "Long range: n, avg, min and max are exact; stddev and trend_per_hour come from hourly averages; change statistics need raw readings and are not computed. Narrow the range to under two days for them.",
+      note: "Long range: n, avg, min and max are exact; stddev and trend_per_hour come from hourly averages; change statistics need raw readings and are not computed. Narrow the range to under two days for them." +
+        (budget.timedOut ? ` ${RAW_SKIPPED_NOTE}` : ""),
     };
   }
   // Only aggregate numeric values. Change statistics count only readings where
@@ -634,7 +649,8 @@ async function compareMetrics(args: { parameter: string; scope?: string }, ctx: 
   let rows: { rows: Row[] };
   if (isLongRange(ctx)) {
     const span = ctx.to.getTime() - ctx.from.getTime();
-    const aggs = await loadBucketAggs(assetIds, metrics, { from: ctx.from, to: ctx.to }, Math.ceil(span / 48));
+    const budget = rawBudget(TOOL_RAW_BUDGET_MS);
+    const aggs = await loadBucketAggs(assetIds, metrics, { from: ctx.from, to: ctx.to }, Math.ceil(span / 48), budget);
     const byPair = new Map<string, BucketAgg[]>();
     for (const a of aggs) {
       if (!selected.some((m) => m.assetId === a.assetId && m.metric === a.metric)) continue;
@@ -649,7 +665,7 @@ async function compareMetrics(args: { parameter: string; scope?: string }, ctx: 
       out.push({ asset_id: list[0]!.assetId, metric: list[0]!.metric, n: s.n, min: s.min, max: s.max, avg: s.avg, first: avgOf(s.first), last: avgOf(s.last) });
     }
     rows = { rows: out.sort((a, b) => b.avg - a.avg) };
-    source = `${SUMMARY_SOURCE}; first and last are the averages of the first and last time buckets`;
+    source = `${SUMMARY_SOURCE}; first and last are the averages of the first and last time buckets${budget.timedOut ? `. ${RAW_SKIPPED_NOTE}` : ""}`;
   } else rows = await db.execute<{
     asset_id: string; metric: string; n: number; min: number; max: number; avg: number; first: number; last: number;
   }>(sql`
@@ -1121,6 +1137,23 @@ export function parseRange(range: unknown): ToolContext | string {
   return { from, to };
 }
 
+/**
+ * The in-route project refusal of the chat and the report, recorded in the
+ * security log like the refusals of `authorize` and the project guard.
+ */
+export function refuseOutOfProject(req: ExpressRequest, res: ExpressResponse, assetId: string): void {
+  recordSecurityEvent({
+    type: "authz.denied",
+    outcome: "failure",
+    reason: "out_of_project_scope",
+    userId: req.principal?.user.id ?? null,
+    username: req.principal?.user.username ?? null,
+    req,
+    detail: { path: req.path, method: req.method, assetId },
+  });
+  res.status(403).json({ error: "This is outside the projects assigned to you.", code: "project_forbidden" });
+}
+
 function validTimeZone(tz: unknown): string | null {
   if (typeof tz !== "string" || tz.length > 64) return null;
   try {
@@ -1197,7 +1230,7 @@ router.post("/ai/chat", aiLimiter, async (req, res): Promise<void> => {
     }
     const allowed = await assetScope(req);
     if (allowed && !allowed.assetIds.has(root.id)) {
-      res.status(403).json({ error: "This is outside the projects assigned to you.", code: "project_forbidden" });
+      refuseOutOfProject(req, res, root.id);
       return;
     }
     let ids = subtree(root.id, all);
@@ -1377,7 +1410,7 @@ const reportLimiter = rateLimit({
 });
 
 
-type LoadedReport = Pick<ReportInput, "stats" | "prevStats" | "alarms" | "prevAlarms" | "coverage" | "prevCoverage" | "lastSeen" | "buckets" | "bucketMs">;
+type LoadedReport = Pick<ReportInput, "stats" | "prevStats" | "alarms" | "prevAlarms" | "coverage" | "prevCoverage" | "lastSeen" | "buckets" | "bucketMs" | "limits">;
 
 /**
  * Everything a report reads from the database, one query at a time so a report
@@ -1388,26 +1421,40 @@ type LoadedReport = Pick<ReportInput, "stats" | "prevStats" | "alarms" | "prevAl
  */
 async function loadReportInput(ids: string[], range: { from: Date; to: Date }, withAlarms: boolean): Promise<LoadedReport> {
   const bucketMs = reportBucketMs(range);
-  if (ids.length === 0) return { stats: [], prevStats: [], alarms: [], prevAlarms: [], coverage: [], prevCoverage: [], lastSeen: [], buckets: [], bucketMs };
+  if (ids.length === 0) return { stats: [], prevStats: [], alarms: [], prevAlarms: [], coverage: [], prevCoverage: [], lastSeen: [], buckets: [], bucketMs, limits: {} };
   const prev = previousRange(range);
   const watermark = await hourlyWatermark();
-  const now = await loadPeriod(ids, range, bucketMs, watermark);
-  const before = await loadPeriod(ids, prev, reportBucketMs(prev), watermark);
+  // One time budget for the raw reads of both periods: without hourly summaries
+  // a long period is skipped and flagged instead of failing the whole report.
+  const budget = rawBudget();
+  const now = await loadPeriod(ids, range, bucketMs, watermark, budget);
+  const before = await loadPeriod(ids, prev, reportBucketMs(prev), watermark, budget);
   const idList = sql.join(ids.map((id) => sql`${id}::uuid`), sql`, `);
+  // Newest raw reading at or before the period end; when raw readings of that
+  // time were already pruned by retention, the start of the newest hourly
+  // summary instead (so an old period does not show "never").
   const last = await db.execute<{ asset_id: string; ts: string | null }>(sql`
     SELECT a.id AS asset_id,
-           (SELECT max(t.timestamp) FROM telemetry t WHERE t.asset_id = a.id AND t.timestamp <= ${range.to}) AS ts
+           COALESCE(
+             (SELECT max(t.timestamp) FROM telemetry t WHERE t.asset_id = a.id AND t.timestamp <= ${range.to}),
+             (SELECT max(r.bucket) FROM telemetry_rollups r WHERE r.asset_id = a.id AND r.bucket <= ${range.to} AND r."rows" > 0)
+           ) AS ts
     FROM unnest(ARRAY[${idList}]) AS a(id)
   `);
   const alarmCols = {
     assetId: alarmsTable.assetId, assetName: alarmsTable.assetName, name: alarmsTable.name, severity: alarmsTable.severity,
     triggeredAt: alarmsTable.triggeredAt, acknowledgedAt: alarmsTable.acknowledgedAt, clearedAt: alarmsTable.clearedAt,
   };
-  const alarmsIn = (r: { from: Date; to: Date }) => db.select(alarmCols).from(alarmsTable)
-    .where(and(inArray(alarmsTable.assetId, ids), gte(alarmsTable.triggeredAt, r.from), lte(alarmsTable.triggeredAt, r.to)))
-    .limit(20_000);
-  const alarms = withAlarms ? await alarmsIn(range) : [];
-  const prevAlarms = withAlarms ? await alarmsIn(prev) : [];
+  // Newest first, one row past the cap to tell that the cap was hit.
+  const alarmsIn = async (r: { from: Date; to: Date }) => {
+    const rows = await db.select(alarmCols).from(alarmsTable)
+      .where(and(inArray(alarmsTable.assetId, ids), gte(alarmsTable.triggeredAt, r.from), lte(alarmsTable.triggeredAt, r.to)))
+      .orderBy(desc(alarmsTable.triggeredAt), desc(alarmsTable.id))
+      .limit(REPORT_MAX_ALARMS + 1);
+    return { rows: rows.slice(0, REPORT_MAX_ALARMS), capped: rows.length > REPORT_MAX_ALARMS };
+  };
+  const alarms = withAlarms ? await alarmsIn(range) : { rows: [], capped: false };
+  const prevAlarms = withAlarms ? await alarmsIn(prev) : { rows: [], capped: false };
   return {
     stats: now.stats,
     prevStats: before.stats,
@@ -1416,8 +1463,14 @@ async function loadReportInput(ids: string[], range: { from: Date; to: Date }, w
     lastSeen: last.rows.map((r) => ({ assetId: r.asset_id, ts: r.ts })),
     buckets: now.buckets,
     bucketMs,
-    alarms,
-    prevAlarms,
+    alarms: alarms.rows,
+    prevAlarms: prevAlarms.rows,
+    limits: {
+      telemetryRows: now.limits.rowsCapped || before.limits.rowsCapped,
+      rawTimedOut: budget.timedOut,
+      alarms: alarms.capped,
+      prevAlarms: prevAlarms.capped,
+    },
   };
 }
 
@@ -1479,7 +1532,7 @@ router.post("/ai/report", reportLimiter, async (req, res): Promise<void> => {
     const root = all.find((a) => a.id === parsed.assetId);
     if (!root) { res.status(404).json({ error: "Asset not found." }); return; }
     if (scope && !scope.assetIds.has(root.id)) {
-      res.status(403).json({ error: "This is outside the projects assigned to you.", code: "project_forbidden" });
+      refuseOutOfProject(req, res, root.id);
       return;
     }
     ids = subtree(root.id, all);

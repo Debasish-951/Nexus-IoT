@@ -19,7 +19,7 @@ import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { AssetScopePicker } from "@/components/AssetScopePicker";
 import {
-  INVESTIGATION_MODE_LABEL, LEVEL_LABEL, STATUS_LABEL, TOOL_LABEL, URGENCY_LABEL,
+  INVESTIGATION_MODE_LABEL, LEVEL_LABEL, STATUS_LABEL, TOOL_LABEL, URGENCY_LABEL, incompleteMessages,
   type AiReport, type Investigation, type EngineerNarrative, type ExecutiveNarrative, type KpiCard, type ManagerNarrative, type ReportFacts, type ReportLevel, type ReportNarrative,
 } from "./types";
 import { cardValue, downloadFactsCsv, downloadReportPdf } from "./exportReport";
@@ -236,6 +236,13 @@ export default function AiReportsPage() {
                 <AlertTriangle className="w-4 h-4 text-amber-500 shrink-0" />
                 <span className="flex-1 min-w-[200px]">{report.narrativeStatus === "rate_limited" ? report.narrativeError : t("The AI insight could not be written this time. The figures below are complete.")}</span>
                 <Button size="sm" variant="outline" className="gap-1.5" onClick={generate} disabled={busy}><RefreshCw className={cn("w-3.5 h-3.5", busy && "animate-spin")} /> {t("Retry")}</Button>
+              </div>
+            )}
+            {incompleteMessages(report.facts).length > 0 && (
+              <div className="mt-3 rounded-md border border-amber-500/40 bg-amber-500/10 text-xs px-3 py-2 space-y-1">
+                {incompleteMessages(report.facts).map((m) => (
+                  <p key={m} className="flex gap-1.5"><AlertTriangle className="w-3.5 h-3.5 text-amber-500 shrink-0 mt-px" />{t(m)}</p>
+                ))}
               </div>
             )}
             {report.unverifiedNumbers.length > 0 && (
