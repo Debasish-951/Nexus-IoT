@@ -4603,6 +4603,12 @@ export const ListActivityLogResponse = zod.object({
       .passthrough(),
   ),
   total: zod.number().int(),
+  totalCapped: zod
+    .boolean()
+    .optional()
+    .describe(
+      "More entries match than are counted (10,000); total is then a lower bound",
+    ),
 });
 
 /**
@@ -4708,10 +4714,34 @@ export const VerifyActivityLogResponse = zod.object({
       seq: zod.number().int().optional(),
       timestamp: zod.string().optional(),
       reason: zod
-        .enum(["prev_mismatch", "hash_mismatch", "missing_hash"])
+        .enum([
+          "prev_mismatch",
+          "hash_mismatch",
+          "missing_hash",
+          "missing_seq",
+          "downgrade",
+          "key_missing",
+          "checkpoint_invalid",
+          "head_rollback",
+          "anchor_mismatch",
+        ])
         .optional(),
     })
     .nullish(),
+  incremental: zod
+    .boolean()
+    .optional()
+    .describe(
+      "Only entries after the last signed check (fromSeq) were walked; a full walk runs at least weekly or with ?full=true",
+    ),
+  fromSeq: zod.number().int().optional(),
+  lastSeq: zod.number().int().optional(),
+  keyed: zod
+    .boolean()
+    .optional()
+    .describe(
+      "Keyed (HMAC-SHA256 from SECRETS_ENC_KEY) entries were found and checked",
+    ),
 });
 
 /**

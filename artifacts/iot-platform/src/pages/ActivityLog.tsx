@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { AssetScopePicker } from "@/components/AssetScopePicker";
 import { useWsEvents } from "@/hooks/useWsEvents";
+import { useToast } from "@/hooks/use-toast";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { apiFetch } from "@/lib/auth-api";
 import { FEATURES } from "@/lib/features";
@@ -35,7 +36,7 @@ interface Summary {
   sensitive: { count: number; byRule: Record<string, number>; recent: { action: string; actorName: string; targetName: string | null; timestamp: string; rule: string }[] };
   failures: { audit: number; security: number };
 }
-interface VerifyResult { ok: boolean; checked: number; verifiedAt: string; broken: { id: string; seq: number; timestamp: string; reason: string } | null; checkpoint: { seq: number; prunedAt: string; pruned: number } | null }
+interface VerifyResult { ok: boolean; checked: number; verifiedAt: string; broken: { id: string; seq: number; timestamp: string; reason: string } | null; checkpoint: { seq: number; prunedAt: string; pruned: number } | null; incremental?: boolean; fromSeq?: number }
 interface AuditSettingsView {
   retentionDays: number | null; effectiveRetentionDays: number; defaultRetentionDays: number; minimumRetentionDays: number;
   alerts: { key: string; title: string; severity: string; enabled: boolean; pendingDisable?: { requestedBy: string; requestedAt: string } | null }[];
@@ -52,6 +53,7 @@ export default function ActivityLog() {
 function AuditLogPage() {
   const t = useT();
   const qc = useQueryClient();
+  const { toast } = useToast();
   const { can, canModule, session } = useCurrentUser();
   const isSecurityAdmin = can("manage_security") && canModule("security");
   const restricted = !!session?.restrictProjects;
@@ -105,6 +107,8 @@ function AuditLogPage() {
       const a = document.createElement("a");
       a.href = URL.createObjectURL(blob); a.download = `audit-log-${new Date().toISOString().slice(0, 10)}.csv`; a.click();
       setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+    } catch (e) {
+      toast({ variant: "destructive", title: t("The export failed"), description: e instanceof Error ? e.message : String(e) });
     } finally { setExporting(null); }
   }
 
@@ -118,15 +122,21 @@ function AuditLogPage() {
         if (p.entries.length < 500) break;
       }
       await downloadAuditPdf(all, filtersText, total);
+    } catch (e) {
+      toast({ variant: "destructive", title: t("The export failed"), description: e instanceof Error ? e.message : String(e) });
     } finally { setExporting(null); }
   }
 
   async function runVerify() {
     setVerifying(true);
+    setVerify(null); // never leave an earlier result on screen while (or after failing to) check again
     try {
       // POST: the check writes an audit entry, so the server refuses GET.
       const r = await apiFetch(`${BASE}/api/activity-log/verify`, { method: "POST" });
-      if (r.ok) setVerify((await r.json()) as VerifyResult);
+      if (!r.ok) throw new Error(t("The server answered {status}.", { status: r.status }));
+      setVerify((await r.json()) as VerifyResult);
+    } catch (e) {
+      toast({ variant: "destructive", title: t("The integrity check could not run"), description: e instanceof Error ? e.message : String(e) });
     } finally { setVerifying(false); }
   }
 
@@ -167,7 +177,9 @@ function AuditLogPage() {
           {verify.ok ? <ShieldCheck className="w-4 h-4 mt-0.5 text-emerald-600" /> : <ShieldAlert className="w-4 h-4 mt-0.5 text-red-600" />}
           <div className="flex-1">
             {verify.ok
-              ? <p>{t("Integrity verified: all {n} entries are unchanged and none is missing.", { n: verify.checked.toLocaleString() })}</p>
+              ? <p>{verify.incremental
+                ? t("Integrity verified: the {n} entries added since the last check (after entry #{seq}) are unchanged and none is missing.", { n: verify.checked.toLocaleString(), seq: verify.fromSeq ?? 0 })
+                : t("Integrity verified: all {n} entries are unchanged and none is missing.", { n: verify.checked.toLocaleString() })}</p>
               : <p className="text-red-600 font-medium">{t("Integrity check failed at entry #{seq} ({reason}). An entry was changed or removed outside the application.", { seq: verify.broken?.seq ?? "?", reason: verify.broken?.reason ?? "" })}</p>}
             {verify.checkpoint && <p className="text-xs text-muted-foreground">{t("Older entries were removed by retention on {date} ({n} entries); the check starts from that point.", { date: format(new Date(verify.checkpoint.prunedAt), "PP"), n: verify.checkpoint.pruned })}</p>}
           </div>
@@ -288,7 +300,7 @@ function AuditLogPage() {
       {/* Entries */}
       <Card className="overflow-hidden">
         <div className="flex items-center justify-between px-4 py-2 border-b text-sm">
-          <span className="text-muted-foreground">{listQ.isFetching ? t("Loading…") : t("{n} entries", { n: total.toLocaleString() })}</span>
+          <span className="text-muted-foreground">{listQ.isFetching ? t("Loading…") : t("{n} entries", { n: `${total.toLocaleString()}${listQ.data?.totalCapped ? "+" : ""}` })}</span>
           <Button size="sm" variant="ghost" className="gap-1.5" onClick={() => void listQ.refetch()}><RefreshCw className={cn("w-3.5 h-3.5", listQ.isFetching && "animate-spin")} />{t("Refresh")}</Button>
         </div>
         <div className="overflow-x-auto">

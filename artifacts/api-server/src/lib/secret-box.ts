@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes, timingSafeEqual } from "node:crypto";
+import { createCipheriv, createDecipheriv, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { getSecret } from "./secrets";
 import { logger } from "./logger";
 
@@ -232,4 +232,17 @@ export function secretsEqual(a: string, b: string): boolean {
 export function keyRingStatus(): { currentKeyId: string | null; loadedKeyIds: string[] } {
   if (!initialised) initSecretBox();
   return { currentKeyId: currentKey?.id ?? null, loadedKeyIds: [...keyRing.keys()] };
+}
+
+/**
+ * A key derived from the key ring for a purpose other than encryption (the
+ * audit log MAC), so the encryption key itself is never used twice. `keyId`
+ * selects a retired key for checking old values; null when no key is loaded.
+ */
+export function derivedKey(purpose: string, keyId?: string): { id: string; key: Buffer } | null {
+  if (!initialised) initSecretBox();
+  const id = keyId ?? currentKey?.id;
+  const raw = id ? keyRing.get(id) : undefined;
+  if (!id || !raw) return null;
+  return { id, key: createHmac("sha256", raw).update(`nexus-iot:${purpose}`).digest() };
 }

@@ -22,7 +22,7 @@ export interface AuditEntry {
   ip: string | null; userAgent: string | null; correlationId: string | null; assetId: string | null; projectId: string | null;
   hash: string | null; seq: number | null;
 }
-export interface AuditPage { entries: AuditEntry[]; total: number }
+export interface AuditPage { entries: AuditEntry[]; total: number; totalCapped?: boolean }
 
 export interface AuditFilterState {
   q?: string; from?: string; to?: string; actor?: string; action?: string; category?: string; outcome?: string;

@@ -7,6 +7,7 @@ import { authConfig } from "./auth-config";
 import { hashToken } from "./tokens";
 import { resolveAccess, hasPermission, hasModuleAccess, canAccessProject, type EffectiveAccess } from "./rbac";
 import { assetSubtree } from "./asset-subtree";
+import { auditEntryInScope } from "./audit-core";
 
 let wss: WebSocketServer | null = null;
 
@@ -363,7 +364,7 @@ export function channelAllowed(access: EffectiveAccess, type: string): boolean {
 const PROJECT_SCOPED_CHANNELS: Record<string, string> = {
   telemetry: "assetId",
   alarm: "assetId",
-  activity_log: "targetId",
+  activity_log: "targetId", // matched by auditEntryInScope below (target, asset or project), as the Audit Log page does
 };
 
 /** What to do with a message for a client whose send queue holds `buffered` bytes. Exported for tests. */
@@ -393,7 +394,7 @@ export function broadcast(type: string, data: unknown, options: BroadcastOptions
     if (context.allowedAssets && scopeKey) {
       const assetId = (data as Record<string, unknown> | null)?.[scopeKey];
       // An event with no asset cannot be shown to belong to their project, so it is withheld.
-      if (typeof assetId !== "string" || !context.allowedAssets.has(assetId)) continue;
+      if (type === "activity_log" ? !auditEntryInScope(data, context.allowedAssets) : typeof assetId !== "string" || !context.allowedAssets.has(assetId)) continue;
     }
 
     const backlog = sendDecision(client.bufferedAmount, type);

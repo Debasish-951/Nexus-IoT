@@ -9,10 +9,11 @@ import { validate } from "../middleware/validate";
 import { assetScope } from "../lib/project-access";
 import { parseAuditFilters, SENSITIVE_RULES, SENSITIVE_RULE_KEYS, AUDIT_MIN_RETENTION_DAYS, type AuditOutcome, type AuditChange } from "../lib/audit-core";
 import {
-  recordAudit, listAudit, auditSummary, verifyAuditChain, raiseAuditAlert, getAuditSettings, saveAuditSettings,
-  AuditSettingsUpdate, getCheckpoint, auditRetentionDays, type AuditOptions,
+  recordAudit, listAudit, exportAuditPage, auditSummary, verifyAuditChain, raiseAuditAlert, getAuditSettings, saveAuditSettings,
+  AuditSettingsUpdate, getCheckpoint, auditRetentionDays, type AuditOptions, type AuditCursor,
 } from "../lib/audit-store";
 import { csvCell } from "../lib/validation";
+import { logger } from "../lib/logger";
 
 const toCsv = (head: string[] | null, rows: unknown[][]): string =>
   [...(head ? [head] : []), ...rows].map((r) => r.map(csvCell).join(",")).join("\r\n") + (head || rows.length ? "\r\n" : "");
@@ -95,9 +96,14 @@ router.get("/activity-log/export", async (req, res): Promise<void> => {
   res.write(`﻿${toCsv(head, [])}`);
   let written = 0;
   if (!(scope && scope.assetIds.size === 0)) {
-    for (let offset = 0; offset < EXPORT_MAX; offset += 2000) {
-      const { entries } = await listAudit(f, scope, Math.min(2000, EXPORT_MAX - offset), offset, false);
+    // Keyset pages: entries written during the export neither shift pages nor repeat rows.
+    let cursor: AuditCursor | null = null;
+    try {
+    while (written < EXPORT_MAX) {
+      const page = await exportAuditPage(f, scope, Math.min(2000, EXPORT_MAX - written), cursor);
+      const entries = page.entries;
       if (!entries.length) break;
+      cursor = page.next;
       res.write(toCsv(null, entries.map((e) => [
         e.timestamp, e.source, e.action, e.category, e.outcome, e.actorName, e.actorRole, e.actorUsername ?? "", e.targetName ?? "", e.targetId ?? "",
         e.detail ?? "", (e.changes ?? []).map((c) => `${c.field}: ${JSON.stringify(c.from)} -> ${JSON.stringify(c.to)}`).join("; "),
@@ -105,6 +111,12 @@ router.get("/activity-log/export", async (req, res): Promise<void> => {
       ])));
       written += entries.length;
       if (entries.length < 2000) break;
+    }
+    } catch (err) {
+      // The header row is already sent: abort the download so the browser reports a failure instead of saving a cut-off file.
+      logger.error({ err }, "audit log: export failed");
+      res.destroy(err instanceof Error ? err : new Error(String(err)));
+      return;
     }
   }
   res.end();
@@ -122,12 +134,13 @@ router.get("/activity-log/summary", async (req, res): Promise<void> => {
 // POST, not GET (L-9): the walk is costly and writes an entry, so a link or an
 // image on another page must not be able to start it. GET is refused by authorize().
 router.post("/activity-log/verify", async (req, res): Promise<void> => {
-  const result = await verifyAuditChain();
+  // Incremental from the last signed check when a key is set; ?full=true walks the whole chain.
+  const result = await verifyAuditChain({ full: req.query.full === "true" || req.query.full === "1" });
   if (!result.ok && result.broken) {
     await logActivity("audit.verify_failed", "activity_log", result.broken.id, null,
       `chain broken at entry #${result.broken.seq} (${result.broken.reason}) after ${result.checked} good entries`, req, { outcome: "failure" });
   } else {
-    await logActivity("audit.verified", "activity_log", null, null, `${result.checked} entries verified`, req);
+    await logActivity("audit.verified", "activity_log", null, null, `${result.checked} entries verified${result.incremental ? ` (from entry #${result.fromSeq})` : ""}`, req);
   }
   res.json(result);
 });

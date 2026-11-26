@@ -1,15 +1,17 @@
-import { pgTable, pgSequence, text, timestamp, uuid, index, jsonb, bigint, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, pgSequence, text, timestamp, uuid, index, jsonb, bigint, bigserial, uniqueIndex } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
 
 /** One field changed by an edit; secrets are stored as "[redacted]". */
 export interface AuditChange { field: string; from: unknown; to: unknown }
 
 /**
- * The audit log. Append-only: a database trigger (ensured at API start, see
- * artifacts/api-server/src/lib/audit-store.ts) refuses UPDATE and DELETE except
- * for the hash backfill and the retention job. Each row carries the SHA-256 of
- * the previous row's hash plus its own fields, so an edit or a removal in the
- * middle breaks the chain that GET /activity-log/verify walks.
+ * The audit log. Append-only: database triggers (lib/db/src/audit-guard-sql.ts,
+ * installed by `pnpm --filter @workspace/db run audit-guard`) refuse UPDATE and
+ * DELETE except for the hash backfill and audit_prune_upto(), and refuse an
+ * INSERT that does not link to the chain head. Each row carries the hash of the
+ * previous row's hash plus its own fields (SHA-256, or HMAC-SHA256 keyed from
+ * SECRETS_ENC_KEY when `hash_alg` is set), so an edit or a removal in the middle
+ * breaks the chain that /activity-log/verify walks.
  */
 /**
  * Sequence for activity_logs.seq. A separate sequence with a nullable column
@@ -45,6 +47,8 @@ export const activityLogsTable = pgTable("activity_logs", {
   projectId: text("project_id"),
   prevHash: text("prev_hash"),
   hash: text("hash"),
+  /** null = plain SHA-256 (entries written before keyed hashing); "hmac-sha256:<key id>" = keyed. */
+  hashAlg: text("hash_alg"),
   timestamp: timestamp("timestamp", { withTimezone: true }).notNull().defaultNow(),
 }, (table) => [
   // The log is read newest first and pruned by age.
@@ -55,9 +59,30 @@ export const activityLogsTable = pgTable("activity_logs", {
   index("activity_logs_action_idx").on(table.action),
   index("activity_logs_target_idx").on(table.targetId),
   index("activity_logs_project_idx").on(table.projectId),
+  index("activity_logs_asset_idx").on(table.assetId),
 ]);
 
 export type ActivityLog = typeof activityLogsTable.$inferSelect;
+
+/**
+ * Insert-only marks on the audit chain (lib/db/src/audit-guard-sql.ts refuses
+ * UPDATE, DELETE and TRUNCATE): `checkpoint` (the last entry removed by
+ * retention, written only by audit_prune_upto()), `anchor` (the chain head,
+ * hourly), `hmac_start` (from here on entries are keyed), `verified` and
+ * `verified_full` (where the last integrity check ended). `mac` is
+ * "<key id>:<HMAC-SHA256>" keyed from SECRETS_ENC_KEY, or null without a key.
+ */
+export const auditCheckpointsTable = pgTable("audit_checkpoints", {
+  id: bigserial("id", { mode: "number" }).primaryKey(),
+  kind: text("kind").notNull(),
+  seq: bigint("seq", { mode: "number" }).notNull(),
+  hash: text("hash").notNull(),
+  pruned: bigint("pruned", { mode: "number" }).notNull().default(0),
+  mac: text("mac"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [
+  index("audit_checkpoints_kind_idx").on(t.kind, t.seq),
+]);
 
 /**
  * Alerts raised when a sensitive action is recorded (an alarm rule deleted, a

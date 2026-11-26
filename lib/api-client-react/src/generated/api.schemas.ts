@@ -2440,6 +2440,12 @@ export const AuditVerifyResultBrokenReason = {
   prev_mismatch: "prev_mismatch",
   hash_mismatch: "hash_mismatch",
   missing_hash: "missing_hash",
+  missing_seq: "missing_seq",
+  downgrade: "downgrade",
+  key_missing: "key_missing",
+  checkpoint_invalid: "checkpoint_invalid",
+  head_rollback: "head_rollback",
+  anchor_mismatch: "anchor_mismatch",
 } as const;
 
 /**
@@ -2460,6 +2466,12 @@ export interface AuditVerifyResult {
   checkpoint?: AuditVerifyResultCheckpoint;
   /** @nullable */
   broken?: AuditVerifyResultBroken;
+  /** Only entries after the last signed check (fromSeq) were walked; a full walk runs at least weekly or with ?full=true */
+  incremental?: boolean;
+  fromSeq?: number;
+  lastSeq?: number;
+  /** Keyed (HMAC-SHA256 from SECRETS_ENC_KEY) entries were found and checked */
+  keyed?: boolean;
 }
 
 export interface AuditAlert {
@@ -2539,6 +2551,8 @@ export interface AuditSettingsUpdate {
 export interface ActivityLogPage {
   entries: ActivityLogEntry[];
   total: number;
+  /** More entries match than are counted (10,000); total is then a lower bound */
+  totalCapped?: boolean;
 }
 
 export interface AssetMaintenanceRequest {

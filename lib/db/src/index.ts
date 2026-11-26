@@ -78,6 +78,7 @@ pool.on("error", (err) => {
 });
 export const db = drizzle(pool, { schema });
 export * from "./schema";
+export * from "./audit-guard-sql";
 
 /** The pg Pool class, for code that must open its own short-lived connection (pull connectors reading an external PostgreSQL). */
 export const PgPool = Pool;

@@ -61,6 +61,18 @@ if [ "$STATUS" = ok ]; then
   fi
 fi
 
+# Audit log chain head (seq, hash and its MAC), kept beside the backup and off the
+# database. A later "Verify integrity" must still find this entry unchanged: a head
+# that went backwards or changed means entries were removed or rewritten
+# (docs/features/audit-log.md). Not fatal: older installs lack audit_checkpoints.
+ANCHORFILE="$DEST/audit-anchor-$STAMP.txt"
+if [ "$STATUS" = ok ]; then
+  psql --host "$DB_HOST" --username "$DB_USER" --dbname "$DB_NAME" --quiet --no-psqlrc --tuples-only --no-align \
+    -c "SELECT 'head', seq, hash, hash_alg FROM activity_logs WHERE hash IS NOT NULL AND seq IS NOT NULL ORDER BY seq DESC LIMIT 1" \
+    -c "SELECT 'anchor', seq, hash, mac, created_at FROM audit_checkpoints WHERE kind = 'anchor' ORDER BY id DESC LIMIT 1" \
+    > "$ANCHORFILE" 2>/dev/null || echo "Could not record the audit log chain head" >&2
+fi
+
 # Copy off the VM.
 if [ "$STATUS" = ok ] && [ -n "$OFFSITE_CMD" ]; then
   if sh -c "$OFFSITE_CMD" _ "$DBFILE" && sh -c "$OFFSITE_CMD" _ "$UPFILE"; then
