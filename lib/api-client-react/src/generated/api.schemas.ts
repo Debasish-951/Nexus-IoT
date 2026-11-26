@@ -1612,10 +1612,19 @@ export interface UploadedFile {
   uploadedAt: string;
   /** API path to download the file (/api/uploads/{id}/content). */
   url: string;
+  /**
+   * Project (root asset) the file belongs to; null for a file shared across
+   * the installation. Project-restricted users list only their own files and
+   * their projects' files.
+   * @nullable
+   */
+  projectId?: string | null;
 }
 
 /**
  * One or more file parts, under any field name (up to UPLOAD_MAX_FILES).
+ * An optional text field `projectId` assigns the files to a project the
+ * caller may access (403 `project_forbidden` otherwise).
  * Left as a free-form object on purpose: a `format: binary` property makes
  * the generated Zod package reference the DOM `Blob` type, which it does
  * not have, and the server parses the multipart stream itself.
@@ -2465,14 +2474,30 @@ export interface AuditAlert {
   acknowledgedBy?: string | null;
   /** @nullable */
   acknowledgedAt?: string | null;
+  /** Raised by the caller's own action; another administrator must acknowledge it (403 `own_action`). */
+  raisedBySelf?: boolean;
   [key: string]: unknown;
 }
+
+/**
+ * A request to switch this alert off, waiting for a second administrator.
+ * @nullable
+ */
+export type AuditSettingsAlertsItemPendingDisable = {
+  requestedBy?: string;
+  requestedAt?: string;
+} | null;
 
 export type AuditSettingsAlertsItem = {
   key?: string;
   title?: string;
   severity?: string;
   enabled?: boolean;
+  /**
+   * A request to switch this alert off, waiting for a second administrator.
+   * @nullable
+   */
+  pendingDisable?: AuditSettingsAlertsItemPendingDisable;
 };
 
 /**
@@ -2487,6 +2512,10 @@ export interface AuditSettings {
   defaultRetentionDays?: number;
   minimumRetentionDays?: number;
   alerts?: AuditSettingsAlertsItem[];
+  /** Switching an alert off needs two administrators (AUDIT_ALERTS_SECOND_ADMIN). */
+  secondAdminRequired?: boolean;
+  /** In a PUT response, the alerts this request asked to switch off that now wait for a second administrator. */
+  waitingForSecondAdmin?: string[];
   /** @nullable */
   checkpoint?: AuditSettingsCheckpoint;
   [key: string]: unknown;

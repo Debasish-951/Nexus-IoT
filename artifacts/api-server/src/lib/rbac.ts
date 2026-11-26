@@ -108,7 +108,8 @@ export const MODULES: ModuleDef[] = [
   { key: "api_clients",   label: "API Clients",      type: "simple" },
   { key: "reports",       label: "Reports",          type: "simple" },
   // Own module since November 2026 (it used to ride on Reports): storage, retention,
-  // legal holds, archives, backups and data health. Role defaults copy Reports, and a
+  // legal holds, archives, backups and data health. Role defaults copy Reports (except
+  // Operator and Viewer, which no longer get it), and a
   // user whose Reports access was overridden keeps that decision (LEGACY_SOURCE).
   { key: "data_management", label: "Data Management", type: "simple" },
   { key: "visualization", label: "Visualization",    type: "granular" },
@@ -174,13 +175,16 @@ export const ROLE_MODULE_DEFAULTS: Record<Role, Record<string, ModuleAccess>> = 
     live: true, explorer: true, users: false, security: false, activity_log: true,
     assets: RW, visualization: RW, ai_advisor: true, live_twin: ALL, analytics: RO,
   },
+  // Operators and Viewers no longer get Data Management by default (audit 23 Nov
+  // 2026, L-3): backup runs, the archive path and legal-hold names are not theirs
+  // to see. A per-user override (or an older Reports override) still applies.
   operator: {
-    dashboard: true, alarms: true, brokers: false, api_clients: false, reports: true, data_management: true,
+    dashboard: true, alarms: true, brokers: false, api_clients: false, reports: true, data_management: false,
     live: true, explorer: false, users: false, security: false, activity_log: false,
     assets: RO, visualization: RO, ai_advisor: false, live_twin: RO, analytics: RO,
   },
   viewer: {
-    dashboard: true, alarms: false, brokers: false, api_clients: false, reports: true, data_management: true,
+    dashboard: true, alarms: false, brokers: false, api_clients: false, reports: true, data_management: false,
     live: true, explorer: false, users: false, security: false, activity_log: false,
     assets: RO, visualization: RO, ai_advisor: false, live_twin: RO, analytics: NONE,
   },

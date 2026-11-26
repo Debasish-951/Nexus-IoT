@@ -15,6 +15,7 @@ import { diffFields } from "../lib/audit-core";
 import { recordSecurityEvent, type SecurityEventType } from "../lib/security-log";
 import { normaliseAllowlist } from "../middleware/apiKeyAuth";
 import { ungrantableScopes, canCreateApiClients } from "../lib/rbac";
+import { refuseIfAboveCeiling } from "../lib/api-client-ceiling";
 import {
   issueIngestToken, revealIngestToken, assertUrlTokenAllowed, INGEST_SCOPE,
 } from "../lib/ingest-token";
@@ -100,6 +101,21 @@ async function refuseIfOutOfScope(req: Request, res: Response, id: string): Prom
   });
   res.status(404).json({ error: "API client not found", code: "not_found" });
   return true;
+}
+
+/**
+ * Scope ceiling on an existing key (H-1): a user may change, rotate, restore or
+ * delete a key only when they could have granted every scope on it. Answers 404,
+ * like an out-of-project key. Revoke is deliberately not covered: switching a key
+ * off is the safe direction, and anyone who can see a key may stop it in an incident.
+ */
+async function refuseAboveCeiling(req: Request, res: Response, id: string): Promise<boolean> {
+  if (!req.principal) return false;
+  const [client] = await db
+    .select({ id: apiClientsTable.id, scopes: apiClientsTable.scopes })
+    .from(apiClientsTable)
+    .where(eq(apiClientsTable.id, id));
+  return refuseIfAboveCeiling(req, res, client);
 }
 
 /**
@@ -372,6 +388,7 @@ router.put("/api-clients/:id", async (req, res): Promise<void> => {
   // Same object-level check as rotate, revoke and delete: a project-restricted
   // user may only edit credentials that belong to one of their projects.
   if (await refuseIfOutOfScope(req, res, params.data.id)) return;
+  if (await refuseAboveCeiling(req, res, params.data.id)) return;
 
   // Same scope ceiling as create. Without it, a user allowed to grant only
   // `ingest:write` could edit their own key to `["*"]`, or to `[]`, which
@@ -491,6 +508,7 @@ router.post("/api-clients/:id/rotate-secret", async (req, res): Promise<void> =>
   const { id } = req.params;
   if (!id || !UUID_RE.test(id)) { res.status(400).json({ error: "Invalid id" }); return; }
   if (await refuseIfOutOfScope(req, res, id)) return;
+  if (await refuseAboveCeiling(req, res, id)) return;
 
   const newSecret = randomUUID();
 
@@ -523,6 +541,7 @@ router.post("/api-clients/:id/regenerate-ingest-url", async (req, res): Promise<
   const { id } = req.params;
   if (!id || !UUID_RE.test(id)) { res.status(400).json({ error: "Invalid id" }); return; }
   if (await refuseIfOutOfScope(req, res, id)) return;
+  if (await refuseAboveCeiling(req, res, id)) return;
 
   const [existing] = await db.select().from(apiClientsTable).where(eq(apiClientsTable.id, id));
   if (!existing) { res.status(404).json({ error: "API client not found" }); return; }
@@ -599,6 +618,7 @@ router.post("/api-clients/:id/restore", async (req, res): Promise<void> => {
   const { id } = req.params;
   if (!id || !UUID_RE.test(id)) { res.status(400).json({ error: "Invalid id" }); return; }
   if (await refuseIfOutOfScope(req, res, id)) return;
+  if (await refuseAboveCeiling(req, res, id)) return;
 
   const [client] = await db
     .update(apiClientsTable)
@@ -617,6 +637,7 @@ router.delete("/api-clients/:id", async (req, res): Promise<void> => {
   const params = DeleteApiClientParams.safeParse(req.params);
   if (!params.success) { respondInvalid(req, res, params.error); return; }
   if (await refuseIfOutOfScope(req, res, params.data.id)) return;
+  if (await refuseAboveCeiling(req, res, params.data.id)) return;
 
   const [client] = await db
     .delete(apiClientsTable)

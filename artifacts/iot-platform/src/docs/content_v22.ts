@@ -1281,7 +1281,7 @@ docs/                Architecture, API, security and operations documentation`),
         ["GET, POST", "/system/alerts, /system/holds, /system/archives, /system/backups, /system/changes", "Alerts, legal holds, archives, backups, bad-data removal"],
         ["GET", "/activity-log", "Audit Log search (q, from, to, actor, action, category, outcome, targetId, assetId, includeSecurity, limit, offset)"],
         ["GET", "/activity-log/export, /activity-log/summary", "Filtered audit log as CSV; 7-day summary"],
-        ["GET", "/activity-log/verify", "Check the hash chain (Manage security)"],
+        ["POST", "/activity-log/verify", "Check the hash chain (Manage security)"],
         ["GET, PUT", "/activity-log/settings", "Audit retention (at least 365 days) and alert switches (Manage security)"],
         ["GET, POST", "/activity-log/alerts, /activity-log/alerts/:id/acknowledge", "Sensitive-action alerts"],
       ]
@@ -1516,7 +1516,7 @@ docs/                Architecture, API, security and operations documentation`),
     ul([
       "Passwords are hashed with scrypt (N=65536, r=8, p=2, 16-byte salt) after Unicode normalisation.",
       "Activation and reset tokens are 256-bit random values, single-use, stored only as a hash.",
-      "Lockout after 5 failures for 15 minutes (AUTH_LOCKOUT_THRESHOLD, AUTH_LOCKOUT_MINUTES).",
+      "After 5 wrong passwords from one network, that network cannot sign in to the account for 15 minutes (AUTH_LOCKOUT_THRESHOLD, AUTH_LOCKOUT_MINUTES); after 25 in a row from anywhere the account itself locks (AUTH_LOCKOUT_ACCOUNT_THRESHOLD). A lockout never signs out sessions that are already open.",
       "Sign-in, forgot-password and token requests are rate limited per source.",
     ]),
 

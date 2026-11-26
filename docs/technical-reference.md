@@ -54,13 +54,14 @@ scripts/                  — Utility scripts
 - `GET/POST /api/alarm-rules` — list/create alarm rules (threshold + rate_of_change + webhook fields)
 - `PUT/DELETE /api/alarm-rules/:id` — update/delete rule
 - `POST /api/alarm-rules/:id/test-webhook` — fire a test webhook POST
-- `GET/POST /api/users` — list/create users
+- `GET/POST /api/users` — list/create users. A project-restricted administrator may create and manage only users restricted to projects of theirs, before and after the change (403 `project_scope`). `allowedProjects` must be project ids (400 `unknown_project`). Suspending or deactivating a user also revokes their activation and reset links. The last active administrator, and the last active Super Admin / Company Admin, cannot be demoted, deactivated or deleted (409 `last_admin` / `last_top_admin`). Deleting a user closes their WebSockets
 - `GET/POST /api/brokers` — list/create brokers. Create/update persist `mqttTopic`, `mqttClientId`, `mqttUsername`, `mqttPassword` (encrypted with `lib/secret-box`, context `brokers.mqttPassword`; never returned, `hasMqttPassword` instead) and `mappingRules`, then restart that broker's MQTT subscriber without an API restart. Azure IoT Hub / Event Hub brokers are stored but not connected; responses carry a `connectionNote` saying so
 - `GET /api/brokers/:id/history` — broker connection event history (newest-first, limit up to 500)
-- `GET/POST /api/api-clients` — list/create API clients
+- `GET/POST /api/api-clients` — list/create API clients. PUT, rotate-secret, regenerate-ingest-url, restore and DELETE on a key (and the Integration Hub access, rotate and end-grace routes) answer 404 when the key has a scope the caller could not grant (`lib/api-client-ceiling.ts`; empty scopes count as `*`). Revoke is not limited
 - `GET /api/dashboard/summary` — stat cards
 - `GET /api/dashboard/recent-telemetry` — latest records
 - `GET /api/dashboard/alarm-stats` — alarm counts by severity
+- `GET /api/dashboard/attention` — attention queue; alarm items and counts only with the Alarms module, expiring API keys only with the API Clients module
 - `GET /api/viz-dashboards` — list visualization dashboards (persisted in PostgreSQL)
 - `POST /api/viz-dashboards` — create dashboard
 - `PUT /api/viz-dashboards/:id` — update dashboard (name, roleAccess, widgets)
@@ -74,10 +75,11 @@ scripts/                  — Utility scripts
 - `POST /api/plant-twins/values` — latest reading for up to 500 asset+metric pairs (read-only; one indexed lookup per pair; pairs outside the caller's projects are dropped)
 - `scene.kind` values: `plant` (default), `machine` (detailed pump skid), `asset`, `process` (P&ID builder, `version: 2`; older scenes are converted on open; annotations in `notes`, uploaded symbols in `custom` with their image in chunks of at most 90 000 characters), `image` (2D twin; the SVG or picture is stored inside the scene in chunks of at most 90 000 characters), `folder`
 - `GET /api/sites` — the projects the caller may open, each with location (`Latitude`/`Longitude`/`Address` static attributes on the project asset), asset and maintenance counts and newest data time (Live Twin or Visualization read). Used by the Map view and the Sites Map widget; alarms come from `/api/alarms`
+- Uploads carry an optional `project_id` (multipart field `projectId`, the open project). Project-restricted users list only their own files and their projects' files, and download those plus files with no project (shared; every file uploaded before November 2026). Delete: the uploader or an administrator (`manage_users`), else 403 `not_uploader`
 - `POST /api/uploads` also accepts binary glTF (`.glb`, `model/gltf-binary`, recognised from its `glTF` v2 header); the polyglot check covers its header and JSON chunk. Used for customer 3D models in Live Twin
-- `GET /api/activity-log` — audit search with total: q, from, to, actor (or actorName), action, category, outcome, targetId, assetId, includeSecurity (merges security_events), limit (≤500), offset
+- `GET /api/activity-log` — audit search with total: q, from, to, actor (or actorName), action, category, outcome, targetId, assetId, includeSecurity (merges security_events; needs Manage security, else 403 `manage_security_required`, also on export), limit (≤500), offset
 - `GET /api/activity-log/export` — the same filters as CSV (≤50,000 rows); `GET /api/activity-log/summary` — 7-day summary
-- `GET /api/activity-log/verify` — walk the hash chain (security + Manage security); `GET /api/activity-log/alerts`, `POST /api/activity-log/alerts/:id/acknowledge`; `GET|PUT /api/activity-log/settings` — audit retention (minimum 365 days) and alert switches
+- `POST /api/activity-log/verify` — walk the hash chain (security + Manage security; GET is refused); `GET /api/activity-log/alerts` (each with `raisedBySelf`), `POST /api/activity-log/alerts/:id/acknowledge` (403 `own_action` for an alert raised by the caller's own action); `GET|PUT /api/activity-log/settings` — audit retention (minimum 365 days) and alert switches. Switching an alert off needs two administrators: the first request is pending (`pendingDisable`, response `waitingForSecondAdmin`) until another administrator makes the same change within 7 days. `AUDIT_ALERTS_SECOND_ADMIN=false` restores single-administrator behaviour
 - `POST /api/assets/:id/maintenance` — toggle maintenance mode (body: { enabled, note? })
 - `GET /api/system/storage` — storage, growth and disk figures for Data Management. Row total is the planner estimate (`pg_class.reltuples`); oldest/newest use the timestamp index; per-asset and per-day counts come from `telemetry_rollups` (cached 60 s). Also returns disk free space (`STORAGE_DISK_PATH`), summary-job status, the age-based retention periods and the last run
 - `GET /api/system/aggregate` — time-bucketed aggregation (bucket: 5m/15m/30m/1h/6h/12h/1d/1w; avg/min/max per interval). Over `limit`, the NEWEST buckets are kept and `truncated: true` is returned; 1d/1w buckets start at midnight / Monday in `PLANT_TIME_ZONE`
@@ -189,7 +191,7 @@ The API is designed to run as exactly one Node.js process per installation (one 
 | Security-event coalescing (`SECURITY_EVENT_COALESCE_MS`) | `lib/security-log.ts` | Pending counts are flushed every 15 s; at most the last few seconds of counts are lost | Bursts are counted per process |
 | Hourly retention and pruning job | `src/index.ts` | Next run one hour after start | The job runs in both processes |
 
-Everything else (sessions, account lockouts, users, alarms, telemetry, audit and security logs) is in PostgreSQL and survives a restart. To scale out beyond one process, move the counters, delay timers and MQTT ownership to PostgreSQL (or a shared store) first and give the retention job a single owner.
+Everything else (sessions, account-wide lockouts, users, alarms, telemetry, audit and security logs) is in PostgreSQL and survives a restart. The per-network sign-in locks (`lib/login-lockout.ts`) are in memory and per process; a restart clears them. To scale out beyond one process, move the counters, delay timers and MQTT ownership to PostgreSQL (or a shared store) first and give the retention job a single owner.
 
 ### DB Schema Notes
 - `alarm_rules`: added `webhook_url TEXT`, `webhook_enabled BOOLEAN DEFAULT false`, `roc_window INTEGER DEFAULT 60`

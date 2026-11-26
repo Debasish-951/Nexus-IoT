@@ -38,7 +38,9 @@ interface Summary {
 interface VerifyResult { ok: boolean; checked: number; verifiedAt: string; broken: { id: string; seq: number; timestamp: string; reason: string } | null; checkpoint: { seq: number; prunedAt: string; pruned: number } | null }
 interface AuditSettingsView {
   retentionDays: number | null; effectiveRetentionDays: number; defaultRetentionDays: number; minimumRetentionDays: number;
-  alerts: { key: string; title: string; severity: string; enabled: boolean }[];
+  alerts: { key: string; title: string; severity: string; enabled: boolean; pendingDisable?: { requestedBy: string; requestedAt: string } | null }[];
+  /** Switching an alert off needs a second administrator (server AUDIT_ALERTS_SECOND_ADMIN). */
+  secondAdminRequired?: boolean;
   checkpoint: { seq: number; prunedAt: string; pruned: number } | null;
 }
 
@@ -122,7 +124,8 @@ function AuditLogPage() {
   async function runVerify() {
     setVerifying(true);
     try {
-      const r = await apiFetch(`${BASE}/api/activity-log/verify`);
+      // POST: the check writes an audit entry, so the server refuses GET.
+      const r = await apiFetch(`${BASE}/api/activity-log/verify`, { method: "POST" });
       if (r.ok) setVerify((await r.json()) as VerifyResult);
     } finally { setVerifying(false); }
   }
@@ -269,7 +272,7 @@ function AuditLogPage() {
           </div>
         </div>
         <div className="flex items-center justify-between gap-3 flex-wrap">
-          {!restricted ? (
+          {!restricted && can("manage_security") ? (
             <label className="flex items-center gap-2 text-sm cursor-pointer">
               <Switch checked={!!draft.includeSecurity} onCheckedChange={(v) => { const f = { ...draft, includeSecurity: v }; setDraft(f); setFilters(f); setPage(0); }} />
               {t("Include security events (sign-ins, refusals, rate limits)")}
@@ -351,6 +354,7 @@ function AuditSettingsDialog({ open, onOpenChange }: { open: boolean; onOpenChan
   const [alerts, setAlerts] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   useEffect(() => {
     if (!q.data) return;
     setDays(q.data.retentionDays == null ? "" : String(q.data.retentionDays));
@@ -358,13 +362,19 @@ function AuditSettingsDialog({ open, onOpenChange }: { open: boolean; onOpenChan
   }, [q.data]);
 
   async function save() {
-    setSaving(true); setError(null);
+    setSaving(true); setError(null); setNotice(null);
     try {
       const n = days.trim() === "" ? null : Number(days);
       if (n != null && (!Number.isInteger(n) || n < 0)) { setError(t("Enter a whole number of days, 0 to keep for ever, or leave empty for the default.")); return; }
       const r = await apiFetch(`${BASE}/api/activity-log/settings`, { method: "PUT", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ retentionDays: n, alerts }) });
       if (!r.ok) { setError(t("The settings could not be saved.")); return; }
+      const saved = (await r.json().catch(() => null)) as { waitingForSecondAdmin?: string[] } | null;
       await q.refetch();
+      // Switching an alert off waits for a second administrator: say so instead of closing.
+      if (saved?.waitingForSecondAdmin?.length) {
+        setNotice(t("Saved. Switching an alert off takes effect only when another administrator also switches it off."));
+        return;
+      }
       onOpenChange(false);
     } finally { setSaving(false); }
   }
@@ -393,7 +403,14 @@ function AuditSettingsDialog({ open, onOpenChange }: { open: boolean; onOpenChan
                   <Switch checked={alerts[a.key] ?? true} onCheckedChange={(v) => setAlerts({ ...alerts, [a.key]: v })} />
                 </label>
               ))}
+              {d.alerts.filter((a) => a.enabled && a.pendingDisable).map((a) => (
+                <p key={`p-${a.key}`} className="text-xs text-muted-foreground">
+                  {t("{alert}: {name} asked to switch this off on {date}. It stays on until another administrator switches it off too.", { alert: t(a.title), name: a.pendingDisable!.requestedBy, date: format(new Date(a.pendingDisable!.requestedAt), "PP") })}
+                </p>
+              ))}
+              {d.secondAdminRequired && <p className="text-xs text-muted-foreground">{t("Switching an alert off needs two administrators. Switching one on takes effect at once.")}</p>}
             </div>
+            {notice && <p className="text-sm text-muted-foreground">{notice}</p>}
             {error && <p className="text-sm text-destructive">{error}</p>}
           </div>
         )}

@@ -101,6 +101,13 @@ export const authConfig = {
     /** Consecutive failures before the account is locked. 0 disables lockout. */
     threshold: num("AUTH_LOCKOUT_THRESHOLD", 5),
     durationMs: num("AUTH_LOCKOUT_MINUTES", 15) * 60_000,
+    /**
+     * Since the 23 Nov 2026 audit (M-1) `threshold` locks only the pair (account,
+     * source network /24 or /64), so a stranger cannot lock the owner out. This
+     * account-wide threshold, counted over every network, still locks the account
+     * itself against guessing spread across networks. 0 disables the account-wide lock.
+     */
+    accountThreshold: num("AUTH_LOCKOUT_ACCOUNT_THRESHOLD", 25),
   },
 
   apiKey: {

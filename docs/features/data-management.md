@@ -11,7 +11,7 @@ Governance → Data Management is where administrators see how much sensor data 
 | Database | What uses the disk (every table, uploads, archives, backups), monthly partitions, database health with Vacuum |
 | Settings | Alert thresholds and webhook, quiet time for assets, pruning window, approval of large deletions, archiving, summary levels |
 
-Reading needs the Data Management module (its own module in Access Control since November 2026; before that it came with Reports, and a user whose Reports access was set individually keeps that setting until Data Management is set). Anything that deletes, restores, changes settings, downloads raw data or shows database queries also needs the Manage assets permission. Project-restricted users cannot open the page (it covers every project). Every change is written to the activity log.
+Reading needs the Data Management module (its own module in Access Control since November 2026; before that it came with Reports, and a user whose Reports access was set individually keeps that setting until Data Management is set). Operators and Viewers do not get it by default (since the 23 Nov 2026 audit); an administrator can still switch it on per user. Anything that deletes, restores, changes settings, downloads raw data or shows database queries also needs the Manage assets permission. Project-restricted users cannot open the page (it covers every project). Every change is written to the activity log.
 
 The previous single-page design is kept as `pages/DataManagementClassic.tsx`; build with `VITE_DATA_MANAGEMENT_CLASSIC=true` to show it instead.
 

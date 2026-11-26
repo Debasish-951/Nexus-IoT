@@ -1,6 +1,6 @@
 import { WebSocketServer, WebSocket } from "ws";
 import type { Server, IncomingMessage } from "http";
-import { and, eq, isNull, gt } from "drizzle-orm";
+import { and, eq, isNull, gt, inArray } from "drizzle-orm";
 import { db, sessionsTable, usersTable, assetsTable } from "@workspace/db";
 import { logger } from "./logger";
 import { authConfig } from "./auth-config";
@@ -156,6 +156,56 @@ const DROPPABLE_CHANNELS = new Set(["telemetry"]);
 const alive = new WeakMap<WebSocket, boolean>();
 let heartbeat: NodeJS.Timeout | null = null;
 
+/**
+ * Session re-check (audit 23 Nov 2026, M-21). A socket is authenticated once, at
+ * connect. Revoking a session or suspending a user closes it (closeSockets), but
+ * a session that simply EXPIRED, or a user deleted outright (sessions go by FK
+ * cascade), left the socket streaming. Every interval the sessions behind all
+ * open sockets are looked up in one query, and a socket whose session is gone,
+ * revoked or expired, or whose user is missing, inactive or must change their
+ * password, is closed with ACCESS_CHANGED. The client then reconnects, which
+ * fails until the user signs in again.
+ */
+const SESSION_CHECK_MS = Math.max(10_000, Number(process.env.WS_SESSION_CHECK_MS) || 60_000);
+let sessionCheck: NodeJS.Timeout | null = null;
+
+/** Whether a socket's session still entitles it to data. Pure; exported for tests. */
+export function socketSessionValid(
+  row: { revokedAt: Date | null; expiresAt: Date; absoluteExpiresAt: Date; status: string | null; mustChangePassword: boolean | null } | undefined,
+  now = Date.now(),
+): boolean {
+  if (!row || row.revokedAt) return false;
+  if (row.expiresAt.getTime() <= now || row.absoluteExpiresAt.getTime() <= now) return false;
+  return row.status === "active" && !row.mustChangePassword;
+}
+
+async function recheckSessions(): Promise<void> {
+  if (!wss || wss.clients.size === 0) return;
+  const bySession = new Map<string, WebSocket[]>();
+  for (const ws of wss.clients) {
+    const ctx = contexts.get(ws);
+    if (!ctx) continue;
+    const list = bySession.get(ctx.sessionId) ?? [];
+    list.push(ws);
+    bySession.set(ctx.sessionId, list);
+  }
+  if (bySession.size === 0) return;
+  const rows = await db
+    .select({
+      id: sessionsTable.id, revokedAt: sessionsTable.revokedAt, expiresAt: sessionsTable.expiresAt,
+      absoluteExpiresAt: sessionsTable.absoluteExpiresAt, status: usersTable.status, mustChangePassword: usersTable.mustChangePassword,
+    })
+    .from(sessionsTable)
+    .leftJoin(usersTable, eq(usersTable.id, sessionsTable.userId))
+    .where(inArray(sessionsTable.id, [...bySession.keys()]));
+  const byId = new Map(rows.map((r) => [r.id, r]));
+  const now = Date.now();
+  for (const [sessionId, sockets] of bySession) {
+    if (socketSessionValid(byId.get(sessionId), now)) continue;
+    for (const ws of sockets) ws.close(ACCESS_CHANGED, "session_ended");
+  }
+}
+
 export function initWebSocketServer(server: Server): void {
   // `noServer` so the handshake can be rejected before the socket is upgraded —
   // an unauthenticated client never reaches the connection handler at all.
@@ -217,12 +267,18 @@ export function initWebSocketServer(server: Server): void {
   // The timer alone must not keep the process alive during shutdown.
   heartbeat.unref();
 
+  sessionCheck = setInterval(() => {
+    recheckSessions().catch((err) => logger.error({ err }, "WebSocket session re-check failed"));
+  }, SESSION_CHECK_MS);
+  sessionCheck.unref();
+
   logger.info("WebSocket server attached at /api/ws (session-authenticated)");
 }
 
 /** Close every live connection, for shutdown. */
 export function closeWebSocketServer(): void {
   if (heartbeat) { clearInterval(heartbeat); heartbeat = null; }
+  if (sessionCheck) { clearInterval(sessionCheck); sessionCheck = null; }
   if (!wss) return;
   for (const ws of wss.clients) ws.close(1001, "server_shutdown");
   wss.close();
@@ -282,6 +338,23 @@ const CHANNEL_MODULES: Record<string, string> = {
 };
 
 /**
+ * Channels that need ANY one of these modules (audit 23 Nov 2026, L-4). Alarm
+ * events need Alarms, like the Alarm List page and GET /alarms. Live readings
+ * need one of the screens that show them (Live Feed, Data Explorer,
+ * Visualization, Live Twin, Dashboard); they used to reach every signed-in socket.
+ */
+const CHANNEL_ANY_MODULES: Record<string, readonly string[]> = {
+  alarm: ["alarms"],
+  telemetry: ["live", "explorer", "visualization", "live_twin", "dashboard"],
+};
+
+/** Whether `access` may receive messages on `type`. Pure; exported for tests. */
+export function channelAllowed(access: EffectiveAccess, type: string): boolean {
+  const any = CHANNEL_ANY_MODULES[type];
+  return !any || any.some((m) => hasModuleAccess(access, m, "read"));
+}
+
+/**
  * Channels carrying one asset's data, withheld from users restricted to other
  * projects, with the field naming the asset. An activity entry is scoped by its
  * target, so one about a user, broker or API client (no asset) is withheld from a
@@ -316,6 +389,7 @@ export function broadcast(type: string, data: unknown, options: BroadcastOptions
     if (options.userId && context.userId !== options.userId) continue;
     if (required && !hasPermission(context.access, required)) continue;
     if (requiredModule && !hasModuleAccess(context.access, requiredModule, "read")) continue;
+    if (!channelAllowed(context.access, type)) continue;
     if (context.allowedAssets && scopeKey) {
       const assetId = (data as Record<string, unknown> | null)?.[scopeKey];
       // An event with no asset cannot be shown to belong to their project, so it is withheld.

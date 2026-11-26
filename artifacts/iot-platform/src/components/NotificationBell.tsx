@@ -9,10 +9,11 @@ import { OPEN_ALARMS_KEY, useOpenAlarms } from "@/hooks/useOpenAlarms";
 import { useProjectScope } from "@/hooks/useProjectScope";
 import { useCurrentUser } from "@/contexts/UserContext";
 import { apiFetch } from "@/lib/auth-api";
+import { useT } from "@/i18n";
 
 interface SystemAlert { id: string; severity: string; title: string; message: string; status: string; raisedAt: string }
 const SYSTEM_ALERTS_KEY = ["system/alerts"];
-interface AuditAlert { id: string; severity: string; title: string; message: string; status: string; raisedAt: string }
+interface AuditAlert { id: string; severity: string; title: string; message: string; status: string; raisedAt: string; raisedBySelf?: boolean }
 const AUDIT_ALERTS_KEY = ["activity-log/alerts"];
 
 const SEVERITY_CONFIG: Record<string, { icon: React.ElementType; color: string }> = {
@@ -40,6 +41,7 @@ const REFRESH_DELAY_MS = 3_000;
 
 export default function NotificationBell() {
   const { enabled, alarms } = useOpenAlarms();
+  const t = useT();
   // Storage / backup / pipeline alerts (Data Management) for those who may see that page.
   const { can, canModule, session } = useCurrentUser();
   const systemEnabled = canModule("data_management") && !session?.restrictProjects;
@@ -149,7 +151,10 @@ export default function NotificationBell() {
                         <p className="text-[11px] text-muted-foreground truncate" title={a.message}>{a.message}</p>
                         <p className="text-[11px] text-muted-foreground">Audit Log · {formatDistanceToNow(new Date(a.raisedAt), { addSuffix: true })}</p>
                       </Link>
-                      {canAckAudit && <button onClick={() => void ackAudit(a.id)} className="text-[11px] text-primary hover:underline self-start shrink-0">Acknowledge</button>}
+                      {canAckAudit && (a.raisedBySelf
+                        // Raised by this administrator's own action: another administrator acknowledges it.
+                        ? <button disabled title={t("Raised by your own action. Another administrator must acknowledge it.")} className="text-[11px] text-muted-foreground self-start shrink-0 cursor-not-allowed">{t("Acknowledge")}</button>
+                        : <button onClick={() => void ackAudit(a.id)} className="text-[11px] text-primary hover:underline self-start shrink-0">Acknowledge</button>)}
                     </div>
                   );
                 })}

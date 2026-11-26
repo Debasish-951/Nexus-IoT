@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogD
 import { useToast } from "@/hooks/use-toast";
 import { cn } from "@/lib/utils";
 import { apiFetch } from "@/lib/auth-api";
+import { useProject } from "@/contexts/ProjectContext";
 import { describeApiError, formatApiError } from "@/lib/validation";
 
 /**
@@ -73,8 +74,10 @@ async function fetchServerMedia(): Promise<MediaItem[]> {
  * boundary the browser must set for FormData. Credentials and the CSRF token
  * are exactly what apiFetch would send.
  */
-async function uploadOne(file: File): Promise<void> {
+async function uploadOne(file: File, projectId: string | null): Promise<void> {
   const form = new FormData();
+  // The open project owns the file, which decides who may list it (server M-2).
+  if (projectId) form.append("projectId", projectId);
   form.append("file", file, file.name);
   const res = await apiFetch("/api/uploads", { method: "POST", body: form });
   if (!res.ok) throw new Error(formatApiError(await describeApiError(res)));
@@ -97,6 +100,7 @@ function formatDate(iso: string) {
 
 export default function MediaLibrary() {
   const { toast } = useToast();
+  const { currentProjectId } = useProject();
   const [, navigate] = useLocation();
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -140,7 +144,7 @@ export default function MediaLibrary() {
           continue;
         }
         try {
-          await uploadOne(file);
+          await uploadOne(file, currentProjectId);
           ok++;
         } catch (e) {
           toast({ title: "Upload failed", description: `"${file.name}": ${(e as Error).message}`, variant: "destructive" });

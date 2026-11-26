@@ -142,10 +142,10 @@ test("audit: route rules for the new endpoints", () => {
   const viewer = resolveAccess("viewer", {});
   assert.equal(ruleAllows(admin, "GET", "/activity-log/summary"), true);
   assert.equal(ruleAllows(admin, "GET", "/activity-log/export"), true);
-  assert.equal(ruleAllows(admin, "GET", "/activity-log/verify"), true);
+  assert.equal(ruleAllows(admin, "POST", "/activity-log/verify"), true, "verify is POST since L-9");
   assert.equal(ruleAllows(admin, "PUT", "/activity-log/settings"), true);
   assert.equal(ruleAllows(admin, "POST", "/activity-log/alerts/00000000-0000-0000-0000-000000000001/acknowledge"), true);
-  assert.equal(ruleAllows(viewer, "GET", "/activity-log/verify"), false);
+  assert.equal(ruleAllows(viewer, "POST", "/activity-log/verify"), false);
   assert.equal(ruleAllows(viewer, "PUT", "/activity-log/settings"), false);
   assert.equal(ruleAllows(viewer, "POST", "/activity-log/alerts/00000000-0000-0000-0000-000000000001/acknowledge"), false);
   assert.equal(ruleAllows(viewer, "DELETE", "/activity-log"), false, "the log cannot be deleted through the API");

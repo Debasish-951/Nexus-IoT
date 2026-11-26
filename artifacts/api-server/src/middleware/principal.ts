@@ -56,9 +56,13 @@ export async function attachPrincipal(req: Request, res: Response, next: NextFun
 
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, found.session.userId));
 
-  // The account changed underneath a live session — suspended, deleted, or
-  // locked. Kill the session now rather than waiting for it to expire.
-  if (!user || user.status !== "active" || (user.lockedUntil && user.lockedUntil.getTime() > Date.now())) {
+  // The account changed underneath a live session — suspended or deleted. Kill
+  // the session now rather than waiting for it to expire. A sign-in LOCKOUT is
+  // deliberately not a reason (audit 23 Nov 2026, M-1): it only blocks new
+  // password sign-ins, and ending live sessions let anyone who knew a username
+  // sign its owner out with a few wrong passwords. An administrator who wants a
+  // user out suspends them or ends their sessions in the Security Center.
+  if (!user || user.status !== "active") {
     await revokeSession(found.session.id, user ? `status_${user.status}` : "user_deleted");
     clearSessionCookies(res);
     req.authFailure = "account_inactive";

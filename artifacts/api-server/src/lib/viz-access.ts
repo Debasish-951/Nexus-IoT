@@ -87,6 +87,24 @@ export function resolveVizAccess(
   return result;
 }
 
+/**
+ * Whether `userId` owns this node or one of its ancestors (audit 23 Nov 2026,
+ * L-2). Only such a user, or a top administrator, may MOVE a node: a grant lets
+ * you edit a dashboard, but moving it under your own folder made it yours through
+ * that folder, so it stayed yours after the grant was revoked.
+ */
+export function ownsInChain(nodes: NodeRef[], nodeId: string, userId: string): boolean {
+  const byId = new Map(nodes.map((n) => [n.id, n]));
+  const seen = new Set<string>();
+  let current = byId.get(nodeId);
+  while (current && !seen.has(current.id)) {
+    seen.add(current.id);
+    if (current.ownerId === userId) return true;
+    current = current.parentId ? byId.get(current.parentId) : undefined;
+  }
+  return false;
+}
+
 /** Access to every node for this user. Trees here are small, so all rows are read. */
 export async function loadVizAccess(principal: Principal): Promise<Map<string, VizNodeAccess>> {
   const [nodes, rows] = await Promise.all([
