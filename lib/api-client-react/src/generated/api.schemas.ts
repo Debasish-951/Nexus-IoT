@@ -2278,6 +2278,30 @@ export const AiReportResponseNarrativeStatus = {
 
 export type AiReportResponseScope = { [key: string]: unknown };
 
+export type AiReportInvestigationMode =
+  (typeof AiReportInvestigationMode)[keyof typeof AiReportInvestigationMode];
+
+export const AiReportInvestigationMode = {
+  investigated: "investigated",
+  single: "single",
+  none: "none",
+} as const;
+
+export type AiReportInvestigationStepsItem = {
+  tool: string;
+  summary: string;
+};
+
+/**
+ * How the narrative was written. investigated: the model looked up the database with read-only tools; single: written from the figures alone after the investigation failed; none: no narrative.
+ */
+export interface AiReportInvestigation {
+  mode: AiReportInvestigationMode;
+  steps: AiReportInvestigationStepsItem[];
+  toolCalls: number;
+  durationMs: number;
+}
+
 export interface AiReportResponse {
   level: AiReportLevel;
   /**
@@ -2299,6 +2323,7 @@ export interface AiReportResponse {
   /** @nullable */
   narrativeError: string | null;
   unverifiedNumbers: string[];
+  investigation: AiReportInvestigation;
   alarmsIncluded: boolean;
   generatedAt: string;
   range: AiChatRange;

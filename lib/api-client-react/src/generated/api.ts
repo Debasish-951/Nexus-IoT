@@ -18116,12 +18116,19 @@ export const getGenerateAiReportUrl = () => {
  * (engineer, developer, operator). Every figure is computed by the server
  * from the database, limited to the assets the caller may see (project
  * access) and to alarm data only when the caller has the Alarms module.
- * When an AI provider is configured (GROQ_API_KEY), only the figures the
- * level needs are sent to the model, which writes the narrative in that
- * level's shape. Without a provider, or when the model fails, the figures
- * are still returned with `narrative: null`, `narrativeStatus` and
- * `narrativeError`. Numbers in the narrative that are not in the figures
- * are listed in `unverifiedNumbers`. Rate limited per user.
+ * The report is built from the database only, never from Visualization
+ * or dashboard data. When an AI provider is configured (GROQ_API_KEY),
+ * the figures the level needs are sent to the model, which then
+ * investigates the database with the AI Advisor read-only tools (kept to
+ * the report's assets and period and to the caller's modules; at most 8
+ * tool calls, 6 model turns and about 40 seconds) and writes the narrative
+ * in that level's shape. `investigation` lists the lookups. If the
+ * investigation fails, one call writes the narrative from the figures
+ * alone (mode "single"); if that fails too, or without a provider, the
+ * figures are still returned with `narrative: null`, `narrativeStatus`
+ * and `narrativeError` (mode "none"). Numbers in the narrative that are
+ * neither in the figures nor in a tool result are listed in
+ * `unverifiedNumbers`. Rate limited per user.
  * @summary Generate an AI report for an asset, a project or all visible assets
  */
 export const generateAiReport = async (
@@ -18217,12 +18224,19 @@ export type GenerateAiReportMutationVariables = {
  * (engineer, developer, operator). Every figure is computed by the server
  * from the database, limited to the assets the caller may see (project
  * access) and to alarm data only when the caller has the Alarms module.
- * When an AI provider is configured (GROQ_API_KEY), only the figures the
- * level needs are sent to the model, which writes the narrative in that
- * level's shape. Without a provider, or when the model fails, the figures
- * are still returned with `narrative: null`, `narrativeStatus` and
- * `narrativeError`. Numbers in the narrative that are not in the figures
- * are listed in `unverifiedNumbers`. Rate limited per user.
+ * The report is built from the database only, never from Visualization
+ * or dashboard data. When an AI provider is configured (GROQ_API_KEY),
+ * the figures the level needs are sent to the model, which then
+ * investigates the database with the AI Advisor read-only tools (kept to
+ * the report's assets and period and to the caller's modules; at most 8
+ * tool calls, 6 model turns and about 40 seconds) and writes the narrative
+ * in that level's shape. `investigation` lists the lookups. If the
+ * investigation fails, one call writes the narrative from the figures
+ * alone (mode "single"); if that fails too, or without a provider, the
+ * figures are still returned with `narrative: null`, `narrativeStatus`
+ * and `narrativeError` (mode "none"). Numbers in the narrative that are
+ * neither in the figures nor in a tool result are listed in
+ * `unverifiedNumbers`. Rate limited per user.
  * @summary Generate an AI report for an asset, a project or all visible assets
  */
 export const useGenerateAiReport = <

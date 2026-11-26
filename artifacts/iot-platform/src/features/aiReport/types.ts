@@ -104,6 +104,14 @@ export type ReportNarrative = ExecutiveNarrative | ManagerNarrative | EngineerNa
 
 export type NarrativeStatus = "ok" | "unavailable" | "failed" | "rate_limited" | "unreadable";
 
+/** How the narrative was written: investigated (the AI looked up the database), single (from the figures alone) or none. */
+export interface Investigation {
+  mode: "investigated" | "single" | "none";
+  steps: { tool: string; summary: string }[];
+  toolCalls: number;
+  durationMs: number;
+}
+
 export interface AiReport {
   level: ReportLevel;
   facts: ReportFacts;
@@ -111,12 +119,37 @@ export interface AiReport {
   narrativeStatus: NarrativeStatus;
   narrativeError: string | null;
   unverifiedNumbers: string[];
+  /** Absent from servers older than the investigation. */
+  investigation?: Investigation;
   alarmsIncluded: boolean;
   generatedAt: string;
   range: { from: string; to: string };
   scope: { assetId: string | null; name: string; assetCount: number };
   model: string | null;
 }
+
+/** Plain names of the database lookups the AI can make, for the reader. */
+export const TOOL_LABEL: Record<string, string> = {
+  resolve_asset: "Found assets and metrics by name",
+  list_assets: "Listed the assets",
+  list_metrics: "Listed an asset's metrics",
+  get_latest_telemetry: "Read the latest readings",
+  query_telemetry: "Read a metric's history",
+  aggregate_telemetry: "Analysed a metric's statistics",
+  compare_metrics: "Compared a metric across machines",
+  asset_health: "Checked an asset's health",
+  get_alarms: "Read the current alarms",
+  get_alarm_history: "Read the alarm history",
+  fleet_summary: "Read the plant summary",
+  get_alarm_rules: "Read the alarm rules and limits",
+  get_asset_attributes: "Read the asset's attributes",
+  get_recent_changes: "Read recent configuration changes",
+};
+export const INVESTIGATION_MODE_LABEL: Record<Investigation["mode"], string> = {
+  investigated: "The AI investigated the database before writing",
+  single: "Written from the computed figures only (the investigation did not complete)",
+  none: "No AI text",
+};
 
 export const LEVEL_LABEL: Record<ReportLevel, string> = { executive: "Executive", manager: "Manager", engineer: "Engineer" };
 export const URGENCY_LABEL: Record<Urgency, string> = { immediate: "Immediate", this_week: "This week", planned: "Planned" };

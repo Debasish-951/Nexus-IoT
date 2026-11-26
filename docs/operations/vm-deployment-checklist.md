@@ -82,6 +82,13 @@ Choose one:
 
 > Never run `push-force` on this database — it is destructive.
 
+> **Upgrading to the Integration Hub release:** run `push` **before** restarting the
+> API. It only adds tables and columns with safe defaults, but the new server reads
+> them, so starting it first makes API-key requests fail until the push is done.
+> Optional settings, all with safe defaults: `OAUTH_TOKEN_TTL_SEC` (3600),
+> `INTEGRATION_LOG_RETENTION_DAYS` (30), `API_REQUEST_LOG_RETENTION_DAYS` (30),
+> `API_KEY_EMPTY_SCOPES_DENY` (false). See [../features/integration-hub.md](../features/integration-hub.md).
+
 ## Step 4 — Build
 
 ```bash
@@ -180,6 +187,17 @@ server {
 
     location / {
         try_files $uri $uri/ /index.html;   # SPA fallback
+    }
+
+    # AI Advisor answers and AI Reports call an external model and can take up to
+    # about a minute; nginx's default 60 s read timeout would cut them off.
+    location /api/ai/ {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_set_header Host              $host;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        # Overwrite, do not append, exactly as in the /api/ block below.
+        proxy_set_header X-Forwarded-For   $remote_addr;
+        proxy_read_timeout 180s;
     }
 
     # The API and ingest endpoints
@@ -315,6 +333,8 @@ This is the most common first-post failure after a move.
 | Gateway gets `429` | Over 1200 requests/minute on that key (`INGEST_RATE_LIMIT_RPM`) — batch readings, use a second key, or raise the limit |
 | Data posts fine but no chart | Tag not declared on the asset — undeclared tags are **dropped**. Post the same payload to `/api/ingest/validate` to see which tags are dropped |
 | Password-reset links point at localhost | `AUTH_PUBLIC_URL` not set |
+| Every API-key request returns 500 after an upgrade | `push` was not run before restarting (column `previous_secret_hash` does not exist) |
+| Queued destination never receives anything | Receiver on a private address without `ALLOW_PRIVATE_WEBHOOK_TARGETS=true`; see Destinations → Delivery log for the error |
 | Sign-in fails with `origin_not_allowed` | The browser's address is not in `AUTH_PUBLIC_URL`/`CORS_ORIGINS` and nginx is not passing the original `Host` (`proxy_set_header Host $host;`) |
 
 ---

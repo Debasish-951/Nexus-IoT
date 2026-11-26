@@ -22,6 +22,10 @@ import { pruneExpiredSessions } from "./lib/sessions";
 import { pruneSecurityEvents } from "./lib/security-log";
 import { assertNoPublicApiKey } from "./lib/public-api-key";
 import { warnLegacyPlaintextSecrets } from "./middleware/apiKeyAuth";
+import { startDeliveryWorker, stopDeliveryWorker, pruneIntegrationData } from "./services/delivery-worker";
+import { startConnectorScheduler, stopConnectorScheduler } from "./services/connectors";
+import { startRequestLogFlush, flushRequestLog, pruneApiLogs } from "./lib/integration/client-auth";
+import { pruneIdempotencyKeys } from "./lib/integration/idempotency";
 
 // Last-resort handlers. A rejected promise nobody awaited (a background job, a
 // library callback) would otherwise stop the process under Node's default
@@ -105,6 +109,11 @@ server.listen(port, host, () => {
   // Storage / backup / pipeline alerts every 10 minutes (Data Management > Overview).
   startAlertJob(computeStorage);
   startIngestRejectionFlush();
+  // Integration Hub: queued destination deliveries, pull connectors (only
+  // enabled ones run), and the buffered per-client request log.
+  startDeliveryWorker();
+  startConnectorScheduler();
+  startRequestLogFlush();
   ensureFuturePartitions().catch((e) => logger.warn({ err: e }, "Partition maintenance failed"));
   setInterval(() => {
     // Telemetry policies, then alarms, history, logs, broker events, auth tokens,
@@ -124,6 +133,11 @@ server.listen(port, host, () => {
     // lib/security-log.ts for why the cap exists alongside the age limit.
     pruneSecurityEvents()
       .catch((e) => logger.warn({ err: e }, "Security event pruning error"));
+
+    // Integration Hub logs: delivery log + outbox, API request log, expired
+    // OAuth tokens and day-old idempotency keys.
+    Promise.all([pruneIntegrationData(), pruneApiLogs(), pruneIdempotencyKeys()])
+      .catch((e) => logger.warn({ err: (e as Error).message }, "Integration log pruning error"));
   }, PRUNE_INTERVAL_MS);
 });
 
@@ -149,6 +163,9 @@ function shutdown(signal: string): void {
 
   closeWebSocketServer();
   void stopMqttSubscribers();
+  stopDeliveryWorker();
+  stopConnectorScheduler();
+  void flushRequestLog();
   server.close(() => {
     pool.end()
       .catch((err) => logger.warn({ err }, "Database pool did not close cleanly"))

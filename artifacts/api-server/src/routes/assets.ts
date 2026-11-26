@@ -7,6 +7,7 @@ import {
 } from "@workspace/db";
 import { forgetRuleDelays, invalidateAlarmRuleCache, forgetAssetDelays } from "./ingest";
 import { logActivity } from "./activity_log";
+import { emitLater, projectOf, forgetAssetTree } from "../lib/integration/events";
 import { diffFields } from "../lib/audit-core";
 import { hasSeenDevice, removeSeenDevice } from "../lib/seen-devices";
 import { deviceClaimedOutsideScope, DEVICE_IN_USE } from "../lib/project-access";
@@ -104,6 +105,8 @@ router.post("/assets", async (req, res): Promise<void> => {
   }
 
   void logActivity("asset.created", "asset", asset.id, asset.name, asset.parentId ? `parentId=${asset.parentId}` : null, req, { assetId: asset.id });
+  forgetAssetTree();
+  emitLater("asset.created", { assetId: asset.id, payload: { assetId: asset.id, name: asset.name, identifier: asset.identifier, parentId: asset.parentId } });
   res.status(201).json(asset);
 });
 
@@ -169,6 +172,8 @@ router.put("/assets/:id", async (req, res): Promise<void> => {
   if (!asset) { res.status(404).json({ error: "Asset not found" }); return; }
   await logActivity("asset.updated", "asset", asset.id, asset.name, null, req,
     { assetId: asset.id, changes: diffFields(beforeAsset as unknown as Record<string, unknown>, asset as unknown as Record<string, unknown>, { only: Object.keys(updateData) }) });
+  if ("parentId" in updateData) forgetAssetTree();
+  emitLater("asset.updated", { assetId: asset.id, payload: { assetId: asset.id, name: asset.name, identifier: asset.identifier, fields: Object.keys(updateData) } });
   res.json(asset);
 });
 
@@ -201,6 +206,7 @@ router.post("/assets/:id/maintenance", async (req, res): Promise<void> => {
   // A running On/Off delay was measured before maintenance. Kept, it could raise
   // an alarm on the first reading after maintenance without waiting the delay.
   forgetAssetDelays(id);
+  emitLater("asset.maintenance", { assetId: id, payload: { assetId: id, name: current.name, maintenanceMode: enable, note: enable ? note : null } });
   res.json(asset);
 });
 
@@ -213,6 +219,8 @@ router.delete("/assets/:id", async (req, res): Promise<void> => {
   // Fetch the root asset first (need name + parentId before we delete)
   const [rootAsset] = await db.select().from(assetsTable).where(eq(assetsTable.id, rootId));
   if (!rootAsset) { res.status(404).json({ error: "Asset not found" }); return; }
+  // Resolved before the delete: afterwards the asset is no longer in the tree.
+  const deletedProjectId = await projectOf(rootId).catch(() => null);
 
   // One transaction: a failure part-way used to leave the subtree half deleted,
   // with assets gone but their attributes, alarms or rules still in place.
@@ -279,6 +287,8 @@ router.delete("/assets/:id", async (req, res): Promise<void> => {
   // project). That is the frontend's warning to give; it is unchanged here.
   void logActivity("asset.deleted", "asset", rootId, rootAsset.name,
     `Deleted ${allIds.length} asset(s) in subtree${ruleIds.length ? `, ${ruleIds.length} alarm rule(s)` : ""}`, req);
+  forgetAssetTree();
+  emitLater("asset.deleted", { assetId: rootId, projectId: deletedProjectId, payload: { assetId: rootId, name: rootAsset.name, identifier: rootAsset.identifier, assetsRemoved: allIds.length } });
   res.sendStatus(204);
 });
 

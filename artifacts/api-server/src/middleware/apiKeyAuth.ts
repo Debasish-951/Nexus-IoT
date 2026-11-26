@@ -1,12 +1,12 @@
 import { Request, Response, NextFunction } from "express";
 import { BlockList, isIP } from "node:net";
-import { eq, or, sql, isNotNull } from "drizzle-orm";
+import { eq, sql, isNotNull } from "drizzle-orm";
 import { db, apiClientsTable } from "@workspace/db";
 import { logger } from "../lib/logger";
 import { authConfig } from "../lib/auth-config";
-import { hashToken } from "../lib/tokens";
 import { clientAddress } from "../lib/client-ip";
 import { recordSecurityEvent } from "../lib/security-log";
+import { findClientBySecret, trackApiRequest } from "../lib/integration/client-auth";
 
 declare global {
   namespace Express {
@@ -173,7 +173,7 @@ function recordInvalidKey(req: Request, reason: string, client?: { id: string; c
 
 /**
  * Warn once per legacy client at startup. Those rows still hold their secret
- * in plaintext, which `secretMatches` accepts until the migration runs. The
+ * in plaintext, which `findClientBySecret` accepts until the migration runs. The
  * operator runs it, not the server: hashing makes the secret unreadable on the
  * API Clients page, and the team should be told first.
  */
@@ -206,12 +206,8 @@ export async function warnLegacyPlaintextSecrets(): Promise<number> {
  * the secret is a randomUUID, so there is no low-entropy input to protect, and
  * the lookup must be a deterministic indexed equality.
  */
-function secretMatches(secret: string) {
-  return or(
-    eq(apiClientsTable.clientSecretHash, hashToken(secret)),
-    eq(apiClientsTable.clientSecret, secret),
-  );
-}
+// Lookup moved to findClientBySecret (lib/integration/client-auth.ts), which keeps
+// both arms above and adds the rotation grace period and OAuth access tokens.
 
 /**
  * Where a client secret may travel, in order of preference.
@@ -305,6 +301,7 @@ export async function attachApiClient(req: Request, _res: Response, next: NextFu
       } else {
         req.apiClient = client;
         req.viaIngestUrlToken = true;
+        trackApiRequest(req, _res, client);
       }
     } catch (err) {
       logger.error({ err }, "ingest URL token lookup failed");
@@ -317,15 +314,15 @@ export async function attachApiClient(req: Request, _res: Response, next: NextFu
   if (!secret) { next(); return; }
 
   try {
-    const [client] = await db
-      .select()
-      .from(apiClientsTable)
-      .where(secretMatches(secret));
+    // Current secret, previous secret within its rotation grace period, or an
+    // OAuth access token — see lib/integration/client-auth.ts.
+    const client = await findClientBySecret(secret);
 
     // Only a usable credential counts. An expired or revoked key must fall
     // through to `authorize`'s 401 rather than being treated as authenticated.
     if (client && client.status === "active" && !(client.expiresAt && new Date() > client.expiresAt)) {
       req.apiClient = client;
+      trackApiRequest(req, _res, client);
     } else {
       recordInvalidKey(req, !client ? "unknown_key" : client.status !== "active" ? `key_${client.status}` : "key_expired", client);
     }
@@ -333,6 +330,18 @@ export async function attachApiClient(req: Request, _res: Response, next: NextFu
     /* a lookup failure is simply "no client" — authorize will reject */
   }
   next();
+}
+
+/**
+ * Whether a client's scopes cover `required`.
+ *
+ * An empty list has always meant "every scope" (the legacy super-key). That
+ * stays the default so existing keys keep working; set
+ * API_KEY_EMPTY_SCOPES_DENY=true to make an empty list grant nothing.
+ */
+export function scopeAllows(scopes: readonly string[], required: string): boolean {
+  if (scopes.length === 0) return process.env.API_KEY_EMPTY_SCOPES_DENY !== "true";
+  return scopes.includes("*") || scopes.includes(required);
 }
 
 // ── Auth middleware factory ────────────────────────────────────────────────────
@@ -349,10 +358,7 @@ export function apiKeyAuth(requiredScope?: string) {
     }
 
     // Reuse the row attachApiClient already fetched where possible.
-    const client = req.apiClient ?? (await db
-      .select()
-      .from(apiClientsTable)
-      .where(secretMatches(secret)))[0];
+    const client = req.apiClient ?? await findClientBySecret(secret);
 
     if (!client) {
       res.status(401).json({ error: "Invalid API credentials" });
@@ -387,10 +393,10 @@ export function apiKeyAuth(requiredScope?: string) {
       return;
     }
 
-    // Scope check — empty scopes array = all scopes (super-key)
-    if (requiredScope && client.scopes.length > 0) {
-      const hasScope = client.scopes.includes("*") || client.scopes.includes(requiredScope);
-      if (!hasScope) {
+    // Scope check — empty scopes array = all scopes (super-key), unless
+    // API_KEY_EMPTY_SCOPES_DENY=true retires that legacy meaning.
+    if (requiredScope && !scopeAllows(client.scopes, requiredScope)) {
+      {
         res.status(403).json({
           error: `Insufficient scope. Required: ${requiredScope}`,
           clientScopes: client.scopes,
@@ -449,18 +455,12 @@ export function optionalApiKeyAuth(requiredScope?: string) {
     const secret = readSecret(req);
     if (!secret) { next(); return; }
 
-    const client = req.apiClient ?? (await db
-      .select()
-      .from(apiClientsTable)
-      .where(secretMatches(secret)))[0];
+    const client = req.apiClient ?? await findClientBySecret(secret);
 
     if (!client || client.status !== "active") { next(); return; }
     if (client.expiresAt && new Date() > client.expiresAt) { next(); return; }
 
-    if (requiredScope && client.scopes.length > 0) {
-      const hasScope = client.scopes.includes("*") || client.scopes.includes(requiredScope);
-      if (!hasScope) { next(); return; }
-    }
+    if (requiredScope && !scopeAllows(client.scopes, requiredScope)) { next(); return; }
 
     db.update(apiClientsTable)
       .set({ lastUsedAt: new Date(), totalRequests: sql`${apiClientsTable.totalRequests} + 1` })

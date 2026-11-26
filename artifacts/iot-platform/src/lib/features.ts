@@ -115,6 +115,18 @@ export const FEATURES = {
   proWidgets: import.meta.env.VITE_DISABLE_PRO_WIDGETS !== "true",
 
   /**
+   * Integration Hub (API Client, Destinations, Connections, Integration Guide):
+   * only the original pages, without the new tabs (Access, Usage, Delivery,
+   * Delivery log, Pull connectors, API v1 reference, Webhook signatures, Alerts).
+   * Off by default. The original pages are unchanged and are the first tab of
+   * each screen either way. The server features (queued delivery, v1 API,
+   * connectors) keep working; they are only hidden from the UI:
+   *
+   *   VITE_CLASSIC_INTEGRATION_HUB=true pnpm --filter @workspace/iot-platform build
+   */
+  classicIntegrationHub: envOn(import.meta.env.VITE_CLASSIC_INTEGRATION_HUB),
+
+  /**
    * "3D plant twins" on the Live Twin page (features/plantTwin): whole plants
    * laid out by process from industry templates, stored on the server
    * (plant_twins), with machines linked to assets so live telemetry drives them.

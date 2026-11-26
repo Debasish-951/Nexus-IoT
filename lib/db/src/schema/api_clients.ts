@@ -77,6 +77,21 @@ export const apiClientsTable = pgTable("api_clients", {
   ingestTokenEnc: text("ingest_token_enc"),
   ingestTokenIssuedAt: timestamp("ingest_token_issued_at", { withTimezone: true }),
 
+  // ── Integration Hub additions (all optional; old rows behave as before) ──
+  /** Previous secret, still accepted until previousSecretExpiresAt (rotation grace period). */
+  previousSecretHash: text("previous_secret_hash"),
+  previousSecretExpiresAt: timestamp("previous_secret_expires_at", { withTimezone: true }),
+  /** Narrower than the project: only these assets (and their children). Empty = no extra limit. */
+  allowedAssetIds: text("allowed_asset_ids").array().notNull().default([]),
+  /** Most rows one read may return. Null = the endpoint default. */
+  maxRows: integer("max_rows"),
+  /** Widest time range one read may cover, in days. Null = no limit. */
+  maxRangeDays: integer("max_range_days"),
+  /** Sandbox client: writes are validated and answered but never stored. */
+  sandbox: boolean("sandbox").notNull().default(false),
+  /** Template the client was created from (gateway, scada, cmms, bi), for display only. */
+  template: text("template"),
+
   tags: text("tags").array().notNull().default([]),
   scopes: text("scopes").array().notNull().default([]),
   status: text("status").notNull().default("active"), // active|inactive|revoked

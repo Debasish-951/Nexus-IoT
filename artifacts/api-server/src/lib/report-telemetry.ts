@@ -63,7 +63,7 @@ export interface BucketAgg { assetId: string; metric: string; t: number; n: numb
  * into per-bucket averages and per-metric statistics. Parts cover disjoint time,
  * so counts and sums add up and min/max combine.
  */
-export function mergeBuckets(parts: BucketAgg[][]): { buckets: BucketRow[]; stats: MetricStatRow[] } {
+export function mergeBucketAggs(parts: BucketAgg[][]): BucketAgg[] {
   const byBucket = new Map<string, BucketAgg>();
   for (const part of parts) for (const r of part) {
     if (!r.n) continue;
@@ -75,9 +75,14 @@ export function mergeBuckets(parts: BucketAgg[][]): { buckets: BucketRow[]; stat
     cur.min = cur.min == null ? r.min : r.min == null ? cur.min : Math.min(cur.min, r.min);
     cur.max = cur.max == null ? r.max : r.max == null ? cur.max : Math.max(cur.max, r.max);
   }
+  return [...byBucket.values()];
+}
+
+export function mergeBuckets(parts: BucketAgg[][]): { buckets: BucketRow[]; stats: MetricStatRow[] } {
+  const byBucket = mergeBucketAggs(parts);
   const byMetric = new Map<string, { assetId: string; metric: string; n: number; sum: number; min: number | null; max: number | null }>();
   const buckets: BucketRow[] = [];
-  for (const b of byBucket.values()) {
+  for (const b of byBucket) {
     if (b.sum != null) buckets.push({ assetId: b.assetId, metric: b.metric, t: b.t, avg: b.sum / b.n });
     const k = `${b.assetId}\u0000${b.metric}`;
     const m = byMetric.get(k) ?? { assetId: b.assetId, metric: b.metric, n: 0, sum: 0, min: null, max: null };
@@ -103,15 +108,16 @@ const toAgg = (r: Raw): BucketAgg => ({
   sum: r.sum == null ? null : Number(r.sum), min: r.min == null ? null : Number(r.min), max: r.max == null ? null : Number(r.max),
 });
 
-async function rollupPart(ids: string[], span: Span, bucketSec: number, origin: number): Promise<{ buckets: BucketAgg[]; coverage: CoverageRow[] }> {
+async function rollupPart(ids: string[], span: Span, bucketSec: number, origin: number, metrics: string[] | null = null): Promise<{ buckets: BucketAgg[]; coverage: CoverageRow[] }> {
   const b = await pool.query<Raw>(`
     SELECT asset_id, metric,
            ($4::float8 + floor((extract(epoch from bucket) - $4::float8) / $5) * $5) AS t,
            SUM(n)::bigint AS n, SUM(sum) AS sum, MIN(min) AS min, MAX(max) AS max
     FROM telemetry_rollups
     WHERE asset_id = ANY($1::uuid[]) AND bucket >= $2 AND bucket < $3 AND n > 0
+      AND ($6::text[] IS NULL OR metric = ANY($6::text[]))
     GROUP BY asset_id, metric, 3
-    LIMIT ${MAX_ROWS}`, [ids, span.from, span.to, origin, bucketSec]);
+    LIMIT ${MAX_ROWS}`, [ids, span.from, span.to, origin, bucketSec, metrics]);
   const c = await pool.query<{ asset_id: string; hours: string }>(`
     SELECT asset_id, COUNT(DISTINCT bucket)::int AS hours
     FROM telemetry_rollups
@@ -120,7 +126,7 @@ async function rollupPart(ids: string[], span: Span, bucketSec: number, origin: 
   return { buckets: b.rows.map(toAgg), coverage: c.rows.map((r) => ({ assetId: r.asset_id, hours: Number(r.hours) })) };
 }
 
-async function rawPart(ids: string[], span: Span, bucketSec: number, origin: number): Promise<{ buckets: BucketAgg[]; coverage: CoverageRow[] }> {
+async function rawPart(ids: string[], span: Span, bucketSec: number, origin: number, metrics: string[] | null = null): Promise<{ buckets: BucketAgg[]; coverage: CoverageRow[] }> {
   const end = span.open ? "<" : "<=";
   const b = await pool.query<Raw>(`
     SELECT asset_id, metric,
@@ -129,8 +135,9 @@ async function rawPart(ids: string[], span: Span, bucketSec: number, origin: num
            SUM((value::text)::float8) AS sum, MIN((value::text)::float8) AS min, MAX((value::text)::float8) AS max
     FROM telemetry
     WHERE asset_id = ANY($1::uuid[]) AND "timestamp" >= $2 AND "timestamp" ${end} $3 AND value::text ~ ${NUMERIC}
+      AND ($6::text[] IS NULL OR metric = ANY($6::text[]))
     GROUP BY asset_id, metric, 3
-    LIMIT ${MAX_ROWS}`, [ids, span.from, span.to, origin, bucketSec]);
+    LIMIT ${MAX_ROWS}`, [ids, span.from, span.to, origin, bucketSec, metrics]);
   const c = await pool.query<{ asset_id: string; hours: string }>(`
     SELECT asset_id, COUNT(DISTINCT date_trunc('hour', "timestamp"))::int AS hours
     FROM telemetry
@@ -163,4 +170,22 @@ export async function loadPeriod(ids: string[], range: Span, bucketMs: number, w
   for (const span of plan.raw) parts.push(await rawPart(ids, span, bucketSec, origin));
   const merged = mergeBuckets(parts.map((p) => p.buckets));
   return { ...merged, coverage: mergeCoverage(parts.map((p) => p.coverage)) };
+}
+
+/**
+ * Bucket aggregates (count, sum, min, max per bucket) of the given metrics of the
+ * given assets over a range, from the hourly summaries plus the raw head and
+ * tail. Serves the AI tools on ranges too long to scan raw (see routes/ai.ts).
+ * Buckets are whole hours, counted from the range start floored to the hour.
+ */
+export async function loadBucketAggs(ids: string[], metrics: string[], range: Span, bucketMs: number): Promise<BucketAgg[]> {
+  if (ids.length === 0 || metrics.length === 0) return [];
+  const watermark = await hourlyWatermark();
+  const plan = planRead(range, watermark);
+  const bucketSec = Math.round(Math.max(HOUR, Math.ceil(bucketMs / HOUR) * HOUR) / 1000);
+  const origin = floorHour(range.from.getTime()) / 1000;
+  const parts: BucketAgg[][] = [];
+  if (plan.rollup) parts.push((await rollupPart(ids, plan.rollup, bucketSec, origin, metrics)).buckets);
+  for (const span of plan.raw) parts.push((await rawPart(ids, span, bucketSec, origin, metrics)).buckets);
+  return mergeBucketAggs(parts).sort((a, b) => a.t - b.t);
 }

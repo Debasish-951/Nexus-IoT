@@ -17,6 +17,21 @@ import {
 
 const router: IRouter = Router();
 
+/**
+ * Per-client read limits (Integration Hub → API Client → Access). Both are
+ * optional; a client without them is answered exactly as before.
+ */
+function capRows(req: import("express").Request, requested: number): number {
+  const max = req.apiClient?.maxRows;
+  return max && max > 0 ? Math.min(requested, max) : requested;
+}
+function capFrom(req: import("express").Request, from: Date | undefined, to: Date | undefined): Date | undefined {
+  const days = req.apiClient?.maxRangeDays;
+  if (!days || days <= 0) return from;
+  const earliest = new Date((to ?? new Date()).getTime() - days * 86_400_000);
+  return !from || from < earliest ? earliest : from;
+}
+
 // Data leaving the platform is audited: one entry per successful export
 // download (who, which dataset, the filters used). Nothing of the data itself.
 router.use((req, res, next) => {
@@ -248,7 +263,7 @@ router.get("/export/assets", apiKeyAuth("read:assets"), validate({ query: Export
 router.get("/export/telemetry", apiKeyAuth("read:telemetry"), validate({ query: TelemetryExportQuery }), async (req, res): Promise<void> => {
   const { assetId, metric, from, to, limit, format } = req.query as z.infer<typeof TelemetryExportQuery>;
   // Already bounded and coerced by the schema; no NaN can reach the query.
-  const maxLimit = limit ?? 500;
+  const maxLimit = capRows(req, limit ?? 500);
 
   const scope = await exportScope(req);
   const decision = exportAssetDecision(scope, assetId);
@@ -261,7 +276,8 @@ router.get("/export/telemetry", apiKeyAuth("read:telemetry"), validate({ query: 
   }
   if (assetId) conditions.push(eq(telemetryTable.assetId, assetId));
   if (metric)  conditions.push(eq(telemetryTable.metric, metric));
-  if (from)    conditions.push(gte(telemetryTable.timestamp, from));
+  const fromCapped = capFrom(req, from, to);
+  if (fromCapped) conditions.push(gte(telemetryTable.timestamp, fromCapped));
   if (to)      conditions.push(lte(telemetryTable.timestamp, to));
 
   const rows = await db
@@ -283,7 +299,7 @@ router.get("/export/telemetry", apiKeyAuth("read:telemetry"), validate({ query: 
 // ── Alarms export ─────────────────────────────────────────────────────────────
 router.get("/export/alarms", apiKeyAuth("read:alarms"), validate({ query: AlarmExportQuery }), async (req, res): Promise<void> => {
   const { status, severity, limit, format } = req.query as z.infer<typeof AlarmExportQuery>;
-  const maxLimit = limit ?? 5000;
+  const maxLimit = capRows(req, limit ?? 5000);
 
   // Alarms with no asset (platform-wide) are left out for a project-assigned key.
   const scope = await exportScope(req);
@@ -319,7 +335,7 @@ router.get("/export/alarms", apiKeyAuth("read:alarms"), validate({ query: AlarmE
 // ── Alarm history export ──────────────────────────────────────────────────────
 router.get("/export/alarm-history", apiKeyAuth("read:alarm-history"), validate({ query: AlarmHistoryExportQuery }), async (req, res): Promise<void> => {
   const { assetId, from, to, limit, format } = req.query as z.infer<typeof AlarmHistoryExportQuery>;
-  const maxLimit = limit ?? 200;
+  const maxLimit = capRows(req, limit ?? 200);
 
   const scope = await exportScope(req);
   const decision = exportAssetDecision(scope, assetId);
@@ -331,7 +347,8 @@ router.get("/export/alarm-history", apiKeyAuth("read:alarm-history"), validate({
     conditions.push(inArray(alarmHistoryTable.assetId, [...scope!]));
   }
   if (assetId) conditions.push(eq(alarmHistoryTable.assetId, assetId));
-  if (from)    conditions.push(gte(alarmHistoryTable.triggeredAt, from));
+  const historyFrom = capFrom(req, from, to);
+  if (historyFrom) conditions.push(gte(alarmHistoryTable.triggeredAt, historyFrom));
   if (to)      conditions.push(lte(alarmHistoryTable.triggeredAt, to));
 
   const rows = await db

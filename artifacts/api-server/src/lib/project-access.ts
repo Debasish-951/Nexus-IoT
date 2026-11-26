@@ -51,9 +51,15 @@ export function assetScope(req: Request): Promise<AssetScope | null> {
 export async function ingestScope(req: Request): Promise<Set<string> | null> {
   if (req.principal) return (await assetScope(req))?.assetIds ?? null;
   const projectId = req.apiClient?.projectId;
-  if (!projectId) return null;
+  // Optional narrower limit set in Integration Hub → API Client → Access: only
+  // these assets and their children. Empty (the default) adds no limit.
+  const assetLimit = req.apiClient?.allowedAssetIds ?? [];
+  if (!projectId && assetLimit.length === 0) return null;
   const assets = await db.select({ id: assetsTable.id, parentId: assetsTable.parentId }).from(assetsTable);
-  return assetSubtree([projectId], assets);
+  const project = projectId ? assetSubtree([projectId], assets) : null;
+  if (assetLimit.length === 0) return project;
+  const narrowed = assetSubtree(assetLimit, assets);
+  return project ? new Set([...narrowed].filter((id) => project.has(id))) : narrowed;
 }
 
 /**
@@ -185,7 +191,7 @@ const FILTERED_LISTS: Array<{ path: RegExp; key: "id" | "assetId" }> = [
 ];
 
 /** Platform-wide configuration a restricted user may read but not change. */
-const SHARED_CONFIG = /^\/(brokers|destinations)(\/|$)/;
+const SHARED_CONFIG = /^\/(brokers|destinations|integration\/(destinations|deliveries|connectors))(\/|$)/;
 const TEMPLATE_PATH = /^\/asset-templates\/([^/]+)\/?$/;
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 

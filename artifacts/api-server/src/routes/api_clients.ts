@@ -117,13 +117,14 @@ async function refuseIfOutOfScope(req: Request, res: Response, id: string): Prom
  * it rotates. The only plaintext secret ever sent is the new one in the create
  * and rotate responses, added after this function runs.
  */
-function redactSecret<T extends { clientSecret?: string | null; clientSecretHash?: string | null; ingestTokenHash?: string | null; ingestTokenEnc?: string | null }>(
+function redactSecret<T extends { clientSecret?: string | null; clientSecretHash?: string | null; ingestTokenHash?: string | null; ingestTokenEnc?: string | null; previousSecretHash?: string | null }>(
   row: T,
-): Omit<T, "clientSecret" | "clientSecretHash" | "ingestTokenHash" | "ingestTokenEnc"> & { clientSecret: null } {
+): Omit<T, "clientSecret" | "clientSecretHash" | "ingestTokenHash" | "ingestTokenEnc" | "previousSecretHash"> & { clientSecret: null } {
   // The ingest URL token's hash and ciphertext are stripped too. Only decorate()
   // used to remove them, so create, update, rotate, revoke and restore responses
   // sent both to the browser.
-  const { clientSecret: _p, clientSecretHash: _s, ingestTokenHash: _h, ingestTokenEnc: _e, ...rest } = row;
+  // previousSecretHash (rotation grace period, Integration Hub) is stripped for the same reason as the current hash.
+  const { clientSecret: _p, clientSecretHash: _s, ingestTokenHash: _h, ingestTokenEnc: _e, previousSecretHash: _ps, ...rest } = row;
   return { ...rest, clientSecret: null };
 }
 
@@ -497,7 +498,9 @@ router.post("/api-clients/:id/rotate-secret", async (req, res): Promise<void> =>
     .update(apiClientsTable)
     // The legacy plaintext column is cleared as well, so rotating a
     // pre-hashing credential also retires its stored plaintext.
-    .set({ clientSecret: null, clientSecretHash: hashToken(newSecret), secretRotatedAt: new Date() })
+    // A grace period left by an Integration Hub rotation ends here too: this
+    // route has always been an immediate cut-over.
+    .set({ clientSecret: null, clientSecretHash: hashToken(newSecret), secretRotatedAt: new Date(), previousSecretHash: null, previousSecretExpiresAt: null })
     .where(eq(apiClientsTable.id, id))
     .returning();
 

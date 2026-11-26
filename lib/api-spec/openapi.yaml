@@ -3041,12 +3041,19 @@ paths:
         (engineer, developer, operator). Every figure is computed by the server
         from the database, limited to the assets the caller may see (project
         access) and to alarm data only when the caller has the Alarms module.
-        When an AI provider is configured (GROQ_API_KEY), only the figures the
-        level needs are sent to the model, which writes the narrative in that
-        level's shape. Without a provider, or when the model fails, the figures
-        are still returned with `narrative: null`, `narrativeStatus` and
-        `narrativeError`. Numbers in the narrative that are not in the figures
-        are listed in `unverifiedNumbers`. Rate limited per user.
+        The report is built from the database only, never from Visualization
+        or dashboard data. When an AI provider is configured (GROQ_API_KEY),
+        the figures the level needs are sent to the model, which then
+        investigates the database with the AI Advisor read-only tools (kept to
+        the report's assets and period and to the caller's modules; at most 8
+        tool calls, 6 model turns and about 40 seconds) and writes the narrative
+        in that level's shape. `investigation` lists the lookups. If the
+        investigation fails, one call writes the narrative from the figures
+        alone (mode "single"); if that fails too, or without a provider, the
+        figures are still returned with `narrative: null`, `narrativeStatus`
+        and `narrativeError` (mode "none"). Numbers in the narrative that are
+        neither in the figures nor in a tool result are listed in
+        `unverifiedNumbers`. Rate limited per user.
       requestBody:
         required: true
         content:
@@ -6947,6 +6954,8 @@ components:
           type: array
           items:
             type: string
+        investigation:
+          $ref: "#/components/schemas/AiReportInvestigation"
         alarmsIncluded:
           type: boolean
         generatedAt:
@@ -6960,7 +6969,29 @@ components:
         model:
           type: string
           nullable: true
-      required: [level, facts, narrative, narrativeStatus, narrativeError, unverifiedNumbers, alarmsIncluded, generatedAt, range, scope, model]
+      required: [level, facts, narrative, narrativeStatus, narrativeError, unverifiedNumbers, investigation, alarmsIncluded, generatedAt, range, scope, model]
+    AiReportInvestigation:
+      type: object
+      description: "How the narrative was written. investigated: the model looked up the database with read-only tools; single: written from the figures alone after the investigation failed; none: no narrative."
+      properties:
+        mode:
+          type: string
+          enum: [investigated, single, none]
+        steps:
+          type: array
+          items:
+            type: object
+            properties:
+              tool:
+                type: string
+              summary:
+                type: string
+            required: [tool, summary]
+        toolCalls:
+          type: integer
+        durationMs:
+          type: integer
+      required: [mode, steps, toolCalls, durationMs]
 
     # ─── Activity log ────────────────────────────────────────────────────────
     ActivityLogEntry:

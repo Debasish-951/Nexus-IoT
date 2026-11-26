@@ -175,6 +175,39 @@ const ROUTE_RULES: Rule[] = [
   { path: "/api-clients/:id",          methods: ["DELETE"], permission: "manage_api_clients", module: "api_clients", level: "delete" },
   { path: "/api-clients/:id/:action",  methods: ["POST"],  permission: "manage_api_clients", module: "api_clients", level: "write" },
 
+  // ── Integration Hub management (/integration/*) ────────────────────────────
+  { path: "/integration/catalog",                    methods: READ,     anyModule: ["brokers", "api_clients"] },
+  { path: "/integration/alerts",                     methods: READ,     anyModule: ["brokers", "api_clients"] },
+  { path: "/integration/verify-signature",           methods: ["POST"], anyModule: ["brokers", "api_clients"] },
+  { path: "/integration/clients",                    methods: READ,     module: "api_clients" },
+  { path: "/integration/clients/:id/usage",          methods: READ,     module: "api_clients" },
+  { path: "/integration/clients/:id/access",         methods: ["PUT"],  permission: "manage_api_clients", module: "api_clients", level: "write" },
+  { path: "/integration/clients/:id/:action",        methods: ["POST"], permission: "manage_api_clients", module: "api_clients", level: "write" },
+  { path: "/integration/destinations",               methods: READ,     module: "brokers" },
+  { path: "/integration/destinations/:id/delivery",  methods: ["PUT"],  permission: "manage_destinations", module: "brokers", level: "write" },
+  { path: "/integration/destinations/:id/:action",   methods: ["POST"], permission: "manage_destinations", module: "brokers", level: "write" },
+  { path: "/integration/deliveries",                 methods: READ,     module: "brokers" },
+  { path: "/integration/deliveries/:id/resend",      methods: ["POST"], permission: "manage_destinations", module: "brokers", level: "write" },
+  { path: "/integration/connectors",                 methods: READ,     module: "brokers" },
+  { path: "/integration/connectors",                 methods: ["POST"], permission: "manage_brokers", module: "brokers", level: "write" },
+  { path: "/integration/connectors/:id",             methods: ["PUT"],  permission: "manage_brokers", module: "brokers", level: "write" },
+  { path: "/integration/connectors/:id",             methods: ["DELETE"], permission: "manage_brokers", module: "brokers", level: "delete" },
+  { path: "/integration/connectors/:id/:action",     methods: ["POST"], permission: "manage_brokers", module: "brokers", level: "write" },
+
+  // ── Third-party API v1 (machine callers; routes check scopes via apiKeyAuth) ─
+  { path: "/oauth/token",                 methods: ["POST"], public: true },
+  { path: "/v1/openapi.json",             methods: READ,     public: true },
+  { path: "/v1/event-types",              methods: READ,     public: true },
+  { path: "/v1/assets",                   methods: READ,     module: "api_clients", allowApiKey: true },
+  { path: "/v1/assets/:id",               methods: READ,     module: "api_clients", allowApiKey: true },
+  { path: "/v1/assets/:id/telemetry",     methods: READ,     module: "api_clients", allowApiKey: true },
+  { path: "/v1/assets/:id/attributes",    methods: ["PUT"],  module: "api_clients", level: "write", allowApiKey: true },
+  { path: "/v1/assets/:id/maintenance",   methods: ["POST"], module: "api_clients", level: "write", allowApiKey: true },
+  { path: "/v1/alarms",                   methods: READ,     module: "api_clients", allowApiKey: true },
+  { path: "/v1/alarms/:id/acknowledge",   methods: ["POST"], module: "api_clients", level: "write", allowApiKey: true },
+  { path: "/v1/alarm-rules",              methods: READ,     module: "api_clients", allowApiKey: true },
+  { path: "/v1/events",                   methods: READ,     module: "api_clients", allowApiKey: true },
+
   // ── Visualization ──────────────────────────────────────────────────────────
   // Visualization hierarchy + each node's dashboard. `/viz-nodes/import` must
   // precede `/viz-nodes/:id` or "import" is read as a node id — and it is a POST

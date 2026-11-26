@@ -10,6 +10,8 @@ import { logger } from "../lib/logger";
 import { correlationIdOf } from "../lib/errors";
 import { CreateDestinationBody, UpdateDestinationBody, IdParams } from "../schemas/common";
 import { encryptSecret, decryptSecret } from "../lib/secret-box";
+import { projectOf } from "../lib/integration/events";
+import { signPayload, SIGNATURE_HEADER, TIMESTAMP_HEADER } from "../lib/integration/signing";
 
 /**
  * Credential columns on this table, and the AAD context each is bound to.
@@ -43,7 +45,7 @@ function toClient(row: typeof destinationsTable.$inferSelect) {
 }
 
 /** Decrypt the credentials for a row that is about to be USED, never returned. */
-function withPlaintext(row: typeof destinationsTable.$inferSelect) {
+export function withPlaintext(row: typeof destinationsTable.$inferSelect) {
   return {
     ...row,
     token: decryptSecret(row.token, ctx("token")),
@@ -171,7 +173,7 @@ router.post("/destinations/:id/test", async (req, res): Promise<void> => {
 // ── Forward event to all matching destinations ─────────────────────────────
 
 /** Headers for a destination's auth type. `apikey` is the legacy spelling of `api_key`. */
-function authHeaders(dest: ReturnType<typeof withPlaintext>): Record<string, string> {
+export function authHeaders(dest: ReturnType<typeof withPlaintext>): Record<string, string> {
   const headers: Record<string, string> = { "Content-Type": "application/json" };
   const authType = dest.authType === "apikey" ? "api_key" : dest.authType;
   if (authType === "bearer" && dest.token)     headers["Authorization"] = `Bearer ${dest.token}`;
@@ -208,8 +210,15 @@ export async function forwardToDestinations(eventType: "alarm" | "telemetry", pa
     logger.warn({ err }, "could not load destinations; event not forwarded");
     return;
   }
+  // Destinations switched to "queued" delivery get their events from the outbox
+  // (lib/integration/events.ts) with retries, so they are skipped here to avoid
+  // sending twice. Old rows default to "direct" and are unaffected.
+  destinations = destinations.filter((d) => d.deliveryMode !== "queued");
+  const scoped = destinations.some((d) => d.projectId);
+  const eventProject = scoped ? await projectOf(typeof payload.assetId === "string" ? payload.assetId : null).catch(() => null) : null;
   await Promise.all(destinations.map(async (stored) => {
     if (!(stored.eventTypes ?? []).includes(eventType)) return;
+    if (stored.projectId && stored.projectId !== eventProject) return;
     let dest: ReturnType<typeof withPlaintext>;
     try {
       // Decrypted per send, at the moment the header is built, and never held
@@ -230,9 +239,16 @@ export async function forwardToDestinations(eventType: "alarm" | "telemetry", pa
       return;
     }
     try {
+      const body = JSON.stringify({ event: eventType, ...payload });
+      const headers = authHeaders(dest);
+      if (stored.signatureEnabled && dest.secretKey) {
+        const ts = Math.floor(Date.now() / 1000);
+        headers[TIMESTAMP_HEADER] = String(ts);
+        headers[SIGNATURE_HEADER] = signPayload(dest.secretKey, ts, body);
+      }
       const r = await safeFetch(dest.endpoint, {
-        method: "POST", headers: authHeaders(dest),
-        body: JSON.stringify({ event: eventType, ...payload }),
+        method: "POST", headers,
+        body,
         signal: AbortSignal.timeout(6000),
       });
       await recordOutcome(dest.id, {

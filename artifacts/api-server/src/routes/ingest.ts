@@ -15,6 +15,7 @@ import { logger } from "../lib/logger";
 import { ingestScope, recordIngestOutOfScope } from "../lib/project-access";
 import { csvCell } from "../lib/validation";
 import { forwardToDestinations } from "./destinations";
+import { emitLater } from "../lib/integration/events";
 
 const router: IRouter = Router();
 
@@ -918,6 +919,8 @@ export async function processNormalised(
     // not throw; the catch is belt and braces for an unhandled rejection.
     void forwardToDestinations("alarm", { alarmEvent: ev.event, ...alarmPayload })
       .catch((err) => logger.warn({ err }, "alarm forwarding to destinations failed"));
+    // Outbox for queued destinations and GET /api/v1/events. Never throws.
+    emitLater(ev.event === "triggered" ? "alarm.triggered" : "alarm.cleared", { assetId, payload: alarmPayload });
   }
 
   recordsWritten += records.length;

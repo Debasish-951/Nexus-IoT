@@ -9,6 +9,7 @@ import {
 } from "@workspace/api-zod";
 import { logActivity } from "./activity_log";
 import { broadcast } from "../lib/ws-broadcast";
+import { emitLater } from "../lib/integration/events";
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -80,6 +81,7 @@ router.post("/alarms/:id/acknowledge", async (req, res): Promise<void> => {
     .where(and(eq(alarmHistoryTable.alarmId, alarm.id), eq(alarmHistoryTable.status, "active")));
 
   void logActivity("alarm.acknowledged", "alarm", alarm.id, alarm.name, null, req);
+  emitLater("alarm.acknowledged", { assetId: alarm.assetId, payload: { alarmId: alarm.id, name: alarm.name, severity: alarm.severity, assetId: alarm.assetId, assetName: alarm.assetName, acknowledgedAt: now.toISOString(), by: req.principal?.user.username ?? req.apiClient?.name ?? null } });
   broadcast("alarm", {
     event: "acknowledged",
     alarmId: alarm.id,

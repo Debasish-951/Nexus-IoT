@@ -22,3 +22,4 @@ export * from "./seen_devices";
 export * from "./uploads";
 export * from "./telemetry_rollups";
 export * from "./data_ops";
+export * from "./integrations";

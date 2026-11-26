@@ -8,6 +8,11 @@ most 92 days). It runs on demand only; there is no scheduled or emailed report y
 AI Advisor is a licensed feature and needs an internet connection: the written insight comes
 from an external model (Groq today, through `lib/llm.ts` so the provider can be changed).
 
+**Required approach.** A report is built from the database only, never from Visualization or
+dashboard data: first the figures are computed in code (the trusted base), then the AI
+investigates the database with read-only tools kept to the report's scope and period, and
+only then writes. Keep new report work to this approach.
+
 ## Who gets which report
 
 The report is written for the reader's level, decided on the server from the user's role
@@ -83,14 +88,47 @@ it comes from the role.
    - possibly stuck sensors: 20 or more readings, all the same value
 
    Alarm figures are included only when the user has the Alarms module.
-2. **Narrative (AI).** Only the figures the level needs are sent to the AI service, without
-   asset ids. Each level has its own instructions and JSON shape. The model must explain why
-   things happened from the figures (correlations, early signals, repeat alarms, timing,
-   maintenance, data gaps), phrase causes as hypotheses and never invent or recalculate
-   numbers.
-3. **Checks.** The answer must be the level's JSON, or it is discarded. Numbers in the text
-   that are not found in the figures (allowing rounding; dates, tag numbers and small counts
-   are ignored) are listed on the page as "check before sharing".
+2. **Investigation (AI, read-only database tools).** The figures the level needs are sent to
+   the AI service, without asset ids, wrapped as untrusted data (asset, metric and alarm names
+   are written by devices and users, so text inside them is never followed as an instruction).
+   The model picks the 2-4 most important problems or changes and investigates them in the
+   database with the same read-only tools as the Advisor chat (`lib/ai-report-agent.ts`):
+   - telemetry: find assets and metrics by name, latest readings, a metric's history and
+     statistics, a metric compared across machines (over more than two days these read the
+     hourly summaries plus the raw head and tail, so long periods do not time out);
+   - alarms: current alarms, alarm history, **alarm rules and limits** (`get_alarm_rules`);
+   - the asset: health, **attributes** such as rated values and set points
+     (`get_asset_attributes`);
+   - **recent configuration changes** from the audit log for the asset and the assets beneath
+     it in the period: who changed which rule, attribute or maintenance setting
+     (`get_recent_changes`; URL, key and secret fields are hidden).
+
+   Every tool is limited to the report's assets (refused for any other asset id), the report
+   period and the user's modules (alarm tools need Alarms, attributes need Assets, changes need
+   Audit Log). The model must base each finding on a figure or a tool result, phrase causes as
+   hypotheses and never invent or recalculate numbers.
+3. **Narrative.** The model then answers with the level's JSON.
+4. **Checks.** The answer must be the level's JSON, or it is discarded. Numbers in the text
+   that are found neither in the figures nor in a tool result (allowing rounding; dates, tag
+   numbers and small counts are ignored) are listed on the page and in the PDF as "check
+   before sharing".
+
+**Budgets.** At most 8 tool calls, 6 model turns and about 38 seconds for the investigation
+(12 seconds of it kept for the final answer); all AI work of a report ends within 48 seconds,
+so the request stays under nginx's default 60 s timeout (the deployment guide also raises it
+for `/api/ai/`).
+
+**Token cost.** Every investigation turn resends the figures and the lookups so far, so a report uses roughly 3-5 times the tokens of a single call (about 10-20k). On Groq's free tier, whose per-minute token limit is close to that, the investigation often hits the limit after one or two lookups and the text is then written by the single call (or, if that is limited too, the report shows the figures only). Use a paid tier for regular use. Short waits for the limit are retried up to twice within the time budget.
+
+**Fallbacks.** If the investigation fails or runs out of time, one call writes the narrative
+from the figures alone; if that fails too, the report is the figures without a narrative
+(below). A usage limit hit during the investigation also falls back to the single call, which
+needs far fewer tokens; a usage limit there is reported ("try again in about N seconds").
+
+**How this report was investigated.** The page shows a collapsible list of the lookups (tool
+and a short summary), how the text was written (`investigated`, `single` or `none`), the
+number of lookups and the time taken. The PDF ends with the same list as an "Investigation"
+appendix.
 
 AI-written sections are marked **AI-generated**. **Edit text** turns them into text boxes
 (items can be added and removed) before export. **PDF** exports the report with the edited
@@ -119,9 +157,11 @@ fails, is rate limited or answers with something unreadable (`failed`, `rate_lim
   off (`TELEMETRY_ROLLUPS=false`) or not built yet, the whole period is read from raw
   telemetry, which can hit the statement timeout for large projects and long periods.
 - Each report is written to the Activity Log (`ai.report`) with the scope, level, period,
-  asset count and the narrative status.
-- What leaves the server: asset names, metric names and the computed figures, never raw
-  readings or ids.
+  asset count, how the text was written (`mode`), the tools used and the narrative status.
+- What leaves the server: the computed figures (asset and metric names, no ids), and the
+  results of the investigation's lookups: asset ids and names, metric names and bucketed or
+  summary values, alarm names and messages, alarm limits, attribute values, and change
+  records with the user name and role of whoever made them. Never secrets, URLs or keys.
 
 ## Older pages and links
 
@@ -138,8 +178,10 @@ fails, is rate limited or answers with something unreadable (`failed`, `rate_lim
 | File | What it holds |
 |---|---|
 | `artifacts/api-server/src/lib/ai-report.ts` | Role to level mapping, figures, health score, model input per level, narrative checks, request checks (pure, unit-tested) |
-| `artifacts/api-server/src/lib/llm.ts` | The AI provider seam (Groq today) |
+| `artifacts/api-server/src/lib/ai-report-agent.ts` | The investigation: tool loop, budgets, fallback chain (unit-tested with a fake model) |
+| `artifacts/api-server/src/lib/llm.ts` | The AI provider seam (Groq today): single completion and tool-calling turn |
 | `artifacts/api-server/src/lib/report-telemetry.ts` | Reads a period from hourly summaries plus short raw spans, and merges them (split and merge unit-tested) |
-| `artifacts/api-server/src/routes/ai.ts` | `POST /ai/report`: database queries, AI call, fallback, activity log |
+| `artifacts/api-server/src/routes/ai.ts` | `POST /ai/report`: database queries, the read-only tools (shared with the chat), the investigation's tool runner, activity log |
 | `artifacts/api-server/src/tests/ai-report.test.ts` | Tests for levels, figures, correlation, timing, narrative checks and the fallback |
+| `artifacts/api-server/src/tests/ai-report-agent.test.ts` | Tests for the investigation: budgets, deadline, fallback chain, verified numbers, tool scope and module gating |
 | `artifacts/iot-platform/src/features/aiReport/` | AI Reports page (`AiReportsPage.tsx`), types, PDF and CSV export |

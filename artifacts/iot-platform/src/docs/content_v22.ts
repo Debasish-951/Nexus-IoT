@@ -891,6 +891,8 @@ export function buildDocumentContent_v22(): ContentItem[] {
 
     h2("14.2 AI Reports"),
     p("AI Advisor > AI Reports writes one report for the reader's level. The level comes from the user's role; there is no report-type list to choose from."),
+    p("A report is built from the database only, never from Visualization or dashboard data. First the server computes every figure in code; these figures are the trusted base of the report. Then the AI service investigates the database with read-only tools, limited to the selected project or asset, the report period and the user's access: it drills into the affected assets and metrics, compares periods, and checks alarm history, alarm rules and limits, asset attributes (rated values, set points) and recent configuration changes. Only then does it write the report."),
+    p("The investigation is limited to 8 database lookups and about 40 seconds. If it does not complete, the text is written from the computed figures alone; if the AI service is not available, the report shows the figures only. 'How this report was investigated' lists every lookup, and the PDF ends with the same list. Numbers in the AI text that appear neither in the figures nor in a lookup are flagged 'check before sharing'."),
     table(
       ["Level", "Roles", "Content"],
       [

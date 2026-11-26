@@ -1,4 +1,4 @@
-import { useMemo, useState, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useSearch } from "wouter";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -8,7 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
-  AlertTriangle, ArrowDownRight, ArrowUpRight, Download, FileText, Info, Loader2, Minus, Pencil, Play, Plus, RefreshCw, Sparkles, Trash2, Check,
+  AlertTriangle, ArrowDownRight, ArrowUpRight, ChevronDown, Database, Download, FileText, Info, Loader2, Minus, Pencil, Play, Plus, RefreshCw, Sparkles, Trash2, Check,
 } from "lucide-react";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, Legend, LineChart, Line, CartesianGrid } from "recharts";
 import { apiFetch } from "@/lib/auth-api";
@@ -19,8 +19,8 @@ import { useT } from "@/i18n";
 import { cn } from "@/lib/utils";
 import { AssetScopePicker } from "@/components/AssetScopePicker";
 import {
-  LEVEL_LABEL, STATUS_LABEL, URGENCY_LABEL,
-  type AiReport, type EngineerNarrative, type ExecutiveNarrative, type KpiCard, type ManagerNarrative, type ReportFacts, type ReportLevel, type ReportNarrative,
+  INVESTIGATION_MODE_LABEL, LEVEL_LABEL, STATUS_LABEL, TOOL_LABEL, URGENCY_LABEL,
+  type AiReport, type Investigation, type EngineerNarrative, type ExecutiveNarrative, type KpiCard, type ManagerNarrative, type ReportFacts, type ReportLevel, type ReportNarrative,
 } from "./types";
 import { cardValue, downloadFactsCsv, downloadReportPdf } from "./exportReport";
 
@@ -71,6 +71,15 @@ export default function AiReportsPage() {
   const [report, setReport] = useState<AiReport | null>(null);
   const [draft, setDraft] = useState<ReportNarrative | null>(null);
   const [editing, setEditing] = useState(false);
+  // Seconds since Generate, shown while the report is computed and investigated.
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!busy) return;
+    const started = Date.now();
+    setElapsed(0);
+    const id = setInterval(() => setElapsed(Math.round((Date.now() - started) / 1000)), 1000);
+    return () => clearInterval(id);
+  }, [busy]);
 
   const range = (): { from: Date; to: Date } => {
     if (preset === "custom") return { from: new Date(from), to: new Date(to) };
@@ -169,7 +178,7 @@ export default function AiReportsPage() {
         </div>
         {rangeError && <p className="text-xs text-destructive mt-2">{rangeError}</p>}
         <p className="text-[11px] text-muted-foreground mt-2">
-          {t("Every figure is computed from your platform data. Only those figures are sent to the AI service, which explains them; it cannot change anything.")}
+          {t("Every figure is computed from your platform database. The AI service then looks up more data with read-only tools, limited to this scope and period, and explains it; it cannot change anything.")}
         </p>
       </Card>
 
@@ -178,7 +187,8 @@ export default function AiReportsPage() {
       {busy && !report && (
         <div className="flex-1 flex flex-col items-center justify-center text-center text-muted-foreground py-16 gap-2">
           <Loader2 className="w-8 h-8 animate-spin opacity-60" />
-          <p className="text-sm">{t("Computing the figures and writing the insight. This takes up to a minute.")}</p>
+          <p className="text-sm">{elapsed < 6 ? t("Analysing your data…") : t("Investigating the database and writing the report…")} <span className="font-mono">{elapsed}s</span></p>
+          <p className="text-xs">{t("This takes up to a minute.")}</p>
         </div>
       )}
 
@@ -230,9 +240,10 @@ export default function AiReportsPage() {
             )}
             {report.unverifiedNumbers.length > 0 && (
               <div className="mt-3 rounded-md border border-amber-500/40 bg-amber-500/10 text-xs px-3 py-2">
-                {t("These numbers in the AI text were not found in the computed figures; check them before sharing:")} <span className="font-mono">{report.unverifiedNumbers.join(", ")}</span>
+                {t("These numbers in the AI text were not found in the computed figures or the database lookups; check them before sharing:")} <span className="font-mono">{report.unverifiedNumbers.join(", ")}</span>
               </div>
             )}
+            {report.investigation && report.investigation.mode !== "none" && <InvestigationPanel inv={report.investigation} />}
             {!report.alarmsIncluded && <p className="text-xs text-muted-foreground flex items-center gap-1 mt-2"><Info className="w-3.5 h-3.5" />{t("Alarm figures are left out: your account has no access to Alarms.")}</p>}
             {draft && <p className="text-[11px] text-muted-foreground flex items-center gap-1 mt-2"><Sparkles className="w-3 h-3 text-primary" />{t("Sections marked AI-generated were written by AI from the figures. Check them, and edit them before exporting if needed.")}</p>}
           </Card>
@@ -247,6 +258,36 @@ export default function AiReportsPage() {
 }
 
 type Upd = (fn: (d: any) => void) => void;
+
+/** "How this report was investigated": the database lookups the AI made, collapsed by default. */
+function InvestigationPanel({ inv }: { inv: Investigation }) {
+  const t = useT();
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="mt-3 rounded-md border text-xs">
+      <button type="button" className="w-full flex items-center gap-2 px-3 py-2 text-left" onClick={() => setOpen(!open)} aria-expanded={open}>
+        <Database className="w-3.5 h-3.5 text-primary shrink-0" />
+        <span className="font-medium">{t("How this report was investigated")}</span>
+        <span className="text-muted-foreground">· {t(INVESTIGATION_MODE_LABEL[inv.mode])} · {t("{n} lookups", { n: inv.toolCalls })} · {Math.round(inv.durationMs / 1000)}s</span>
+        <ChevronDown className={cn("w-3.5 h-3.5 ml-auto transition-transform", open && "rotate-180")} />
+      </button>
+      {open && (
+        <div className="border-t px-3 py-2">
+          {inv.steps.length === 0 ? (
+            <p className="text-muted-foreground">{t("The AI wrote the text from the computed figures without further lookups.")}</p>
+          ) : (
+            <ol className="list-decimal pl-5 space-y-1">
+              {inv.steps.map((s, i) => (
+                <li key={i}><span className="font-medium">{t(TOOL_LABEL[s.tool] ?? s.tool)}</span>{s.summary ? <span className="text-muted-foreground"> — {s.summary}</span> : null}</li>
+              ))}
+            </ol>
+          )}
+          <p className="text-muted-foreground mt-2">{t("Every lookup is read-only and limited to the selected project or asset, the report period and your access.")}</p>
+        </div>
+      )}
+    </div>
+  );
+}
 
 // ── building blocks ──────────────────────────────────────────────────────────
 

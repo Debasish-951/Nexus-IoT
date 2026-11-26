@@ -199,6 +199,12 @@ export const API_SCOPE_OPTIONS = [
   { id: "read:telemetry",     label: "Read Telemetry",     kind: "read"  as const },
   { id: "read:alarms",        label: "Read Alarms",        kind: "read"  as const },
   { id: "read:alarm-history", label: "Read Alarm History", kind: "read"  as const },
+  // Integration Hub: third-party read/write API (/api/v1) and the event feed.
+  { id: "read:alarm-rules",   label: "Read Alarm Rules",   kind: "read"  as const },
+  { id: "read:events",        label: "Read Event Feed",    kind: "read"  as const },
+  { id: "write:alarms",       label: "Acknowledge Alarms", kind: "write" as const },
+  { id: "write:attributes",   label: "Set Attribute Values", kind: "write" as const },
+  { id: "write:maintenance",  label: "Set Maintenance Mode", kind: "write" as const },
 ];
 
 export const API_SCOPE_IDS = API_SCOPE_OPTIONS.map((s) => s.id);

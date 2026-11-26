@@ -8,6 +8,8 @@ import {
   attributesTable,
   alarmsTable,
   alarmHistoryTable,
+  alarmRulesTable,
+  activityLogsTable,
   brokersTable,
   usersTable,
 } from "@workspace/db";
@@ -19,11 +21,12 @@ import { logActivity } from "./activity_log";
 import { assetScope } from "../lib/project-access";
 import { parseScopeAssetId, scopeNote, scopeRefusal, subtree, type ChatScope } from "../lib/ai-scope";
 import {
-  buildFacts, parseNarrative, parseReportRequest, previousRange, reportLevelFor, reportMessages, unverifiedNumbers,
-  NARRATIVE_MESSAGES, type ReportFacts, type ReportInput, type ReportNarrative,
+  buildFacts, parseReportRequest, previousRange, reportLevelFor,
+  REPORT_MAX_DAYS, type ReportFacts, type ReportInput, type ReportNarrative,
 } from "../lib/ai-report";
-import { LlmRateLimitError, llmComplete, llmConfigured, llmModel } from "../lib/llm";
-import { hourlyWatermark, loadPeriod, reportBucketMs } from "../lib/report-telemetry";
+import { writeReportNarrative, type AgentDeps, type NarrativeStatus } from "../lib/ai-report-agent";
+import { llmChat, llmComplete, llmConfigured, llmModel } from "../lib/llm";
+import { hourlyWatermark, loadBucketAggs, loadPeriod, reportBucketMs, type BucketAgg } from "../lib/report-telemetry";
 
 const router: IRouter = Router();
 
@@ -94,7 +97,9 @@ RULES:
 - The user's latest message states the selected TIME RANGE.
   * query_telemetry, aggregate_telemetry and get_alarm_history are automatically limited to this range.
   * asset_health, get_latest_telemetry, get_alarms and fleet_summary describe the current state, not the range; say so when you use them.
-  * When the range holds no data, say so and use dataAvailable to tell the user when data does exist.`;
+  * When the range holds no data, say so and use dataAvailable to tell the user when data does exist.
+- To explain a cause, get_alarm_rules (limits), get_asset_attributes (rated values, set points) and get_recent_changes
+  (who changed what in the range) can help.`;
 
 // ── Tool implementations (all READ-ONLY) ────────────────────────────────────────
 
@@ -278,7 +283,7 @@ function ambiguousMetric(requested: string, candidates: string[]) {
 
 // The analysis window the user picked in the UI. The server applies it to every
 // history tool itself, so the model cannot widen, shift or forget it.
-interface ToolContext {
+export interface ToolContext {
   from: Date;
   to: Date;
   /** The caller's access, for tools whose result depends on more than one module. */
@@ -305,10 +310,57 @@ async function metricDataSpan(assetId: string, metric: string) {
   return { first: row?.first ?? null, last: row?.last ?? null };
 }
 
+// Over more than two days, the history tools read the hourly summaries (plus the
+// raw head and tail, lib/report-telemetry.ts) instead of scanning raw telemetry,
+// which over weeks of a busy asset cannot finish inside the statement timeout.
+// Their output keeps the same shape, with `source` saying where it came from.
+const LONG_RANGE_MS = 2 * 86_400_000;
+const HOUR_MS = 3_600_000;
+const SUMMARY_SOURCE = "hourly summaries (long range)";
+const isLongRange = (ctx: ToolContext) => ctx.to.getTime() - ctx.from.getTime() > LONG_RANGE_MS;
+const r3 = (v: number) => Math.round(v * 1000) / 1000;
+
+/** Count, average, min and max of bucket aggregates, and the regression slope of their averages per hour. */
+export function summariseAggs(aggs: BucketAgg[]) {
+  const withData = aggs.filter((a) => a.n > 0 && a.sum != null);
+  const n = withData.reduce((s, a) => s + a.n, 0);
+  if (!n) return null;
+  const sum = withData.reduce((s, a) => s + (a.sum ?? 0), 0);
+  const avgs = withData.map((a) => ({ x: a.t / HOUR_MS, y: (a.sum ?? 0) / a.n }));
+  const my = avgs.reduce((s, p) => s + p.y, 0) / avgs.length;
+  const mx = avgs.reduce((s, p) => s + p.x, 0) / avgs.length;
+  const sxx = avgs.reduce((s, p) => s + (p.x - mx) ** 2, 0);
+  const sxy = avgs.reduce((s, p) => s + (p.x - mx) * (p.y - my), 0);
+  const sd = avgs.length > 1 ? Math.sqrt(avgs.reduce((s, p) => s + (p.y - my) ** 2, 0) / (avgs.length - 1)) : null;
+  return {
+    n,
+    avg: r3(sum / n),
+    min: Math.min(...withData.map((a) => a.min ?? Infinity)),
+    max: Math.max(...withData.map((a) => a.max ?? -Infinity)),
+    stddevOfHourlyAvg: sd == null ? null : r3(sd),
+    trendPerHour: sxx > 0 ? Math.round((sxy / sxx) * 10_000) / 10_000 : null,
+    first: withData[0]!, last: withData[withData.length - 1]!,
+  };
+}
+
 async function queryTelemetry(args: { assetId: string; metric: string }, ctx: ToolContext) {
   const resolved = await resolveMetricName(args.assetId, args.metric);
   if (Array.isArray(resolved)) return ambiguousMetric(args.metric, resolved);
   const metric = resolved;
+
+  if (isLongRange(ctx)) {
+    const span = ctx.to.getTime() - ctx.from.getTime();
+    const aggs = await loadBucketAggs([args.assetId], [metric], { from: ctx.from, to: ctx.to }, Math.ceil(span / QUERY_TELEMETRY_MAX_POINTS));
+    if (aggs.length > 0) {
+      return {
+        metric,
+        columns: ["bucket_start", "avg", "min", "max", "readings"],
+        buckets: aggs.map((a) => [new Date(a.t).toISOString(), a.sum == null ? null : r3(a.sum / a.n), a.min, a.max, a.n]),
+        dataAvailable: await metricDataSpan(args.assetId, metric),
+        source: SUMMARY_SOURCE,
+      };
+    }
+  }
 
   // Averaged into buckets spread evenly over the range. Returning the latest N raw
   // points showed only the final minutes of a long range.
@@ -371,6 +423,21 @@ async function aggregateTelemetry(args: { assetId: string; metric: string }, ctx
   const resolved = await resolveMetricName(args.assetId, args.metric);
   if (Array.isArray(resolved)) return ambiguousMetric(args.metric, resolved);
   const metric = resolved;
+  if (isLongRange(ctx)) {
+    const s = summariseAggs(await loadBucketAggs([args.assetId], [metric], { from: ctx.from, to: ctx.to }, HOUR_MS));
+    return {
+      metric,
+      stats: s && {
+        n: s.n, avg: s.avg, min: s.min, max: s.max, stddev: s.stddevOfHourlyAvg,
+        value_changes: null, avg_change_size: null, max_change_size: null, avg_change_pct_of_range: null, minutes_between_changes: null,
+        trend_per_hour: s.trendPerHour,
+        first_ts: new Date(s.first.t).toISOString(), last_ts: new Date(s.last.t + HOUR_MS).toISOString(),
+      },
+      dataAvailable: await metricDataSpan(args.assetId, metric),
+      source: SUMMARY_SOURCE,
+      note: "Long range: n, avg, min and max are exact; stddev and trend_per_hour come from hourly averages; change statistics need raw readings and are not computed. Narrow the range to under two days for them.",
+    };
+  }
   // Only aggregate numeric values. Change statistics count only readings where
   // the value actually moved: ingest often stores the same value many times
   // between sensor updates (>95% repeats in practice), and averaging over those
@@ -562,7 +629,28 @@ async function compareMetrics(args: { parameter: string; scope?: string }, ctx: 
   const metrics = [...new Set(selected.map((m) => m.metric))];
   const assetIds = [...new Set(selected.map((m) => m.assetId))];
 
-  const rows = await db.execute<{
+  type Row = { asset_id: string; metric: string; n: number; min: number; max: number; avg: number; first: number; last: number };
+  let source: string | undefined;
+  let rows: { rows: Row[] };
+  if (isLongRange(ctx)) {
+    const span = ctx.to.getTime() - ctx.from.getTime();
+    const aggs = await loadBucketAggs(assetIds, metrics, { from: ctx.from, to: ctx.to }, Math.ceil(span / 48));
+    const byPair = new Map<string, BucketAgg[]>();
+    for (const a of aggs) {
+      if (!selected.some((m) => m.assetId === a.assetId && m.metric === a.metric)) continue;
+      const k = `${a.assetId} ${a.metric}`;
+      byPair.set(k, [...(byPair.get(k) ?? []), a]);
+    }
+    const out: Row[] = [];
+    for (const list of byPair.values()) {
+      const s = summariseAggs(list);
+      if (!s) continue;
+      const avgOf = (a: BucketAgg) => r3((a.sum ?? 0) / a.n);
+      out.push({ asset_id: list[0]!.assetId, metric: list[0]!.metric, n: s.n, min: s.min, max: s.max, avg: s.avg, first: avgOf(s.first), last: avgOf(s.last) });
+    }
+    rows = { rows: out.sort((a, b) => b.avg - a.avg) };
+    source = `${SUMMARY_SOURCE}; first and last are the averages of the first and last time buckets`;
+  } else rows = await db.execute<{
     asset_id: string; metric: string; n: number; min: number; max: number; avg: number; first: number; last: number;
   }>(sql`
     SELECT
@@ -597,9 +685,89 @@ async function compareMetrics(args: { parameter: string; scope?: string }, ctx: 
       return [assetNames.get(r.asset_id), machine, leaf, r.n, r.min, r.max, r.avg, r.first, r.last];
     }),
     noDataInRange: selected.filter((m) => !withData.has(`${m.assetId} ${m.metric}`)).map((m) => m.metric),
+    ...(source ? { source } : {}),
     ...(matched.length > COMPARE_MAX_METRICS
       ? { note: `Only the first ${COMPARE_MAX_METRICS} of ${matched.length} matching metrics are included; narrow the scope.` }
       : {}),
+  };
+}
+
+const clipText = (v: unknown, n: number) => (typeof v === "string" && v.length > n ? `${v.slice(0, n - 1)}…` : v);
+
+/** Alarm rules (limits) of one asset, enabled or not. Webhook settings are not included. */
+async function getAlarmRules(args: { assetId: string }) {
+  const rows = await db
+    .select({
+      name: alarmRulesTable.name, description: alarmRulesTable.description, type: alarmRulesTable.alarmType,
+      metric: alarmRulesTable.metric, operator: alarmRulesTable.operator, threshold: alarmRulesTable.threshold,
+      deadband: alarmRulesTable.deadband, severity: alarmRulesTable.severity, enabled: alarmRulesTable.enabled,
+      onDelaySec: alarmRulesTable.onDelay, offDelaySec: alarmRulesTable.offDelay, rocWindowSec: alarmRulesTable.rocWindow,
+      updatedAt: alarmRulesTable.updatedAt,
+    })
+    .from(alarmRulesTable)
+    .where(eq(alarmRulesTable.assetId, args.assetId))
+    .orderBy(alarmRulesTable.name)
+    .limit(100);
+  return { count: rows.length, rules: rows.map((r) => ({ ...r, description: clipText(r.description, 200) })) };
+}
+
+/**
+ * Attributes of one asset: rated values, set points, configuration and runtime
+ * values. Live readings (dynamic attributes) only on request; get_latest_telemetry
+ * already returns them.
+ */
+async function getAssetAttributes(args: { assetId: string; includeDynamic?: boolean }) {
+  const rows = await db
+    .select({
+      name: attributesTable.name, type: attributesTable.type, dataType: attributesTable.dataType, value: attributesTable.value,
+      uom: attributesTable.uom, timestamp: attributesTable.timestamp, expression: attributesTable.expression,
+    })
+    .from(attributesTable)
+    .where(and(eq(attributesTable.assetId, args.assetId), args.includeDynamic ? undefined : sql`${attributesTable.type} <> 'dynamic'`))
+    .orderBy(attributesTable.sortOrder, attributesTable.name)
+    .limit(200);
+  return {
+    count: rows.length,
+    attributes: rows.map((r) => ({ ...r, value: typeof r.value === "string" ? clipText(r.value, 200) : r.value, expression: clipText(r.expression, 200) })),
+  };
+}
+
+// Values of fields like these are not shown even though the audit log already
+// redacts secrets: webhook and broker URLs carry credentials in their path.
+const HIDDEN_CHANGE_FIELD = /(url|uri|webhook|endpoint|token|secret|password|passwd|key|credential)/i;
+
+/**
+ * Configuration changes recorded in the audit log for one asset and the assets
+ * beneath it, within the selected range: who changed which rule, attribute,
+ * template or maintenance setting.
+ */
+async function getRecentChanges(args: { assetId: string }, ctx: ToolContext) {
+  const all = await db.select({ id: assetsTable.id, parentId: assetsTable.parentId }).from(assetsTable);
+  let ids = [...subtree(args.assetId, all)];
+  if (ctx.scope) ids = ids.filter((id) => ctx.scope!.assetIds.has(id));
+  if (ids.length === 0) return { count: 0, changes: [] };
+  const rows = await db
+    .select({
+      at: activityLogsTable.timestamp, action: activityLogsTable.action, category: activityLogsTable.category,
+      actor: activityLogsTable.actorName, actorRole: activityLogsTable.actorRole, target: activityLogsTable.targetName,
+      detail: activityLogsTable.detail, changes: activityLogsTable.changes, outcome: activityLogsTable.outcome,
+    })
+    .from(activityLogsTable)
+    .where(and(
+      or(inArray(activityLogsTable.assetId, ids), inArray(activityLogsTable.targetId, ids)),
+      gte(activityLogsTable.timestamp, ctx.from), lte(activityLogsTable.timestamp, ctx.to),
+    ))
+    .orderBy(desc(activityLogsTable.timestamp))
+    .limit(50);
+  return {
+    count: rows.length,
+    changes: rows.map((r) => ({
+      at: r.at, action: r.action, category: r.category, actor: r.actor, actorRole: r.actorRole, target: r.target,
+      outcome: r.outcome, detail: clipText(r.detail, 200),
+      fields: (Array.isArray(r.changes) ? r.changes : []).slice(0, 10).map((c: any) => (HIDDEN_CHANGE_FIELD.test(String(c?.field ?? ""))
+        ? { field: c?.field, from: "[hidden]", to: "[hidden]" }
+        : { field: c?.field, from: clipText(typeof c?.from === "string" ? c.from : JSON.stringify(c?.from ?? null), 120), to: clipText(typeof c?.to === "string" ? c.to : JSON.stringify(c?.to ?? null), 120) })),
+    })),
   };
 }
 
@@ -771,7 +939,52 @@ const TOOLS: Record<string, { fn: ToolFn; def: any; modules: string[] }> = {
       parameters: { type: "object", properties: {} },
     },
   },
+  get_alarm_rules: {
+    modules: ["alarms"],
+    fn: getAlarmRules,
+    def: {
+      name: "get_alarm_rules",
+      description: "List the alarm rules of one asset: metric, operator, threshold (limit), deadband, severity, delays, enabled, last change. Use to tell how close readings were to their limits, or whether a limit or rule changed.",
+      parameters: {
+        type: "object",
+        properties: { assetId: { type: "string", description: "Asset UUID" } },
+        required: ["assetId"],
+      },
+    },
+  },
+  get_asset_attributes: {
+    modules: ["ai_advisor", "assets"],
+    fn: getAssetAttributes,
+    def: {
+      name: "get_asset_attributes",
+      description: "List the attributes of one asset: rated values, set points, configuration and runtime values with units. Live readings are left out unless includeDynamic is true (get_latest_telemetry returns them).",
+      parameters: {
+        type: "object",
+        properties: {
+          assetId: { type: "string", description: "Asset UUID" },
+          includeDynamic: { type: "boolean", description: "Also list live readings (default false)" },
+        },
+        required: ["assetId"],
+      },
+    },
+  },
+  get_recent_changes: {
+    modules: ["activity_log"],
+    fn: getRecentChanges,
+    def: {
+      name: "get_recent_changes",
+      description: "List configuration changes recorded in the audit log within the selected time range for one asset and the assets beneath it (alarm rules, attributes, templates, maintenance mode), newest first: when, who, what changed from what to what.",
+      parameters: {
+        type: "object",
+        properties: { assetId: { type: "string", description: "Asset UUID" } },
+        required: ["assetId"],
+      },
+    },
+  },
 };
+
+/** One tool by name (for the report investigation and tests); undefined when there is none. */
+export function toolByName(name: string) { return TOOLS[name]; }
 
 /** The tools this caller may use: the only ones offered to the model, and the only ones run. */
 export function toolNamesFor(access: EffectiveAccess): string[] {
@@ -780,7 +993,7 @@ export function toolNamesFor(access: EffectiveAccess): string[] {
     .map(([name]) => name);
 }
 
-function toolSpecs(names: string[]) {
+export function toolSpecs(names: string[]) {
   return names.map((name) => ({ type: "function", function: TOOLS[name]!.def }));
 }
 
@@ -891,7 +1104,8 @@ async function callGroq(
   return data;
 }
 
-function parseRange(range: unknown): ToolContext | string {
+/** The chat's time range: both ends, start before end, at most REPORT_MAX_DAYS days. Returns an error message otherwise. */
+export function parseRange(range: unknown): ToolContext | string {
   const r = range as { from?: unknown; to?: unknown } | undefined;
   if (typeof r?.from !== "string" || typeof r?.to !== "string") {
     return "Select a start and end time for the analysis.";
@@ -902,6 +1116,8 @@ function parseRange(range: unknown): ToolContext | string {
     return "The start or end time is not a valid date.";
   }
   if (from >= to) return "The start time must be earlier than the end time.";
+  // A multi-year range kept a database connection busy for every tool call of the question.
+  if (to.getTime() - from.getTime() > REPORT_MAX_DAYS * 86_400_000) return `Select at most ${REPORT_MAX_DAYS} days.`;
   return { from, to };
 }
 
@@ -1141,12 +1357,17 @@ router.post("/ai/chat", aiLimiter, async (req, res): Promise<void> => {
 
 // ── AI Reports ───────────────────────────────────────────────────────────────
 //
-// The report's numbers are computed here from the database, limited to the
-// assets the caller may see (lib/ai-report.ts). The report is written for the
-// caller's level, decided from their role (REPORT_LEVEL_BY_ROLE). The model only
-// receives the facts its level needs, through lib/llm.ts; without a provider, or
-// when the model fails, the report is still returned with `narrative: null`,
-// `narrativeStatus` and the reason.
+// REQUIRED APPROACH: a report is built from the database only, never from
+// Visualization or dashboard data.
+// 1. Facts: computed here from the database, limited to the assets the caller may
+//    see (lib/ai-report.ts). They are the trusted base and the report's figures.
+// 2. Investigation: the model reads the facts for the caller's level (decided from
+//    their role, REPORT_LEVEL_BY_ROLE), investigates the database with the same
+//    read-only tools as the chat, kept to the report's scope and period and to
+//    the caller's modules, then writes the narrative (lib/ai-report-agent.ts).
+// Fallbacks: investigation fails → one call writes the narrative from the facts →
+// facts only, with `narrativeStatus` and the reason. A report never fails because
+// the AI did.
 
 const reportLimiter = rateLimit({
   name: "ai:report",
@@ -1200,25 +1421,45 @@ async function loadReportInput(ids: string[], range: { from: Date; to: Date }, w
   };
 }
 
-export type NarrativeStatus = "ok" | "unavailable" | "failed" | "rate_limited" | "unreadable";
+export type { NarrativeStatus };
 
-/** Writes the narrative; null with a status and reason when the model's answer is unusable or the call fails. */
+/**
+ * The single-call narrative alone (no investigation): the fallback path, kept
+ * callable on its own for tests. Null narrative with a status and reason when
+ * the model's answer is unusable or the call fails.
+ */
 export async function reportNarrative(
   facts: ReportFacts,
   ask: (messages: { role: "system" | "user"; content: string }[]) => Promise<string | null>,
 ): Promise<{ narrative: ReportNarrative | null; unverified: string[]; status: NarrativeStatus; narrativeError: string | null }> {
-  try {
-    const text = await ask(reportMessages(facts));
-    const narrative = parseNarrative(text, facts.level);
-    if (!narrative) return { narrative: null, unverified: [], status: "unreadable", narrativeError: NARRATIVE_MESSAGES.unreadable };
-    return { narrative, unverified: unverifiedNumbers(narrative, facts), status: "ok", narrativeError: null };
-  } catch (err) {
-    if (err instanceof LlmRateLimitError) {
-      return { narrative: null, unverified: [], status: "rate_limited", narrativeError: `The AI service has reached its usage limit. Try again in about ${err.retryAfterSec} seconds. The figures below are complete.` };
-    }
-    logger.error({ err }, "AI report narrative failed");
-    return { narrative: null, unverified: [], status: "failed", narrativeError: NARRATIVE_MESSAGES.failed };
-  }
+  const s = await writeReportNarrative(facts, {
+    configured: true,
+    agent: { tools: [], chat: async () => ({ content: null, toolCalls: [] }), runTool: async () => null },
+    complete: (messages) => ask(messages as { role: "system" | "user"; content: string }[]),
+    onError: (err, stage) => { if (stage === "single") logger.error({ err }, "AI report narrative failed"); },
+  });
+  return { narrative: s.narrative, unverified: s.unverified, status: s.status, narrativeError: s.narrativeError };
+}
+
+/**
+ * The tools of a report investigation: the chat's tools this caller may use,
+ * run inside the report's scope and period. Never throws: a failed lookup is a
+ * generic error the model can read.
+ */
+export function reportAgentTools(allowed: string[], ctx: ToolContext, onError?: (err: unknown, tool: string) => void): Pick<AgentDeps, "tools" | "runTool"> {
+  return {
+    tools: toolSpecs(allowed),
+    runTool: async (name, args) => {
+      const tool = allowed.includes(name) ? TOOLS[name] : undefined;
+      if (!tool) return { error: `unknown tool: ${String(name).slice(0, 64)}` };
+      try {
+        return await runScopedTool(tool, args, ctx);
+      } catch (err) {
+        onError?.(err, name);
+        return { error: "that lookup failed" };
+      }
+    },
+  };
 }
 
 router.post("/ai/report", reportLimiter, async (req, res): Promise<void> => {
@@ -1259,14 +1500,27 @@ router.post("/ai/report", reportLimiter, async (req, res): Promise<void> => {
   });
 
   const configured = llmConfigured();
-  const story = configured
-    ? await reportNarrative(facts, (messages) => llmComplete(messages, { json: true, maxTokens: 2500 }))
-    : { narrative: null, unverified: [], status: "unavailable" as const, narrativeError: NARRATIVE_MESSAGES.unavailable };
+  // The investigation reads the database only inside the report's own assets and period.
+  const ctx: ToolContext = { from: parsed.range.from, to: parsed.range.to, access, scope: { rootId: parsed.assetId ?? "all", name: scopeName, assetIds: ids } };
+  const correlationId = correlationIdOf(req);
+  const story = await writeReportNarrative(facts, {
+    configured,
+    agent: {
+      ...reportAgentTools(toolNamesFor(access), ctx, (err, tool) => logger.warn({ err, tool, correlationId }, "AI report tool call failed")),
+      chat: (messages, o) => llmChat(messages, { tools: o.tools, allowTools: o.allowTools, timeoutMs: o.timeoutMs, maxTokens: 2500 }),
+    },
+    complete: (messages, timeoutMs) => llmComplete(messages, { json: true, maxTokens: 2500, timeoutMs }),
+    onError: (err, stage) => logger.warn({ err, stage, correlationId }, "AI report narrative stage failed; falling back"),
+  });
+  const inv = story.investigation;
 
   void logActivity(
     "ai.report", "ai", parsed.assetId, scopeName,
     `level=${level}; hours=${facts.range.hours}; assets=${assets.length}; ` +
-    (configured ? `facts sent to the AI provider (${llmModel()}); narrative=${story.status}` : "no AI provider; facts only"),
+    (configured
+      ? `facts and tool results sent to the AI provider (${llmModel()}); mode=${inv.mode}; narrative=${story.status}; ` +
+        `tools=${[...new Set(inv.steps.map((s) => s.tool))].join(",") || "none"}`
+      : "no AI provider; facts only"),
     req,
   );
 
@@ -1277,6 +1531,7 @@ router.post("/ai/report", reportLimiter, async (req, res): Promise<void> => {
     narrativeStatus: story.status,
     narrativeError: story.narrativeError,
     unverifiedNumbers: story.unverified,
+    investigation: inv,
     alarmsIncluded: withAlarms,
     generatedAt: new Date().toISOString(),
     range: { from: facts.range.from, to: facts.range.to },

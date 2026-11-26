@@ -24,6 +24,9 @@ import uploadsRouter from "./uploads";
 import aiRouter from "./ai";
 import authRouter from "./auth";
 import securityRouter from "./security";
+import integrationRouter from "./integration";
+import v1Router from "./v1";
+import { sandboxIngest } from "../lib/integration/sandbox";
 
 const router: IRouter = Router();
 
@@ -33,6 +36,8 @@ router.use(healthRouter);
 router.use(assetsRouter);
 router.use(attributesRouter);
 router.use(assetTemplatesRouter);
+// Sandbox API clients get a dry run instead of a stored write; every other request passes through.
+router.use(sandboxIngest);
 router.use(ingestRouter);
 router.use(alarmsRouter);
 router.use(alarmRulesRouter);
@@ -52,5 +57,8 @@ router.use(plantTwinsRouter);
 router.use(sitesRouter);
 router.use(uploadsRouter);
 router.use(aiRouter);
+// Integration Hub: management API for the new screens, and the third-party v1 API.
+router.use(integrationRouter);
+router.use(v1Router);
 
 export default router;

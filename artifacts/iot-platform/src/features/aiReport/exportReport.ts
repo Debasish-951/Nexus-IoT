@@ -1,5 +1,5 @@
 import { toCsv, downloadCsvText } from "@/lib/csv";
-import { LEVEL_LABEL, STATUS_LABEL, URGENCY_LABEL, type AiReport, type KpiCard, type ReportNarrative } from "./types";
+import { INVESTIGATION_MODE_LABEL, LEVEL_LABEL, STATUS_LABEL, TOOL_LABEL, URGENCY_LABEL, type AiReport, type KpiCard, type ReportNarrative } from "./types";
 
 const fmtDate = (s: string | null) => (s ? new Date(s).toLocaleString() : "-");
 const num = (v: number | null | undefined, d = 2) => (v == null ? "" : Number.isInteger(v) ? String(v) : v.toFixed(d));
@@ -166,6 +166,9 @@ export async function downloadReportPdf(r: AiReport, narrative: ReportNarrative 
   text(`${f.scope.name}  |  ${fmtDate(f.range.from)} - ${fmtDate(f.range.to)}  |  compared with ${fmtDate(f.previous.from)} - ${fmtDate(f.previous.to)}`, 9.5);
   text(`Generated ${fmtDate(r.generatedAt)}${r.model ? `  |  written sections are AI-generated (${r.model}) from the computed figures` : ""}`, 8, "normal", [107, 114, 128]);
   if (!narrative && r.narrativeError) text(r.narrativeError, 9, "italic", [146, 64, 14]);
+  if (narrative && r.unverifiedNumbers.length) {
+    text(`Check before sharing: these numbers in the AI text were not found in the computed figures or the database lookups: ${r.unverifiedNumbers.join(", ")}`, 8.5, "italic", [146, 64, 14]);
+  }
 
   if (r.level === "executive") {
     const n = narrative?.level === "executive" ? narrative : null;
@@ -294,6 +297,14 @@ export async function downloadReportPdf(r: AiReport, narrative: ReportNarrative 
       if (f.dataQuality.lowCoverage.length) table(["Asset", "Data coverage"], f.dataQuality.lowCoverage.map((c) => [c.assetName, `${c.coveragePct}%`]), [90, 88]);
       if (f.dataQuality.stuck.length) table(["Possibly stuck sensor", "Metric", "Value", "Readings"], f.dataQuality.stuck.map((s) => [s.assetName, s.metric, num(s.value), s.readings]), [60, 60, 30, 28]);
     }
+  }
+
+  // Appendix: how the AI text was written, so a reader can judge it.
+  const inv = r.investigation;
+  if (narrative && inv && inv.mode !== "none") {
+    heading("Investigation");
+    text(`${INVESTIGATION_MODE_LABEL[inv.mode]}. ${inv.toolCalls} read-only database lookup(s), limited to this scope and period, in ${Math.round(inv.durationMs / 1000)} s.`, 9);
+    inv.steps.forEach((st, i) => text(`${i + 1}. ${TOOL_LABEL[st.tool] ?? st.tool}${st.summary ? ` - ${st.summary}` : ""}`, 8.5, "normal", [40, 48, 60], 2));
   }
 
   const foot = "Figures are computed from the platform database. The written sections are AI-generated from those figures and should be checked before decisions are made.";
