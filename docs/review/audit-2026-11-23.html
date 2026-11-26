@@ -1,0 +1,692 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Technical Audit Report</title>
+<style>
+:root{--bg:#f6f7f9;--card:#fff;--fg:#1c2330;--muted:#5d6878;--line:#e2e6ec;--accent:#2457c5;
+--crit:#7a1020;--high:#c62828;--med:#d97706;--low:#2563eb;--info:#64748b;--ok:#15803d;--code:#eef1f5}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#0f141b;--card:#161d27;--fg:#e4e9f0;--muted:#97a3b4;--line:#263140;--accent:#7aa5ff;--code:#1e2733;--high:#ef5350;--med:#f59e0b;--low:#60a5fa;--info:#94a3b8;--ok:#4ade80}}
+:root[data-theme="dark"]{--bg:#0f141b;--card:#161d27;--fg:#e4e9f0;--muted:#97a3b4;--line:#263140;--accent:#7aa5ff;--code:#1e2733;--high:#ef5350;--med:#f59e0b;--low:#60a5fa;--info:#94a3b8;--ok:#4ade80}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font:15px/1.6 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{background:var(--card);border-bottom:1px solid var(--line);padding:24px 16px}
+.wrap{max-width:1240px;margin:0 auto}
+h1{margin:0 0 4px;font-size:26px}
+.sub{color:var(--muted);font-size:14px}
+.verdict{display:inline-block;margin-top:12px;padding:6px 12px;border-radius:6px;background:var(--high);color:#fff;font-weight:600;letter-spacing:.02em}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:12px;margin-top:18px}
+.card{background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:12px;border-top:4px solid var(--c);cursor:pointer;text-align:left;color:inherit;font:inherit}
+.card b{display:block;font-size:28px;line-height:1.1}
+.card span{color:var(--muted);font-size:13px}
+.card.off{opacity:.4}
+.note{margin-top:14px;padding:10px 12px;border-left:4px solid var(--med);background:var(--bg);border-radius:4px;font-size:14px}
+.layout{display:grid;grid-template-columns:230px 1fr;gap:24px;padding:24px 16px}
+nav{position:sticky;top:12px;align-self:start;max-height:calc(100vh - 24px);overflow:auto;font-size:13px}
+nav a{display:block;color:var(--muted);text-decoration:none;padding:4px 8px;border-radius:4px}
+nav a:hover,nav a.on{color:var(--fg);background:var(--card)}
+.tools{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px;position:sticky;top:0;background:var(--bg);padding:8px 0;z-index:2}
+.tools input{flex:1;min-width:200px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--fg);font:inherit}
+button.b{padding:8px 12px;border:1px solid var(--line);border-radius:6px;background:var(--card);color:var(--fg);font:inherit;cursor:pointer}
+main{min-width:0}
+main section{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 24px 20px;margin-bottom:20px}
+main h2{font-size:20px;border-bottom:1px solid var(--line);padding-bottom:8px;scroll-margin-top:70px}
+main h3{font-size:16px;scroll-margin-top:70px;margin-top:28px}
+main h3.hi{padding:8px 12px;border-left:4px solid var(--high);background:var(--bg);border-radius:4px}
+.tbl{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:14px;margin:8px 0}
+th,td{border-bottom:1px solid var(--line);padding:7px 10px;text-align:left;vertical-align:top}
+th{color:var(--muted);font-weight:600;font-size:12px;text-transform:uppercase;letter-spacing:.04em}
+tr.hide{display:none}
+code{background:var(--code);padding:1px 5px;border-radius:4px;font-size:.88em;word-break:break-word}
+.id{display:inline-block;min-width:42px;text-align:center;padding:1px 6px;border-radius:4px;color:#fff;font-weight:600;font-size:12px;text-decoration:none}
+.sev-H{background:var(--high)}.sev-M{background:var(--med)}.sev-L{background:var(--low)}.sev-I{background:var(--info)}
+.pill{padding:1px 8px;border-radius:999px;font-size:12px;border:1px solid currentColor}
+.pill.c{color:var(--ok)}.pill.p{color:var(--med)}
+mark{background:#fde68a;color:#000;border-radius:2px}
+hr{display:none}
+.empty{color:var(--muted);font-style:italic;display:none}
+@media (max-width:860px){.layout{grid-template-columns:1fr}nav{display:none}main section{padding:4px 14px 14px}}
+@media print{nav,.tools,.card{cursor:default}nav,.tools{display:none}.layout{display:block}body{background:#fff}main section{break-inside:auto;border:0}}
+</style>
+</head>
+<body>
+<header><div class="wrap">
+  <div class="sub">Nexus-IoT · Integrated Suite</div>
+  <h1>Technical Audit Report</h1>
+  <div class="sub">23 November 2026 · Scope: commit <code>ae49022</code> · Read-only static review (React, Express, PostgreSQL, configuration)</div>
+  <div class="verdict">NOT READY FOR PRODUCTION</div>
+  <div class="cards" id="cards">
+    <div class="card" style="--c:var(--crit)"><b>0</b><span>Critical</span></div>
+    <button class="card" style="--c:var(--high)" data-sev="H"><b>8</b><span>High</span></button>
+    <button class="card" style="--c:var(--med)" data-sev="M"><b>23</b><span>Medium</span></button>
+    <button class="card" style="--c:var(--low)" data-sev="L"><b>27</b><span>Low</span></button>
+    <button class="card" style="--c:var(--info)" data-sev="I"><b>8</b><span>Informational</span></button>
+  </div>
+  <div class="note">This audit covers commit <code>ae49022</code>. Later work (AI Reports database investigation and the Integration Hub, commit <code>ffe8e47</code>) is <b>not</b> covered, and no finding has been fixed or retested yet. Fixes wait for approval of these findings.</div>
+</div></header>
+<div class="wrap layout">
+  <nav id="toc"></nav>
+  <main>
+    <div class="tools">
+      <input id="q" type="search" placeholder="Filter findings: id, word, file name…">
+      <button class="b" id="all">Show all</button>
+      <button class="b" id="theme">Theme</button>
+      <button class="b" onclick="window.print()">Print / PDF</button>
+    </div>
+    <div id="out"></div>
+  </main>
+</div>
+<script type="text/markdown" id="src"># Technical Audit Report — 23 November 2026
+
+**Scope:** the whole application at commit `ae49022` (React frontend, Express API, PostgreSQL schema and queries, configuration and docs). Extra depth went to code added since the previous audit (`f27070f`, 18 Nov 2026): AI Reports and AI chat scoping, the Data Management module split, the sites map, 2D, process and GLB twin uploads, the audit-log hash chain with its trigger and alerts, and the Live Feed redesign.
+
+**Method:** a read-only static review by five parallel reviewers: authentication and access, API and configuration, database and performance, frontend, and end-to-end workflows. I then checked every HIGH finding against the code myself. Supporting runs:
+- dependency scan with `pnpm audit --prod`;
+- typecheck of all three packages: clean;
+- the 106 API regression tests: all pass.
+
+**Not done:**
+- No live attack testing and no database queries. The local database may hold real data, so the audit rules forbid touching it.
+- No browser walkthrough.
+
+**Status labels:** every finding comes from reading the code. "Confirmed" means the faulty path was traced line by line. "Potential" means the problem depends on data volume, timing or deployment.
+
+**Previous findings:** none of the six HIGH findings from 18 Nov has been fixed, and several have grown with the new features.
+
+---
+
+## A. Executive summary
+
+| | |
+|---|---|
+| Overall health | **Good foundations; new features are weaker than the core.** Strong core controls: a deny-by-default route table, hashed sessions and tokens, CSRF protection, scrypt passwords, encrypted integration secrets, parameterised SQL, hardened uploads and a safe outbound-URL guard on most paths. No XSS was found, even in the new SVG, uploaded-symbol, map and AI-text paths. The weaknesses are in object-level rules for new features and in operational robustness. |
+| Security posture | **No critical issue, eight HIGH issues.** All eight are reachable by ordinary signed-in users (Engineer role) or by normal use. Six were reported on 18 Nov and are still open. |
+| Main risks | (1) An Engineer can take over an administrator's full-access API key. (2) An Engineer can bypass the two-person deletion approval and legal holds, and delete held data. (3) The audit log is advertised as tamper-evident, but anyone with the app's own database login can delete or forge entries without detection. (4) A missing archive file crashes the whole API. (5) Live Feed exhausts a user's API budget at about 150 assets. (6) Live Twin can silently overwrite one twin with another. |
+| Production readiness | **NOT READY FOR PRODUCTION.** Fix the P0 items (section K) before the next customer installation. |
+
+**Finding count, after merging duplicates found by more than one reviewer:**
+
+| Severity | Count |
+|---|---|
+| Critical | 0 |
+| High | 8 |
+| Medium | 23 |
+| Low | 27 |
+| Informational | 8 |
+
+---
+
+## B. Architecture assessment
+
+- **React:**
+  - A single SPA (React 19, Vite, TanStack Query) with a generated API client.
+  - Route guards mirror the server rules for usability only; the server stays authoritative.
+  - The session lives in an HttpOnly cookie and the CSRF token in memory. All writes go through `apiFetch`, and no secrets are in the bundle.
+  - New screens (Live Twin builders, AI Reports, Audit Log, Live Feed) are large, single-file components. Their load/save state handling is the weak spot (H-6, M-18).
+- **Express:**
+  - A clear middleware chain: `floodGuard → attachPrincipal → attachApiClient → stripForgedActorHeaders → audit context → csrfGuard → authorize → projectScopeGuard → apiRateLimit`.
+  - Global body and structure limits, and a correlation-id error handler.
+  - Weak points:
+    - Per-object rules on newer resources (API keys, uploads, Data Management approvals).
+    - Simple boolean modules silently ignore the `level` the route table asks for (H-2).
+- **PostgreSQL:**
+  - Drizzle schema with pooled connections (max 10, 30 s statement timeout), optional monthly telemetry partitions, and hourly and 15-minute summaries.
+  - Weak points:
+    - Missing uniqueness on telemetry and missing indexes on hot lookups.
+    - The audit log's protections live in data the runtime login can rewrite (H-7).
+    - The schema is applied by `push`, so DDL such as the audit trigger is run by the app at start-up (H-5).
+- **Cross-layer:**
+  - OpenAPI codegen keeps the contract consistent.
+  - The hand-written AI Report, Audit Log and Live Feed calls match the server responses field for field.
+  - Mismatches:
+    - The global request guard (20k keys) refuses scenes the plant-twin route allows (40k) (M-15).
+    - Live Feed's request pattern exceeds the server's rate limiter (H-8).
+
+---
+
+## C. Consolidated findings
+
+IDs: **H** = High, **M** = Medium, **L** = Low, **I** = Informational. The "Source" column gives the reviewer IDs. "18 Nov" marks findings already reported on 18 Nov.
+
+### HIGH
+
+| ID | Title | Area | Source | Status |
+|---|---|---|---|---|
+| H-1 | An Engineer can rotate an administrator's full-access API key and receive its new secret; can also clear its IP list or re-enable a revoked key | API clients | AUTH-1, API-1 (18 Nov AUTH-1) | Confirmed |
+| H-2 | Two-person approval and legal holds can be bypassed by one Engineer, partly because simple modules ignore the required `level` | Data Management | AUTH-2, FN-1, FN-2 (18 Nov FN-1/AUTH-3/API-2/FN-4) | Confirmed |
+| H-3 | Deleting an asset or project deletes telemetry under a legal hold; leaves 15-minute summaries behind; large projects cannot be deleted | Assets | DB-2, FN-2 (18 Nov DB-2/FN-7) | Confirmed |
+| H-4 | Restoring an archive whose file is missing crashes the API process | Archives | API-1, FN-3 (18 Nov FN-2) | Confirmed |
+| H-5 | The documented least-privilege DB roles break partitioning, pruning and backups, and now also prevent the audit trigger from being created | DB, ops docs | DB-3 (18 Nov DB-1) | Confirmed |
+| H-6 | Live Twin (3D and 2D) can save the previously open twin's layout into the newly selected twin | Live Twin | FE-2, FN-7 (18 Nov FE-1) | Confirmed |
+| H-7 | The audit log's append-only and tamper-evident guarantees can be bypassed with ordinary SQL by the app's own DB login; the compliance doc overstates them | Audit log | DB-1, DB-5 | Confirmed |
+| H-8 | Live Feed sends 4 requests per asset per minute and exhausts the per-user API budget at about 150 assets, so other screens get 429 errors and assets wrongly drift to "offline" | Live Feed | FE-1, DB-4, FN-5 | Confirmed |
+
+### MEDIUM
+
+| ID | Title | Source | Status |
+|---|---|---|---|
+| M-1 | Anyone who knows a username can lock that user out with 5 wrong passwords, which also ends their live sessions; repeatable, admins included | AUTH-3 (18 Nov AUTH-4) | Confirmed |
+| M-2 | Uploads (images, 2D-twin files, GLB models) are listed, downloaded and deleted with no project or uploader check | AUTH-6, FN-23 (18 Nov AUTH-2) | Confirmed |
+| M-3 | `includeSecurity=true` on the Audit Log lets anyone with the Audit Log module read and export the security log (typed usernames, IPs, refusals) | AUTH-4, API-2 | Confirmed |
+| M-4 | `GET /dashboard/attention` returns alarms and API-key names to roles without the Alarms or API Clients module | AUTH-5 | Confirmed |
+| M-5 | A project-restricted admin can escape the restriction through user management (create or lift the restriction on users, issue a temporary password) | AUTH-7 | Confirmed |
+| M-6 | Webhook URLs (Slack/Teams secrets in the path) are written in full into the append-only audit log, the WebSocket feed and CSV exports, and cannot be scrubbed | API-3 | Confirmed |
+| M-7 | A broker endpoint can point the server at internal hosts and ports (SSRF and port scan through connection-error history) | API-4 | Confirmed |
+| M-8 | The Data Management alert webhook skips the outbound-URL guard and follows redirects | API-5 (18 Nov API-1) | Confirmed |
+| M-9 | Text containing half an emoji (from truncation or sent directly) makes audit entries fail verification for good, or silently not save | DB-6, FN-4 | Confirmed |
+| M-10 | The hash backfill seals any unhashed row on the next write (forged rows become "verified"); rows with NULL `seq` are never verified | DB-5 | Confirmed |
+| M-11 | AI report figures can be silently incomplete (unordered 80k and 20k caps); the raw-data fallback times out; last-seen comes from raw data only, so old periods show "never" | DB-7, FN-12, FN-13 | Confirmed |
+| M-12 | Audit Log search runs two full scans per page (ILIKE plus count); there is no `asset_id` index; export pages overlap, which duplicates rows | DB-8 | Confirmed |
+| M-13 | Verify reads the whole audit table inside one HTTP request and can raise a false CRITICAL alarm while pruning runs | DB-9, FN-14 | Confirmed |
+| M-14 | The plant-twin list, folder moves and folder delete load every scene (images up to about 900 KB each); no conflict check; folder delete is not in a transaction | DB-10, FN-8 (18 Nov PERF-5/FN-12) | Confirmed |
+| M-15 | Scenes with 20,000 to 40,000 keys are always refused by the global guard, and each refusal is logged as an attack with no user | FN-6 | Confirmed |
+| M-16 | Readings arriving more than 6 hours late are never summarised and disappear after raw retention | DB-12 (18 Nov DB-3) | Confirmed |
+| M-17 | Retried ingest stores duplicate telemetry; `GET /telemetry/:id` has no upper limit; indexes missing on `assets(identifier)`, `assets(parent_id)` and `alarm_history(asset_id, triggered_at)` | DB-13 (18 Nov DB-4, PERF-2, PERF-4) | Confirmed |
+| M-18 | Machine and process twins can save stale bindings after a failed load | FE-3 (18 Nov FE-2, partly fixed) | Confirmed |
+| M-19 | GPU memory grows in long Live Twin sessions (materials, textures and GLB cache never freed) | FE-4 (18 Nov FE-11) | Confirmed |
+| M-20 | A failure on one table stops the rest of the hourly operational pruning, and its counts are lost | FN-9 | Confirmed |
+| M-21 | WebSockets stay open after user deletion and after session expiry | AUTH-10, FN-10 (18 Nov AUTH-5, partly fixed) | Confirmed |
+| M-22 | AI chat and report requests run past nginx's 60 s timeout, and the chat page shows "Unexpected token <"; the nginx guide has no `client_max_body_size`, so GLB uploads over 1 MB fail | FN-11, API I-1 (18 Nov FN-11) | Confirmed |
+| M-23 | Audit pruning holds the global audit lock while running a potentially heavy query, which can stall every audited write and the connection pool | DB-11 | Potential |
+
+### LOW
+
+| ID | Title | Source |
+|---|---|---|
+| L-1 | A Live Twin can be published to every project by setting `projectId` to null | AUTH-8 (18 Nov AUTH-7) |
+| L-2 | A dashboard moved under your own folder stays yours after the grant is revoked | AUTH-9 (18 Nov AUTH-6) |
+| L-3 | Viewers and Operators get Data Management by default (backup runs, archive path, hold names) | AUTH-11 |
+| L-4 | The `alarm` and `telemetry` WebSocket channels are not gated by module; `restrictDashboards`/`restrictAnalytics` are enforced only in the UI and not labelled "not working yet" | AUTH-12 (18 Nov AUTH-8, AUTH-10) |
+| L-5 | AI chat accepts an unbounded time range and its tools scan raw telemetry over it | API-6, DB-14 |
+| L-6 | The AI Report prompt does not mark plant data as untrusted (prompt injection through asset or alarm names) | API-7 |
+| L-7 | CSV formula injection in two hand-written escapers (pruning report, 2D-twin mapping CSV) | API-8 (18 Nov API-5) |
+| L-8 | Alarm webhook URLs are logged in full and stored unencrypted | API-9 (18 Nov API-6) |
+| L-9 | `GET /activity-log/verify` is costly and writes to the log, and a link can trigger it (SameSite=Lax) | API-10 |
+| L-10 | The SVG sanitiser's `url()` check can be bypassed (quoted URLs with mixed quotes, CSS escapes, `image-set`); blocked today by the CSP | FE-5 |
+| L-11 | Textures inside GLB models are likely blocked by `connect-src 'self'` in production | FE-6 (Potential) |
+| L-12 | The thumbnail renderer holds a WebGL context for the whole session and caches blank images after context loss | FE-7 |
+| L-13 | Audit Log export and verify fail silently; an old "intact" result stays on screen | FE-8 |
+| L-14 | AI Advisor: no request cancellation, raw JSON parse errors, many untranslated strings (Live Feed event texts too) | FE-9, FN-22 |
+| L-15 | Two concurrent payloads can both clear one alarm, so the "cleared" webhook and broadcast fire twice | FN-15 |
+| L-16 | The live activity feed and the Audit Log page scope project-restricted users differently | FN-16 |
+| L-17 | Read-only POSTs (previews, alert check) write generic `api.post` audit entries | FN-17 |
+| L-18 | Unvalidated path and query values return 500 instead of 400 (`/telemetry/:id/metrics`, export dates, `/assets/:id/health`) | FN-18 |
+| L-19 | Placing a site on the map can create duplicate Latitude/Longitude attributes | FN-19 |
+| L-20 | Data Management state defects: collisions mark changes failed forever, deleted-policy changes marked done, wrong retention shown, old FN-5/FN-6/FN-9 | FN-20 |
+| L-21 | User lifecycle: suspension does not revoke activation or reset links; last-admin guard ignores Super/Company Admin; unknown project ids accepted | FN-21 |
+| L-22 | AI details: the `?action=` prompt is re-sent on reload, "12,345" is misread in the number check, the PDF omits the unverified-numbers warning, in-route 403s are not logged | FN-22 |
+| L-23 | Live Twin, Map and Viz details: 2D size check counts characters not bytes, live values stop after 500 bindings, site status reads only 200 alarms, folder and viz-node cycles possible | FN-23 (18 Nov FN-13) |
+| L-24 | Bad-data deletion and its estimate run inside the HTTP request; the hold check is not atomic | DB-15 |
+| L-25 | Data Management pages open 7 to 12 parallel queries on a 10-connection pool | DB-16 (18 Nov API-7) |
+| L-26 | Schema hygiene: enum-like text columns without CHECK, `seq` nullable, `security_events` capped at 500k and not chained, plaintext unused `mfa_secret` | DB-17 |
+| L-27 | One admin can disable sensitive-action alerts and acknowledge alerts raised by their own actions | AUTH INFO |
+
+### INFORMATIONAL
+
+| ID | Note |
+|---|---|
+| I-1 | `/ai/chat` is refused outright for project-restricted users, so the in-route scope code is never used, yet Live Feed shows "Ask AI Advisor" to them. Decide which behaviour is intended. |
+| I-2 | Data sent to Groq: questions, tool results (asset names, device ids, metric values, alarm texts) and report figures. No usernames, emails or credentials. Document this as a third-party data transfer for customers. |
+| I-3 | `DEBUG_ERRORS=true` returns stack traces and is not refused in production. |
+| I-4 | The dev `.env` (with `DATABASE_URL`, `GROQ_API_KEY`, `SECRETS_ENC_KEY`, `SESSION_SECRET`) sits in a OneDrive-synced folder, so it is copied to the cloud. Values were not read. |
+| I-5 | The outbound-URL blocklist misses 198.18.0.0/15, 224.0.0.0/4, 240.0.0.0/4 and IPv4-compatible IPv6; DNS rebinding is not covered (already documented). |
+| I-6 | The GLB polyglot scan only covers 4 KB. This is mitigated by attachment download, `nosniff` and a sandbox CSP. |
+| I-7 | User deletion cannot remove personal data from the append-only audit log. Document this in the privacy notes. |
+| I-8 | Dead `pages/AnalyticsKpi.tsx` still writes with bare `fetch` (no CSRF header). It is unreachable; delete it. |
+
+### Dependencies (`pnpm audit --prod`)
+
+| Package | Advisory | Path | Status |
+|---|---|---|---|
+| zod < 4.6.6 | GHSA-mrhx-c7xc-m3w5 (High) | `artifacts__api-server>zod` | Accepted until **2026-12-10**. The zod 4 upgrade, together with the Orval output config, must land within 17 days. |
+
+---
+
+## D–E. Detailed findings (HIGH)
+
+Each finding uses the 14-point format.
+
+### H-1 — An Engineer can take over an administrator's full-access API key
+1. **ID:** H-1 (AUTH-1, API-1; 18 Nov AUTH-1).
+2. **Description:**
+   - Rotate-secret, PUT, restore and delete on API keys never compare the key's scopes with what the caller is allowed to grant.
+   - An Engineer (scope ceiling `ingest:write`) can therefore rotate an admin's `*` key and receive the new secret.
+3. **Severity:** HIGH (security remediation).
+4. **Technology:** Express API.
+5. **Affected:**
+   - `artifacts/api-server/src/routes/api_clients.ts:489-510` (rotate-secret), `:364-486` (PUT), `:595-610` (restore).
+   - `refuseIfOutOfScope` at `:79-91`.
+   - Route rules at `middleware/authorize.ts:173-176`.
+6. **Current implementation:** `refuseIfOutOfScope` returns `false` immediately for any user who is not project-restricted. Rotate then issues `randomUUID()` and returns it as `clientSecret`. `ungrantableScopes` is used only on create and on scope additions in PUT.
+7. **Expected implementation:** a user may act on a key only if every scope on it is one they could grant themselves.
+8. **Root cause:** the scope ceiling covers creating and widening keys, but not acting on existing wider keys.
+9. **Impact:** a lasting credential that can read all assets, telemetry and alarms through `/export/*` and post to ingest. It also breaks the admin's integration and allows revoked keys to be revived.
+10. **Fix:** in rotate, regenerate-ingest-url, restore, delete and PUT (for every field), return 404 when `ungrantableScopes(access, client.scopes).length > 0`.
+11. **Enhancement:** show "managed by an administrator" on such keys in the UI, and record an audit alert when a `*` key is rotated.
+12. **Approach:** one helper `refuseIfAboveCeiling(req, res, client)`, called after the row is loaded in each handler.
+13. **Test:**
+    - A new API test: as an Engineer, rotate an admin `*` key and expect 404.
+    - As an Admin, expect 200.
+14. **Expected outcome:** key management is limited to keys within the caller's own grant level.
+
+### H-2 — Two-person approval and legal holds can be bypassed
+1. **ID:** H-2 (AUTH-2, FN-1, FN-2; 18 Nov FN-1/AUTH-3/API-2/FN-4).
+2. **Description:** one Engineer can turn approval off, release any legal hold, approve another person's deletion, delete retention policies, and then range-delete telemetry.
+3. **Severity:** HIGH (security remediation, business logic).
+4. **Technology:** Express API, RBAC.
+5. **Affected:**
+   - `routes/data_ops.ts:41-54` (PUT data-settings), `:327-334` (hold release), `:434-454` (range-delete).
+   - `routes/system.ts:574,594,615-625` (policy delete; approval skipped when `rollupsEnabled()` is false).
+   - `middleware/authorize.ts:260-283`.
+   - `lib/rbac.ts:391-402` (`hasModuleAccess`).
+6. **Current implementation:**
+   - The rules ask for `permission: "manage_assets", module: "data_management", level: "delete"`.
+   - `data_management` is a simple boolean module, and `hasModuleAccess` returns the boolean regardless of level.
+   - Engineer and Developer hold both `manage_assets` and `data_management: true` by default.
+   - Hold release has no check of who created the hold.
+7. **Expected implementation:**
+   - Only administrators, or an explicit grant, can approve, reject, release holds, change approval settings or delete policies.
+   - Changes to approval settings and hold release themselves need a second person.
+   - Approval fails closed when estimates are unavailable.
+8. **Root cause:**
+   - The people the controls are meant to restrain are the ones who run them.
+   - The rule table's `level` silently degrades to "read" on simple modules.
+9. **Impact:** evidence under legal hold, and history, can be destroyed by one person. This defeats the feature's purpose and any compliance claim built on it.
+10. **Fix:**
+    - Add a permission `approve_data_changes` (admin roles only). Require it for approve, reject, hold release, `PUT /system/data-settings` and policy DELETE.
+    - Route approval-setting changes and hold release through `requestApproval`, with the requester barred from approving.
+    - Fail closed when rollups are off.
+11. **Enhancement:** make `authorize` refuse at start-up any rule that sets `level` on a simple module, so this class of bug cannot return.
+12. **Approach:** RBAC constant plus route-table changes; small handler changes in `data_ops.ts` and `system.ts`; a start-up assertion in `authorize.ts`.
+13. **Test:** API tests as an Engineer for each of the five endpoints, expecting 403. The requester approving their own request gets 403. A test that a rule with `level` on a simple module throws.
+14. **Expected outcome:** the two-person rule and legal holds actually hold.
+
+### H-3 — Deleting an asset ignores legal holds
+1. **ID:** H-3 (DB-2, FN-2; 18 Nov DB-2/FN-7).
+2. **Description:** deleting an asset or project deletes its telemetry even when a legal hold covers it. It leaves the 15-minute summaries behind. The single telemetry delete times out on large projects.
+3. **Severity:** HIGH (security remediation, data integrity).
+4. **Technology:** Express API, PostgreSQL.
+5. **Affected:** `routes/assets.ts:219-267`.
+6. **Current implementation:** a recursive CTE collects the subtree, then telemetry, rollups and metadata are deleted in one transaction under the 30 s statement timeout. There is no `activeHolds()` call, and `telemetry_rollups_15m` is not deleted.
+7. **Expected implementation:** refuse with 409 `hold_conflict` when any asset in the subtree is under hold. Delete all summary tiers. Delete telemetry in batches outside the metadata transaction.
+8. **Root cause:** the asset delete was written before holds and 15-minute summaries existed, and was never updated.
+9. **Impact:** held evidence is destroyed. Orphaned summaries keep appearing in charts. Large projects cannot be deleted.
+10. **Fix:** call the hold check before the transaction, add the `telemetry_rollups_15m` delete, and move the telemetry delete to `deleteInBatches` after commit.
+11. **Enhancement:** run large deletes as a background job with progress shown in Data Management.
+12. **Approach:** reuse `holdConflict`/`activeHolds` and `deleteInBatches` from `data_ops.ts`/`system.ts`.
+13. **Test:** an API test where an asset under hold gets DELETE 409. A test that the 15-minute summary rows are gone after delete.
+14. **Expected outcome:** holds are honoured everywhere data can be deleted.
+
+### H-4 — A missing archive file crashes the API
+1. **ID:** H-4 (API-1, FN-3; 18 Nov FN-2).
+2. **Description:** restoring an archive whose file has been moved or deleted emits an unhandled stream error. `uncaughtException` then exits the process.
+3. **Severity:** HIGH (bug fix, availability).
+4. **Technology:** Node.js streams.
+5. **Affected:**
+   - `services/archive.ts:154` (`createReadStream(file).pipe(createGunzip())`, no `stat`, no error listener).
+   - `routes/data_ops.ts:354` (download pipe without an error handler).
+   - `index.ts:34-37`.
+6. **Current implementation:** the restore opens the file without checking it exists. The read-stream `error` is not handled, and the process exits.
+7. **Expected implementation:** return 410 `archive_file_missing`, and handle every stream error.
+8. **Root cause:** `.pipe()` does not forward errors, and no listener is attached.
+9. **Impact:** ingest, MQTT and every live screen go down until systemd restarts the service. Any Data Management writer can trigger it repeatedly.
+10. **Fix:** `stat` before restore, and use `stream/promises.pipeline` for both restore and download.
+11. **Enhancement:** verify the stored SHA-256 before inserting rows, and create the hold before inserting (18 Nov FN-14).
+12. **Approach:** small changes in two files.
+13. **Test:** a unit or API test that restoring an archive whose file was deleted returns 410 and the process stays up.
+14. **Expected outcome:** archive problems produce an error message, not an outage.
+
+### H-5 — The documented DB roles break partitioning, backups and the audit trigger
+1. **ID:** H-5 (DB-3; 18 Nov DB-1).
+2. **Description:** `.env.example` and the backup guide describe a runtime role without DDL rights. With that role:
+   - partition creation and drop fail;
+   - pruning stops;
+   - backups miss `telemetry_parts`;
+   - the new audit trigger is never created, while the UI still describes the log as append-only.
+3. **Severity:** HIGH (configuration, preventive measure).
+4. **Technology:** PostgreSQL, ops docs.
+5. **Affected:**
+   - `.env.example:303`.
+   - `services/partitions.ts:100` (`DROP TABLE` without try/catch).
+   - `routes/system.ts:891-899`.
+   - `docs/operations/backup-restore.md:34-38`.
+   - `lib/audit-store.ts:157-171` (`ensureAuditStore` runs `CREATE FUNCTION`/`CREATE TRIGGER` at every start).
+6. **Current implementation:** DDL runs at runtime. Failures are only logged with "run db push", and `ensured` is reset, so every prune and verify retries the DDL.
+7. **Expected implementation:**
+   - DDL is applied by an owner-run step.
+   - At start-up the app only checks that the trigger exists, and raises a system alert if it does not.
+   - The docs and grants match reality.
+8. **Root cause:** schema management by `push` plus runtime DDL, combined with docs written for a migration-based setup.
+9. **Impact:** installations that follow the hardening guide silently lose pruning, backups of partitions and audit-log protection.
+10. **Fix:**
+    - Move `GUARD_SQL` into an owner-run script (`pnpm --filter @workspace/db run audit-guard`).
+    - Check `pg_trigger` at start-up.
+    - Add `USAGE` on `telemetry_parts` to the grants.
+    - Wrap the partition drop in try/catch.
+11. **Enhancement:** adopt the prepared migration workflow (`docs/operations/database-migrations.md`) so all DDL is versioned.
+12. **Approach:** a DB package script, docs updates, small API changes.
+13. **Test:** on a scratch database with the documented runtime role, start the API: a system alert is raised if the trigger is missing, and pruning and partition maintenance complete.
+14. **Expected outcome:** hardened installations work and do not silently lose protections.
+
+### H-6 — Live Twin saves into the wrong twin
+1. **ID:** H-6 (FE-2, FN-7; 18 Nov FE-1).
+2. **Description:** when switching twins, the selected id changes at once, but the 3D engine still holds the previous twin's scene and edit right until the new twin loads, and forever if the load fails. Pressing Save writes twin A's layout into twin B. The 2D twin view has the same flaw.
+3. **Severity:** HIGH (bug fix, data integrity).
+4. **Technology:** React, Express API.
+5. **Affected:**
+   - `iot-platform/src/features/plantTwin/PlantTwinView.tsx:117-123` (`doSave`), `:160-182` (load effect), `:386` (Save button).
+   - `features/imageTwin/ImageTwinView.tsx:137,153-163,190-195,356`.
+   - `api-server/src/routes/plant_twins.ts:210-245` (no version check).
+6. **Current implementation:**
+   - `currentRef.current = currentId` is set immediately, while `canEditRef` keeps the old value.
+   - The load error path only shows a toast.
+   - Save is disabled only while saving.
+   - The server accepts any PUT.
+7. **Expected implementation:** Save is allowed only when the loaded twin equals the selected twin. The server refuses stale writes with 409.
+8. **Root cause:** there is no "loaded id" state separate from the "selected id", and no optimistic locking on the server.
+9. **Impact:** silent loss of a twin's layout and its machine bindings, with no undo.
+10. **Fix:**
+    - At effect start, set `canEditRef=false`, `loadingRef=true` and `loadedIdRef=null`. Set `loadedIdRef` only after `loadScene` succeeds.
+    - `doSave` refuses unless `loadedIdRef === currentRef.current`.
+    - Disable Save while loading or after an error.
+    - Add an `expectedUpdatedAt` check with `SELECT … FOR UPDATE` on the server, as `viz_nodes` does.
+11. **Enhancement:** keep a short version history per twin so mistakes can be undone.
+12. **Approach:** the same guard in PlantTwinView, ImageTwinView and TagTwinView (see M-18); a server change plus an OpenAPI field.
+13. **Test:**
+    - Manual with a throttled network: switch twins and press Save; no PUT is sent until load resolves, or when it fails.
+    - An API test: a PUT with a stale `expectedUpdatedAt` returns 409.
+14. **Expected outcome:** no cross-twin overwrites.
+
+### H-7 — The audit log's tamper evidence can be bypassed
+1. **ID:** H-7 (DB-1, DB-5).
+2. **Description:** anyone who can run SQL with the app's own login can bypass the append-only trigger and the hash chain:
+   - by setting the session variable `app.audit_retention='on'`;
+   - by inserting rows (no insert guard);
+   - by editing the pruning checkpoint in `job_state`;
+   - by recomputing the unkeyed SHA-256 chain.
+
+   The backfill also hashes forged unhashed rows on the next write.
+3. **Severity:** HIGH (security remediation; compliance accuracy).
+4. **Technology:** PostgreSQL, Express API.
+5. **Affected:**
+   - `lib/audit-store.ts:88-109` (`GUARD_SQL`), `:124-153` (backfill and `chainHead`), `:325-343` (prune), `:81-83` (checkpoint).
+   - `lib/audit-core.ts:126` (`entryHash`).
+   - `docs/security/compliance.md:19` and `docs/features/audit-log.md` (claims).
+6. **Current implementation:**
+   - The trigger allows DELETE whenever `current_setting('app.audit_retention', true) = 'on'`, which any session can set.
+   - The trigger covers UPDATE, DELETE and TRUNCATE only.
+   - The checkpoint is an ordinary row, and the hash has no secret key.
+7. **Expected implementation:** the runtime role cannot delete or update audit rows or the checkpoint. Inserts must carry a valid chain link. The chain head is anchored outside the database with a keyed MAC.
+8. **Root cause:** the protections live in data and settings that the runtime login can change.
+9. **Impact:**
+   - With the credentials in `.env` (a shell on the VM, or a future SQL injection), entries can be deleted, rewritten or forged without detection.
+   - The docs present the log as a 21 CFR Part 11 / ISO 27001 control, which overstates it.
+10. **Fix:**
+    - `REVOKE UPDATE, DELETE, TRUNCATE ON activity_logs, job_state FROM <runtime role>`.
+    - Prune through a `SECURITY DEFINER` function owned by the table owner that deletes only rows older than the retention period, and writes the checkpoint to an insert-only table.
+    - In the trigger, check `current_user` instead of a session setting.
+    - Add a `BEFORE INSERT` trigger that rejects a NULL `seq` or `hash` and a mismatched `prev_hash`.
+    - Run the backfill once only, from start-up, up to a stored marker; `ORDER BY seq DESC NULLS LAST`; make `seq` NOT NULL.
+11. **Enhancement:**
+    - Use an HMAC keyed from `SECRETS_ENC_KEY` and sign the checkpoint.
+    - Ship the chain head `(seq, hash, mac)` outside the database periodically, for example in the backup manifest or to syslog.
+    - Verify fails if the head goes backwards.
+    - Correct the compliance docs until this is in place.
+12. **Approach:** an owner-run SQL script (together with H-5), a small change in `audit-store.ts`, docs updates.
+13. **Test:** on a scratch database as the runtime role:
+    - `SET app.audit_retention='on'; DELETE FROM activity_logs` fails with 42501.
+    - An insert with a NULL hash fails.
+    - Editing the checkpoint makes verify fail.
+14. **Expected outcome:** tampering needs the DB owner credentials and is still detectable from the external anchor.
+
+### H-8 — Live Feed exhausts the API rate limit
+1. **ID:** H-8 (FE-1, DB-4, FN-5).
+2. **Description:** every 30 s, Live Feed requests `/assets/:id/health` and `/assets/:id/attributes` for every asset in scope. That is 4 requests per asset per minute per tab. The per-user (and per-IP) budget is 600 per minute, so it runs out at about 150 assets. Failed polls are silently ignored, so assets drift to "delayed" or "offline" while data is arriving.
+3. **Severity:** HIGH (performance, functional defect).
+4. **Technology:** React, Express API, PostgreSQL.
+5. **Affected:**
+   - `iot-platform/src/features/liveFeed/useLiveData.ts:26-28,134-204`.
+   - `api-server/src/middleware/apiRateLimit.ts:53-63`.
+   - `lib/auth-config.ts:169`.
+   - `routes/ingest.ts:1369-1402` (4 queries per health call).
+   - `lib/project-access.ts:32` (loads the whole assets table per request for restricted users).
+6. **Current implementation:**
+   - The page makes N+1 requests per asset.
+   - About 10 to 11 DB queries per asset per 30 s per tab, on a 10-connection pool shared with ingest.
+   - Each 429 writes a `ratelimit.tripped` security event.
+7. **Expected implementation:** one batched request per poll. Failures show "status unknown" instead of ageing the assets.
+8. **Root cause:** per-asset polling designed without considering the rate limiter or pool size.
+9. **Impact:**
+   - With large plants, every other screen gets 429 errors.
+   - Two operators behind one NAT run out at about 75 assets each.
+   - The status shown is wrong, false "offline" events are recorded, and the security log fills up.
+10. **Fix:**
+    - Add `POST /assets/live-summary {ids}` (or project-scoped). It returns per asset: newest reading time, open alarm count, latest attributes and expected interval, from three set queries (attributes `= ANY`, alarms `GROUP BY`, and a `LATERAL` newest-reading lookup as `/sites` uses). Add spec, codegen, a ROUTE_RULES entry and a test.
+    - Poll it every 30 s and rely on the WebSocket in between.
+    - Cache `assetScope` per user for a few seconds.
+11. **Enhancement:** back off on 429, poll only visible assets, and show a "data could not be refreshed" banner.
+12. **Approach:** a server endpoint plus a `useLiveData` rewrite of the poll function.
+13. **Test:** with 200 mocked assets, at most 2 requests per poll. A unit test that a 429 does not turn assets offline. On the server, a test that 30 polls stay under the limiter.
+14. **Expected outcome:** Live Feed scales to thousands of assets without affecting other screens.
+
+---
+
+## F. Authentication and authorization report
+
+**Sound:**
+- **Sessions:** HttpOnly cookie with idle and absolute expiry.
+- **CSRF:** double-submit token bound to the session.
+- **Login:** origin guard, dummy scrypt for timing, rate limits per IP, subnet and account.
+- **Tokens:** activation and reset tokens are hashed, single-use and rate-limited.
+- **Session revocation:** on password change or reset, temporary password and suspension.
+- **Route table:** deny-by-default with full method coverage; `AUTH_ENFORCE=false` is refused in production.
+- **User administration:** rank checks and a last-admin guard.
+- **API keys:** hashed, with expiry, CIDR allowlist and scope checks.
+- **Project scope:** enforced on direct ids, owner lookups and filtered lists.
+- **AI routes:** scope intersected with project access, and every tool enforces it.
+- **Audit endpoints:** verify, settings and acknowledge require `manage_security`.
+
+**Open:**
+- H-1 (API keys) and H-2 (approvals).
+- M-1 (lockout ends sessions).
+- M-2 (uploads), M-3 (security events), M-4 (attention endpoint).
+- M-5 (restricted admin), M-21 (sockets after delete or expiry).
+- L-1 to L-4.
+- No MFA: `otpLimiter` exists but is not mounted.
+
+## G. Data protection and encryption report
+
+**Sound:**
+- **Passwords:** scrypt.
+- **Hashes:** SHA-256 for sessions, tokens and API keys.
+- **Integration secrets:** AES-256-GCM with per-field AAD and key rotation (brokers, destinations, ingest tokens). Production refuses to start without `SECRETS_ENC_KEY`.
+- **Responses:** never include password, MFA or secret fields.
+- **Logs:** pino redacts cookies, authorization headers, tokens and passwords.
+- **Audit diffs:** redact secret-named fields at any depth.
+- **Downloads:** sandboxed with attachment and nosniff.
+
+**Open:**
+- M-6 (webhook secrets kept permanently in the audit log).
+- L-8 (webhook URLs logged in full and stored unencrypted).
+- H-7 (audit log integrity).
+- I-2 (data sent to Groq needs to be documented for customers).
+- I-4 (`.env` synced to OneDrive).
+- I-7 (personal data in the append-only log).
+- L-26 (plaintext `mfa_secret`, unused).
+
+## H. API and database assessment
+
+**API:**
+- **Validation:** consistent use of `validate`/zod. A few routes return 500 on bad input (L-18).
+- **SQL:** parameterised everywhere. `sql.raw` is used only with internal constants, and user LIKE input is escaped.
+- **Outbound calls:** the URL guard covers webhooks and destinations, but not brokers (M-7) or the Data Management alert webhook (M-8).
+- **Uploads:** content-sniffed against an allow-list, polyglots refused, UUID file names.
+
+**Database:**
+- **Strong:** rollup design and boundaries, report merge logic (no double counting), optimistic locking on viz nodes, the data-change claim. No deadlock risk among the 6 server-side transactions.
+- **Weak:** missing uniqueness and indexes (M-17), plant-twin scene storage (M-14), audit-log search and verify cost (M-12, M-13), late-data summarisation (M-16), report truncation (M-11).
+
+## I. Performance and reliability report
+
+The heaviest problems:
+- H-8 (Live Feed request amplification).
+- M-14 (plant-twin list reads every scene, up to about 900 KB each).
+- M-12 and M-13 (audit-log search, count, export and verify on a table with at least a year of entries).
+- M-23 (audit lock during pruning).
+- L-25 (parallel query bursts on a 10-connection pool).
+- M-22 (nginx timeouts for AI requests).
+
+Reliability:
+- **Breaks the service:** H-4 (crash on a missing archive file).
+- **Fail silently:** M-20 (pruning stops at the first failing table), L-13 (audit export and verify).
+
+Graceful shutdown, statement timeouts, outbound timeouts and rollup slicing are all in place.
+
+## J. Technical enhancement recommendations
+
+1. **Batched read endpoints for live screens** (Live Feed, Map, twins), with WebSocket push in between; no per-entity polling.
+2. **Move DDL out of runtime.** Adopt the prepared migration workflow and run trigger and grant setup as an owner step (H-5, H-7).
+3. **Store large binary content (2D-twin images, GLB) in `uploads`** with project scoping, not in `scene` jsonb (M-2, M-14).
+4. **Start-up self-checks:** route rules with `level` on simple modules, the audit trigger present, required grants. Report failures as system alerts.
+5. **Background jobs with progress** for long operations: range delete, verify, archive restore, large asset delete.
+6. **Frontend test runner (Vitest)** for pure helpers: Live Feed `status.ts`, SVG sanitiser, CSV escapers, twin save guards.
+7. **External anchoring of the audit-log head** (backup manifest or syslog) to support compliance claims.
+
+## K. Prioritised remediation roadmap
+
+**P0 — before the next customer installation**
+1. H-1: scope ceiling on edit, rotate, restore and delete of API keys.
+2. H-2: `approve_data_changes` permission; second person for approval settings and hold release; fail closed; start-up check against `level` on simple modules.
+3. H-3: hold check, 15-minute summaries and batched telemetry delete on asset delete.
+4. H-4: archive stream error handling.
+5. H-6: twin save guard in 3D, 2D and tag twins (with M-18), plus the server conflict check (409).
+6. H-8: batched Live Feed endpoint and failure-aware status.
+7. H-5 + H-7 (done together): owner-run DDL script, grants and revokes, insert guard, keyed hash, correct the compliance docs.
+8. zod 4 upgrade before **2026-12-10**.
+
+**P1 — high priority**
+- M-1, M-2, M-3, M-4, M-5 (access rules).
+- M-6, M-7, M-8 (secrets and SSRF).
+- M-9, M-10 (audit-log correctness).
+- M-11 (report truncation flags).
+- M-17 (uniqueness, limit cap, indexes).
+- M-21 (sockets), M-22 (nginx settings).
+
+**P2 — medium**
+M-12, M-13, M-14, M-15, M-16, M-18, M-19, M-20, M-23, L-5, L-6, L-7, L-8, L-9, L-10, L-11, L-24, L-25.
+
+**P3 — low and long term**
+L-1 to L-4, L-12 to L-23, L-26, L-27, I-1 to I-8, dead-code removal, and the enhancements in section J.
+
+## L. Final production readiness assessment
+
+**NOT READY FOR PRODUCTION.**
+
+**Reasoning:**
+- No critical vulnerability exists, and the core security controls remain strong.
+- However, eight HIGH issues are reachable by ordinary users or normal use:
+  - an Engineer can mint an admin-level API credential;
+  - an Engineer can destroy data under legal hold;
+  - a missing file takes the API down;
+  - large plants get rate-limited by their own Live Feed;
+  - twin layouts can be silently overwritten.
+- Six of these were reported five days ago with a "fix before the next installation" priority and are still open.
+- The new audit log is described as a compliance control, but its tamper evidence does not hold against the app's own database login.
+
+Once the P0 items are fixed and re-tested, the platform would move to **CONDITIONALLY READY – REMAINING RISKS DOCUMENTED**.
+
+**Untested areas:**
+- Runtime and penetration testing, because no isolated database was available.
+- Browser walkthrough: CSP violations, WebGL context loss, real 429 rates.
+- nginx, TLS, systemd and journald on a real VM.
+- Real PostgreSQL behaviour of the hash round trip, trigger and grants.
+- MQTT and Azure broker paths and broker access control.
+- Email delivery, PDF rendering, and AI prompt-injection behaviour against the live model.
+
+Per the audit rules, no source code, data or configuration was changed. Fixes start only after these findings are reviewed and approved. Each fix will then get a regression test and a remediation verification report.
+</script>
+<script src="https://cdn.jsdelivr.net/npm/marked@12.0.2/marked.min.js"></script>
+<script>
+(function(){
+  var src = document.getElementById('src').textContent;
+  src = src.replace(/^# .*\n/, '');               // title is in the header
+  var out = document.getElementById('out');
+  if (!window.marked) { out.innerHTML = '<section><p>Could not load the Markdown renderer (offline?). The report source is docs/review/audit-2026-11-23.md.</p><pre style="white-space:pre-wrap">' + src.replace(/[&<]/g, function(c){return c==='&'?'&amp;':'&lt;'}) + '</pre></section>'; return; }
+  var doc = document.createElement('div');
+  doc.innerHTML = marked.parse(src, { gfm: true });
+
+  // Split into sections at each h2; the preamble becomes "Scope and method".
+  var sec = document.createElement('section'), first = true;
+  var h = document.createElement('h2'); h.textContent = 'Scope and method'; sec.appendChild(h);
+  Array.prototype.slice.call(doc.childNodes).forEach(function(n){
+    if (n.nodeName === 'H2') { out.appendChild(sec); sec = document.createElement('section'); }
+    sec.appendChild(n);
+  });
+  out.appendChild(sec);
+
+  // Ids, TOC, highlight HIGH detail headings.
+  var toc = document.getElementById('toc');
+  out.querySelectorAll('h2').forEach(function(h2, i){
+    h2.id = 's' + i;
+    var a = document.createElement('a'); a.href = '#s' + i; a.textContent = h2.textContent; toc.appendChild(a);
+  });
+  out.querySelectorAll('h3').forEach(function(h3){
+    var m = h3.textContent.match(/^(H-\d+)\b/);
+    if (m) { h3.id = m[1].toLowerCase(); h3.classList.add('hi'); }
+  });
+
+  // Wrap tables, badge ids, status pills, link HIGH ids to details.
+  out.querySelectorAll('table').forEach(function(t){
+    var w = document.createElement('div'); w.className = 'tbl'; t.parentNode.insertBefore(w, t); w.appendChild(t);
+    t.querySelectorAll('tbody tr').forEach(function(tr){
+      var c = tr.cells[0]; if (!c) return;
+      var m = c.textContent.trim().match(/^([HMLI])-(\d+)$/);
+      if (m) {
+        tr.dataset.sev = m[1];
+        var id = m[1] + '-' + m[2];
+        var target = document.getElementById(id.toLowerCase());
+        c.innerHTML = target ? '<a class="id sev-' + m[1] + '" href="#' + id.toLowerCase() + '">' + id + '</a>' : '<span class="id sev-' + m[1] + '">' + id + '</span>';
+      }
+      Array.prototype.forEach.call(tr.cells, function(td){
+        var s = td.textContent.trim();
+        if (s === 'Confirmed') td.innerHTML = '<span class="pill c">Confirmed</span>';
+        else if (/^Potential/.test(s)) td.innerHTML = '<span class="pill p">' + s + '</span>';
+      });
+    });
+  });
+
+  // Filtering by severity cards and text.
+  var off = {}, q = document.getElementById('q');
+  function apply(){
+    var term = q.value.trim().toLowerCase();
+    out.querySelectorAll('tbody tr[data-sev]').forEach(function(tr){
+      var show = !off[tr.dataset.sev] && (!term || tr.textContent.toLowerCase().indexOf(term) >= 0);
+      tr.classList.toggle('hide', !show);
+    });
+    document.querySelectorAll('.card[data-sev]').forEach(function(c){ c.classList.toggle('off', !!off[c.dataset.sev]); });
+  }
+  document.querySelectorAll('.card[data-sev]').forEach(function(c){
+    c.addEventListener('click', function(){ off[c.dataset.sev] = !off[c.dataset.sev]; apply(); document.getElementById('s3') && document.getElementById('s3').scrollIntoView({behavior:'smooth'}); });
+  });
+  q.addEventListener('input', apply);
+  document.getElementById('all').addEventListener('click', function(){ off = {}; q.value = ''; apply(); });
+
+  // Theme toggle (kept per viewer).
+  var root = document.documentElement;
+  try { var t = localStorage.getItem('audit-theme'); if (t) root.dataset.theme = t; } catch (e) {}
+  document.getElementById('theme').addEventListener('click', function(){
+    var dark = root.dataset.theme ? root.dataset.theme === 'dark' : matchMedia('(prefers-color-scheme: dark)').matches;
+    root.dataset.theme = dark ? 'light' : 'dark';
+    try { localStorage.setItem('audit-theme', root.dataset.theme); } catch (e) {}
+  });
+
+  // Active TOC entry.
+  var links = toc.querySelectorAll('a');
+  var io = new IntersectionObserver(function(es){ es.forEach(function(e){ if (e.isIntersecting) links.forEach(function(a){ a.classList.toggle('on', a.getAttribute('href') === '#' + e.target.id); }); }); }, { rootMargin: '0px 0px -70% 0px' });
+  out.querySelectorAll('h2').forEach(function(h2){ io.observe(h2); });
+})();
+</script>
+</body>
+</html>
