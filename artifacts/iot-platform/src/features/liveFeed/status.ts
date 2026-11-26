@@ -77,15 +77,19 @@ export function readable(reading: string): string {
   return spaced.split(" ").map((w, i) => (i === 0 ? w[0]!.toUpperCase() + w.slice(1) : /^[A-Z]{2,}/.test(w) ? w : w.toLowerCase())).join(" ");
 }
 
-/** Short human duration: 12 s, 4 min, 3 h, 2 d. */
-export function fmtDuration(ms: number): string {
+/**
+ * Short human duration: 12 s, 4 min, 3 h, 2 d. Pass the page's `t` to get the
+ * units in the interface language (keys "{n} s", "{n} min", "{n} h", "{n} d").
+ */
+export function fmtDuration(ms: number, t?: (text: string, vars: Record<string, number>) => string): string {
+  const unit = (n: number, key: string) => (t ? t(key, { n }) : key.replace("{n}", String(n)));
   const s = Math.max(0, Math.round(ms / 1000));
-  if (s < 60) return `${s} s`;
+  if (s < 60) return unit(s, "{n} s");
   const m = Math.round(s / 60);
-  if (m < 60) return `${m} min`;
+  if (m < 60) return unit(m, "{n} min");
   const h = Math.round(m / 60);
-  if (h < 48) return `${h} h`;
-  return `${Math.round(h / 24)} d`;
+  if (h < 48) return unit(h, "{n} h");
+  return unit(Math.round(h / 24), "{n} d");
 }
 
 export function fmtValue(v: number | null | undefined, decimals?: number | null): string {

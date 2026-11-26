@@ -57,6 +57,37 @@ If this platform is used to process data about individuals (e.g., operator activ
 
 ---
 
+## Third-Party Data Transfer: AI Advisor (Groq)
+
+AI Advisor (the Advisor chat and AI Reports) sends plant data to an external AI service,
+Groq (`api.groq.com`, through `GROQ_API_KEY`). This is a transfer of customer data to a third
+party and must be covered by the customer's agreement. Nothing is sent when `GROQ_API_KEY` is
+not set; AI Reports then show the computed figures only.
+
+What is sent:
+
+- **Advisor chat:** the question (at most 2,000 characters), up to four earlier messages of the
+  conversation (each cut to 1,000 characters), the selected time range and time zone, the name
+  of the selected project or asset, and the results of the read-only lookups the model asks for:
+  asset ids, names and device identifiers, metric names, readings and statistics, alarm names,
+  messages, severities and times, alarm rule limits, asset attribute values, platform counts
+  (number of assets, users and connected brokers, shown only to roles that see them elsewhere)
+  and configuration change records from the audit log (what changed, when, and the **display
+  name and role** of who changed it; URL, key, token, secret and password fields are hidden).
+- **AI Reports:** the computed figures of the report (asset, metric and alarm names and the
+  numbers, no asset ids), the list of the report's assets with their ids, and the results of the
+  same read-only lookups, kept to the report's assets and period.
+
+What is not sent: usernames, email addresses, passwords, session or CSRF tokens, API client
+secrets, webhook URLs and other credentials, and the security log. Who asked is not sent either.
+
+Every transfer is recorded in the Activity Log (`ai.question` with the question's length and the
+lookups used, not its text; `ai.report` with scope, period, mode and lookups). Text inside the
+data (asset, alarm and metric names typed by users or devices) is marked to the model as
+untrusted data that must not be followed as instructions. See `docs/features/ai-report.md`.
+
+---
+
 ## Recommended Compliance Actions
 
 **Immediate:**

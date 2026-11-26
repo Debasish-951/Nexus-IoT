@@ -63,6 +63,34 @@ function toLocalInputValue(d: Date): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+/** Longest time range the server accepts for a question (REPORT_MAX_DAYS in the API). */
+const MAX_RANGE_DAYS = 92;
+
+type Translate = (text: string, vars?: Record<string, string | number>) => string;
+
+/**
+ * The answer of /api/ai/chat, or a message to show. A proxy in front of the API
+ * (nginx) answers a timeout or an unreachable API with an HTML page, not JSON,
+ * so the body is read as text and only parsed when it is JSON; reading it with
+ * res.json() showed "Unexpected token <" to the user.
+ */
+async function readChatResponse(res: Response, t: Translate): Promise<{ answer: string; steps?: Msg["steps"] } | { error: string }> {
+  const text = await res.text().catch(() => "");
+  let data: any = null;
+  try { data = text ? JSON.parse(text) : null; } catch { data = null; }
+  const ref = data?.correlationId ?? res.headers.get("X-Correlation-Id");
+  const withRef = (m: string) => (ref ? `${m} ${t("(reference {id})", { id: ref })}` : m);
+  if (!res.ok) {
+    if (data && typeof data.error === "string") return { error: withRef(data.error) };
+    if (res.status === 502 || res.status === 503 || res.status === 504) {
+      return { error: withRef(t("The server did not answer in time (error {status}). The AI Advisor may be busy or unreachable; try again in a moment, or choose a shorter time range.", { status: res.status })) };
+    }
+    return { error: withRef(t("The request failed (error {status}).", { status: res.status })) };
+  }
+  if (!data || typeof data !== "object") return { error: t("The server sent an answer this page could not read. Try again.") };
+  return { answer: typeof data.answer === "string" && data.answer ? data.answer : t("(no answer)"), steps: Array.isArray(data.steps) ? data.steps : undefined };
+}
+
 const EXAMPLES = [
   "Why is the Fan's health dropping?",
   "Show assets with high vibration",
@@ -90,14 +118,18 @@ export default function AICopilot() {
   const toDate = new Date(rangeTo);
   const rangeError =
     !rangeFrom || !rangeTo || Number.isNaN(fromDate.getTime()) || Number.isNaN(toDate.getTime())
-      ? "Set both a start and an end time."
+      ? t("Set both a start and an end time.")
       : fromDate >= toDate
-        ? "\"From\" must be earlier than \"To\"."
-        : null;
+        ? t("\"From\" must be earlier than \"To\".")
+        : toDate.getTime() - fromDate.getTime() > MAX_RANGE_DAYS * 86_400_000
+          ? t("Select at most {n} days.", { n: MAX_RANGE_DAYS })
+          : null;
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const search = useSearch();
-  const lastAction = useRef<string | null>(null);
   const [, navigate] = useLocation();
+  // The question in flight: cancelled when the page closes or another question starts.
+  const inflight = useRef<AbortController | null>(null);
+  useEffect(() => () => inflight.current?.abort(), []);
   // Reports moved to their own page (AI Advisor -> AI Reports); older links such as
   // /ai-copilot?action=report&assetId=...&from=...&to=... are forwarded with their parameters.
   useEffect(() => {
@@ -124,13 +156,20 @@ export default function AICopilot() {
 
   // Deep-link from the sidebar submenus: /ai-copilot?action=health|failure|recommend
   useEffect(() => {
-    const action = new URLSearchParams(search).get("action");
-    if (!action || lastAction.current === action) return;
+    const p = new URLSearchParams(search);
+    const action = p.get("action");
+    if (!action || action === "report") return;
     const qa = QUICK_ACTIONS.find((a) => a.key === action);
-    // Marked handled only once send() accepts it. Clicked while an answer was
-    // still loading, it used to be marked and then dropped; now it waits, and
+    if (!qa?.prompt) return;
+    // Consumed once: the action is taken out of the address when send() accepts
+    // it, so a reload does not ask the same question again (and spend the AI
+    // provider's quota). Clicked while an answer is still loading, it waits, and
     // this effect re-runs when loading ends.
-    if (qa?.prompt && send(qa.prompt)) lastAction.current = action;
+    if (send(qa.prompt)) {
+      p.delete("action");
+      const rest = p.toString();
+      navigate(rest ? `/ai-copilot?${rest}` : "/ai-copilot", { replace: true });
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [search, loading, rangeError]);
 
@@ -150,10 +189,14 @@ export default function AICopilot() {
     setMessages(next);
     setInput("");
     setLoading(true);
+    inflight.current?.abort();
+    const ctrl = new AbortController();
+    inflight.current = ctrl;
 
     try {
       const res = await apiFetch(`${BASE}/api/ai/chat`, {
         method: "POST",
+        signal: ctrl.signal,
         body: JSON.stringify({
           question: q,
           history,
@@ -162,16 +205,19 @@ export default function AICopilot() {
           timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         }),
       });
-      const data = await res.json();
-      if (!res.ok) {
-        setMessages([...next, { role: "assistant", content: data.error ?? "Request failed.", error: true }]);
+      const out = await readChatResponse(res, t);
+      if (ctrl.signal.aborted) return;
+      if ("error" in out) {
+        setMessages([...next, { role: "assistant", content: out.error, error: true }]);
       } else {
-        setMessages([...next, { role: "assistant", content: data.answer ?? "(no answer)", steps: data.steps }]);
+        setMessages([...next, { role: "assistant", content: out.answer, steps: out.steps }]);
       }
-    } catch (err: any) {
-      setMessages([...next, { role: "assistant", content: err?.message ?? "Network error.", error: true }]);
+    } catch {
+      // Cancelled (page closed or a newer question): nothing to show.
+      if (ctrl.signal.aborted) return;
+      setMessages([...next, { role: "assistant", content: t("The server could not be reached. Check the connection and try again."), error: true }]);
     } finally {
-      setLoading(false);
+      if (inflight.current === ctrl) { inflight.current = null; setLoading(false); }
     }
   }
 
@@ -194,7 +240,7 @@ export default function AICopilot() {
               <Sparkles className="w-3 h-3" /> Groq
             </Badge>
           </h1>
-          <p className="text-sm text-muted-foreground">Ask anything about your assets, telemetry, and alarms</p>
+          <p className="text-sm text-muted-foreground">{t("Ask anything about your assets, telemetry, and alarms")}</p>
         </div>
       </div>
 
@@ -249,17 +295,17 @@ export default function AICopilot() {
               <div className="text-center py-10">
                 <BrainCircuit className="w-10 h-10 text-muted-foreground/40 mx-auto mb-3" />
                 <p className="text-sm text-muted-foreground mb-4">
-                  Ask a question, or try one of these:
+                  {t("Ask a question, or try one of these:")}
                 </p>
                 <div className="flex flex-wrap gap-2 justify-center max-w-xl mx-auto">
                   {EXAMPLES.map((ex) => (
                     <button
                       key={ex}
-                      onClick={() => send(ex)}
+                      onClick={() => send(t(ex))}
                       disabled={loading || !!rangeError}
                       className="text-xs px-3 py-1.5 rounded-full border bg-card hover:bg-accent transition-colors disabled:opacity-50"
                     >
-                      {ex}
+                      {t(ex)}
                     </button>
                   ))}
                 </div>
@@ -313,7 +359,7 @@ export default function AICopilot() {
                 </div>
                 <div className="bg-muted rounded-lg px-3 py-2 text-sm text-muted-foreground flex items-center gap-2">
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                  Thinking & gathering data…
+                  {t("Thinking & gathering data…")}
                 </div>
               </div>
             )}
@@ -333,7 +379,7 @@ export default function AICopilot() {
                   send(input);
                 }
               }}
-              placeholder="Ask about your assets, telemetry, or alarms…  (Enter to send, Shift+Enter for newline)"
+              placeholder={t("Ask about your assets, telemetry, or alarms…  (Enter to send, Shift+Enter for newline)")}
               rows={1}
               className="resize-none min-h-[40px] max-h-32"
               disabled={loading}
@@ -343,9 +389,8 @@ export default function AICopilot() {
             </Button>
           </div>
           <p className="text-[11px] text-muted-foreground mt-1.5">
-            Answers come from your live platform data. <strong>Smart Recommendations</strong> use a heuristic
-            ranking (alarms, history, freshness) — not a machine-learning failure prediction. Read-only: the
-            Assistant cannot change anything.
+            {t("Answers come from your live platform data.")} <strong>{t("Smart Recommendations")}</strong>{" "}
+            {t("use a heuristic ranking (alarms, history, freshness), not a machine-learning failure prediction. Read-only: the Assistant cannot change anything.")}
           </p>
         </div>
       </Card>

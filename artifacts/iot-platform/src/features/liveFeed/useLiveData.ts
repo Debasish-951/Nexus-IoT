@@ -38,7 +38,13 @@ export interface AssetLive {
   readings: Reading[];
 }
 export type LiveEventKind = "alarm" | "status" | "limit" | "user";
-export interface LiveEvent { id: string; kind: LiveEventKind; at: number; assetId?: string; assetName?: string; title: string; detail?: string; tone: "red" | "amber" | "green" | "blue" | "grey" }
+/**
+ * One line of the event stream. `title` is data (a metric, rule or asset name, or
+ * an audit action); an alarm without a rule name has an empty title and the page
+ * shows "Alarm". `detail` is interface text the page translates, except when
+ * `detailIsData` is set (user names of an audit entry).
+ */
+export interface LiveEvent { id: string; kind: LiveEventKind; at: number; assetId?: string; assetName?: string; title: string; detail?: string; detailIsData?: boolean; severity?: string; tone: "red" | "amber" | "green" | "blue" | "grey" }
 
 interface Store {
   readings: Map<string, Map<string, Reading>>;   // assetId -> metric -> reading
@@ -223,7 +229,7 @@ export function useLiveData() {
     const sev = String(data.severity ?? "");
     pushEvent({
       kind: "alarm", at: newest(data.timestamp) || Date.now(), assetId: data.assetId, assetName: data.assetName,
-      title: sev ? `${data.ruleName ?? "Alarm"} (${sev})` : data.ruleName ?? "Alarm",
+      title: String(data.ruleName ?? ""), severity: sev || undefined,
       detail: ev === "triggered" ? "raised" : ev === "cleared" ? "cleared" : ev === "acknowledged" ? "acknowledged" : ev,
       tone: ev === "cleared" ? "green" : ev === "acknowledged" ? "blue" : sev === "critical" || sev === "high" ? "red" : "amber",
     });
@@ -233,7 +239,7 @@ export function useLiveData() {
     if (!canAudit || !data) return;
     pushEvent({
       kind: "user", at: newest(data.timestamp) || Date.now(), title: String(data.action ?? ""),
-      detail: [data.actorName, data.targetName].filter(Boolean).join(" - ") || undefined, tone: "blue",
+      detail: [data.actorName, data.targetName].filter(Boolean).join(" - ") || undefined, detailIsData: true, tone: "blue",
     });
   }, [canAudit, pushEvent]);
 
