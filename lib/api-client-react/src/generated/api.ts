@@ -11642,6 +11642,7 @@ export const getDeleteUploadUrl = (id: string) => {
 };
 
 /**
+ * Only the uploader or an administrator (manage_users) may delete a file.
  * @summary Delete an uploaded file
  */
 export const deleteUpload = async (
@@ -11657,7 +11658,9 @@ export const deleteUpload = async (
 export const getDeleteUploadMutationKey = () => ["deleteUpload"] as const;
 
 export const getDeleteUploadMutationOptions = <
-  TError = ErrorType<ValidationFailedResponse | NotFoundResponse>,
+  TError = ErrorType<
+    ValidationFailedResponse | ErrorResponse | NotFoundResponse
+  >,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -11699,13 +11702,18 @@ export type DeleteUploadMutationResult = NonNullable<
 >;
 
 export type DeleteUploadMutationError = ErrorType<
-  ValidationFailedResponse | NotFoundResponse
+  ValidationFailedResponse | ErrorResponse | NotFoundResponse
 >;
 export type DeleteUploadMutationVariables = { id: string };
 
-/** @summary Delete an uploaded file */
+/**
+ * Only the uploader or an administrator (manage_users) may delete a file.
+ * @summary Delete an uploaded file
+ */
 export const useDeleteUpload = <
-  TError = ErrorType<ValidationFailedResponse | NotFoundResponse>,
+  TError = ErrorType<
+    ValidationFailedResponse | ErrorResponse | NotFoundResponse
+  >,
   TContext = unknown,
 >(
   options?: {
@@ -18801,6 +18809,8 @@ export const getVerifyActivityLogUrl = () => {
 };
 
 /**
+ * POST since the 23 Nov 2026 audit (L-9): the walk is costly and writes an
+ * audit entry, so a link or image must not be able to start it. GET is refused.
  * @summary Walk the hash chain and report the first broken entry, if any (security administrators)
  */
 export const verifyActivityLog = async (
@@ -18808,148 +18818,82 @@ export const verifyActivityLog = async (
 ): Promise<AuditVerifyResult> => {
   return customFetch<AuditVerifyResult>(getVerifyActivityLogUrl(), {
     ...options,
-    method: "GET",
+    method: "POST",
   });
 };
 
-export const getVerifyActivityLogQueryKey = () => {
-  return [`/api/activity-log/verify`] as const;
-};
+export const getVerifyActivityLogMutationKey = () =>
+  ["verifyActivityLog"] as const;
 
-export const getVerifyActivityLogQueryOptions = <
-  TData = Awaited<ReturnType<typeof verifyActivityLog>>,
+export const getVerifyActivityLogMutationOptions = <
   TError = ErrorType<unknown>,
+  TContext = unknown,
 >(options?: {
-  query?: Partial<
-    UseQueryOptions<
-      Awaited<ReturnType<typeof verifyActivityLog>>,
-      TError,
-      TData
-    >
-  >;
-  request?: SecondParameter<typeof customFetch>;
-}) => {
-  const { query: queryOptions, request: requestOptions } = options ?? {};
-
-  const queryKey = queryOptions?.queryKey ?? getVerifyActivityLogQueryKey();
-
-  const queryFn: QueryFunction<
-    Awaited<ReturnType<typeof verifyActivityLog>>
-  > = ({ signal }) => verifyActivityLog({ signal, ...requestOptions });
-
-  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+  mutation?: UseMutationOptions<
     Awaited<ReturnType<typeof verifyActivityLog>>,
     TError,
-    TData
-  > & { queryKey: DataTag<QueryKey, TData, TError> };
+    void,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof verifyActivityLog>>,
+  TError,
+  void,
+  TContext
+> => {
+  const mutationKey = getVerifyActivityLogMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof verifyActivityLog>>,
+    void
+  > = () => {
+    return verifyActivityLog(requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
 };
 
-export type VerifyActivityLogQueryResult = NonNullable<
+export type VerifyActivityLogMutationResult = NonNullable<
   Awaited<ReturnType<typeof verifyActivityLog>>
 >;
-export type VerifyActivityLogQueryError = ErrorType<unknown>;
 
-/** @summary Walk the hash chain and report the first broken entry, if any (security administrators) */
-export function useVerifyActivityLog<
-  TData = Awaited<ReturnType<typeof verifyActivityLog>>,
+export type VerifyActivityLogMutationError = ErrorType<unknown>;
+
+/**
+ * POST since the 23 Nov 2026 audit (L-9): the walk is costly and writes an
+ * audit entry, so a link or image must not be able to start it. GET is refused.
+ * @summary Walk the hash chain and report the first broken entry, if any (security administrators)
+ */
+export const useVerifyActivityLog = <
   TError = ErrorType<unknown>,
->(
-  options: {
-    query: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof verifyActivityLog>>,
-        TError,
-        TData
-      >
-    > &
-      Pick<
-        DefinedInitialDataOptions<
-          Awaited<ReturnType<typeof verifyActivityLog>>,
-          TError,
-          Awaited<ReturnType<typeof verifyActivityLog>>
-        >,
-        "initialData"
-      >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): DefinedUseQueryResult<TData, TError> & {
-  queryKey: DataTag<QueryKey, TData, TError>;
-};
-/** @summary Walk the hash chain and report the first broken entry, if any (security administrators) */
-export function useVerifyActivityLog<
-  TData = Awaited<ReturnType<typeof verifyActivityLog>>,
-  TError = ErrorType<unknown>,
+  TContext = unknown,
 >(
   options?: {
-    query?: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof verifyActivityLog>>,
-        TError,
-        TData
-      >
-    > &
-      Pick<
-        UndefinedInitialDataOptions<
-          Awaited<ReturnType<typeof verifyActivityLog>>,
-          TError,
-          Awaited<ReturnType<typeof verifyActivityLog>>
-        >,
-        "initialData"
-      >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-  queryKey: DataTag<QueryKey, TData, TError>;
-};
-/** @summary Walk the hash chain and report the first broken entry, if any (security administrators) */
-export function useVerifyActivityLog<
-  TData = Awaited<ReturnType<typeof verifyActivityLog>>,
-  TError = ErrorType<unknown>,
->(
-  options?: {
-    query?: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof verifyActivityLog>>,
-        TError,
-        TData
-      >
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof verifyActivityLog>>,
+      TError,
+      void,
+      TContext
     >;
     request?: SecondParameter<typeof customFetch>;
   },
   queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-  queryKey: DataTag<QueryKey, TData, TError>;
+): UseMutationResult<
+  Awaited<ReturnType<typeof verifyActivityLog>>,
+  TError,
+  void,
+  TContext
+> => {
+  return useMutation(getVerifyActivityLogMutationOptions(options), queryClient);
 };
-/** @summary Walk the hash chain and report the first broken entry, if any (security administrators) */
-export function useVerifyActivityLog<
-  TData = Awaited<ReturnType<typeof verifyActivityLog>>,
-  TError = ErrorType<unknown>,
->(
-  options?: {
-    query?: Partial<
-      UseQueryOptions<
-        Awaited<ReturnType<typeof verifyActivityLog>>,
-        TError,
-        TData
-      >
-    >;
-    request?: SecondParameter<typeof customFetch>;
-  },
-  queryClient?: QueryClient,
-): UseQueryResult<TData, TError> & {
-  queryKey: DataTag<QueryKey, TData, TError>;
-} {
-  const queryOptions = getVerifyActivityLogQueryOptions(options);
-
-  const query = useQuery(queryOptions, queryClient) as UseQueryResult<
-    TData,
-    TError
-  > & { queryKey: DataTag<QueryKey, TData, TError> };
-
-  return withQueryKey(query, queryOptions.queryKey);
-}
 
 export const getListAuditAlertsUrl = () => {
   return `/api/activity-log/alerts`;

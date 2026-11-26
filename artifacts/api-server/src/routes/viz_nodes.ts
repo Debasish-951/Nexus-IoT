@@ -8,7 +8,7 @@ import { markAudited } from "../lib/audit-context";
 import { validate } from "../middleware/validate";
 import { recordSecurityEvent } from "../lib/security-log";
 import { hasModuleAccess } from "../lib/rbac";
-import { isSuperAdmin, loadVizAccess, NO_ACCESS, type VizNodeAccess } from "../lib/viz-access";
+import { isSuperAdmin, loadVizAccess, ownsInChain, NO_ACCESS, type VizNodeAccess } from "../lib/viz-access";
 import { assetScope } from "../lib/project-access";
 import { tagsForViewer } from "../lib/viz-tags";
 import {
@@ -185,6 +185,15 @@ router.put("/viz-nodes/:id", validate({ params: VizNodeParams, body: UpdateVizNo
   if (update.parentId && !access.get(update.parentId)?.write) {
     deny(req, res, "viz_move_denied", "You do not have permission to move a dashboard there.");
     return;
+  }
+  // Moving needs ownership, not just a grant (L-2): see ownsInChain.
+  if ("parentId" in update && !isSuperAdmin(req.principal)) {
+    const nodes = await db.select({ id: vizNodesTable.id, parentId: vizNodesTable.parentId, ownerId: vizNodesTable.ownerId }).from(vizNodesTable);
+    const before = nodes.find((n) => n.id === id);
+    if (before && (before.parentId ?? null) !== (update.parentId ?? null) && !ownsInChain(nodes, id, req.principal!.user.id)) {
+      deny(req, res, "viz_move_not_owner", "Only the owner of this dashboard can move it.");
+      return;
+    }
   }
   if (update.projectId !== undefined) {
     const [node] = await db.select({ parentId: vizNodesTable.parentId }).from(vizNodesTable).where(eq(vizNodesTable.id, id));

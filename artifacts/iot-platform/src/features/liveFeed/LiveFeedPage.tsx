@@ -11,6 +11,7 @@ import { Switch } from "@/components/ui/switch";
 import { Label } from "@/components/ui/label";
 import { AssetScopePicker, useAssetTree } from "@/components/AssetScopePicker";
 import { useProject } from "@/contexts/ProjectContext";
+import { useCurrentUser } from "@/contexts/UserContext";
 import { toCsv, downloadCsvText } from "@/lib/csv";
 import { cn } from "@/lib/utils";
 import { useT } from "@/i18n";
@@ -32,6 +33,10 @@ export default function LiveFeedPage() {
   const live = useLiveData();
   const tree = useAssetTree();
   const { currentProjectId } = useProject();
+  // The server refuses AI Advisor chat for project-restricted users (I-1), so the
+  // button stays visible but disabled, with the reason.
+  const { session } = useCurrentUser();
+  const aiBlocked = !!session?.restrictProjects;
   const [scope, setScope] = useState<string>(() => currentProjectId || "all");
   const [machine, setMachine] = useState("");
   const [query, setQuery] = useState("");
@@ -232,7 +237,9 @@ export default function LiveFeedPage() {
                     <div className="flex items-center gap-1">
                       <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => openAsset(it.asset.id)}>{t("Open asset")}</Button>
                       <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => navigate("/live-twin")}>{t("Live Twin")}</Button>
-                      <Button size="sm" variant="ghost" className="h-7 px-2 text-xs gap-1" onClick={() => askAi(it.asset, it.detail)}><BrainCircuit className="w-3.5 h-3.5" /> {t("Ask AI Advisor")}</Button>
+                      <span title={aiBlocked ? t("AI Advisor chat is not available yet for users limited to specific projects.") : undefined}>
+                        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs gap-1" disabled={aiBlocked} onClick={() => askAi(it.asset, it.detail)}><BrainCircuit className="w-3.5 h-3.5" /> {t("Ask AI Advisor")}</Button>
+                      </span>
                     </div>
                   </li>
                 ))}

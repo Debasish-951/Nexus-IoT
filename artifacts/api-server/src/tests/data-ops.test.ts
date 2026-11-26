@@ -144,10 +144,11 @@ test("access: Live Twin and AI Advisor are their own modules, defaults keep toda
 });
 
 test("access: Data Management is its own module, split from Reports without changing anyone's access", () => {
-  // Defaults copy Reports.
-  const viewer = resolveAccess("viewer", {});
-  assert.equal(viewer.modules.data_management, true);
-  assert.equal(ruleAllows(viewer, "GET", "/system/data-health"), true);
+  // Defaults copy Reports, except Operator and Viewer (audit 23 Nov 2026, L-3).
+  const engineer = resolveAccess("engineer", {});
+  assert.equal(engineer.modules.data_management, true);
+  assert.equal(ruleAllows(engineer, "GET", "/system/data-health"), true);
+  assert.equal(resolveAccess("viewer", {}).modules.data_management, false);
 
   // Switched off per user: the data pages close, reports keep working.
   const noDm = resolveAccess("engineer", { modules: { data_management: false } });

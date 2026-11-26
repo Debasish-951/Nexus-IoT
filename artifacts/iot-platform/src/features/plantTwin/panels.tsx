@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { apiFetch } from "@/lib/auth-api";
 import { describeApiError, formatApiError } from "@/lib/validation";
 import { useCurrentUser } from "@/contexts/UserContext";
+import { useProject } from "@/contexts/ProjectContext";
 import { useMetricChoices } from "@/features/dashboards/useWidgetData";
 import { fetchAssetMetrics } from "./api";
 import { fmtReading, hex, type AreaStat, type PlantEngine, type Reading } from "./engine/engine";
@@ -376,8 +377,9 @@ export function AddMachine({ engine, onMessage }: { engine: PlantEngine; onMessa
 const BASE = import.meta.env.BASE_URL.replace(/\/$/, "");
 
 /** Puts a .glb file in the upload store and returns its id. */
-async function uploadGlb(file: File): Promise<string> {
-  const fd = new FormData(); fd.append("file", file, file.name);
+async function uploadGlb(file: File, projectId: string | null): Promise<string> {
+  // The open project owns the model, which decides who may list it (server M-2).
+  const fd = new FormData(); if (projectId) fd.append("projectId", projectId); fd.append("file", file, file.name);
   const res = await apiFetch(`${BASE}/api/uploads`, { method: "POST", body: fd });
   if (!res.ok) throw new Error(formatApiError(await describeApiError(res)));
   const body = await res.json() as { uploaded?: { id: string }[]; rejected?: { reason: string }[] };
@@ -401,6 +403,7 @@ export async function fetchGlbBytes(uploadId: string): Promise<ArrayBuffer> {
 export function GlbUpload({ engine, areaId, onMessage }: { engine: PlantEngine; areaId: string; onMessage: (text: string, error?: boolean) => void }) {
   const t = useT();
   const { canModule } = useCurrentUser();
+  const { currentProjectId } = useProject();
   const canStore = canModule("visualization", "write");
   const fileRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
@@ -412,7 +415,7 @@ export function GlbUpload({ engine, areaId, onMessage }: { engine: PlantEngine; 
         (async () => {
           let id: string | undefined, note = "";
           if (canStore) {
-            try { id = await uploadGlb(f); }
+            try { id = await uploadGlb(f, currentProjectId); }
             catch (err: any) { note = ` ${t("Not saved with the twin: {err}", { err: err?.message ?? String(err) })}`; }
           }
           const msg = await engine.addGlb(f, areaId, id);

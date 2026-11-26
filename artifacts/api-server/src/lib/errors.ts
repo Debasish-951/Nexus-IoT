@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import type { Request } from "express";
+import { logger } from "./logger";
 
 /**
  * Error taxonomy and the single place a server error becomes a client response.
@@ -28,8 +29,20 @@ import type { Request } from "express";
  * of exposing a database schema.
  */
 
-/** Explicit opt-in. Not derived from NODE_ENV — see above. */
-const includeDetail = /^(1|true|yes|on)$/i.test(process.env.DEBUG_ERRORS ?? "");
+/**
+ * Explicit opt-in, not derived from NODE_ENV (see above). It can still only be
+ * switched OFF by NODE_ENV: with NODE_ENV=production, DEBUG_ERRORS is ignored and
+ * a warning is logged at start-up (audit 23 Nov 2026, I-3), so a debugging flag
+ * left in a production .env cannot send stack traces to browsers.
+ */
+export function debugErrorsEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  const requested = /^(1|true|yes|on)$/i.test(env.DEBUG_ERRORS ?? "");
+  return requested && env.NODE_ENV !== "production";
+}
+const includeDetail = debugErrorsEnabled();
+if (!includeDetail && /^(1|true|yes|on)$/i.test(process.env.DEBUG_ERRORS ?? "")) {
+  logger.error("DEBUG_ERRORS is set but IGNORED because NODE_ENV=production: error responses carry no stack traces. Remove DEBUG_ERRORS from the production environment.");
+}
 
 // ── Correlation ──────────────────────────────────────────────────────────────
 

@@ -28,6 +28,7 @@ import { useCurrentUser } from "@/contexts/UserContext";
 import { canGrantRole } from "@/lib/roleRank";
 import { ReadOnlyBanner } from "@/components/RoleGuard";
 import { apiGet, apiPost, apiPut, apiFetch } from "@/lib/auth-api";
+import { useT } from "@/i18n";
 import { HistoryButton } from "@/features/auditLog/shared";
 
 // ── Styles ────────────────────────────────────────────────────────────────────
@@ -202,7 +203,7 @@ function Section({ icon, title, children }: { icon: React.ReactNode; title: stri
 
 function ResourceSection({
   icon, title, allItems, restricted, allowedIds, canEdit,
-  onToggleRestrict, onToggleItem, emptyText, allLabel, fixed,
+  onToggleRestrict, onToggleItem, emptyText, allLabel, fixed, notEnforced,
 }: {
   icon: React.ReactNode; title: string;
   allItems: { id: string; name: string }[];
@@ -213,11 +214,20 @@ function ResourceSection({
   emptyText: string; allLabel: string;
   /** The role decides this, so the Restrict switch is hidden. */
   fixed?: "all" | "assigned";
+  /** The setting is saved but the server does not enforce it yet (audit L-4): say so. */
+  notEnforced?: boolean;
 }) {
+  const t = useT();
   const showList = fixed ? fixed === "assigned" : restricted;
   return (
     <Section icon={icon} title={title}>
       <div className="space-y-3">
+        {notEnforced && (
+          <p className="flex items-start gap-1.5 rounded-md border border-amber-300/60 bg-amber-50 dark:bg-amber-950/20 px-2.5 py-1.5 text-[11px] text-amber-800 dark:text-amber-300">
+            <Info className="w-3 h-3 mt-0.5 shrink-0" />
+            <span>{t("Not enforced by the server yet. This restriction is saved, but the user can still open everything their role and modules allow.")}</span>
+          </p>
+        )}
         <div className="flex items-center justify-between">
           <p className="text-xs text-muted-foreground">
             {fixed === "assigned" ? "This role sees only the projects ticked below."
@@ -459,6 +469,7 @@ function UserDetailPanel({
           canEdit={canEdit}
           allLabel="This user can view all dashboards their role permits."
           emptyText="No dashboards found. Create dashboards in the Visualization page."
+          notEnforced
           onToggleRestrict={(v) => onUpdateConfig({ restrictDashboards: v, allowedDashboards: v ? (config.allowedDashboards ?? []) : [] })}
           onToggleItem={(id, checked) => {
             const cur = config.allowedDashboards ?? [];
@@ -475,6 +486,7 @@ function UserDetailPanel({
           canEdit={canEdit}
           allLabel="This user can access all analytics and report types their role permits."
           emptyText=""
+          notEnforced
           onToggleRestrict={(v) => onUpdateConfig({ restrictAnalytics: v, allowedAnalytics: v ? (config.allowedAnalytics ?? []) : [] })}
           onToggleItem={(id, checked) => {
             const cur = config.allowedAnalytics ?? [];

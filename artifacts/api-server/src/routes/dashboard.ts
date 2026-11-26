@@ -11,6 +11,7 @@ import {
   usersTable, telemetryTable,
 } from "@workspace/db";
 import { PLANT_TIME_ZONE, startOfZoneDay, startOfZoneHour, zoneDateKey } from "../lib/plant-time";
+import { hasModuleAccess } from "../lib/rbac";
 
 const router: IRouter = Router();
 
@@ -201,7 +202,14 @@ router.get("/dashboard/attention", validate({ query: AttentionQuery }), async (r
   const staleCutoff = new Date(now - staleMinutes * 60_000);
   const keyCutoff = new Date(now + keyExpiryDays * 86_400_000);
 
-  const openAlarms = await db
+  // Alarms and API-key names follow their modules (M-4), the same rules as the
+  // Alarms and API Clients pages. A role without the module gets empty lists and
+  // zero counts for that source, not a refusal of the whole queue.
+  const access = req.principal?.access;
+  const seeAlarms = !access || hasModuleAccess(access, "alarms", "read");
+  const seeKeys = !access || hasModuleAccess(access, "api_clients", "read");
+
+  const openAlarms = !seeAlarms ? [] : await db
     .select({
       id: alarmsTable.id, name: alarmsTable.name, assetId: alarmsTable.assetId,
       assetName: alarmsTable.assetName, severity: alarmsTable.severity,
@@ -213,7 +221,7 @@ router.get("/dashboard/attention", validate({ query: AttentionQuery }), async (r
     .orderBy(desc(alarmsTable.triggeredAt))
     .limit(200);
 
-  const acknowledged = await db
+  const acknowledged = !seeAlarms ? [] : await db
     .select({
       id: alarmsTable.id, name: alarmsTable.name, assetId: alarmsTable.assetId,
       assetName: alarmsTable.assetName, severity: alarmsTable.severity,
@@ -226,7 +234,7 @@ router.get("/dashboard/attention", validate({ query: AttentionQuery }), async (r
 
   // "Today" in the plant's time zone, not the API host's.
   const midnight = startOfZoneDay(new Date());
-  const clearedToday = await db
+  const clearedToday = !seeAlarms ? [] : await db
     .select({
       id: alarmsTable.id, name: alarmsTable.name, assetName: alarmsTable.assetName,
       severity: alarmsTable.severity, triggeredAt: alarmsTable.triggeredAt,
@@ -272,7 +280,7 @@ router.get("/dashboard/attention", validate({ query: AttentionQuery }), async (r
 
   // Counted separately: the list above stops at 200, and counting that list
   // capped every figure at 200.
-  const activeBySeverity = await db
+  const activeBySeverity = !seeAlarms ? [] : await db
     .select({ severity: alarmsTable.severity, count: sql<number>`count(*)::int` })
     .from(alarmsTable)
     .where(eq(alarmsTable.status, "active"))
@@ -280,7 +288,7 @@ router.get("/dashboard/attention", validate({ query: AttentionQuery }), async (r
   const severityCount = (sev: string) => activeBySeverity.find((r) => r.severity === sev)?.count ?? 0;
   const activeAlarmTotal = activeBySeverity.reduce((sum, r) => sum + r.count, 0);
 
-  const expiringKeys = await db.execute<{ id: string; name: string; expires_at: string }>(sql`
+  const expiringKeys = !seeKeys ? { rows: [] as { id: string; name: string; expires_at: string }[] } : await db.execute<{ id: string; name: string; expires_at: string }>(sql`
     SELECT id, name, expires_at
     FROM api_clients
     WHERE status = 'active' AND expires_at IS NOT NULL AND expires_at < ${keyCutoff}

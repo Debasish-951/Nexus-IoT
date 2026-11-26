@@ -54,12 +54,20 @@ export const uploadsTable = pgTable(
     uploadedBy: uuid("uploaded_by"),
     uploadedByName: text("uploaded_by_name"),
 
+    /**
+     * Project (root asset) the file belongs to, or NULL for a file shared across
+     * the installation (every file uploaded before this column existed). Decides
+     * who may list and download it (audit 23 Nov 2026, M-2). Additive, nullable.
+     */
+    projectId: uuid("project_id"),
+
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [
     index("uploads_created_idx").on(t.createdAt),
     // Lets a re-upload of identical bytes be recognised instead of stored twice.
     index("uploads_sha256_idx").on(t.sha256),
+    index("uploads_project_idx").on(t.projectId),
   ],
 );
 

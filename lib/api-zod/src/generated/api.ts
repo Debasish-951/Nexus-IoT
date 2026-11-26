@@ -2963,6 +2963,12 @@ export const ListUploadsResponseItem = zod.object({
   url: zod
     .string()
     .describe("API path to download the file (/api/uploads/{id}/content)."),
+  projectId: zod
+    .string()
+    .nullish()
+    .describe(
+      "Project (root asset) the file belongs to; null for a file shared across\nthe installation. Project-restricted users list only their own files and\ntheir projects' files.\n",
+    ),
 });
 export const ListUploadsResponse = zod.array(ListUploadsResponseItem);
 
@@ -2976,7 +2982,7 @@ export const ListUploadsResponse = zod.array(ListUploadsResponseItem);
 export const CreateUploadsBody = zod
   .record(zod.string(), zod.unknown())
   .describe(
-    "One or more file parts, under any field name (up to UPLOAD_MAX_FILES).\nLeft as a free-form object on purpose: a `format: binary` property makes\nthe generated Zod package reference the DOM `Blob` type, which it does\nnot have, and the server parses the multipart stream itself.\n",
+    "One or more file parts, under any field name (up to UPLOAD_MAX_FILES).\nAn optional text field `projectId` assigns the files to a project the\ncaller may access (403 `project_forbidden` otherwise).\nLeft as a free-form object on purpose: a `format: binary` property makes\nthe generated Zod package reference the DOM `Blob` type, which it does\nnot have, and the server parses the multipart stream itself.\n",
   );
 
 export const CreateUploadsResponse = zod.object({
@@ -2996,6 +3002,12 @@ export const CreateUploadsResponse = zod.object({
       url: zod
         .string()
         .describe("API path to download the file (/api/uploads/{id}/content)."),
+      projectId: zod
+        .string()
+        .nullish()
+        .describe(
+          "Project (root asset) the file belongs to; null for a file shared across\nthe installation. Project-restricted users list only their own files and\ntheir projects' files.\n",
+        ),
     }),
   ),
   rejected: zod.array(
@@ -3007,6 +3019,7 @@ export const CreateUploadsResponse = zod.object({
 });
 
 /**
+ * Only the uploader or an administrator (manage_users) may delete a file.
  * @summary Delete an uploaded file
  */
 export const DeleteUploadParams = zod.object({
@@ -4664,6 +4677,8 @@ export const GetActivityLogSummaryResponse = zod.object({
 });
 
 /**
+ * POST since the 23 Nov 2026 audit (L-9): the walk is costly and writes an
+ * audit entry, so a link or image must not be able to start it. GET is refused.
  * @summary Walk the hash chain and report the first broken entry, if any (security administrators)
  */
 export const VerifyActivityLogResponse = zod.object({
@@ -4698,6 +4713,12 @@ export const ListAuditAlertsResponseItem = zod
     raisedAt: zod.coerce.date(),
     acknowledgedBy: zod.string().nullish(),
     acknowledgedAt: zod.coerce.date().nullish(),
+    raisedBySelf: zod
+      .boolean()
+      .optional()
+      .describe(
+        "Raised by the caller's own action; another administrator must acknowledge it (403 `own_action`).",
+      ),
   })
   .passthrough();
 export const ListAuditAlertsResponse = zod.array(ListAuditAlertsResponseItem);
@@ -4721,6 +4742,12 @@ export const AcknowledgeAuditAlertResponse = zod
     raisedAt: zod.coerce.date(),
     acknowledgedBy: zod.string().nullish(),
     acknowledgedAt: zod.coerce.date().nullish(),
+    raisedBySelf: zod
+      .boolean()
+      .optional()
+      .describe(
+        "Raised by the caller's own action; another administrator must acknowledge it (403 `own_action`).",
+      ),
   })
   .passthrough();
 
@@ -4740,9 +4767,30 @@ export const GetAuditSettingsResponse = zod
           title: zod.string().optional(),
           severity: zod.string().optional(),
           enabled: zod.boolean().optional(),
+          pendingDisable: zod
+            .object({
+              requestedBy: zod.string().optional(),
+              requestedAt: zod.coerce.date().optional(),
+            })
+            .nullish()
+            .describe(
+              "A request to switch this alert off, waiting for a second administrator.",
+            ),
         }),
       )
       .optional(),
+    secondAdminRequired: zod
+      .boolean()
+      .optional()
+      .describe(
+        "Switching an alert off needs two administrators (AUDIT_ALERTS_SECOND_ADMIN).",
+      ),
+    waitingForSecondAdmin: zod
+      .array(zod.string())
+      .optional()
+      .describe(
+        "In a PUT response, the alerts this request asked to switch off that now wait for a second administrator.",
+      ),
     checkpoint: zod.record(zod.string(), zod.unknown()).nullish(),
   })
   .passthrough();

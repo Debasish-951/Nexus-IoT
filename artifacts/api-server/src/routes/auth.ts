@@ -22,6 +22,10 @@ import {
 } from "../lib/email";
 import { rateLimit, resetLimiter, recordAuthFailure } from "../middleware/rateLimit";
 import { logActivity } from "./activity_log";
+import { clientAddress, subnetKey } from "../lib/client-ip";
+import {
+  sourceLockRemainingMs, registerSourceFailure, clearSourceFailures, clearAllSourceLocks,
+} from "../lib/login-lockout";
 
 const router: IRouter = Router();
 
@@ -257,7 +261,13 @@ router.post("/auth/login", loginOriginGuard, loginLimiter, async (req, res): Pro
     valid = await verifyPassword(password, user.passwordHash);
   }
 
-  const locked = !!(user.lockedUntil && user.lockedUntil.getTime() > Date.now());
+  // Two locks (M-1): the account-wide one in the database, set only after many
+  // failures across networks, and the per-(account, network) one in memory. A
+  // stranger's guesses lock only the stranger's network for this account.
+  const network = subnetKey(clientAddress(req));
+  const accountLocked = !!(user.lockedUntil && user.lockedUntil.getTime() > Date.now());
+  const sourceWaitMs = sourceLockRemainingMs(user.id, network);
+  const locked = accountLocked || sourceWaitMs > 0;
 
   if (!valid) {
     if (locked || user.status !== "active" || legacy) {
@@ -271,20 +281,26 @@ router.post("/auth/login", loginOriginGuard, loginLimiter, async (req, res): Pro
         req,
       });
     } else {
-      await registerFailedLogin(user, req);
+      await registerFailedLogin(user, req, network);
     }
     res.status(401).json(GENERIC);
     return;
   }
 
-  if (locked && user.lockedUntil) {
-    const minutes = Math.ceil((user.lockedUntil.getTime() - Date.now()) / 60_000);
+  if (locked) {
+    const until = accountLocked && user.lockedUntil
+      ? user.lockedUntil.getTime()
+      : Date.now() + sourceWaitMs;
+    const minutes = Math.max(1, Math.ceil((until - Date.now()) / 60_000));
     await logSecurityEvent({
       type: "login.blocked", outcome: "failure", userId: user.id, username: user.username,
-      reason: "locked", detail: { lockedUntil: user.lockedUntil.toISOString() }, req,
+      reason: accountLocked ? "locked" : "locked_for_network",
+      detail: { lockedUntil: new Date(until).toISOString() }, req,
     });
     res.status(423).json({
-      error: `Account temporarily locked after repeated failed sign-in attempts. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.`,
+      error: accountLocked
+        ? `Account temporarily locked after repeated failed sign-in attempts. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.`
+        : `Too many failed sign-in attempts for this account from your network. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.`,
       code: "account_locked",
       retryAfterMinutes: minutes,
     });
@@ -344,6 +360,7 @@ router.post("/auth/login", loginOriginGuard, loginLimiter, async (req, res): Pro
   // in correctly has demonstrated they hold the credential and should not spend
   // the rest of the window one attempt from a lockout.
   resetLimiter("auth:login", req, identifier);
+  clearSourceFailures(user.id, network);
 
   let created;
   try {
@@ -384,19 +401,23 @@ router.post("/auth/login", loginOriginGuard, loginLimiter, async (req, res): Pro
 });
 
 /**
- * Increment the failure counter and lock the account when it crosses the
- * threshold. The increment is done in SQL so concurrent attempts cannot race
- * each other into losing a count.
+ * Count a wrong password. `threshold` failures from one network lock that
+ * network out of this account (in memory); `accountThreshold` failures in a row
+ * from anywhere lock the account itself (in the database). Neither ends sessions
+ * that are already signed in (M-1). The increment is done in SQL so concurrent
+ * attempts cannot race each other into losing a count.
  */
-async function registerFailedLogin(user: User, req: Request): Promise<void> {
+async function registerFailedLogin(user: User, req: Request, network: string): Promise<void> {
   // Feeds the system-wide failure velocity that spray detection watches. A
   // distributed attack keeps every per-key counter under its ceiling by design;
   // the aggregate is the one thing it cannot hold down.
   recordAuthFailure(req);
 
-  const { threshold, durationMs } = authConfig.lockout;
+  const { threshold, durationMs, accountThreshold } = authConfig.lockout;
   const attempts = user.failedLoginAttempts + 1;
-  const shouldLock = threshold > 0 && attempts >= threshold;
+  const networkLocked = registerSourceFailure(user.id, network, threshold, durationMs);
+  // AUTH_LOCKOUT_THRESHOLD=0 still disables lockout altogether, as before.
+  const shouldLock = threshold > 0 && accountThreshold > 0 && attempts >= accountThreshold;
   const lockedUntil = shouldLock ? new Date(Date.now() + durationMs) : null;
 
   await db
@@ -409,8 +430,18 @@ async function registerFailedLogin(user: User, req: Request): Promise<void> {
 
   await logSecurityEvent({
     type: "login.failure", outcome: "failure", userId: user.id, username: user.username,
-    reason: "bad_password", detail: { attempt: attempts, threshold }, req,
+    reason: "bad_password", detail: { attempt: attempts, threshold, accountThreshold }, req,
   });
+
+  if (networkLocked && !shouldLock) {
+    // Logged, not emailed: one stranger could otherwise send the owner a mail per
+    // network. The account-wide lock below still emails.
+    await logSecurityEvent({
+      type: "account.locked", outcome: "failure", userId: user.id, username: user.username,
+      reason: "failed_login_threshold_network",
+      detail: { threshold, lockedForMinutes: Math.round(durationMs / 60_000) }, req,
+    });
+  }
 
   if (shouldLock && lockedUntil) {
     await logSecurityEvent({
@@ -741,6 +772,7 @@ router.post("/auth/reset-password", tokenLimiter, async (req, res): Promise<void
     // administrator made in the meantime.
     ...activateIfInvited(),
   }).where(eq(usersTable.id, user.id));
+  clearAllSourceLocks(user.id);
 
   // Whoever knew the old password (or hijacked a session) is signed out.
   const revoked = await revokeAllUserSessions(user.id, "password_reset");

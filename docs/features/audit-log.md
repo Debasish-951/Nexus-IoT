@@ -57,7 +57,7 @@ The earlier page (category filter and a 25-row table) is kept behind `VITE_CLASS
   - The one-time hash backfill (`app.audit_maint`) may fill in `hash` and `prev_hash` on rows that have none, and nothing else.
   - The retention job (`app.audit_retention`) may delete.
 - **Older entries.** Entries written before the chain existed are hashed in sequence order at the first start.
-- **Verify integrity.** The button runs `GET /activity-log/verify` (security administrators). It walks the chain in batches and reports either "all N entries are unchanged" or the first entry whose link or contents do not match. Each check is itself recorded (`audit.verified` or `audit.verify_failed`); a failure raises an alert.
+- **Verify integrity.** The button runs `POST /activity-log/verify` (security administrators; GET is refused, so a link cannot start the walk). It walks the chain in batches and reports either "all N entries are unchanged" or the first entry whose link or contents do not match. Each check is itself recorded (`audit.verified` or `audit.verify_failed`); a failure raises an alert.
 - **What it protects against.** Someone with direct database access can still switch the trigger off. They cannot change or remove an entry without breaking the chain, unless they also recompute every later hash. For stronger guarantees, export the log regularly (CSV includes the hash), or copy the latest hash somewhere outside the server.
 
 ## Retention
@@ -80,8 +80,8 @@ These rules raise an alert (`audit_alerts` table) in the notification bell for u
 | Audit log integrity check failed | A failed verify |
 | Repeated failed sign-ins | 5 or more `login.failure` events for one user name within 10 minutes (one alert per user per hour) |
 
-- **Switching rules off.** Each rule can be switched off in Audit Log → Settings (`job_state` key `audit_settings`).
-- **Acknowledging.** Alerts are acknowledged from the bell (Manage security).
+- **Switching rules off.** Each rule can be switched off in Audit Log → Settings (`job_state` key `audit_settings`). Switching one off needs two administrators: the first request waits (`job_state` key `audit_alert_disable_pending`, 7 days) until another administrator makes the same change. Switching a rule on is immediate. `AUDIT_ALERTS_SECOND_ADMIN=false` restores the single-administrator behaviour for an installation with one administrator.
+- **Acknowledging.** Alerts are acknowledged from the bell (Manage security), but not by the administrator whose own action raised them.
 - **Not built yet.** Alerts are not sent to notification groups (email or other channels).
 
 ## The page
@@ -121,10 +121,10 @@ Project-restricted users see only entries about assets in their projects.
 
 | Method | Path | Access |
 |---|---|---|
-| GET | `/activity-log` | `activity_log`. Filters: `q`, `from`, `to`, `actor` (or `actorName`), `action`, `category`, `outcome`, `targetId`, `assetId`, `includeSecurity`, `limit` (≤500), `offset` |
+| GET | `/activity-log` | `activity_log`. Filters: `q`, `from`, `to`, `actor` (or `actorName`), `action`, `category`, `outcome`, `targetId`, `assetId`, `includeSecurity` (also needs Manage security), `limit` (≤500), `offset` |
 | GET | `/activity-log/export` | `activity_log`. Same filters; CSV |
 | GET | `/activity-log/summary?timeZone=` | `activity_log` |
-| GET | `/activity-log/verify` | `security` + Manage security |
+| POST | `/activity-log/verify` | `security` + Manage security |
 | GET | `/activity-log/alerts` | `security` |
 | POST | `/activity-log/alerts/:id/acknowledge` | `security` + Manage security |
 | GET, PUT | `/activity-log/settings` | `security` + Manage security |

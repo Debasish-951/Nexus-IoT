@@ -1973,11 +1973,18 @@ paths:
       operationId: deleteUpload
       tags: [uploads]
       summary: Delete an uploaded file
+      description: Only the uploader or an administrator (manage_users) may delete a file.
       parameters:
         - $ref: "#/components/parameters/UuidPath"
       responses:
         "204":
           description: Deleted
+        "403":
+          description: Not the uploader (`not_uploader`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "400":
           $ref: "#/components/responses/ValidationFailed"
         "404":
@@ -3285,10 +3292,13 @@ paths:
                 $ref: "#/components/schemas/AuditSummary"
 
   /activity-log/verify:
-    get:
+    post:
       operationId: verifyActivityLog
       tags: [activity-log]
       summary: Walk the hash chain and report the first broken entry, if any (security administrators)
+      description: |
+        POST since the 23 Nov 2026 audit (L-9): the walk is costly and writes an
+        audit entry, so a link or image must not be able to start it. GET is refused.
       responses:
         "200":
           description: OK
@@ -6080,12 +6090,21 @@ components:
         url:
           type: string
           description: API path to download the file (/api/uploads/{id}/content).
+        projectId:
+          type: string
+          nullable: true
+          description: |
+            Project (root asset) the file belongs to; null for a file shared across
+            the installation. Project-restricted users list only their own files and
+            their projects' files.
       required: [id, name, mimeType, size, scanStatus, uploadedAt, url]
 
     UploadFilesForm:
       type: object
       description: |
         One or more file parts, under any field name (up to UPLOAD_MAX_FILES).
+        An optional text field `projectId` assigns the files to a project the
+        caller may access (403 `project_forbidden` otherwise).
         Left as a free-form object on purpose: a `format: binary` property makes
         the generated Zod package reference the DOM `Blob` type, which it does
         not have, and the server parses the multipart stream itself.
@@ -7129,6 +7148,9 @@ components:
         raisedAt: { type: string, format: date-time }
         acknowledgedBy: { type: string, nullable: true }
         acknowledgedAt: { type: string, format: date-time, nullable: true }
+        raisedBySelf:
+          type: boolean
+          description: Raised by the caller's own action; another administrator must acknowledge it (403 `own_action`).
       required: [id, rule, severity, title, message, status, raisedAt]
       additionalProperties: true
 
@@ -7148,6 +7170,20 @@ components:
               title: { type: string }
               severity: { type: string }
               enabled: { type: boolean }
+              pendingDisable:
+                type: object
+                nullable: true
+                description: A request to switch this alert off, waiting for a second administrator.
+                properties:
+                  requestedBy: { type: string }
+                  requestedAt: { type: string, format: date-time }
+        secondAdminRequired:
+          type: boolean
+          description: Switching an alert off needs two administrators (AUDIT_ALERTS_SECOND_ADMIN).
+        waitingForSecondAdmin:
+          type: array
+          items: { type: string }
+          description: In a PUT response, the alerts this request asked to switch off that now wait for a second administrator.
         checkpoint:
           type: object
           nullable: true

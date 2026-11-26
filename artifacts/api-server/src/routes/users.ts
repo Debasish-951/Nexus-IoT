@@ -1,7 +1,7 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { respondInvalid } from "../lib/respond";
 import { eq, sql, and, isNull, gt, desc } from "drizzle-orm";
-import { db, usersTable, authTokensTable, type User } from "@workspace/db";
+import { db, usersTable, authTokensTable, assetsTable, type User, type UserAccessOverrides } from "@workspace/db";
 import {
   CreateUserBody,
   UpdateUserBody,
@@ -35,6 +35,8 @@ import { issueAuthToken, revokeAuthTokens, buildActivationUrl, buildResetUrl } f
 import { revokeAllUserSessions } from "../lib/sessions";
 import { logSecurityEvent, recordSecurityEvent, clientIp } from "../lib/security-log";
 import { closeSockets } from "../lib/ws-broadcast";
+import { userWithinActorProjects, unknownProjectIds, adminGuardsFor } from "../lib/user-scope";
+import { clearAllSourceLocks } from "../lib/login-lockout";
 import { activateIfInvited } from "./auth";
 import {
   sendEmail, renderActivationEmail, renderPasswordResetEmail,
@@ -115,17 +117,78 @@ function actorId(req: Request): string | null {
   return req.principal?.user.id ?? null;
 }
 
+/**
+ * Project scope of user administration (M-5): a project-restricted administrator
+ * may act only on users restricted to projects of theirs, before and after the
+ * change. Same 403 shape as refuseIfOutranked. Returns true when answered.
+ */
+function refuseIfOutsideProjects(
+  req: Request, res: Response,
+  target: { id?: string | null; role: string; accessOverrides: UserAccessOverrides | null | undefined },
+  stage: "current" | "result" = "current",
+): boolean {
+  if (userWithinActorProjects(req.principal?.access, target.role, target.accessOverrides)) return false;
+  recordSecurityEvent({
+    type: "authz.denied", outcome: "failure",
+    reason: stage === "current" ? "user_outside_actor_projects" : "user_change_leaves_actor_projects",
+    userId: req.principal?.user.id ?? null, username: req.principal?.user.username ?? null,
+    detail: { targetUserId: target.id ?? null, targetRole: target.role }, req,
+  });
+  res.status(403).json({
+    error: stage === "current"
+      ? "You do not have permission to manage this account: it is not limited to your projects."
+      : "You can only give users access to your own projects. Limit this user to projects you have access to.",
+    code: "project_scope",
+  });
+  return true;
+}
+
+/** 400 for project ids in the overrides that are not projects (L-21). Returns true when answered. */
+async function refuseUnknownProjects(res: Response, overrides: UserAccessOverrides | null | undefined): Promise<boolean> {
+  if (!overrides?.allowedProjects?.length) return false;
+  const roots = await db.select({ id: assetsTable.id }).from(assetsTable).where(isNull(assetsTable.parentId));
+  const unknown = unknownProjectIds(overrides.allowedProjects, new Set(roots.map((r) => r.id)));
+  if (unknown.length === 0) return false;
+  res.status(400).json({ error: `These are not projects: ${unknown.join(", ")}.`, code: "unknown_project", unknown });
+  return true;
+}
+
 /** Guard against an admin locking the platform out of itself. */
-async function isLastActiveAdmin(userId: string): Promise<boolean> {
+async function isLastActiveAdmin(userId: string, roles: readonly string[] = ["admin", "company_admin", "super_admin"]): Promise<boolean> {
   const [{ count }] = await db
     .select({ count: sql<number>`count(*)::int` })
     .from(usersTable)
     .where(and(
-      sql`${usersTable.role} IN ('admin','company_admin','super_admin')`,
+      sql`${usersTable.role} IN (${sql.join(roles.map((r) => sql`${r}`), sql`, `)})`,
       eq(usersTable.status, "active"),
       sql`${usersTable.id} <> ${userId}`,
     ));
   return count === 0;
+}
+
+/**
+ * Last-administrator guards (L-21): the last active administrator of any kind,
+ * and the last active Super Admin / Company Admin, cannot be demoted, deactivated
+ * or deleted. Returns true when answered.
+ */
+async function refuseIfLastAdmin(
+  res: Response,
+  target: { id: string; role: string; status: string },
+  next: { role: string; active: boolean } | null,
+): Promise<boolean> {
+  const guards = adminGuardsFor(target, next);
+  if (guards.admin && await isLastActiveAdmin(target.id)) {
+    res.status(409).json({ error: "This is the last active administrator. Promote another user first.", code: "last_admin" });
+    return true;
+  }
+  if (guards.topAdmin && await isLastActiveAdmin(target.id, ["super_admin", "company_admin"])) {
+    res.status(409).json({
+      error: "This is the last active Super Admin or Company Admin. Only they can create a Company Admin, set login limits and share dashboards; make another one first.",
+      code: "last_top_admin",
+    });
+    return true;
+  }
+  return false;
 }
 
 // ── List / read ──────────────────────────────────────────────────────────────
@@ -220,6 +283,8 @@ router.post("/users", async (req, res): Promise<void> => {
   }
 
   const accessOverrides = sanitiseAccessOverrides((req.body as Record<string, unknown>).accessOverrides);
+  if (await refuseUnknownProjects(res, accessOverrides)) return;
+  if (refuseIfOutsideProjects(req, res, { role, accessOverrides }, "result")) return;
 
   const [user] = await db.insert(usersTable).values({
     username,
@@ -275,6 +340,7 @@ router.put("/users/:id", async (req, res): Promise<void> => {
   const [existing] = await db.select().from(usersTable).where(eq(usersTable.id, params.data.id));
   if (!existing) { res.status(404).json({ error: "User not found" }); return; }
   if (refuseIfOutranked(req, res, existing)) return;
+  if (refuseIfOutsideProjects(req, res, existing)) return;
 
   const updateData: Record<string, unknown> = {};
   if (parsed.data.email !== undefined) updateData.email = parsed.data.email.trim().toLowerCase();
@@ -303,16 +369,9 @@ router.put("/users/:id", async (req, res): Promise<void> => {
       });
       return;
     }
-    // Demoting the last admin would leave nobody able to manage users.
-    const losingAdmin = ["admin", "company_admin", "super_admin"].includes(existing.role)
-      && !["admin", "company_admin", "super_admin"].includes(parsed.data.role);
-    if (losingAdmin && await isLastActiveAdmin(existing.id)) {
-      res.status(409).json({
-        error: "This is the last active administrator. Promote another user first.",
-        code: "last_admin",
-      });
-      return;
-    }
+    // Demoting the last admin (or the last Super/Company Admin) would leave
+    // nobody able to manage users, or nobody holding the top-level powers.
+    if (await refuseIfLastAdmin(res, existing, { role: parsed.data.role, active: existing.status === "active" })) return;
     updateData.role = parsed.data.role;
   }
 
@@ -331,19 +390,20 @@ router.put("/users/:id", async (req, res): Promise<void> => {
       });
       return;
     }
-    if (next !== "active" && ["admin", "company_admin", "super_admin"].includes(existing.role) && await isLastActiveAdmin(existing.id)) {
-      res.status(409).json({
-        error: "This is the last active administrator. Promote another user first.",
-        code: "last_admin",
-      });
-      return;
-    }
+    if (next !== "active" && await refuseIfLastAdmin(res, existing, { role: parsed.data.role ?? existing.role, active: false })) return;
     updateData.status = next;
   }
 
   if ((req.body as Record<string, unknown>).accessOverrides !== undefined) {
     updateData.accessOverrides = sanitiseAccessOverrides((req.body as Record<string, unknown>).accessOverrides);
+    if (await refuseUnknownProjects(res, updateData.accessOverrides as UserAccessOverrides)) return;
   }
+  // The account after the change must still be inside the actor's projects (M-5).
+  if (refuseIfOutsideProjects(req, res, {
+    id: existing.id,
+    role: (updateData.role as string | undefined) ?? existing.role,
+    accessOverrides: (updateData.accessOverrides as UserAccessOverrides | undefined) ?? existing.accessOverrides,
+  }, "result")) return;
 
   const [user] = await db.update(usersTable).set(updateData).where(eq(usersTable.id, params.data.id)).returning();
 
@@ -364,6 +424,10 @@ router.put("/users/:id", async (req, res): Promise<void> => {
   // the end of the target's current session.
   if (updateData.status && updateData.status !== "active") {
     const revoked = await revokeAllUserSessions(user.id, "status_changed");
+    // An activation or reset link mailed earlier must not reopen the account (L-21).
+    // `invited` keeps its activation link: that status is waiting for it.
+    if (updateData.status !== "invited") await revokeAuthTokens(user.id, "activation");
+    await revokeAuthTokens(user.id, "password_reset");
     recordSecurityEvent({
       type: "account.status_changed", userId: user.id, username: user.username,
       outcome: "failure", reason: `set_${updateData.status}`,
@@ -417,6 +481,7 @@ router.put("/users/:id/access", async (req, res): Promise<void> => {
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.params.id));
   if (!user) { res.status(404).json({ error: "User not found" }); return; }
   if (refuseIfOutranked(req, res, user)) return;
+  if (refuseIfOutsideProjects(req, res, user)) return;
 
   // Overrides can GRANT as well as remove — `resolveAccess` replaces the role
   // default rather than intersecting with it. Editing your own overrides was
@@ -431,6 +496,8 @@ router.put("/users/:id/access", async (req, res): Promise<void> => {
   }
 
   const overrides = sanitiseAccessOverrides((req.body as Record<string, unknown>)?.overrides ?? req.body);
+  if (await refuseUnknownProjects(res, overrides)) return;
+  if (refuseIfOutsideProjects(req, res, { id: user.id, role: user.role, accessOverrides: overrides }, "result")) return;
 
   // Removing your own manage_users grant would leave the console unreachable.
   if (user.id === req.principal?.user.id) {
@@ -472,6 +539,7 @@ router.post("/users/:id/resend-invitation", async (req, res): Promise<void> => {
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.params.id));
   if (!user) { res.status(404).json({ error: "User not found" }); return; }
   if (refuseIfOutranked(req, res, user)) return;
+  if (refuseIfOutsideProjects(req, res, user)) return;
   if (user.status !== "invited") {
     res.status(409).json({
       error: "This account is already activated. Send a password reset instead.",
@@ -508,6 +576,7 @@ router.post("/users/:id/revoke-invitation", async (req, res): Promise<void> => {
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.params.id));
   if (!user) { res.status(404).json({ error: "User not found" }); return; }
   if (refuseIfOutranked(req, res, user)) return;
+  if (refuseIfOutsideProjects(req, res, user)) return;
 
   await revokeAuthTokens(user.id, "activation");
   recordSecurityEvent({
@@ -530,6 +599,7 @@ router.post("/users/:id/send-password-reset", async (req, res): Promise<void> =>
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.params.id));
   if (!user) { res.status(404).json({ error: "User not found" }); return; }
   if (refuseIfOutranked(req, res, user)) return;
+  if (refuseIfOutsideProjects(req, res, user)) return;
   if (user.status === "invited") {
     res.status(409).json({
       error: "This user has not activated their account. Resend the invitation instead.",
@@ -578,6 +648,7 @@ router.post("/users/:id/temporary-password", async (req, res): Promise<void> => 
   const [user] = await db.select().from(usersTable).where(eq(usersTable.id, req.params.id));
   if (!user) { res.status(404).json({ error: "User not found" }); return; }
   if (refuseIfOutranked(req, res, user)) return;
+  if (refuseIfOutsideProjects(req, res, user)) return;
 
   const requested = Number((req.body as Record<string, unknown>)?.expiresInMinutes ?? 15);
   const minutes = Number.isFinite(requested)
@@ -602,6 +673,7 @@ router.post("/users/:id/temporary-password", async (req, res): Promise<void> => 
   }).where(eq(usersTable.id, user.id));
 
   // Whatever the old credential was, it is gone — so are its sessions.
+  clearAllSourceLocks(user.id);
   const revoked = await revokeAllUserSessions(user.id, "temporary_password_issued");
   await revokeAuthTokens(user.id, "activation");
   await revokeAuthTokens(user.id, "password_reset");
@@ -636,7 +708,10 @@ router.post("/users/:id/unlock", async (req, res): Promise<void> => {
   const [target] = await db.select().from(usersTable).where(eq(usersTable.id, req.params.id));
   if (!target) { res.status(404).json({ error: "User not found" }); return; }
   if (refuseIfOutranked(req, res, target)) return;
+  if (refuseIfOutsideProjects(req, res, target)) return;
 
+  // The per-network locks (M-1) live in memory; an unlock clears them too.
+  clearAllSourceLocks(target.id);
   const [user] = await db
     .update(usersTable)
     .set({ failedLoginAttempts: 0, lockedUntil: null })
@@ -675,6 +750,7 @@ router.put("/users/:id/session-limit", async (req, res): Promise<void> => {
   const [target] = await db.select().from(usersTable).where(eq(usersTable.id, params.data.id));
   if (!target) { res.status(404).json({ error: "User not found" }); return; }
   if (refuseIfOutranked(req, res, target)) return;
+  if (refuseIfOutsideProjects(req, res, target)) return;
 
   const [user] = await db.update(usersTable).set({ maxSessions: limit }).where(eq(usersTable.id, target.id)).returning();
   if (!user) { res.status(404).json({ error: "User not found" }); return; }
@@ -694,6 +770,7 @@ router.post("/users/:id/require-password-change", async (req, res): Promise<void
   const [target] = await db.select().from(usersTable).where(eq(usersTable.id, req.params.id));
   if (!target) { res.status(404).json({ error: "User not found" }); return; }
   if (refuseIfOutranked(req, res, target)) return;
+  if (refuseIfOutsideProjects(req, res, target)) return;
 
   const [user] = await db
     .update(usersTable)
@@ -736,18 +813,17 @@ router.delete("/users/:id", async (req, res): Promise<void> => {
   const [target] = await db.select().from(usersTable).where(eq(usersTable.id, params.data.id));
   if (!target) { res.status(404).json({ error: "User not found" }); return; }
   if (refuseIfOutranked(req, res, target)) return;
+  if (refuseIfOutsideProjects(req, res, target)) return;
 
-  if (["admin", "company_admin", "super_admin"].includes(target.role) && await isLastActiveAdmin(target.id)) {
-    res.status(409).json({
-      error: "This is the last active administrator. Promote another user first.",
-      code: "last_admin",
-    });
-    return;
-  }
+  if (await refuseIfLastAdmin(res, target, null)) return;
 
   // Sessions and auth_tokens cascade on the FK; security_events deliberately
   // do not (user_id → NULL) so the forensic trail survives the deletion.
   const [user] = await db.delete(usersTable).where(eq(usersTable.id, params.data.id)).returning();
+  // Sessions go with the row (FK cascade), which bypasses revokeAllUserSessions,
+  // so live connections are closed here (M-21).
+  closeSockets({ userId: params.data.id }, "user_deleted");
+  clearAllSourceLocks(params.data.id);
 
   recordSecurityEvent({
     type: "account.status_changed", userId: null, username: user.username,

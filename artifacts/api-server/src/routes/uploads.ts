@@ -3,8 +3,13 @@ import { createReadStream, promises as fs } from "node:fs";
 import { pipeline } from "node:stream/promises";
 import { createHash } from "node:crypto";
 import busboy from "busboy";
-import { eq, desc } from "drizzle-orm";
-import { db, uploadsTable } from "@workspace/db";
+import { eq, desc, and, isNull, or, inArray } from "drizzle-orm";
+import { db, uploadsTable, assetsTable } from "@workspace/db";
+import { hasPermission } from "../lib/rbac";
+import { recordSecurityEvent } from "../lib/security-log";
+import {
+  canListUpload, canDownloadUpload, canDeleteUpload, chooseUploadProject, type UploadViewer,
+} from "../lib/upload/access";
 import { logActivity } from "./activity_log";
 import { logger } from "../lib/logger";
 import { AppError, correlationIdOf } from "../lib/errors";
@@ -40,6 +45,27 @@ const router: IRouter = Router();
  * usual way "rejected" content ends up on disk anyway.
  */
 
+/** The caller, as the upload access rules see them (lib/upload/access.ts, M-2). */
+function viewerOf(req: Request): UploadViewer {
+  const access = req.principal?.access;
+  return {
+    userId: req.principal?.user.id ?? null,
+    restricted: !!access?.restrictProjects,
+    allowedProjects: new Set(access?.allowedProjects ?? []),
+    admin: !!access && hasPermission(access, "manage_users"),
+  };
+}
+
+/** Same answer as a missing file, so ids of other projects' files cannot be probed. */
+function refuseUpload(req: Request, id: string, reason: string): never {
+  recordSecurityEvent({
+    type: "authz.denied", outcome: "failure", reason,
+    userId: req.principal?.user.id ?? null, username: req.principal?.user.username ?? null,
+    detail: { uploadId: id, path: req.path, method: req.method }, req,
+  });
+  throw new AppError(404, "not_found", "That file could not be found.");
+}
+
 // ── Metadata shown to clients. Never exposes a path. ─────────────────────────
 function toClient(row: typeof uploadsTable.$inferSelect) {
   return {
@@ -52,6 +78,7 @@ function toClient(row: typeof uploadsTable.$inferSelect) {
     scanStatus: row.scanStatus,
     uploadedBy: row.uploadedByName,
     uploadedAt: row.createdAt,
+    projectId: row.projectId,
     // A relative API path, not a filesystem location. The caller never learns
     // where the bytes actually are.
     url: `/api/uploads/${row.id}/content`,
@@ -81,7 +108,7 @@ class UploadRejected extends AppError {
  * busboy rather than multer: it is the parser multer is built on, with far less
  * around it. Fewer layers in the path that handles untrusted bytes.
  */
-function receive(req: Request): Promise<ReceivedFile[]> {
+function receive(req: Request, fields: Record<string, string> = {}): Promise<ReceivedFile[]> {
   return new Promise((resolve, reject) => {
     const contentType = req.headers["content-type"] ?? "";
     if (!contentType.toLowerCase().startsWith("multipart/form-data")) {
@@ -168,6 +195,9 @@ function receive(req: Request): Promise<ReceivedFile[]> {
       pending.push(task);
     });
 
+    // Plain form fields (only `projectId` is read). Bounded by `limits` above.
+    bb.on("field", (name, value) => { if (typeof value === "string") fields[name] = value; });
+
     bb.on("filesLimit", () => fail(new UploadRejected(
       `At most ${uploadStorage.maxFiles} files can be uploaded at once.`, "too_many_files")));
     bb.on("error", (err) => fail(err as Error));
@@ -194,7 +224,23 @@ function receive(req: Request): Promise<ReceivedFile[]> {
 
 // ── POST /uploads ────────────────────────────────────────────────────────────
 router.post("/uploads", async (req: Request, res: Response): Promise<void> => {
-  const received = await receive(req);
+  const fields: Record<string, string> = {};
+  const received = await receive(req, fields);
+
+  // Which project the files belong to (M-2). Checked before anything is committed;
+  // a refusal removes the received files.
+  const requested = typeof fields.projectId === "string" && /^[0-9a-f-]{36}$/i.test(fields.projectId.trim())
+    ? fields.projectId.trim()
+    : null;
+  const projects = requested
+    ? await db.select({ id: assetsTable.id }).from(assetsTable).where(and(eq(assetsTable.id, requested), isNull(assetsTable.parentId)))
+    : [];
+  const chosen = chooseUploadProject(viewerOf(req), requested, (id) => projects.some((p) => p.id === id));
+  if ("error" in chosen) {
+    await Promise.allSettled(received.map((f) => removeFile(f.absolutePath)));
+    res.status(403).json({ error: chosen.error, code: "project_forbidden" });
+    return;
+  }
   const stored: Array<ReturnType<typeof toClient>> = [];
   const rejected: Array<{ name: string; reason: string }> = [];
 
@@ -256,6 +302,7 @@ router.post("/uploads", async (req: Request, res: Response): Promise<void> => {
         scannedAt: scanConfig.mode === "off" ? null : new Date(),
         uploadedBy: req.principal?.user.id ?? null,
         uploadedByName: req.principal?.user.fullName ?? null,
+        projectId: chosen.projectId,
       }).returning();
 
       void logActivity("upload.created", "upload", row.id, row.originalName,
@@ -290,8 +337,18 @@ router.post("/uploads", async (req: Request, res: Response): Promise<void> => {
 router.get("/uploads", validate({ query: z.object({ limit: z.coerce.number().int().min(1).max(200).default(100) }) }),
   async (req, res): Promise<void> => {
     const { limit } = req.query as unknown as { limit: number };
-    const rows = await db.select().from(uploadsTable).orderBy(desc(uploadsTable.createdAt)).limit(limit);
-    res.json(rows.map(toClient));
+    const viewer = viewerOf(req);
+    // Narrowed in the query for a restricted user, so the limit counts visible files.
+    const rows = await db.select().from(uploadsTable)
+      .where(viewer.restricted
+        ? or(
+            viewer.userId ? eq(uploadsTable.uploadedBy, viewer.userId) : undefined,
+            // Only well-formed ids reach the uuid column; anything else matches nothing.
+            ...[[...viewer.allowedProjects].filter((p) => /^[0-9a-f-]{36}$/i.test(p))].filter((l) => l.length > 0).map((l) => inArray(uploadsTable.projectId, l)),
+          )
+        : undefined)
+      .orderBy(desc(uploadsTable.createdAt)).limit(limit);
+    res.json(rows.filter((r) => canListUpload(viewer, r)).map(toClient));
   });
 
 // ── GET /uploads/:id/content ─────────────────────────────────────────────────
@@ -299,6 +356,7 @@ router.get("/uploads/:id/content", validate({ params: IdParams }), async (req, r
   const { id } = req.params as unknown as { id: string };
   const [row] = await db.select().from(uploadsTable).where(eq(uploadsTable.id, id)).limit(1);
   if (!row) throw new AppError(404, "not_found", "That file could not be found.");
+  if (!canDownloadUpload(viewerOf(req), row)) refuseUpload(req, id, "upload_out_of_scope");
 
   const filePath = resolveStoredPath(row.id, row.extension);
   if (!filePath) throw new AppError(404, "not_found", "That file could not be found.");
@@ -361,6 +419,20 @@ function safeDownloadName(originalName: string, extension: string): string {
 // ── DELETE /uploads/:id ──────────────────────────────────────────────────────
 router.delete("/uploads/:id", validate({ params: IdParams }), async (req, res): Promise<void> => {
   const { id } = req.params as unknown as { id: string };
+  // Uploader or an administrator only (M-2), checked before the delete.
+  const [existing] = await db.select().from(uploadsTable).where(eq(uploadsTable.id, id)).limit(1);
+  if (!existing) throw new AppError(404, "not_found", "That file could not be found.");
+  const viewer = viewerOf(req);
+  if (!canDeleteUpload(viewer, existing)) {
+    if (!canListUpload(viewer, existing)) refuseUpload(req, id, "upload_out_of_scope");
+    recordSecurityEvent({
+      type: "authz.denied", outcome: "failure", reason: "upload_delete_not_owner",
+      userId: viewer.userId, username: req.principal?.user.username ?? null,
+      detail: { uploadId: id }, req,
+    });
+    res.status(403).json({ error: "Only the person who uploaded this file, or an administrator, can delete it.", code: "not_uploader" });
+    return;
+  }
   const [row] = await db.delete(uploadsTable).where(eq(uploadsTable.id, id)).returning();
   if (!row) throw new AppError(404, "not_found", "That file could not be found.");
 

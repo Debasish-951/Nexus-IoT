@@ -275,7 +275,8 @@ const ROUTE_RULES: Rule[] = [
   { path: "/activity-log/export",  methods: READ,      module: "activity_log" },
   { path: "/activity-log/summary", methods: READ,      module: "activity_log" },
   // Integrity check, sensitive-action alerts and audit settings: security administrators.
-  { path: "/activity-log/verify",  methods: READ,      permission: "manage_security", module: "security" },
+  // POST only (L-9): costly and writes an entry, so a link must not start it. GET is unmapped, so refused.
+  { path: "/activity-log/verify",  methods: ["POST"],  permission: "manage_security", module: "security" },
   { path: "/activity-log/alerts",  methods: READ,      module: "security" },
   { path: "/activity-log/alerts/:id/acknowledge", methods: ["POST"], permission: "manage_security", module: "security", level: "write" },
   { path: "/activity-log/settings", methods: READ,     permission: "manage_security", module: "security" },

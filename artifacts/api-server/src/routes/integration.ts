@@ -9,6 +9,7 @@ import { logActivity } from "./activity_log";
 import { recordSecurityEvent } from "../lib/security-log";
 import { hashToken } from "../lib/tokens";
 import { API_SCOPE_OPTIONS, API_SCOPE_ALL, ungrantableScopes } from "../lib/rbac";
+import { refuseIfAboveCeiling } from "../lib/api-client-ceiling";
 import { EVENT_TYPES } from "../lib/integration/events";
 import { newSigningSecret, verifySignature, signPayload } from "../lib/integration/signing";
 import { revokeAccessTokens, ACCESS_TOKEN_TTL_SEC } from "../lib/integration/client-auth";
@@ -42,7 +43,12 @@ function projectFilter(req: Request): { restricted: boolean; allowed: Set<string
   return { restricted: true, allowed: new Set(access.allowedProjects) };
 }
 
-async function loadClient(req: Request, res: Response, id: string): Promise<typeof apiClientsTable.$inferSelect | null> {
+/**
+ * Load a client the caller may see. `change` also applies the scope ceiling
+ * (H-1): access, rotation and grace changes need every scope on the key to be
+ * one the caller could grant (same rule as routes/api_clients.ts).
+ */
+async function loadClient(req: Request, res: Response, id: string, opts: { change?: boolean } = {}): Promise<typeof apiClientsTable.$inferSelect | null> {
   if (!UUID_RE.test(id)) { res.status(400).json({ error: "Invalid id" }); return null; }
   const [client] = await db.select().from(apiClientsTable).where(eq(apiClientsTable.id, id));
   const { restricted, allowed } = projectFilter(req);
@@ -50,6 +56,7 @@ async function loadClient(req: Request, res: Response, id: string): Promise<type
     res.status(404).json({ error: "API client not found", code: "not_found" });
     return null;
   }
+  if (opts.change && refuseIfAboveCeiling(req, res, client)) return null;
   return client;
 }
 
@@ -104,7 +111,7 @@ router.get("/integration/clients", async (req, res): Promise<void> => {
 });
 
 router.put("/integration/clients/:id/access", async (req, res): Promise<void> => {
-  const client = await loadClient(req, res, String(req.params.id));
+  const client = await loadClient(req, res, String(req.params.id), { change: true });
   if (!client) return;
   const body = (req.body ?? {}) as Record<string, unknown>;
   const set: Partial<typeof apiClientsTable.$inferInsert> = {};
@@ -168,7 +175,7 @@ router.put("/integration/clients/:id/access", async (req, res): Promise<void> =>
  * without a gap. graceHours 0 is an immediate cut-over.
  */
 router.post("/integration/clients/:id/rotate", async (req, res): Promise<void> => {
-  const client = await loadClient(req, res, String(req.params.id));
+  const client = await loadClient(req, res, String(req.params.id), { change: true });
   if (!client) return;
   const graceHours = Math.min(720, Math.max(0, Math.floor(Number((req.body ?? {}).graceHours ?? 24)) || 0));
   const oldHash = client.clientSecretHash ?? (client.clientSecret ? hashToken(client.clientSecret) : null);
@@ -186,7 +193,7 @@ router.post("/integration/clients/:id/rotate", async (req, res): Promise<void> =
 });
 
 router.post("/integration/clients/:id/end-grace", async (req, res): Promise<void> => {
-  const client = await loadClient(req, res, String(req.params.id));
+  const client = await loadClient(req, res, String(req.params.id), { change: true });
   if (!client) return;
   const [row] = await db.update(apiClientsTable).set({ previousSecretHash: null, previousSecretExpiresAt: null })
     .where(eq(apiClientsTable.id, client.id)).returning();
