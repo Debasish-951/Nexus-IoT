@@ -1,7 +1,7 @@
 import dotenv from "dotenv";
 import path from "path";
 dotenv.config({
- path: path.resolve(process.cwd(), "../../.env"),
+ path: process.env.DOTENV_CONFIG_PATH || path.resolve(process.cwd(), "../../.env"),
 });
 import { drizzle } from "drizzle-orm/node-postgres";
 import pg from "pg";

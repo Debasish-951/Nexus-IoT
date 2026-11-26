@@ -3,7 +3,7 @@ import dns from "node:dns/promises";
 import { eq, sql } from "drizzle-orm";
 import { db, pullConnectorsTable, assetsTable, PgPool, type PullConnector } from "@workspace/db";
 import { logger } from "../lib/logger";
-import { safeFetch, checkOutboundUrl } from "../lib/outbound-url";
+import { safeFetch, checkOutboundUrl, classifyHost } from "../lib/outbound-url";
 import { decryptSecret } from "../lib/secret-box";
 import { assetSubtree } from "../lib/asset-subtree";
 import { processNormalised, type NormalisedPayload } from "../routes/ingest";
@@ -79,9 +79,10 @@ export function toReadings(
 export async function assertConnectorHost(host: string): Promise<void> {
   const addrs = net.isIP(host) ? [host] : (await dns.lookup(host, { all: true })).map((a) => a.address);
   for (const a of addrs) {
-    const v = a.toLowerCase().replace(/^::ffff:/, "");
-    if (/^127\./.test(v) || v === "::1" || v === "0.0.0.0" || v === "::" || /^169\.254\./.test(v) || /^fe80:/.test(v)) {
-      throw new Error(`Address ${a} is not allowed for a connector (loopback or link-local).`);
+    // classifyHost also catches multicast, reserved and documentation ranges and
+    // every IPv6 spelling of an IPv4 address (audit 23 Nov 2026, I-5).
+    if (classifyHost(a) === "forbidden") {
+      throw new Error(`Address ${a} is not allowed for a connector (loopback, link-local or reserved).`);
     }
   }
 }

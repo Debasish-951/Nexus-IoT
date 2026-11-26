@@ -12,6 +12,7 @@ import { logActivity } from "./activity_log";
 import { diffFields } from "../lib/audit-core";
 import { encryptSecret } from "../lib/secret-box";
 import { refreshMqttSubscribers } from "../services/mqtt";
+import { checkBrokerEndpoint } from "../lib/broker-target";
 import { logger } from "../lib/logger";
 
 /** AAD context for the MQTT password; services/mqtt.ts decrypts with the same one. */
@@ -85,6 +86,10 @@ router.post("/brokers", async (req, res): Promise<void> => {
   }
   const body = parsed.data;
 
+  // The server connects to this address, so it is checked here (lib/broker-target.ts).
+  const target = checkBrokerEndpoint(body.endpoint, body.type);
+  if (!target.ok) { res.status(400).json({ error: target.error, code: "unsafe_broker_target" }); return; }
+
   // Topic, client id, credentials and mapping rules used to be dropped here, and
   // the subscriber skips a broker without a topic, so an MQTT broker created in
   // the UI could never connect.
@@ -144,6 +149,10 @@ router.put("/brokers/:id", async (req, res): Promise<void> => {
   }
 
   const [beforeBroker] = await db.select().from(brokersTable).where(eq(brokersTable.id, params.data.id));
+  if (beforeBroker && body.endpoint !== undefined) {
+    const target = checkBrokerEndpoint(body.endpoint, beforeBroker.type);
+    if (!target.ok) { res.status(400).json({ error: target.error, code: "unsafe_broker_target" }); return; }
+  }
   const [broker] = await db
     .update(brokersTable)
     .set(updateData)

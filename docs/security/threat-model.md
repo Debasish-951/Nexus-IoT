@@ -75,6 +75,7 @@
 **Likelihood:** Low — requires admin access  
 **Impact:** Medium — could expose cloud metadata or trigger internal API side effects  
 **Recommendation:** Validate webhook URLs against an allowlist of schemes and disallow private IP ranges
+**Current mitigation (Nov 2026):** `lib/outbound-url.ts` refuses loopback, link-local/metadata, private, CGNAT, 198.18.0.0/15, multicast, reserved and documentation ranges, including every IPv6 form that embeds an IPv4 address (mapped, compatible, translated, NAT64, 6to4, Teredo), unless `ALLOW_PRIVATE_WEBHOOK_TARGETS=true`. `safeFetch` resolves the name once and connects to the checked address (no DNS rebinding window) and never follows redirects. MQTT broker endpoints have their own policy (`lib/broker-target.ts`, private LAN allowed by default). Webhook URLs are encrypted at rest and logged as origin only. Not pinned: the PostgreSQL and Modbus pull connectors check the resolved address but connect through their own drivers, which resolve again.
 
 ---
 

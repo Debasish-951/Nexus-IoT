@@ -11,7 +11,7 @@ import { RANGES, GRANULARITY_OPTS, AGG_TYPE_OPTS, REFRESH_INTERVALS, rangeLabelO
 import type { Widget } from "./types";
 
 // Per-widget "Time Range & Aggregation" control — mirrors the popover on the
-// Analytics & KPI page (src/pages/AnalyticsKpi.tsx) so both dashboards behave
+// former Analytics & KPI page (deleted) so both dashboards behave
 // the same way, restyled with this app's light shadcn components.
 //
 // Scope: every setting in here — range, granularity, aggregation, refresh — is

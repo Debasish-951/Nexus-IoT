@@ -190,5 +190,39 @@ export function detectType(head: Buffer, declaredMime?: string): DetectionResult
   };
 }
 
+/**
+ * Markup markers long enough to look for across a WHOLE GLB, binary geometry
+ * included. The short markers above ("MZ", "#!/", "<?=", "<svg") occur in
+ * random vertex data by chance and would refuse genuine models, so they stay
+ * limited to the header and JSON chunk; these five-plus-byte tags are what a
+ * browser or a PHP interpreter would need to find, and practically never appear
+ * by accident (about one chance in 10^12 per byte position).
+ */
+const GLB_BODY_MARKERS = /<script|<html|<!doctype\s+html|<\?php|<iframe|<object|<embed/i;
+
+/**
+ * The second, full-file polyglot check for a GLB (audit 23 Nov 2026, I-6).
+ * `detectType` only sees the first DETECTION_HEAD_BYTES; a GLB whose JSON chunk
+ * is longer than that, or that hides HTML in its binary chunk or after it, is
+ * caught here. One linear regex pass over the file as latin1, so the cost is
+ * proportional to the upload size, which is already capped.
+ */
+export function scanGlbBody(file: Buffer): DetectionResult {
+  if (file.length >= 20 && file.subarray(0, 4).toString("latin1") === "glTF" && file.subarray(16, 20).toString("latin1") === "JSON") {
+    // The whole JSON chunk gets the full marker list, like the head did.
+    const jsonLen = file.readUInt32LE(12);
+    const json = Buffer.from(file.subarray(20, Math.min(file.length, 20 + jsonLen)).toString("latin1").toLowerCase(), "latin1");
+    for (const marker of POLYGLOT_MARKERS) {
+      if (marker.label === "Windows executable" || marker.label === "shell shebang" || marker.label === "ELF executable") continue;
+      const needle = Buffer.from(marker.pattern.toString("latin1").toLowerCase(), "latin1");
+      if (json.includes(needle)) return { ok: false, reason: `The file contains ${marker.label} and cannot be accepted.` };
+    }
+  }
+  if (GLB_BODY_MARKERS.test(file.toString("latin1"))) {
+    return { ok: false, reason: "The file contains HTML or script markup and cannot be accepted." };
+  }
+  return { ok: true };
+}
+
 /** How many leading bytes detection needs. Enough for the polyglot window. */
 export const DETECTION_HEAD_BYTES = 4096;

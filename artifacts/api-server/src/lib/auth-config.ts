@@ -55,6 +55,15 @@ export const authConfig = {
   allowPrivateWebhookTargets: bool("ALLOW_PRIVATE_WEBHOOK_TARGETS", false),
 
   /**
+   * MQTT broker endpoints (lib/broker-target.ts). Brokers usually sit on the
+   * plant LAN, so private addresses are allowed unless this is set false.
+   * Link-local (cloud metadata), multicast and reserved ranges are always refused.
+   */
+  allowPrivateBrokerTargets: bool("ALLOW_PRIVATE_BROKER_TARGETS", true),
+  /** A broker on this same machine (localhost / 127.0.0.1). Refused unless set true. */
+  allowLoopbackBrokerTargets: bool("ALLOW_LOOPBACK_BROKER_TARGETS", false),
+
+  /**
    * Accept an API client secret in the query string (`?key=…`).
    *
    * OFF by default. The application's own log strips query strings (see the pino

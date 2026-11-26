@@ -24,7 +24,7 @@
 import * as dotenv from "dotenv";
 import pg from "pg";
 
-dotenv.config({ path: "../../.env" });
+dotenv.config({ path: process.env.DOTENV_CONFIG_PATH || "../../.env" });
 
 const args = new Set(process.argv.slice(2));
 const PARTS = "telemetry_parts";

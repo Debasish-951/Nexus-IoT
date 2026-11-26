@@ -27,8 +27,8 @@ class SeriesFetchError extends Error {
 }
 
 // Fetch one tag's raw or server-bucketed series for the given time config —
-// shared by useTelemetrySeries/useMultiSeries. Mirrors AnalyticsKpi.tsx's
-// fetchOneSeries so both dashboards aggregate identically.
+// shared by useTelemetrySeries/useMultiSeries. (Ported from the deleted AnalyticsKpi.tsx
+// fetchOneSeries.)
 async function fetchSeriesRaw(assetId: string, tag: string, timeCfg: TimeCfg): Promise<{ timestamp: string; value: number | null }[]> {
   const { from, to } = getFromTo(timeCfg);
   const rawMinutes = effectiveRangeMinutes(timeCfg);

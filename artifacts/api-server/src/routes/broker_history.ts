@@ -4,6 +4,8 @@ import { validate } from "../middleware/validate";
 import { BrokerHistoryQuery, IdParams } from "../schemas/common";
 import { eq, desc } from "drizzle-orm";
 import { db, brokerEventsTable } from "@workspace/db";
+import { isTopAdminRole } from "../lib/rbac";
+import { publicBrokerMessage } from "../lib/broker-target";
 
 const router: IRouter = Router();
 
@@ -18,7 +20,10 @@ router.get("/brokers/:id/history", validate({ params: IdParams, query: BrokerHis
     .orderBy(desc(brokerEventsTable.timestamp))
     .limit(limit);
 
-  res.json(events);
+  // Raw connection errors name internal hosts and ports (a port-scan oracle);
+  // only administrators see them (audit 23 Nov 2026, M-7).
+  if (isTopAdminRole(req.principal?.user.role)) { res.json(events); return; }
+  res.json(events.map((e) => ({ ...e, message: publicBrokerMessage(e.message) })));
 });
 
 export default router;

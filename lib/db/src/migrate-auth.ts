@@ -23,7 +23,7 @@
  */
 
 import * as dotenv from "dotenv";
-dotenv.config({ path: "../../.env" });
+dotenv.config({ path: process.env.DOTENV_CONFIG_PATH || "../../.env" });
 
 import crypto from "node:crypto";
 import { and, eq, isNull, sql } from "drizzle-orm";

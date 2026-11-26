@@ -45,3 +45,25 @@ test("a glTF version 1 or a header without a JSON chunk is not accepted", () => 
   const noJson = glb('{"asset":{}}'); noJson.write("BIN\0", 16, "latin1");
   assert.equal(detectType(noJson).ok, false);
 });
+
+test("I-6: markup beyond the first 4 KB of a GLB is refused by the full-file scan", async () => {
+  const { scanGlbBody } = await import("../lib/upload/file-types");
+  const longJson = `{"asset":{"version":"2.0"},"extras":"${"a".repeat(6000)}<script>x</script>"}`;
+  const inJson = glb(longJson);
+  assert.equal(detectType(inJson.subarray(0, 4096)).ok, true, "head alone does not see it");
+  assert.equal(scanGlbBody(inJson).ok, false);
+
+  const geometry = Buffer.alloc(100_000, 0x11);
+  geometry.write("<HTML><body>", 90_000, "latin1");
+  assert.equal(scanGlbBody(glb('{"asset":{"version":"2.0"}}', geometry)).ok, false);
+});
+
+test("I-6: random geometry with short markers still passes the full-file scan", async () => {
+  const { scanGlbBody } = await import("../lib/upload/file-types");
+  const geometry = Buffer.alloc(200_000);
+  for (let i = 0; i < geometry.length; i++) geometry[i] = (i * 2654435761) >>> 24;
+  geometry.write("MZ", 1000, "latin1");
+  geometry.write("#!/", 5000, "latin1");
+  geometry.write("<svg", 9000, "latin1");
+  assert.equal(scanGlbBody(glb('{"asset":{"version":"2.0"}}', geometry)).ok, true);
+});

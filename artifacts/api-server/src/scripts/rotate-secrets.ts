@@ -1,6 +1,6 @@
 import "dotenv/config";
 import { eq } from "drizzle-orm";
-import { db, destinationsTable, brokersTable } from "@workspace/db";
+import { db, destinationsTable, brokersTable, alarmRulesTable } from "@workspace/db";
 import { initSecretBox, encryptionEnabled, isEncrypted, decryptSecret, encryptSecret, keyRingStatus } from "../lib/secret-box";
 
 /**
@@ -63,6 +63,19 @@ const TARGETS: Target[] = [
     },
     async save(id, values) {
       await db.update(brokersTable).set(values).where(eq(brokersTable.id, id));
+    },
+  },
+  {
+    // Webhook URLs carry their credential in the path/query (lib/alarm-webhook.ts).
+    label: "alarm_rules",
+    fields: ["webhookUrl"],
+    context: () => "alarm_rules.webhookUrl",
+    async load() {
+      const rows = await db.select({ id: alarmRulesTable.id, webhookUrl: alarmRulesTable.webhookUrl }).from(alarmRulesTable);
+      return rows.map((r) => ({ id: r.id, values: { webhookUrl: r.webhookUrl } }));
+    },
+    async save(id, values) {
+      await db.update(alarmRulesTable).set(values).where(eq(alarmRulesTable.id, id));
     },
   },
 ];

@@ -16,7 +16,7 @@ import { AppError, correlationIdOf } from "../lib/errors";
 import { validate } from "../middleware/validate";
 import { IdParams } from "../schemas/common";
 import { z } from "zod";
-import { detectType, DETECTION_HEAD_BYTES } from "../lib/upload/file-types";
+import { detectType, scanGlbBody, DETECTION_HEAD_BYTES } from "../lib/upload/file-types";
 import { checkImage } from "../lib/upload/image-info";
 import { scanBuffer, verdictAllowsStorage, verdictAllowsDownload, scanConfig, type ScanResult } from "../lib/upload/scanner";
 import {
@@ -250,6 +250,13 @@ router.post("/uploads", async (req: Request, res: Response): Promise<void> => {
       const detected = detectType(file.head, file.declaredMime);
       if (!detected.ok || !detected.type) {
         throw new UploadRejected(detected.reason ?? "That file type is not supported.", "type_not_allowed");
+      }
+
+      // A GLB is scanned in full: the head check above sees only the first
+      // DETECTION_HEAD_BYTES, and a model can carry markup further in.
+      if (detected.type.mime === "model/gltf-binary") {
+        const body = scanGlbBody(await fs.readFile(file.absolutePath));
+        if (!body.ok) throw new UploadRejected(body.reason ?? "That file cannot be accepted.", "type_not_allowed");
       }
 
       // Worth knowing about: a mismatch is not always an attack (browsers guess
