@@ -55,6 +55,8 @@ export const alarmHistoryTable = pgTable("alarm_history", {
   // retention filter by triggered_at.
   index("alarm_history_alarm_id_idx").on(table.alarmId),
   index("alarm_history_triggered_at_idx").on(table.triggeredAt),
+  // Per-asset history (asset pages, AI tools, reports) filters by asset and time.
+  index("alarm_history_asset_triggered_idx").on(table.assetId, table.triggeredAt),
 ]);
 
 export const insertAlarmHistorySchema = createInsertSchema(alarmHistoryTable).omit({ id: true });

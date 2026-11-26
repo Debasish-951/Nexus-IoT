@@ -44,10 +44,13 @@ scripts/                  — Utility scripts
 - `POST /api/ingest/payload` — single payload ingest (normalise + write telemetry + evaluate runtime attrs + fire alarm rules + deliver webhooks)
 - `POST /api/ingest/validate` — dry-run: resolves deviceId, extracts metrics, checks asset match — does NOT write to DB
 - `POST /api/ingest/batch` — batch ingest array
-- `GET /api/telemetry/:assetId` — query telemetry (metric, from, to, limit filters); from/to coerced from ISO strings
+- Ingest repeats: a reading with the same metric, device timestamp and value as the newest stored one (a gateway retrying a post whose reply it lost) is not stored again; the result then carries `duplicatesSkipped`. Readings without a device timestamp are always stored. An optional owner-run unique index catches every repeat: `docs/operations/database-migrations.md`
+- `GET /api/telemetry/:assetId` — query telemetry (metric, from, to, limit filters); from/to coerced from ISO strings; `limit` default 100, values above 10000 are treated as 10000
 - `GET /api/telemetry/:assetId/metrics` — distinct metric keys for an asset (used by widget dialog when no attributes exist)
 - `GET /api/telemetry/:assetId/export` — CSV export of telemetry (cells pass through `csvCell`, so a value starting with = + - @ is written as text; numbers stay numeric)
 - `GET /api/assets/:assetId/health` — asset health score (freshness%, activeAlarms, lastSeen, keyMetrics)
+- The four routes above answer 400 for an asset id that is not a UUID or a date that cannot be read (they used to answer 500)
+- `POST /api/assets/live-summary` (Assets read) — Live Feed poll. Body `{ids: uuid[]}` (at most 500). Returns per existing asset `{assetId, lastSeen, activeAlarms, expectedInterval, attributes: [{name, type, tagName, sourceMetric, value, uom, decimalPlaces, timestamp}]}` (dynamic, metric and runtime attributes) from three set queries. A project-restricted caller naming an id outside their projects gets 403 `project_forbidden`. Not written to the audit log (a read sent as POST)
 - `GET /api/alarms` — list alarms (filter by severity/status), newest first; `?limit` default 500, max 5000; still returns a plain array
 - `POST /api/alarms/:id/acknowledge` — acknowledge an ACTIVE alarm (409 `alarm_not_active` otherwise); also marks its open history row acknowledged and sets `alarm_history.acknowledged_at`
 - `GET /api/alarm-history` — paginated alarm history

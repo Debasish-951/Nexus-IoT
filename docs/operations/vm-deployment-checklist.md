@@ -185,12 +185,19 @@ server {
     root /opt/nexus-iot/artifacts/iot-platform/dist/public;
     index index.html;
 
+    # nginx refuses request bodies over 1 MB by default, which breaks Live Twin
+    # GLB model and other file uploads (the API accepts up to UPLOAD_MAX_BYTES,
+    # 10 MB by default). Keep this a little above UPLOAD_MAX_BYTES; raise both together.
+    client_max_body_size 12m;
+
     location / {
         try_files $uri $uri/ /index.html;   # SPA fallback
     }
 
     # AI Advisor answers and AI Reports call an external model and can take up to
     # about a minute; nginx's default 60 s read timeout would cut them off.
+    # 180 s is well above the API's own AI limits (45 s per model call, 48 s for a
+    # whole report investigation, plus its fallbacks), so the API always answers first.
     location /api/ai/ {
         proxy_pass http://127.0.0.1:8080;
         proxy_set_header Host              $host;

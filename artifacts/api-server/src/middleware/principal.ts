@@ -1,5 +1,5 @@
 import type { Request, Response, NextFunction } from "express";
-import { eq } from "drizzle-orm";
+import { eq, getTableColumns } from "drizzle-orm";
 import { db, usersTable, type Session, type User } from "@workspace/db";
 import { resolveAccess, type EffectiveAccess } from "../lib/rbac";
 import {
@@ -37,6 +37,13 @@ declare global {
   }
 }
 
+/**
+ * Every user column except `mfa_secret`. The column is an unused TOTP seam that
+ * would hold a plaintext secret; it is not read into the per-request principal
+ * (audit L-26). A later release drops it, see docs/security/auth-upgrade.md.
+ */
+const { mfaSecret: _mfaSecret, ...principalColumns } = getTableColumns(usersTable);
+
 export async function attachPrincipal(req: Request, res: Response, next: NextFunction): Promise<void> {
   const raw = readSessionCookie(req);
   if (!raw) { next(); return; }
@@ -54,7 +61,8 @@ export async function attachPrincipal(req: Request, res: Response, next: NextFun
     return;
   }
 
-  const [user] = await db.select().from(usersTable).where(eq(usersTable.id, found.session.userId));
+  const [row] = await db.select(principalColumns).from(usersTable).where(eq(usersTable.id, found.session.userId));
+  const user: User | undefined = row ? { ...row, mfaSecret: null } : undefined;
 
   // The account changed underneath a live session — suspended, deleted, or
   // locked. Kill the session now rather than waiting for it to expire.

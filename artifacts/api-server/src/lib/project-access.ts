@@ -22,19 +22,66 @@ export interface AssetScope {
 
 const scopeCache = new WeakMap<Request, Promise<AssetScope | null>>();
 
+/**
+ * A restricted user's scope is also kept for a few seconds across requests. It
+ * used to load the whole assets table on every request, so a page polling many
+ * endpoints (Live Feed) read it dozens of times a minute. The key includes the
+ * user's project list, so a change to their access applies at once; a create,
+ * move or delete of an asset clears the cache (see projectScopeGuard).
+ */
+export const SCOPE_TTL_MS = 5_000;
+const userScopes = new Map<string, { at: number; scope: Promise<AssetScope> }>();
+
+export function scopeCacheKey(userId: string, access: { restrictProjects?: boolean; allowedProjects?: readonly string[] }): string {
+  return `${userId}|${access.restrictProjects ? 1 : 0}|${[...(access.allowedProjects ?? [])].sort().join(",")}`;
+}
+
+/** Drop every cached scope. Called after any change to the asset tree. */
+export function forgetAssetScopes(): void { userScopes.clear(); }
+
 /** The assets this caller may reach, or null when they are not restricted. */
 export function assetScope(req: Request): Promise<AssetScope | null> {
   const cached = scopeCache.get(req);
   if (cached) return cached;
   const access = req.principal?.access;
-  const scope = !access?.restrictProjects
-    ? Promise.resolve(null)
-    : db.select({ id: assetsTable.id, parentId: assetsTable.parentId }).from(assetsTable).then((assets) => {
+  let scope: Promise<AssetScope | null>;
+  if (!access?.restrictProjects) {
+    scope = Promise.resolve(null);
+  } else {
+    const key = scopeCacheKey(req.principal!.user.id, access);
+    const now = Date.now();
+    const hit = userScopes.get(key);
+    if (hit && now - hit.at < SCOPE_TTL_MS) {
+      scope = hit.scope;
+    } else {
+      const loading = db.select({ id: assetsTable.id, parentId: assetsTable.parentId }).from(assetsTable).then((assets) => {
         const roots = new Set(assets.filter((a) => !a.parentId && canAccessProject(access, a.id)).map((a) => a.id));
         return { roots, assetIds: assetSubtree(roots, assets) };
       });
+      if (userScopes.size > 1000) for (const [k, e] of userScopes) if (now - e.at >= SCOPE_TTL_MS) userScopes.delete(k);
+      userScopes.set(key, { at: now, scope: loading });
+      // A failed load is not remembered.
+      loading.catch(() => { if (userScopes.get(key)?.scope === loading) userScopes.delete(key); });
+      scope = loading;
+    }
+  }
   scopeCache.set(req, scope);
   return scope;
+}
+
+/** POST /assets/live-summary carries its asset ids in the body, not the path. */
+const LIVE_SUMMARY = /^\/assets\/live-summary\/?$/;
+/** Writes that change the asset tree, and so every restricted user's scope. */
+const TREE_WRITE = /^\/assets(\/[^/]+)?\/?$/;
+
+/** The first requested id outside the scope (or not a string), or undefined when all are inside. */
+export function idOutsideScope(body: unknown, scope: AssetScope): { id: string | null } | undefined {
+  const ids = (body as { ids?: unknown } | null)?.ids;
+  if (!Array.isArray(ids)) return undefined; // the route answers 400
+  for (const id of ids) {
+    if (typeof id !== "string" || !scope.assetIds.has(id)) return { id: typeof id === "string" ? id : null };
+  }
+  return undefined;
 }
 
 /**
@@ -210,10 +257,23 @@ function refuse(req: Request, res: Response, assetId: string | null): void {
 
 export async function projectScopeGuard(req: Request, res: Response, next: NextFunction): Promise<void> {
   try {
+    // Whoever changes the tree (restricted or not), cached scopes are dropped once it is done.
+    if (req.method !== "GET" && TREE_WRITE.test(req.path) && !LIVE_SUMMARY.test(req.path)) {
+      res.on("finish", () => { if (res.statusCode < 400) forgetAssetScopes(); });
+    }
+
     const scope = await assetScope(req);
     if (!scope) { next(); return; }
 
     if (PLATFORM_WIDE.some((p) => p.test(req.path))) { refuse(req, res, null); return; }
+
+    // Every id in the body must be in scope; the path holds no asset id here.
+    if (LIVE_SUMMARY.test(req.path) && req.method === "POST") {
+      const outside = idOutsideScope(req.body, scope);
+      if (outside) { refuse(req, res, outside.id); return; }
+      next();
+      return;
+    }
 
     for (const pattern of DIRECT_ASSET) {
       const id = pattern.exec(req.path)?.[1];

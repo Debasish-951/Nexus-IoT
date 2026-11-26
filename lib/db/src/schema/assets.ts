@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, integer, uuid, boolean } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, integer, uuid, boolean, index } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -30,7 +30,12 @@ export const assetsTable = pgTable("assets", {
   maintenanceNote: text("maintenance_note"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow().$onUpdate(() => new Date()),
-});
+}, (table) => [
+  // Ingest attributes every payload by identifier = deviceId; tree walks, deletes
+  // and child lists look up by parent. Both were sequential scans.
+  index("assets_identifier_idx").on(table.identifier),
+  index("assets_parent_id_idx").on(table.parentId),
+]);
 
 export const insertAssetSchema = createInsertSchema(assetsTable).omit({ id: true, createdAt: true, updatedAt: true });
 export type InsertAsset = z.infer<typeof insertAssetSchema>;

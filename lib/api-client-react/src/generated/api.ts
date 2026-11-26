@@ -37,6 +37,8 @@ import type {
   ApplyTemplateResult,
   Asset,
   AssetHealthReport,
+  AssetLiveSummary,
+  AssetLiveSummaryRequest,
   AssetMaintenanceRequest,
   AssetTemplate,
   Attribute,
@@ -20183,6 +20185,133 @@ export function useGetAssetHealth<
 
   return withQueryKey(query, queryOptions.queryKey);
 }
+
+export const getGetAssetsLiveSummaryUrl = () => {
+  return `/api/assets/live-summary`;
+};
+
+/**
+ * Newest stored reading, active alarm count, expected reporting interval and latest live attributes of each asset named in `ids`. A read sent as POST to carry the id list. Ids outside the caller's projects are refused (403); unknown ids are left out of the answer.
+ * @summary Live Feed data for many assets in one request
+ */
+export const getAssetsLiveSummary = async (
+  assetLiveSummaryRequest: AssetLiveSummaryRequest,
+  options?: Parameters<typeof customFetch>[1],
+): Promise<AssetLiveSummary[]> => {
+  const getHeaders = (
+    h?: NonNullable<RequestInit["headers"]>,
+  ): Record<string, string | readonly string[]> => {
+    if (!h) return {};
+    if (h instanceof Headers) return Object.fromEntries(h.entries());
+    if (Symbol.iterator in h) {
+      return Object.fromEntries(
+        Array.from(
+          h as Iterable<Iterable<string>>,
+          (entry) => Array.from(entry) as [string, string],
+        ),
+      );
+    }
+    const headers: Record<string, string | readonly string[]> = {};
+    for (const [name, value] of Object.entries<
+      string | readonly string[] | undefined
+    >(h)) {
+      if (value !== undefined) headers[name] = value;
+    }
+    return headers;
+  };
+  return customFetch<AssetLiveSummary[]>(getGetAssetsLiveSummaryUrl(), {
+    ...options,
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...getHeaders(options?.headers),
+    },
+    body: JSON.stringify(assetLiveSummaryRequest),
+  });
+};
+
+export const getGetAssetsLiveSummaryMutationKey = () =>
+  ["getAssetsLiveSummary"] as const;
+
+export const getGetAssetsLiveSummaryMutationOptions = <
+  TError = ErrorType<ValidationFailedResponse | RateLimitedResponse>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof getAssetsLiveSummary>>,
+    TError,
+    GetAssetsLiveSummaryMutationVariables,
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof getAssetsLiveSummary>>,
+  TError,
+  GetAssetsLiveSummaryMutationVariables,
+  TContext
+> => {
+  const mutationKey = getGetAssetsLiveSummaryMutationKey();
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof getAssetsLiveSummary>>,
+    GetAssetsLiveSummaryMutationVariables
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return getAssetsLiveSummary(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type GetAssetsLiveSummaryMutationResult = NonNullable<
+  Awaited<ReturnType<typeof getAssetsLiveSummary>>
+>;
+export type GetAssetsLiveSummaryMutationBody =
+  BodyType<AssetLiveSummaryRequest>;
+export type GetAssetsLiveSummaryMutationError = ErrorType<
+  ValidationFailedResponse | RateLimitedResponse
+>;
+export type GetAssetsLiveSummaryMutationVariables = {
+  data: BodyType<AssetLiveSummaryRequest>;
+};
+
+/**
+ * Newest stored reading, active alarm count, expected reporting interval and latest live attributes of each asset named in `ids`. A read sent as POST to carry the id list. Ids outside the caller's projects are refused (403); unknown ids are left out of the answer.
+ * @summary Live Feed data for many assets in one request
+ */
+export const useGetAssetsLiveSummary = <
+  TError = ErrorType<ValidationFailedResponse | RateLimitedResponse>,
+  TContext = unknown,
+>(
+  options?: {
+    mutation?: UseMutationOptions<
+      Awaited<ReturnType<typeof getAssetsLiveSummary>>,
+      TError,
+      GetAssetsLiveSummaryMutationVariables,
+      TContext
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+  queryClient?: QueryClient,
+): UseMutationResult<
+  Awaited<ReturnType<typeof getAssetsLiveSummary>>,
+  TError,
+  GetAssetsLiveSummaryMutationVariables,
+  TContext
+> => {
+  return useMutation(
+    getGetAssetsLiveSummaryMutationOptions(options),
+    queryClient,
+  );
+};
 
 export const getListSeenDevicesUrl = () => {
   return `/api/ingest/seen-devices`;

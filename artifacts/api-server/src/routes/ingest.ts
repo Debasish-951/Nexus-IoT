@@ -14,6 +14,9 @@ import { assertSafeOutboundUrl, safeFetch } from "../lib/outbound-url";
 import { logger } from "../lib/logger";
 import { ingestScope, recordIngestOutOfScope } from "../lib/project-access";
 import { csvCell } from "../lib/validation";
+import * as v from "../lib/validation";
+import { z } from "zod";
+import { LiveSummaryBody, buildLiveSummary, type LiveSummaryAttrRow } from "../lib/live-summary";
 import { forwardToDestinations } from "./destinations";
 import { emitLater } from "../lib/integration/events";
 
@@ -402,7 +405,34 @@ async function fireWebhook(url: string, payload: Record<string, unknown>): Promi
 
 // ── Alarm rule evaluation (threshold + rate-of-change) ────────────────────────
 /** The newest stored reading of a metric. `value` is null when it was not a number. */
-export interface PrevReading { value: number | null; ts: Date }
+export interface PrevReading {
+  value: number | null; ts: Date;
+  /** The stored value as read back, used to spot an exact repeat of a reading. */
+  raw?: unknown;
+}
+
+/**
+ * Drops readings that exactly repeat the newest stored one: same metric, same
+ * device timestamp and same value. A gateway that retries a post after a timeout
+ * (the first attempt was stored, the reply was lost) used to store every reading
+ * twice. The comparison uses `prev`, the newest stored reading per metric that
+ * ingest already reads for the late-data check, so it costs no extra query. It
+ * catches a retry of the latest message, the common case; a retry of an older
+ * message that has since been overtaken is not detected (see
+ * docs/operations/database-migrations.md for the optional unique index that
+ * catches every repeat). Readings without a device timestamp get the server
+ * clock, so they are never repeats and are always kept.
+ */
+export function dropRepeatedReadings<T extends { metric: string; value: unknown }>(
+  records: T[], prev: Record<string, PrevReading>, ts: Date, deviceStamped: boolean,
+): T[] {
+  if (!deviceStamped) return records;
+  return records.filter((r) => {
+    const p = prev[r.metric];
+    return !(p && p.ts.getTime() === ts.getTime() && "raw" in p
+      && JSON.stringify(p.raw ?? null) === JSON.stringify(r.value ?? null));
+  });
+}
 
 interface AlarmEvent {
   ruleId: string; ruleName: string; metric: string;
@@ -590,7 +620,13 @@ export async function evaluateAlarmRules(
         : !evalOp(effectiveValue, rule.operator, lowLimit ? rule.threshold + deadband : rule.threshold - deadband);
       if (!clearOk) pendingOff.delete(delayKey);
       if (clearOk && delayElapsed(pendingOff, delayKey, rule.offDelay, ts)) {
-        await db.update(alarmsTable).set({ status: "cleared", clearedAt: ts }).where(eq(alarmsTable.id, existing.id));
+        // Conditional, like the insert above: two concurrent payloads can both see
+        // the alarm open, but only the one whose UPDATE still finds it open gets a
+        // row back, so the "cleared" webhook, broadcast and event fire once.
+        const [closed] = await db.update(alarmsTable).set({ status: "cleared", clearedAt: ts })
+          .where(and(eq(alarmsTable.id, existing.id), inArray(alarmsTable.status, ["active", "acknowledged"])))
+          .returning({ id: alarmsTable.id });
+        if (!closed) continue;
         await db.update(alarmHistoryTable).set({ status: "cleared", clearedAt: ts }).where(eq(alarmHistoryTable.alarmId, existing.id));
         events.push({ ruleId: rule.id, ruleName: rule.name, metric: rule.metric,
           value: effectiveValue, threshold: rule.threshold, operator: rule.operator,
@@ -735,7 +771,7 @@ async function latestReadings(assetId: string, metrics: string[]): Promise<Recor
   `);
   for (const row of result.rows) {
     const ts = new Date(row.ts);
-    if (!Number.isNaN(ts.getTime())) out[row.metric] = { value: toNum(row.value), ts };
+    if (!Number.isNaN(ts.getTime())) out[row.metric] = { value: toNum(row.value), ts, raw: row.value };
   }
   return out;
 }
@@ -852,6 +888,7 @@ export async function processNormalised(
   }
 
   let recordsWritten = 0;
+  let duplicatesSkipped = 0;
   const alarmEvents: Awaited<ReturnType<typeof evaluateAlarmRules>> = [];
 
   for (const share of shares) {
@@ -865,11 +902,19 @@ export async function processNormalised(
 
   // A blank reading is stored as sent but marked bad, so it is visible and
   // never mistaken for a measured zero.
-  const records = Object.entries(metrics).map(([metric, value]) => ({
+  const received = Object.entries(metrics).map(([metric, value]) => ({
     assetId, deviceId: n.deviceId, metric, value, timestamp: ts,
     quality: isBlankReading(value) ? "bad" : "good",
   }));
-  await db.insert(telemetryTable).values(records as any[]);
+  // A retried post repeats readings already stored: those are not stored again.
+  const records = dropRepeatedReadings(received, prevMetrics, ts, !!n.timestamp);
+  duplicatesSkipped += received.length - records.length;
+  // The whole share was a repeat: it was fully processed the first time, so there
+  // is nothing to write, evaluate or broadcast again.
+  if (records.length === 0) continue;
+  // DO NOTHING has no effect without a unique index; it lets an owner add the
+  // optional (asset_id, metric, timestamp) unique index without a code change.
+  await db.insert(telemetryTable).values(records as any[]).onConflictDoNothing();
 
   // Update dynamic attributes — match either the full "deviceId.metric" tag OR the
   // bare metric name (case-insensitive; telemetry keys are camelCase, tagNames lower).
@@ -933,6 +978,8 @@ export async function processNormalised(
 
   return {
     recordsWritten, assetId, assetName, alarmEvents,
+    // Readings left out because they repeated the newest stored one (a retry).
+    ...(duplicatesSkipped > 0 && { duplicatesSkipped }),
     // Every asset claiming this device id, so callers do not have to guess which one
     // "the" asset is when a payload is split across sections.
     claimantIds: siblings.map((s) => s.id),
@@ -1316,9 +1363,26 @@ router.post(["/ingest/batch", "/ingest/k/:clientId/batch", "/ingest/e/:token/bat
     outOfScopeCount, alarmsTriggered: totalTriggered, alarmsCleared: totalCleared });
 });
 
+/**
+ * Path and query values are checked before they reach SQL: a malformed asset id
+ * or date used to surface as a database error and a 500 instead of a 400.
+ */
+export const AssetIdParam = z.object({ assetId: v.uuid() });
+export const TelemetryCsvQuery = z.object({
+  metric: v.shortText().optional(),
+  from: v.timestamp().optional(),
+  to: v.timestamp().optional(),
+});
+/** Upper bound for GET /telemetry/:assetId. Larger requests are clamped, not refused. */
+export const TELEMETRY_MAX_LIMIT = 10_000;
+export const clampTelemetryLimit = (limit: number | undefined): number =>
+  Math.min(Math.max(Math.trunc(limit ?? 100) || 100, 1), TELEMETRY_MAX_LIMIT);
+
 // ── Distinct metrics for an asset (for widget dialog when no attributes exist) ─
 router.get("/telemetry/:assetId/metrics", async (req, res): Promise<void> => {
-  const { assetId } = req.params;
+  const params = AssetIdParam.safeParse(req.params);
+  if (!params.success) { respondInvalid(req, res, params.error); return; }
+  const { assetId } = params.data;
   const rows = await db
     .selectDistinct({ metric: telemetryTable.metric })
     .from(telemetryTable)
@@ -1330,6 +1394,8 @@ router.get("/telemetry/:assetId/metrics", async (req, res): Promise<void> => {
 router.get("/telemetry/:assetId", async (req, res): Promise<void> => {
   const params = GetTelemetryParams.safeParse(req.params);
   if (!params.success) { respondInvalid(req, res, params.error); return; }
+  const idCheck = AssetIdParam.safeParse(req.params);
+  if (!idCheck.success) { respondInvalid(req, res, idCheck.error); return; }
   const query = GetTelemetryQueryParams.safeParse(req.query);
   if (!query.success) { respondInvalid(req, res, query.error); return; }
   const conditions = [eq(telemetryTable.assetId, params.data.assetId)];
@@ -1337,18 +1403,23 @@ router.get("/telemetry/:assetId", async (req, res): Promise<void> => {
   if (query.data.from) conditions.push(gte(telemetryTable.timestamp, query.data.from as unknown as Date));
   if (query.data.to)   conditions.push(lte(telemetryTable.timestamp, query.data.to as unknown as Date));
   const records = await db.select().from(telemetryTable).where(and(...conditions))
-    .orderBy(desc(telemetryTable.timestamp)).limit(query.data.limit ?? 100);
+    // Capped: an unbounded limit loaded an asset's whole history into memory.
+    .orderBy(desc(telemetryTable.timestamp)).limit(clampTelemetryLimit(query.data.limit));
   res.json(records);
 });
 
 // ── Telemetry CSV export ──────────────────────────────────────────────────────
 router.get("/telemetry/:assetId/export", async (req, res): Promise<void> => {
-  const { assetId } = req.params;
-  const { metric, from, to } = req.query as Record<string, string>;
+  const params = AssetIdParam.safeParse(req.params);
+  if (!params.success) { respondInvalid(req, res, params.error); return; }
+  const query = TelemetryCsvQuery.safeParse(req.query);
+  if (!query.success) { respondInvalid(req, res, query.error); return; }
+  const { assetId } = params.data;
+  const { metric, from, to } = query.data;
   const conditions = [eq(telemetryTable.assetId, assetId)];
   if (metric) conditions.push(eq(telemetryTable.metric, metric));
-  if (from) conditions.push(gte(telemetryTable.timestamp, new Date(from)));
-  if (to)   conditions.push(lte(telemetryTable.timestamp, new Date(to)));
+  if (from) conditions.push(gte(telemetryTable.timestamp, from));
+  if (to)   conditions.push(lte(telemetryTable.timestamp, to));
   const records = await db.select().from(telemetryTable).where(and(...conditions))
     .orderBy(desc(telemetryTable.timestamp)).limit(50000);
   const header = "id,assetId,deviceId,metric,value,quality,timestamp";
@@ -1370,7 +1441,9 @@ router.get("/telemetry/:assetId/export", async (req, res): Promise<void> => {
 
 // ── Asset health endpoint ─────────────────────────────────────────────────────
 router.get("/assets/:assetId/health", async (req, res): Promise<void> => {
-  const { assetId } = req.params;
+  const params = AssetIdParam.safeParse(req.params);
+  if (!params.success) { respondInvalid(req, res, params.error); return; }
+  const { assetId } = params.data;
   const [asset] = await db.select().from(assetsTable).where(eq(assetsTable.id, assetId));
   if (!asset) { res.status(404).json({ error: "Asset not found" }); return; }
 
@@ -1405,6 +1478,38 @@ router.get("/assets/:assetId/health", async (req, res): Promise<void> => {
       name: a.name, value: a.value, uom: a.uom, quality: a.quality, timestamp: a.timestamp,
     })),
   });
+});
+
+// ── Live Feed summary: many assets in one request (see lib/live-summary.ts) ──
+router.post("/assets/live-summary", async (req, res): Promise<void> => {
+  const parsed = LiveSummaryBody.safeParse(req.body);
+  if (!parsed.success) { respondInvalid(req, res, parsed.error); return; }
+  const ids = [...new Set(parsed.data.ids)];
+  if (ids.length === 0) { res.json([]); return; }
+  const idArray = sql`ARRAY[${sql.join(ids.map((id) => sql`${id}`), sql`, `)}]::uuid[]`;
+
+  // Newest reading per asset: one index seek each (idx_telemetry_asset_ts), as
+  // /sites does. Also tells which requested ids exist.
+  const last = await db.execute<{ id: string; ts: string | Date | null }>(sql`
+    SELECT a.id, ls.ts
+    FROM assets a
+    LEFT JOIN LATERAL (
+      SELECT "timestamp" AS ts FROM telemetry WHERE asset_id = a.id ORDER BY "timestamp" DESC LIMIT 1
+    ) ls ON true
+    WHERE a.id = ANY(${idArray})
+  `);
+  const alarmRows = await db.select({ assetId: alarmsTable.assetId, n: count() })
+    .from(alarmsTable)
+    .where(and(inArray(alarmsTable.assetId, ids), eq(alarmsTable.status, "active")))
+    .groupBy(alarmsTable.assetId);
+  const attrRows: LiveSummaryAttrRow[] = await db.select({
+    assetId: attributesTable.assetId, name: attributesTable.name, type: attributesTable.type,
+    tagName: attributesTable.tagName, sourceMetric: attributesTable.sourceMetric,
+    value: attributesTable.value, uom: attributesTable.uom,
+    decimalPlaces: attributesTable.decimalPlaces, timestamp: attributesTable.timestamp,
+  }).from(attributesTable).where(inArray(attributesTable.assetId, ids));
+
+  res.json(buildLiveSummary(ids, last.rows, alarmRows, attrRows));
 });
 
 export default router;
