@@ -22,7 +22,7 @@ export function respondInvalid(req: Request, res: Response, error: ZodError, cod
     error: "The request could not be accepted because some values were not valid.",
     code,
     errors: error.issues.slice(0, 25).map((issue) => ({
-      field: issue.path.length > 0 ? issue.path.join(".") : "(root)",
+      field: issue.path.length > 0 ? issue.path.map(String).join(".") : "(root)",
       message:
         issue.code === "unrecognized_keys"
           ? `unexpected field${issue.keys.length > 1 ? "s" : ""}: ${issue.keys.join(", ")}`

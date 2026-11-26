@@ -5,6 +5,7 @@
  */
 import { z } from "zod";
 import { pool } from "@workspace/db";
+import { partialUpdate } from "./validation";
 
 const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, "Use HH:MM, 24-hour");
 
@@ -24,44 +25,44 @@ export const DataSettingsSchema = z.object({
     quietAssets: z.boolean().default(true),
     /** Optional webhook (HTTPS recommended) that receives raised and cleared alerts as JSON. */
     webhookUrl: z.string().url().max(2000).nullable().default(null),
-  }).default({}),
+  }).prefault({}),
   pruneWindow: z.object({
     /** When on, the hourly job deletes telemetry only between start and end (plant time). */
     enabled: z.boolean().default(false),
     start: hhmm.default("01:00"),
     end: hhmm.default("05:00"),
-  }).default({}),
+  }).prefault({}),
   approval: z.object({
     /** When on, deletions estimated above thresholdRows wait for a second administrator. */
     enabled: z.boolean().default(false),
     thresholdRows: z.number().int().min(0).max(1_000_000_000).default(1_000_000),
-  }).default({}),
+  }).prefault({}),
   archive: z.object({
     /** When on, raw readings are written to daily files before pruning deletes them. */
     enabled: z.boolean().default(false),
-  }).default({}),
+  }).prefault({}),
   tiers: z.object({
     /** Days 15-minute summaries are kept. 0 = do not build them. */
     m15Days: z.number().int().min(0).max(3650).default(365),
     /** Days hourly summaries are kept; null = RETENTION_ROLLUP_DAYS (default 1825). 0 = for ever. */
     hourDays: z.number().int().min(0).max(36500).nullable().default(null),
-  }).default({}),
+  }).prefault({}),
   health: z.object({
     /** An asset counts as quiet after this many minutes without a reading. */
     quietMinutes: z.number().int().min(5).max(60 * 24 * 30).default(60),
-  }).default({}),
+  }).prefault({}),
 });
 
 export type DataSettings = z.infer<typeof DataSettingsSchema>;
 
 /** Partial update body: any subset of sections and fields. */
 export const DataSettingsUpdate = z.object({
-  alerts: DataSettingsSchema.shape.alerts.removeDefault().partial().optional(),
-  pruneWindow: DataSettingsSchema.shape.pruneWindow.removeDefault().partial().optional(),
-  approval: DataSettingsSchema.shape.approval.removeDefault().partial().optional(),
-  archive: DataSettingsSchema.shape.archive.removeDefault().partial().optional(),
-  tiers: DataSettingsSchema.shape.tiers.removeDefault().partial().optional(),
-  health: DataSettingsSchema.shape.health.removeDefault().partial().optional(),
+  alerts: partialUpdate(DataSettingsSchema.shape.alerts.unwrap()).optional(),
+  pruneWindow: partialUpdate(DataSettingsSchema.shape.pruneWindow.unwrap()).optional(),
+  approval: partialUpdate(DataSettingsSchema.shape.approval.unwrap()).optional(),
+  archive: partialUpdate(DataSettingsSchema.shape.archive.unwrap()).optional(),
+  tiers: partialUpdate(DataSettingsSchema.shape.tiers.unwrap()).optional(),
+  health: partialUpdate(DataSettingsSchema.shape.health.unwrap()).optional(),
 }).strict();
 
 const KEY = "data_settings";
