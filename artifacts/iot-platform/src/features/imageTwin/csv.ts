@@ -1,5 +1,6 @@
 import { BEHAVIOURS, newItemId, type Behaviour, type TwinItem } from "./types";
 import type { Part } from "./sanitize";
+import { csvCell } from "@/lib/csv";
 
 /**
  * Mapping as CSV, for drawings with many points.
@@ -11,12 +12,8 @@ import type { Part } from "./sanitize";
 export const CSV_COLUMNS = ["part", "asset_identifier_or_name", "metric", "behaviours", "unit", "decimals", "warn", "crit", "min", "max"] as const;
 const VALID = new Set<string>(BEHAVIOURS.map((b) => b.k));
 
-/** Quotes when needed; a leading = + @ (or - before a non-number) gets a ' so spreadsheets do not run it as a formula. */
-const esc = (v: unknown) => {
-  let s = v == null ? "" : String(v);
-  if (/^[=+@]/.test(s) || /^-[^\d.]/.test(s)) s = `'${s}`;
-  return /[",\n\r]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
-};
+/** The shared escaper: quotes when needed, and a text cell starting with = + - @ tab or CR gets a ' so spreadsheets do not run it as a formula (numbers stay numbers). */
+const esc = csvCell;
 
 export function toCsv(items: TwinItem[], assets: { id: string; name: string; identifier?: string | null }[]): string {
   const byId = new Map(assets.map((a) => [a.id, a]));
@@ -57,7 +54,7 @@ export function applyCsv(text: string, items: TwinItem[], parts: Part[], assets:
   let applied = 0, created = 0;
   rows.slice(1).forEach((r, idx) => {
     const line = idx + 2;
-    const get = (n: string) => { const c = col(n); return c >= 0 ? (r[c] ?? "").trim().replace(/^'(?=[=+@-])/, "") : ""; };
+    const get = (n: string) => { const c = col(n); return c >= 0 ? (r[c] ?? "").trim().replace(/^'(?=[=+@\t\r-])/, "") : ""; };
     const key = get("part");
     if (!key) { problems.push(`Row ${line}: no part.`); return; }
     let it = next.find((i) => (i.kind === "part" && i.ref === key) || norm(i.name) === norm(key));

@@ -218,7 +218,7 @@ Key behavioural rules:
 
 One WebSocket endpoint (`/api/ws`), one `broadcast(type, data, options?)` function in `lib/ws-broadcast.ts`. Delivery is filtered per-connection by the caller's resolved permissions — a socket only receives event types its principal is allowed to see. There is no pub/sub layer or message queue; `broadcast()` iterates every open connection on the process synchronously. This is the reason horizontal scaling is not currently possible (see §9).
 
-Server event types: `telemetry`, `alarm`, `broker_status`, `activity_log` and `security_event`. Nine reachable frontend surfaces consume them through a single `useWsEvents` hook (`hooks/useWsEvents.ts`): Live Feed, Live Twin, Visualization (through `features/dashboards/AssetVizPanel.tsx`), Active Alarms, Alarm History, Activity Log, Brokers, the notification bell and the broker status bar (both in `Layout.tsx`). Three more pages still call the hook but are not routed: `Dashboard.tsx`, `HomeOverview.tsx` (with `features/home/StatusRibbon.tsx`) and `AnalyticsKpi.tsx` (see §8.5); Home is now the project list and opens no socket of its own. The former alarm toast listener has been removed.
+Server event types: `telemetry`, `alarm`, `broker_status`, `activity_log` and `security_event`. Nine reachable frontend surfaces consume them through a single `useWsEvents` hook (`hooks/useWsEvents.ts`): Live Feed, Live Twin, Visualization (through `features/dashboards/AssetVizPanel.tsx`), Active Alarms, Alarm History, Activity Log, Brokers, the notification bell and the broker status bar (both in `Layout.tsx`). Two more pages still call the hook but are not routed: `Dashboard.tsx` and `HomeOverview.tsx` (with `features/home/StatusRibbon.tsx`) (see §8.5); Home is now the project list and opens no socket of its own. The former alarm toast listener has been removed.
 
 ### 5.5 Deployment architecture (current)
 
@@ -389,7 +389,7 @@ Two paths, both wrapped in TanStack Query:
 
 ### 8.5 Known frontend debt
 
-- `pages/AnalyticsKpi.tsx` (2,770 lines, the largest file in the frontend) and `pages/DataExplorer.tsx` (324 lines) have no route, no nav entry, and no importer — they do not run. Three files in `features/dashboards/` cite `AnalyticsKpi.tsx` in comments as the time-range/aggregation behaviour they mirror, meaning the "reference implementation" for that logic is unreachable code.
+- `pages/DataExplorer.tsx` (324 lines) has no route, no nav entry, and no importer — it does not run. The former unreachable `pages/AnalyticsKpi.tsx` was deleted (audit 23 Nov 2026, I-8).
 - No React error boundary existed prior to this review cycle; one now wraps the app root (`components/ErrorBoundary.tsx`), replacing the dev-time error overlay that was removed along with the platform's original hosted-preview tooling.
 
 ### 8.6 Theming

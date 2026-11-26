@@ -11,6 +11,7 @@ import { broadcast } from "../lib/ws-broadcast";
 import { apiKeyAuth } from "../middleware/apiKeyAuth";
 import { recordDevice, listSeenDevices, removeSeenDevice, pruneUnusedDevices } from "../lib/seen-devices";
 import { assertSafeOutboundUrl, safeFetch } from "../lib/outbound-url";
+import { openWebhookUrl, redactUrlForLog } from "../lib/alarm-webhook";
 import { logger } from "../lib/logger";
 import { ingestScope, recordIngestOutOfScope } from "../lib/project-access";
 import { csvCell } from "../lib/validation";
@@ -375,11 +376,19 @@ function evalOp(value: number, op: string, threshold: number): boolean {
  * written before this guard existed, or edited straight in the database, must
  * not get a free pass to the metadata endpoint.
  */
-async function fireWebhook(url: string, payload: Record<string, unknown>): Promise<void> {
+async function fireWebhook(stored: string, payload: Record<string, unknown>): Promise<void> {
+  // Stored encrypted; decrypted only for the call. Logs get the origin only:
+  // the path and query of a webhook URL are its credential (lib/alarm-webhook.ts).
+  const url = openWebhookUrl(stored);
+  if (!url) {
+    logger.warn({ ruleName: payload.ruleName ?? null }, "Alarm webhook skipped: the stored URL could not be decrypted");
+    return;
+  }
+  const target = redactUrlForLog(url);
   try {
     assertSafeOutboundUrl(url);
   } catch (err) {
-    logger.warn({ url, err: (err as Error).message }, "Alarm webhook blocked: unsafe target");
+    logger.warn({ url: target, err: (err as Error).message }, "Alarm webhook blocked: unsafe target");
     return;
   }
 
@@ -391,13 +400,22 @@ async function fireWebhook(url: string, payload: Record<string, unknown>): Promi
       signal: AbortSignal.timeout(5000),
     });
     if (!res.ok) {
-      logger.warn({ url, status: res.status }, "Alarm webhook rejected by the receiver");
+      logger.warn({ url: target, status: res.status }, "Alarm webhook rejected by the receiver");
     }
   } catch (err) {
     // A timeout, DNS failure or connection refusal. Logged, never rethrown —
     // the caller is fire-and-forget by design.
-    logger.warn({ url, err: (err as Error).message }, "Alarm webhook delivery failed");
+    logger.warn({ url: target, err: (err as Error).message }, "Alarm webhook delivery failed");
   }
+}
+
+/**
+ * Alarm events as sent back to an ingest caller. The webhook fields are for the
+ * dispatcher only: a webhook URL is a credential, and a device gateway posting
+ * readings has no business seeing it (audit 23 Nov 2026, L-8).
+ */
+function publicAlarmEvents(events: AlarmEvent[]): Omit<AlarmEvent, "webhookUrl" | "webhookEnabled">[] {
+  return events.map(({ webhookUrl: _u, webhookEnabled: _e, ...rest }) => rest);
 }
 
 // ── Alarm rule evaluation (threshold + rate-of-change) ────────────────────────
@@ -1201,7 +1219,7 @@ router.post(["/ingest/payload", "/ingest/k/:clientId/payload", "/ingest/e/:token
           success: rejected === 0 && outOfScope === 0 && accepted > 0,
           items: items.length, matched: accepted, rejected, outOfScope, recordsWritten,
           message: `Ingested ${recordsWritten} metric(s) from ${accepted} of ${items.length} reading(s)`,
-          alarmsTriggered: triggered, alarmsCleared: cleared, alarmEvents,
+          alarmsTriggered: triggered, alarmsCleared: cleared, alarmEvents: publicAlarmEvents(alarmEvents),
           ...(outOfScope > 0 && { code: "out_of_project_scope" }),
         });
         return;
@@ -1288,7 +1306,7 @@ router.post(["/ingest/payload", "/ingest/k/:clientId/payload", "/ingest/e/:token
     message: result.assetId
       ? `Ingested ${result.recordsWritten} metric(s); ${machinesAttributed} machine(s) attributed`
       : `No asset has the identifier "${normalised.deviceId}" (matching is case-sensitive), so nothing was stored.`,
-    alarmsTriggered: triggered.length, alarmsCleared: cleared.length, alarmEvents: result.alarmEvents });
+    alarmsTriggered: triggered.length, alarmsCleared: cleared.length, alarmEvents: publicAlarmEvents(result.alarmEvents) });
 });
 
 router.post(["/ingest/batch", "/ingest/k/:clientId/batch", "/ingest/e/:token/batch"],

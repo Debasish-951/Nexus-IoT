@@ -13,6 +13,7 @@ import { and, eq, sql } from "drizzle-orm";
 import { normalise, processNormalised } from "../routes/ingest.js";
 import { recordIngestRejection } from "./ingest-rejections.js";
 import { broadcast } from "../lib/ws-broadcast.js";
+import { connectBroker, parseBrokerEndpoint } from "../lib/broker-target.js";
 
 const activeClients: Map<string, ReturnType<typeof mqtt.connect>> = new Map();
 
@@ -70,6 +71,20 @@ export async function startMqttSubscribers(onlyId?: string): Promise<void> {
     if (!broker.endpoint || !broker.mqttTopic) continue;
     if (activeClients.has(broker.id)) continue; // already running
 
+    // The address policy (lib/broker-target.ts). A broker saved before it existed,
+    // or edited in the database, is not connected; the reason goes to its history.
+    const target = parseBrokerEndpoint(broker.endpoint);
+    if ("error" in target) {
+      console.error(`[MQTT] Not connecting ${broker.name}: ${target.error}`);
+      try {
+        await db.update(brokersTable).set({ status: "error" }).where(eq(brokersTable.id, broker.id));
+        await db.insert(brokerEventsTable).values({ brokerId: broker.id, brokerName: broker.name, status: "error", message: target.error, timestamp: new Date() });
+      } catch (err: any) {
+        console.error(`[MQTT] Could not record the refusal for ${broker.name}:`, err?.message ?? err);
+      }
+      continue;
+    }
+
     try {
       const options: mqtt.IClientOptions = {
         clientId: mqttClientIdFor(broker),
@@ -88,7 +103,8 @@ export async function startMqttSubscribers(onlyId?: string): Promise<void> {
       options.reconnectPeriod = 5000;
       options.connectTimeout = 10000;
 
-      const client = mqtt.connect(broker.endpoint, options);
+      // connectBroker re-checks the resolved address on every (re)connection.
+      const client = connectBroker(broker.endpoint, options);
       activeClients.set(broker.id, client);
 
       // Writes the broker's status. These handlers are called by the MQTT library,

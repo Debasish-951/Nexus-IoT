@@ -14,7 +14,7 @@
  */
 
 import * as dotenv from "dotenv";
-dotenv.config({ path: "../../.env" }); // Points up to the root Nexus-IoT folder
+dotenv.config({ path: process.env.DOTENV_CONFIG_PATH || "../../.env" }); // Points up to the root Nexus-IoT folder
 
 import crypto from "node:crypto";
 import { sql, eq, and, isNull } from "drizzle-orm";

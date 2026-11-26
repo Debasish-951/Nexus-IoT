@@ -13,6 +13,7 @@ import {
   activityLogsTable, brokerEventsTable, authTokensTable, retentionRunsTable, dataChangeRequestsTable,
 } from "@workspace/db";
 import { logger } from "../lib/logger";
+import { csvCell } from "../lib/validation";
 import { logActivity } from "./activity_log";
 import { diffFields } from "../lib/audit-core";
 import {
@@ -532,7 +533,8 @@ router.get("/system/retention/runs/:id/report", validate({ params: IdParams }), 
   const { id } = req.params as unknown as z.infer<typeof IdParams>;
   const [run] = await db.select().from(retentionRunsTable).where(eq(retentionRunsTable.id, id));
   if (!run) { res.status(404).json({ error: "Run not found" }); return; }
-  const esc = (v: unknown) => { const t = v === null || v === undefined ? "" : String(v instanceof Date ? v.toISOString() : v); return /[",\n]/.test(t) ? `"${t.replace(/"/g, '""')}"` : t; };
+  // csvCell quotes AND neutralises spreadsheet formulas (policy names, notes and error text are free text).
+  const esc = (v: unknown) => csvCell(v instanceof Date ? v.toISOString() : v);
   const lines = [
     ["run", run.id], ["trigger", run.trigger], ["run by", run.username ?? "hourly job"],
     ["started", run.startedAt], ["finished", run.finishedAt ?? ""], ["readings deleted", run.telemetryDeleted], ["error", run.error ?? ""],

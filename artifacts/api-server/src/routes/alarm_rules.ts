@@ -14,6 +14,7 @@ import { forgetRuleDelays, invalidateAlarmRuleCache } from "./ingest";
 import { hasPermission } from "../lib/rbac";
 import { logActivity } from "./activity_log";
 import { diffFields } from "../lib/audit-core";
+import { sealWebhookUrl, openWebhookUrl, withOpenWebhook } from "../lib/alarm-webhook";
 
 const router: IRouter = Router();
 
@@ -52,7 +53,8 @@ function forClient<T extends { webhookUrl: string | null }>(req: Request, rule: 
 
 router.get("/alarm-rules", async (req, res): Promise<void> => {
   const rules = await db.select().from(alarmRulesTable).orderBy(alarmRulesTable.name);
-  res.json(rules.map((r) => forClient(req, r)));
+  // Stored encrypted (lib/alarm-webhook.ts); decrypted here, then masked for readers.
+  res.json(rules.map((r) => forClient(req, withOpenWebhook(r))));
 });
 
 router.post("/alarm-rules", async (req, res): Promise<void> => {
@@ -72,7 +74,7 @@ router.post("/alarm-rules", async (req, res): Promise<void> => {
     if (!check.ok) { res.status(400).json({ error: check.error, code: "unsafe_url" }); return; }
   }
 
-  const [rule] = await db.insert(alarmRulesTable).values({
+  const [sealedRule] = await db.insert(alarmRulesTable).values({
     name: parsed.data.name,
     description: parsed.data.description ?? null,
     assetId: parsed.data.assetId ?? null,
@@ -88,9 +90,10 @@ router.post("/alarm-rules", async (req, res): Promise<void> => {
     rocWindow: typeof body.rocWindow === "number" ? body.rocWindow : 60,
     enabled: parsed.data.enabled,
     requireAcknowledge: parsed.data.requireAcknowledge,
-    webhookUrl: newWebhookUrl,
+    webhookUrl: sealWebhookUrl(newWebhookUrl),
     webhookEnabled: typeof body.webhookEnabled === "boolean" ? body.webhookEnabled : false,
   }).returning();
+  const rule = withOpenWebhook(sealedRule!);
   invalidateAlarmRuleCache();
   await logActivity("alarm_rule.created", "alarm_rules", rule!.id, rule!.name,
     `${rule!.severity} ${rule!.alarmType}${rule!.metric ? ` on ${rule!.metric}` : ""}${rule!.operator ? ` ${rule!.operator} ${rule!.threshold}` : ""}`, req,
@@ -131,7 +134,7 @@ router.put("/alarm-rules/:id", async (req, res): Promise<void> => {
       const check = checkOutboundUrl(String(url));
       if (!check.ok) { res.status(400).json({ error: check.error, code: "unsafe_url" }); return; }
     }
-    updateData.webhookUrl = url;
+    updateData.webhookUrl = sealWebhookUrl(url ? String(url) : null);
   }
   if (body.webhookEnabled !== undefined) updateData.webhookEnabled = Boolean(body.webhookEnabled);
   if (body.rocWindow !== undefined)      updateData.rocWindow = Number(body.rocWindow) || 60;
@@ -140,11 +143,15 @@ router.put("/alarm-rules/:id", async (req, res): Promise<void> => {
     return;
   }
 
-  const [before] = await db.select().from(alarmRulesTable).where(eq(alarmRulesTable.id, params.data.id));
-  if (!before) { res.status(404).json({ error: "Alarm rule not found" }); return; }
-  const [rule] = await db.update(alarmRulesTable).set({ ...updateData, updatedAt: new Date() })
+  const [sealedBefore] = await db.select().from(alarmRulesTable).where(eq(alarmRulesTable.id, params.data.id));
+  if (!sealedBefore) { res.status(404).json({ error: "Alarm rule not found" }); return; }
+  const [sealedRule] = await db.update(alarmRulesTable).set({ ...updateData, updatedAt: new Date() })
     .where(eq(alarmRulesTable.id, params.data.id)).returning();
-  if (!rule) { res.status(404).json({ error: "Alarm rule not found" }); return; }
+  if (!sealedRule) { res.status(404).json({ error: "Alarm rule not found" }); return; }
+  // Compared and returned decrypted, so the change record and the response are
+  // about the URL itself, not its (randomly re-encrypted) ciphertext.
+  const before = withOpenWebhook(sealedBefore);
+  const rule = withOpenWebhook(sealedRule);
   // Ingest caches enabled rules for a few seconds; an edit takes effect now.
   invalidateAlarmRuleCache();
 
@@ -167,16 +174,18 @@ router.post("/alarm-rules/:id/test-webhook", async (req, res): Promise<void> => 
   const [rule] = await db.select().from(alarmRulesTable).where(eq(alarmRulesTable.id, id)).limit(1);
   if (!rule) { res.status(404).json({ error: "Rule not found" }); return; }
   if (!rule.webhookUrl) { res.status(400).json({ error: "No webhook URL configured" }); return; }
+  const webhookUrl = openWebhookUrl(rule.webhookUrl);
+  if (!webhookUrl) { res.status(400).json({ error: "The stored webhook URL could not be decrypted. Enter it again.", code: "webhook_unreadable" }); return; }
   try {
     // Re-checked at call time: a rule stored before this guard existed must
     // not be testable against a private address either.
-    assertSafeOutboundUrl(rule.webhookUrl);
+    assertSafeOutboundUrl(webhookUrl);
   } catch (err) {
     res.status(400).json({ success: false, error: (err as UnsafeUrlError).message, code: "unsafe_url" });
     return;
   }
   try {
-    const resp = await safeFetch(rule.webhookUrl, {
+    const resp = await safeFetch(webhookUrl, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ event: "test", ruleName: rule.name, severity: rule.severity,

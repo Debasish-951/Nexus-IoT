@@ -49,7 +49,7 @@ Create `/opt/nexus-iot/.env`. These are the values that **must** be set:
 | `AUTH_EMAIL_TRANSPORT` | `smtp` | **Server refuses to start** (see below) |
 | `SMTP_HOST` / `SMTP_PORT` / `SMTP_USER` / `SMTP_PASS` | your mail server | Invitations and resets never arrive |
 | `AUTH_EMAIL_FROM` | `Integrated Suite <no-reply@yourcompany.com>` | Uses a `localhost` sender |
-| `SECRETS_ENC_KEY` | 32 random bytes, base64: `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"` | **Server refuses to start.** It encrypts broker passwords, destination tokens and ingest URLs. Keep a copy outside the server (see [backup-restore.md](backup-restore.md)); without it a restored database cannot decrypt them. |
+| `SECRETS_ENC_KEY` | 32 random bytes, base64: `node -e "console.log(require('crypto').randomBytes(32).toString('base64'))"` | **Server refuses to start.** It encrypts broker passwords, destination tokens, alarm webhook URLs and ingest URLs. Keep a copy outside the server (see [backup-restore.md](backup-restore.md)); without it a restored database cannot decrypt them. |
 
 **About `AUTH_EMAIL_TRANSPORT`:** in production the app deliberately refuses to boot
 with the default (`console`), because that would print account-activation links into
@@ -335,6 +335,7 @@ This is the most common first-post failure after a move.
 | Password-reset links point at localhost | `AUTH_PUBLIC_URL` not set |
 | Every API-key request returns 500 after an upgrade | `push` was not run before restarting (column `previous_secret_hash` does not exist) |
 | Queued destination never receives anything | Receiver on a private address without `ALLOW_PRIVATE_WEBHOOK_TARGETS=true`; see Destinations → Delivery log for the error |
+| MQTT broker shows `error` after an upgrade, history says "Refusing broker address" | The broker address is refused by the broker policy: `localhost`/`127.0.0.1` needs `ALLOW_LOOPBACK_BROKER_TARGETS=true`; link-local, metadata, multicast and reserved addresses are always refused; private addresses are refused only with `ALLOW_PRIVATE_BROKER_TARGETS=false` |
 | Sign-in fails with `origin_not_allowed` | The browser's address is not in `AUTH_PUBLIC_URL`/`CORS_ORIGINS` and nginx is not passing the original `Host` (`proxy_set_header Host $host;`) |
 
 ---

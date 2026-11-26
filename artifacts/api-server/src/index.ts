@@ -22,6 +22,7 @@ import { pruneExpiredSessions } from "./lib/sessions";
 import { pruneSecurityEvents } from "./lib/security-log";
 import { assertNoPublicApiKey } from "./lib/public-api-key";
 import { warnLegacyPlaintextSecrets } from "./middleware/apiKeyAuth";
+import { encryptStoredWebhookUrls } from "./lib/alarm-webhook";
 import { startDeliveryWorker, stopDeliveryWorker, pruneIntegrationData } from "./services/delivery-worker";
 import { startConnectorScheduler, stopConnectorScheduler } from "./services/connectors";
 import { startRequestLogFlush, flushRequestLog, pruneApiLogs } from "./lib/integration/client-auth";
@@ -96,6 +97,10 @@ server.listen(port, host, () => {
   loadSeenDevices()
     .then((n) => logger.info({ devices: n }, "Loaded seen-device registry"))
     .catch((e) => logger.warn({ err: e }, "Seen-device load failed"));
+
+  // Alarm webhook URLs saved in clear before they were encrypted at rest.
+  // Idempotent, needs SECRETS_ENC_KEY, never throws.
+  void encryptStoredWebhookUrls();
 
   startMqttSubscribers().catch((e) => {
     logger.warn({ err: e }, "MQTT subscriber startup failed — will retry on next broker save");

@@ -51,12 +51,12 @@ scripts/                  — Utility scripts
 - `GET /api/alarms` — list alarms (filter by severity/status), newest first; `?limit` default 500, max 5000; still returns a plain array
 - `POST /api/alarms/:id/acknowledge` — acknowledge an ACTIVE alarm (409 `alarm_not_active` otherwise); also marks its open history row acknowledged and sets `alarm_history.acknowledged_at`
 - `GET /api/alarm-history` — paginated alarm history
-- `GET/POST /api/alarm-rules` — list/create alarm rules (threshold + rate_of_change + webhook fields)
+- `GET/POST /api/alarm-rules` — list/create alarm rules (threshold + rate_of_change + webhook fields). `webhook_url` is stored encrypted (`lib/alarm-webhook.ts`, secret-box context `alarm_rules.webhookUrl`); plaintext rows from older versions still work, are encrypted on their next save and by an idempotent pass at start-up when `SECRETS_ENC_KEY` is set, and `rotate-secrets` covers the column. Logs show only the URL's origin
 - `PUT/DELETE /api/alarm-rules/:id` — update/delete rule
 - `POST /api/alarm-rules/:id/test-webhook` — fire a test webhook POST
 - `GET/POST /api/users` — list/create users
-- `GET/POST /api/brokers` — list/create brokers. Create/update persist `mqttTopic`, `mqttClientId`, `mqttUsername`, `mqttPassword` (encrypted with `lib/secret-box`, context `brokers.mqttPassword`; never returned, `hasMqttPassword` instead) and `mappingRules`, then restart that broker's MQTT subscriber without an API restart. Azure IoT Hub / Event Hub brokers are stored but not connected; responses carry a `connectionNote` saying so
-- `GET /api/brokers/:id/history` — broker connection event history (newest-first, limit up to 500)
+- `GET/POST /api/brokers` — list/create brokers. Create/update persist `mqttTopic`, `mqttClientId`, `mqttUsername`, `mqttPassword` (encrypted with `lib/secret-box`, context `brokers.mqttPassword`; never returned, `hasMqttPassword` instead) and `mappingRules`, then restart that broker's MQTT subscriber without an API restart. The endpoint must pass the broker address policy (`lib/broker-target.ts`): link-local/metadata, multicast and reserved addresses and unix sockets are always refused (400 `unsafe_broker_target`), loopback needs `ALLOW_LOOPBACK_BROKER_TARGETS=true`, private addresses are allowed unless `ALLOW_PRIVATE_BROKER_TARGETS=false`; the resolved address is re-checked on every (re)connection. Azure IoT Hub / Event Hub brokers are stored but not connected; responses carry a `connectionNote` saying so
+- `GET /api/brokers/:id/history` — broker connection event history (newest-first, limit up to 500). Only Super/Company Admins see raw connection errors; others get a generic message, so the history cannot be used to map internal hosts and ports
 - `GET/POST /api/api-clients` — list/create API clients
 - `GET /api/dashboard/summary` — stat cards
 - `GET /api/dashboard/recent-telemetry` — latest records
@@ -74,7 +74,7 @@ scripts/                  — Utility scripts
 - `POST /api/plant-twins/values` — latest reading for up to 500 asset+metric pairs (read-only; one indexed lookup per pair; pairs outside the caller's projects are dropped)
 - `scene.kind` values: `plant` (default), `machine` (detailed pump skid), `asset`, `process` (P&ID builder, `version: 2`; older scenes are converted on open; annotations in `notes`, uploaded symbols in `custom` with their image in chunks of at most 90 000 characters), `image` (2D twin; the SVG or picture is stored inside the scene in chunks of at most 90 000 characters), `folder`
 - `GET /api/sites` — the projects the caller may open, each with location (`Latitude`/`Longitude`/`Address` static attributes on the project asset), asset and maintenance counts and newest data time (Live Twin or Visualization read). Used by the Map view and the Sites Map widget; alarms come from `/api/alarms`
-- `POST /api/uploads` also accepts binary glTF (`.glb`, `model/gltf-binary`, recognised from its `glTF` v2 header); the polyglot check covers its header and JSON chunk. Used for customer 3D models in Live Twin
+- `POST /api/uploads` also accepts binary glTF (`.glb`, `model/gltf-binary`, recognised from its `glTF` v2 header); the polyglot check covers its header and JSON chunk, and a second pass (`scanGlbBody`) scans the whole file, binary chunk included, for HTML/script/PHP tags. Used for customer 3D models in Live Twin
 - `GET /api/activity-log` — audit search with total: q, from, to, actor (or actorName), action, category, outcome, targetId, assetId, includeSecurity (merges security_events), limit (≤500), offset
 - `GET /api/activity-log/export` — the same filters as CSV (≤50,000 rows); `GET /api/activity-log/summary` — 7-day summary
 - `GET /api/activity-log/verify` — walk the hash chain (security + Manage security); `GET /api/activity-log/alerts`, `POST /api/activity-log/alerts/:id/acknowledge`; `GET|PUT /api/activity-log/settings` — audit retention (minimum 365 days) and alert switches

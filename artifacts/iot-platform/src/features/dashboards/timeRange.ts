@@ -1,6 +1,6 @@
 // ── Time range / refresh / aggregation vocabulary shared by the dashboard
 // builder's global header controls and the per-widget "Time Range &
-// Aggregation" popover. Values mirror src/pages/AnalyticsKpi.tsx so both
+// Aggregation" popover (the former Analytics & KPI page, now deleted, used the same values) so both
 // dashboards behave identically.
 
 import { format } from "date-fns";

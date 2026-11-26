@@ -98,6 +98,13 @@ Replit creates checkpoints on every session end and significant code change. To 
 | Development (Replit) | Replit workspace secrets | Replit PostgreSQL (shared) |
 | Production (Replit) | Replit deployment secrets | Replit PostgreSQL (separate production DB) |
 
+**Keep the dev `.env` out of synced folders.** A checkout inside OneDrive, Dropbox or
+Google Drive copies `.env` (with `DATABASE_URL`, `SECRETS_ENC_KEY`, `SESSION_SECRET`,
+API keys) to the cloud. Either keep the checkout outside the synced folder, or keep
+`.env` elsewhere and point to it with `DOTENV_CONFIG_PATH=/path/to/.env`: the API
+(`dotenv/config`) and the `lib/db` scripts (`push`, `seed`, `set-password`, …)
+read that path instead of the repo-root `.env`.
+
 ### Adding a Secret
 Use the Replit Secrets panel (or `environment-secrets` skill):
 ```bash
