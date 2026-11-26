@@ -16,6 +16,8 @@ import { getDataSettings, type DataSettings } from "../lib/data-settings";
 import { broadcast } from "../lib/ws-broadcast";
 import { logActivity } from "../routes/activity_log";
 import { archiveError } from "./archive";
+import { partitionError } from "./partitions";
+import { safeFetch } from "../lib/outbound-url";
 
 export interface AlertCondition { key: string; severity: "critical" | "high" | "medium"; title: string; message: string }
 
@@ -33,6 +35,8 @@ const GB = 1024 ** 3;
 export function conditionsFor(s: DataSettings, facts: StorageFacts, extra: {
   lastBackup: { status: string; startedAt: Date } | null; lastGoodBackup: Date | null;
   rejectionsLastHour: number; archiveError: string | null; now: Date;
+  /** Last failed partition create/drop (services/partitions.ts), if any. */
+  partitionError?: string | null;
 }): AlertCondition[] {
   const out: AlertCondition[] = [];
   const a = s.alerts;
@@ -89,17 +93,25 @@ export function conditionsFor(s: DataSettings, facts: StorageFacts, extra: {
   if (extra.archiveError) {
     out.push({ key: "archive_failed", severity: "high", title: "Archiving failed", message: `${extra.archiveError.slice(0, 400)} Pruning waits until archiving works.` });
   }
+  if (extra.partitionError) {
+    out.push({ key: "partitions_failed", severity: "high", title: "Partition maintenance failed",
+      message: `${extra.partitionError.slice(0, 400)} The database role may lack the right to create or drop partitions; see docs/operations/backup-restore.md. Expired months are pruned row by row meanwhile.` });
+  }
   return out;
 }
 
-async function notify(url: string | null, event: "raised" | "cleared", alert: { key: string; severity: string; title: string; message: string }): Promise<string | null> {
+/** Post an alert to the Data Management webhook. Exported for tests. */
+export async function notify(url: string | null, event: "raised" | "cleared", alert: { key: string; severity: string; title: string; message: string }): Promise<string | null> {
   if (!url) return null;
   try {
-    const r = await fetch(url, {
+    // Same outbound guard as alarm webhooks and destinations: no private or
+    // loopback targets (unless ALLOW_PRIVATE_WEBHOOK_TARGETS), redirects not followed.
+    const r = await safeFetch(url, {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ source: "integrated-suite", event, ...alert, at: new Date().toISOString(), installation: process.env.AUTH_PUBLIC_URL ?? null }),
       signal: AbortSignal.timeout(5000),
     });
+    if (r.status >= 300 && r.status < 400) return `failed (${r.status}, redirect not followed)`;
     return r.ok ? `delivered (${r.status})` : `failed (${r.status})`;
   } catch (err) {
     return `failed (${err instanceof Error ? err.message : String(err)})`.slice(0, 200);
@@ -126,6 +138,7 @@ export async function evaluateAlerts(computeFacts: () => Promise<StorageFacts>):
       lastGoodBackup: lastGood ? lastGood.finishedAt ?? lastGood.startedAt : null,
       rejectionsLastHour: Number(rej.rows[0]?.n ?? 0),
       archiveError: settings.archive.enabled ? archiveError() : null,
+      partitionError: partitionError()?.message ?? null,
       now,
     });
     const open = await db.select().from(systemAlertsTable).where(ne(systemAlertsTable.status, "cleared"));

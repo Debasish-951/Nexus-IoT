@@ -15,6 +15,15 @@
  * switched on (see `rawPruneLimit`), so nothing is deleted before it has been
  * summarised.
  *
+ * Readings that arrive later than that (a gateway catching up after an outage)
+ * fall in buckets the job never recounts. Ingest hands them to
+ * `noteLateReadings`, which adds them to per-bucket totals in memory; every run
+ * of the job first adds those totals to the stored summaries (`flushLateReadings`).
+ * Limits: totals waiting in memory (at most MAX_LATE_BUCKETS buckets, until the
+ * next run, at most 10 minutes) are lost if the API restarts, and in the first
+ * seconds after start-up, before the watermarks are loaded, late readings are
+ * not noticed. See docs/features/data-management.md.
+ *
  * TELEMETRY_ROLLUPS=false turns the job off entirely. The 15-minute level is off
  * when its retention (Data Management settings) is 0.
  */
@@ -67,13 +76,16 @@ export async function getRollupState(tier: Tier = HOUR_TIER): Promise<RollupStat
   const r = await pool.query<{ value: { watermark?: string; startedFrom?: string } }>(
     `SELECT value FROM job_state WHERE key = $1`, [tier.stateKey]);
   const v = r.rows[0]?.value ?? {};
-  return {
+  const state = {
     watermark: v.watermark ? new Date(v.watermark) : null,
     startedFrom: v.startedFrom ? new Date(v.startedFrom) : null,
   };
+  rememberWatermark(tier, state.watermark);
+  return state;
 }
 
 async function saveState(tier: Tier, s: RollupState): Promise<void> {
+  rememberWatermark(tier, s.watermark);
   await pool.query(
     `INSERT INTO job_state (key, value, updated_at) VALUES ($1, $2, now())
      ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
@@ -217,6 +229,7 @@ export async function runRollups(): Promise<{ slices: number; skipped?: boolean 
   running = true;
   let slices = 0;
   try {
+    await flushLateReadings().catch((e) => logger.warn({ err: e }, "Could not add late readings to the summaries; kept for the next run"));
     for (const tier of await activeTiers()) slices += await runTier(tier);
     if (slices > 0) for (const fn of advancedListeners) fn();
     lastError = null;
@@ -227,6 +240,154 @@ export async function runRollups(): Promise<{ slices: number; skipped?: boolean 
   } finally {
     running = false;
   }
+}
+
+// ── Late readings (audit M-16) ────────────────────────────────────────────────
+
+/** Most buckets (per level, asset and metric) waiting in memory; further ones are dropped and logged. */
+export const MAX_LATE_BUCKETS = 100_000;
+
+export interface LateDelta { tier: Tier; assetId: string; metric: string; bucket: number; rows: number; n: number; sum: number | null; min: number | null; max: number | null }
+
+const lateDeltas = new Map<string, LateDelta>();
+let lateDropped = 0;
+/** Each level's watermark as last read or written by this process. */
+const knownWatermarks = new Map<string, number>();
+let watermarksLoading = false;
+
+function rememberWatermark(tier: Tier, wm: Date | null): void {
+  if (wm) knownWatermarks.set(tier.stateKey, wm.getTime());
+}
+
+const NUMERIC_RE = /^-?[0-9]+(\.[0-9]+)?$/;
+
+/** The numeric value the summaries count, by the same rule as the SQL (a JSON number written without exponent). */
+export function summaryNumber(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) && NUMERIC_RE.test(String(v)) ? v : null;
+}
+
+/** Add one reading to a delta (pure). */
+export function addToDelta(d: LateDelta, value: unknown): void {
+  d.rows += 1;
+  const x = summaryNumber(value);
+  if (x === null) return;
+  d.n += 1;
+  d.sum = (d.sum ?? 0) + x;
+  d.min = d.min === null ? x : Math.min(d.min, x);
+  d.max = d.max === null ? x : Math.max(d.max, x);
+}
+
+function mergeDelta(into: LateDelta, d: LateDelta): void {
+  into.rows += d.rows;
+  into.n += d.n;
+  if (d.sum !== null) into.sum = (into.sum ?? 0) + d.sum;
+  if (d.min !== null) into.min = into.min === null ? d.min : Math.min(into.min, d.min);
+  if (d.max !== null) into.max = into.max === null ? d.max : Math.max(into.max, d.max);
+}
+
+function deltaKey(d: { tier: Tier; assetId: string; metric: string; bucket: number }): string {
+  return `${d.tier.key}|${d.assetId}|${d.metric}|${d.bucket}`;
+}
+
+/**
+ * Pure: the readings that fall before `watermark - LATE_WINDOW` of a level,
+ * i.e. in buckets the job will not recount, as per-bucket totals.
+ */
+export function lateDeltasFor(
+  readings: Array<{ assetId: string; metric: string; value: unknown; timestamp: Date }>,
+  watermarks: Map<string, number>, tiers: Tier[] = TIERS,
+): LateDelta[] {
+  const out = new Map<string, LateDelta>();
+  for (const tier of tiers) {
+    const wm = watermarks.get(tier.stateKey);
+    if (wm === undefined) continue;
+    const recountFrom = wm - LATE_WINDOW_MS;
+    const step = tier.stepSec * 1000;
+    for (const r of readings) {
+      const t = r.timestamp.getTime();
+      if (!(t < recountFrom)) continue;
+      const bucket = Math.floor(t / step) * step;
+      const key = deltaKey({ tier, assetId: r.assetId, metric: r.metric, bucket });
+      let d = out.get(key);
+      if (!d) {
+        d = { tier, assetId: r.assetId, metric: r.metric, bucket, rows: 0, n: 0, sum: null, min: null, max: null };
+        out.set(key, d);
+      }
+      addToDelta(d, r.value);
+    }
+  }
+  return [...out.values()];
+}
+
+function keepDelta(d: LateDelta): void {
+  const key = deltaKey(d);
+  const existing = lateDeltas.get(key);
+  if (existing) { mergeDelta(existing, d); return; }
+  if (lateDeltas.size >= MAX_LATE_BUCKETS) { lateDropped += d.rows; return; }
+  lateDeltas.set(key, { ...d });
+}
+
+/** Called by ingest after readings are stored. Cheap and synchronous; never throws. */
+export function noteLateReadings(readings: Array<{ assetId: string; metric: string; value: unknown; timestamp: Date }>): void {
+  if (!rollupsEnabled() || readings.length === 0) return;
+  if (knownWatermarks.size === 0) {
+    if (!watermarksLoading) {
+      watermarksLoading = true;
+      void Promise.all(TIERS.map((t) => getRollupState(t))).catch(() => {}).finally(() => { watermarksLoading = false; });
+    }
+    return;
+  }
+  for (const d of lateDeltasFor(readings, knownWatermarks)) keepDelta(d);
+}
+
+/** Drop waiting late totals of deleted assets, so they do not come back as summaries. */
+export function forgetLateReadings(assetIds: string[]): void {
+  if (lateDeltas.size === 0) return;
+  const ids = new Set(assetIds);
+  for (const [k, d] of lateDeltas) if (ids.has(d.assetId)) lateDeltas.delete(k);
+}
+
+/** Add the waiting late totals to the stored summaries. Returns buckets written. */
+export async function flushLateReadings(): Promise<number> {
+  if (lateDropped > 0) {
+    logger.warn({ readings: lateDropped, limit: MAX_LATE_BUCKETS }, "Late readings were left out of the summaries: too many late buckets at once");
+    lateDropped = 0;
+  }
+  if (lateDeltas.size === 0) return 0;
+  const active = new Set((await activeTiers()).map((t) => t.key));
+  const pending = [...lateDeltas.values()].filter((d) => active.has(d.tier.key));
+  lateDeltas.clear();
+  // One statement per level and chunk of 500 buckets.
+  const units: LateDelta[][] = [];
+  for (const tier of TIERS) {
+    const list = pending.filter((d) => d.tier === tier);
+    for (let i = 0; i < list.length; i += 500) units.push(list.slice(i, i + 500));
+  }
+  let written = 0;
+  for (let u = 0; u < units.length; u++) {
+    const list = units[u];
+    const tier = list[0].tier;
+    const values: unknown[] = [];
+    const tuples = list.map((d, j) => {
+      values.push(d.assetId, d.metric, new Date(d.bucket), d.rows, d.n, d.sum, d.min, d.max);
+      const b = j * 8;
+      return `(${b + 1}::uuid, ${b + 2}, ${b + 3}::timestamptz, ${b + 4}::int, ${b + 5}::int, ${b + 6}::float8, ${b + 7}::float8, ${b + 8}::float8)`;
+    });
+    try {
+      await pool.query(`
+        INSERT INTO ${tier.table} AS t (asset_id, metric, bucket, "rows", n, sum, min, max) VALUES ${tuples.join(", ")}
+        ON CONFLICT (asset_id, metric, bucket) DO UPDATE SET
+          "rows" = t."rows" + EXCLUDED."rows", n = t.n + EXCLUDED.n,
+          sum = CASE WHEN t.sum IS NULL AND EXCLUDED.sum IS NULL THEN NULL ELSE COALESCE(t.sum, 0) + COALESCE(EXCLUDED.sum, 0) END,
+          min = LEAST(t.min, EXCLUDED.min), max = GREATEST(t.max, EXCLUDED.max)`, values);
+    } catch (err) {
+      // Keep what was not written for the next run.
+      for (const rest of units.slice(u)) for (const d of rest) keepDelta(d);
+      throw err;
+    }
+    written += list.length;
+  }
+  return written;
 }
 
 /** Delete hourly summaries older than `days` (0 keeps them for ever). Returns rows deleted. */

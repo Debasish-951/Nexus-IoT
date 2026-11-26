@@ -2207,7 +2207,7 @@ paths:
     put:
       operationId: updateDataSettings
       tags: [system]
-      summary: Change Data Management settings (any subset)
+      summary: Change Data Management settings (any subset; needs approve_data_changes). While approval is on, changes that weaken the safeguards wait for a second administrator (202).
       requestBody:
         required: false
         content:
@@ -2217,6 +2217,12 @@ paths:
       responses:
         "200":
           description: OK
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LooseObject"
+        "202":
+          description: "Other changes saved; the weakening part waits for approval ('pendingApproval', 'request')"
           content:
             application/json:
               schema:
@@ -2348,7 +2354,7 @@ paths:
     post:
       operationId: releaseDataHold
       tags: [system]
-      summary: Release a legal hold
+      summary: Release a legal hold (needs approve_data_changes; waits for a second administrator while approval is on)
       parameters:
         - $ref: "#/components/parameters/UuidPath"
       responses:
@@ -2358,6 +2364,24 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/LooseObject"
+        "202":
+          description: "Waiting for approval ('pendingApproval', 'request')"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LooseObject"
+        "404":
+          description: "No active hold with that id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: "'already_requested'"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /system/archives:
     get:
@@ -2401,6 +2425,24 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/LooseObject"
+        "404":
+          description: "Archive not found"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "410":
+          description: "'archive_file_missing'"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: "'archive_checksum_mismatch' or 'archive_unreadable'"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
 
   /system/changes:
     get:
@@ -2440,7 +2482,7 @@ paths:
     post:
       operationId: requestRangeDelete
       tags: [system]
-      summary: Remove readings of one asset (and metric) in a time range; 202 when it waits for approval
+      summary: Remove readings of one asset (and metric) in a time range. Always 202, either waiting for approval ('pendingApproval') or started in the background ('started'); the outcome appears in /system/changes.
       requestBody:
         required: false
         content:
@@ -2454,6 +2496,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/LooseObject"
+        "202":
+          description: "Waiting for approval or started"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LooseObject"
+        "409":
+          description: "'hold_conflict'"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "400":
           $ref: "#/components/responses/ValidationFailed"
 
@@ -2461,7 +2515,7 @@ paths:
     post:
       operationId: approveDataChange
       tags: [system]
-      summary: Approve and carry out a pending request (not your own)
+      summary: Approve and carry out a pending request (not your own; needs approve_data_changes). Removals and pruning runs start in the background (202).
       parameters:
         - $ref: "#/components/parameters/UuidPath"
       requestBody:
@@ -2477,6 +2531,30 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/LooseObject"
+        "202":
+          description: "Started in the background ('started', 'request')"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LooseObject"
+        "403":
+          description: "'self_approval'"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "409":
+          description: "Decided by someone else, 'pruning_in_progress' or 'retry_later'"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "422":
+          description: "'change_failed': approved but not carried out"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "400":
           $ref: "#/components/responses/ValidationFailed"
 
@@ -2484,7 +2562,7 @@ paths:
     post:
       operationId: rejectDataChange
       tags: [system]
-      summary: Reject or withdraw a pending request
+      summary: Reject (needs approve_data_changes) or withdraw (the requester) a pending request
       parameters:
         - $ref: "#/components/parameters/UuidPath"
       requestBody:
@@ -2500,6 +2578,18 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/LooseObject"
+        "403":
+          description: "'insufficient_permission'"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          description: "No pending request with that id"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "400":
           $ref: "#/components/responses/ValidationFailed"
 
@@ -2564,12 +2654,18 @@ paths:
     delete:
       operationId: deleteRetentionPolicy
       tags: [system]
-      summary: Delete a retention policy
+      summary: Delete a retention policy (needs approve_data_changes; 202 when it waits for approval)
       parameters:
-        - $ref: "#/components/parameters/IdPath"
+        - $ref: "#/components/parameters/UuidPath"
       responses:
         "204":
           description: Deleted
+        "202":
+          description: "Waiting for approval ('pendingApproval', 'request')"
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/LooseObject"
         "404":
           $ref: "#/components/responses/NotFound"
 

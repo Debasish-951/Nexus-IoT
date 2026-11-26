@@ -36,6 +36,26 @@ GRANT USAGE ON SCHEMA public TO nexus_backup;
 GRANT SELECT ON ALL TABLES IN SCHEMA public TO nexus_backup;
 GRANT SELECT ON ALL SEQUENCES IN SCHEMA public TO nexus_backup;
 ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO nexus_backup;
+-- Only once telemetry is partitioned (partition-telemetry): the months live in
+-- their own schema, and pg_dump fails on it without these.
+GRANT USAGE ON SCHEMA telemetry_parts TO nexus_backup;
+GRANT SELECT ON ALL TABLES IN SCHEMA telemetry_parts TO nexus_backup;
+ALTER DEFAULT PRIVILEGES IN SCHEMA telemetry_parts GRANT SELECT ON TABLES TO nexus_backup;
+```
+
+The API's own runtime role (`app_runtime` in `.env.example`) needs `USAGE` on `telemetry_parts` and DML on its tables too, or telemetry reads and writes fail once telemetry is partitioned. That role cannot create or drop partitions (DDL): when the hourly job tries and is refused, Data Management raises **Partition maintenance failed**, the job stops trying for 6 hours, and expired months are pruned row by row instead. Create the coming months ahead as the owner role, for example once a year:
+
+```sql
+-- as app_owner: the next 12 monthly partitions
+DO $
+DECLARE m date := date_trunc('month', now() AT TIME ZONE 'UTC')::date;  -- months are UTC
+BEGIN
+  FOR i IN 0..11 LOOP
+    EXECUTE format('CREATE TABLE IF NOT EXISTS telemetry_parts.%I PARTITION OF public.telemetry FOR VALUES FROM (%L) TO (%L)',
+      to_char(m, '"p"YYYY_MM'), m::timestamp AT TIME ZONE 'UTC', (m + interval '1 month')::timestamp AT TIME ZONE 'UTC');
+    m := (m + interval '1 month')::date;
+  END LOOP;
+END $;
 ```
 
 Put its connection details in `/var/backups/nexus/.pgpass` (mode 600, owned by `nexus-backup`):

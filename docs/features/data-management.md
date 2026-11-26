@@ -40,7 +40,9 @@ A background job (`artifacts/api-server/src/services/rollups.ts`) summarises raw
 
 - The most specific enabled policy decides per reading (asset and metric, then asset, then metric, then all). Same rule in pruning and in estimates.
 - The policy dialog, Run pruning now and policy deletion show an estimate from the summaries. In tests it was within 0.3% of the readings actually deleted, including legal holds and archiving.
-- **Pruning window** (Settings): the hourly job deletes readings only between the set times (plant time). Other records are still pruned hourly; Run pruning now is not limited.
+- **Pruning window** (Settings): the hourly job deletes readings only between the set times (plant time). Other records are still pruned hourly; Run pruning now is not limited. The scheduler checks every 10 minutes, so a window shorter than an hour gets a telemetry run as soon as it opens.
+- One failing table does not stop the pruning of the others; each failure is recorded in the pruning history and raises the "Pruning run had a problem" alert.
+- **Late readings.** Summaries recount the last 6 hours on each run. Readings that arrive later than that (a gateway catching up) are added to the summaries of their hour and quarter hour on the next run (within 10 minutes). Limits: these totals wait in memory, so readings of that kind that arrive in the 10 minutes before an API restart are not summarised, nor are late readings in the first seconds after start-up; at most 100,000 late buckets wait at once (more are logged and left out).
 
 ## Approval of large deletions
 
@@ -48,24 +50,28 @@ When switched on (Settings, off by default), these wait for a second administrat
 
 - bad-data removal,
 - Run pruning now,
-- creating or changing a policy (the extra readings it would delete).
+- creating, changing or deleting a policy (the extra readings it would delete),
+- releasing a legal hold (always, while approval is on),
+- settings changes that weaken these safeguards: switching approval off, raising its limit, switching archiving off, or keeping summaries for less time. Other settings changes apply at once.
 
-The request appears under Retention → Waiting for approval. The requester cannot approve their own request but can withdraw it. Approving carries it out at once. The hourly run of policies that already exist needs no approval. Installations with a single administrator should leave this off.
+Approving, rejecting, releasing a hold, changing Data Management settings and deleting a policy need the **approve_data_changes** permission, which only Super Admin, Company Admin and Admin hold. Engineers and Developers can still request removals and policy changes. The request appears under Retention → Waiting for approval. The requester cannot approve their own request but can withdraw it. When no estimate is possible (summaries switched off with `TELEMETRY_ROLLUPS=false`), a change that could delete readings waits for approval instead of going through. Approving a policy, settings or hold change carries it out at once; an approved removal or pruning run starts in the background, shows as Running, and its result (with the readings deleted so far if it failed part-way) appears under Bad-data removals and approvals. A pruning run that cannot start because another is running goes back to waiting. Removals that were running when the API stopped are marked failed at the next start. The hourly run of policies that already exist needs no approval. Installations with a single administrator should leave this off.
 
 ## Remove bad data
 
-Retention → Remove bad data deletes the readings of one asset (optionally one metric) in a time range, with a required reason. The dialog shows the exact count first. It is refused if a legal hold covers part of the range. By default the summaries of those periods are removed too; periods that still have raw readings are recounted either way.
+Retention → Remove bad data deletes the readings of one asset (optionally one metric) in a time range, with a required reason. The dialog shows the count first (exact up to 2,000,000; above that it says "more than", and with approval on the removal always waits for approval). It is refused if a legal hold covers part of the range, and a hold placed while it runs protects its readings from that moment. The removal runs in the background. By default the summaries of those periods are removed too; periods that still have raw readings are recounted either way.
 
 ## Legal holds
 
-A hold names an asset, metric and period (any of them may be "any"). Pruning, partition drops and bad-data removal skip held readings. Holds can end by themselves at a set time or be released; released holds stay listed.
+A hold names an asset, metric and period (any of them may be "any"). Pruning, partition drops and bad-data removal skip held readings. An asset or project whose readings are under a hold cannot be deleted (409 `hold_conflict`). Holds can end by themselves at a set time or be released (approve_data_changes; a second administrator while approval is on); released holds stay listed.
+
+Deleting an asset or project deletes its metadata at once and its readings and both summary levels in batches in the background.
 
 ## Archive before delete
 
 When switched on (Settings), pruning first writes every complete UTC day it is about to touch to `ARCHIVE_DIR` (default `var/archives`) as `telemetry/YYYY/MM/YYYY-MM-DD.jsonl.gz`: one JSON line per reading with id, asset, device, metric, value, quality and timestamp, plus a SHA-256 in `data_archives`. Pruning waits while archiving fails, and an alert is raised.
 
 - **Download** returns the day's file (needs Manage assets; logged).
-- **Restore** re-inserts the day's readings, skipping those still present, and places a legal hold on the day so the next run does not delete them again.
+- **Restore** checks the file's SHA-256 first, places a legal hold on the day, then re-inserts the day's readings, skipping those still present. A missing file gives 410 `archive_file_missing`, a changed file 422 `archive_checksum_mismatch`; nothing is inserted.
 - Mount a network share or object storage at `ARCHIVE_DIR` to keep archives off the server. The first run archives every day up to the oldest cutoff; plan for roughly a fifth of the telemetry table size.
 
 ## Backups
@@ -92,8 +98,9 @@ Checked every 10 minutes (and with Check now). Each condition raises one alert t
 | Many ingest requests refused | more than 100 in the last hour |
 | Asset(s) stopped sending | an asset that sent in the last 7 days has been quiet longer than the quiet time (60 min) |
 | Archiving failed | archiving is on and its last run failed |
+| Partition maintenance failed | creating or dropping a monthly partition was refused (usually the database role lacks the right; see backup-restore.md) |
 
-Alerts show in the bell (for users with the Data Management module) and on the Overview, are written to the activity log, and are posted as JSON to the optional webhook (`{source, event: "raised"|"cleared", key, severity, title, message, at, installation}`). The webhook URL is masked when read back. Email, SMS and WhatsApp delivery do not exist in the platform yet, so Notification Groups cannot receive these alerts.
+Alerts show in the bell (for users with the Data Management module) and on the Overview, are written to the activity log, and are posted as JSON to the optional webhook (`{source, event: "raised"|"cleared", key, severity, title, message, at, installation}`). The webhook URL is masked when read back. It goes through the same outbound guard as alarm webhooks: private, loopback and link-local targets are refused (unless `ALLOW_PRIVATE_WEBHOOK_TARGETS=true`) and redirects are not followed. Email, SMS and WhatsApp delivery do not exist in the platform yet, so Notification Groups cannot receive these alerts.
 
 ## Data health
 
@@ -109,7 +116,7 @@ Alerts show in the bell (for users with the Data Management module) and on the O
 
 ## Monthly partitions
 
-`telemetry` can be converted to one partition per month. Pruning then drops a whole month in one statement and frees its disk space at once, when an all-assets policy exists, the whole month is past the longest retention, summarised, archived (if on) and not under a legal hold. Partial months are still pruned row by row. The current and next two months are created ahead automatically.
+`telemetry` can be converted to one partition per month. Pruning then drops a whole month in one statement and frees its disk space at once, when an all-assets policy exists, the whole month is past the longest retention, summarised, archived (if on) and not under a legal hold. Partial months are still pruned row by row. The current and next two months are created ahead automatically. The database role the API runs as needs the rights listed in [backup-restore.md](../operations/backup-restore.md) section 2.1; when creating or dropping a partition is refused, the Partition maintenance failed alert is raised, the job stops trying for 6 hours and expired months are pruned row by row.
 
 The conversion is a one-off operator step on the server, after a backup:
 

@@ -20,6 +20,7 @@ import { z } from "zod";
 import { LiveSummaryBody, buildLiveSummary, type LiveSummaryAttrRow } from "../lib/live-summary";
 import { forwardToDestinations } from "./destinations";
 import { emitLater } from "../lib/integration/events";
+import { noteLateReadings } from "../services/rollups";
 
 const router: IRouter = Router();
 
@@ -933,6 +934,8 @@ export async function processNormalised(
   // DO NOTHING has no effect without a unique index; it lets an owner add the
   // optional (asset_id, metric, timestamp) unique index without a code change.
   await db.insert(telemetryTable).values(records as any[]).onConflictDoNothing();
+  // Readings too late for the summary job's recount window still get summarised.
+  noteLateReadings(records);
 
   // Update dynamic attributes — match either the full "deviceId.metric" tag OR the
   // bare metric name (case-insensitive; telemetry keys are camelCase, tagNames lower).

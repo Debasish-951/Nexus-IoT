@@ -7,6 +7,7 @@ import { Switch } from "@/components/ui/switch";
 import { Card, CardContent } from "@/components/ui/card";
 import { useToast } from "@/hooks/use-toast";
 import { useCurrentUser } from "@/contexts/UserContext";
+import { useT } from "@/i18n";
 import { Save } from "lucide-react";
 import { ErrorLine, getJson, send } from "./shared";
 
@@ -44,8 +45,10 @@ function Block({ title, hint, children }: { title: string; hint: string; childre
 export function SettingsTab() {
   const { toast } = useToast();
   const qc = useQueryClient();
-  const { canAction } = useCurrentUser();
-  const canManage = canAction("manage_assets", "data_management");
+  const { canAction, can } = useCurrentUser();
+  const t = useT();
+  // Settings guard deletions, so changing them needs approve_data_changes (administrators).
+  const canManage = canAction("manage_assets", "data_management") && can("approve_data_changes");
   const q = useQuery({ queryKey: ["system/data-settings"], queryFn: () => getJson<DataSettings>("/api/system/data-settings"), retry: 1 });
   const [d, setD] = useState<DataSettings | null>(null);
   const [webhook, setWebhook] = useState("");
@@ -65,8 +68,9 @@ export function SettingsTab() {
     try {
       const { webhookSet: _w, webhookUrl: _u, ...alerts } = d.alerts;
       const body = { ...d, alerts: { ...alerts, ...(webhook !== (q.data?.alerts.webhookUrl ?? "") ? { webhookUrl: webhook.trim() || null } : {}) } };
-      await send("PUT", "/api/system/data-settings", body);
-      toast({ title: "Settings saved" });
+      const r = await send<{ pendingApproval?: boolean }>("PUT", "/api/system/data-settings", body);
+      if (r.status === 202 && r.data.pendingApproval) toast({ title: t("Partly waiting for approval"), description: t("Changes that weaken the deletion safeguards wait for a second administrator under Retention > Waiting for approval. The other changes are saved.") });
+      else toast({ title: "Settings saved" });
       for (const k of ["system/data-settings", "system/storage", "system/archives", "system/alerts"]) qc.invalidateQueries({ queryKey: [k] });
     } catch (err) {
       toast({ title: "Not saved", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
@@ -109,7 +113,7 @@ export function SettingsTab() {
         <Block title="Approval of large deletions" hint="When on, bad-data removals, manual pruning runs and policy changes that would delete more readings than the limit wait until a second administrator approves them.">
           <label className="flex items-center gap-2 text-xs"><Switch checked={d.approval.enabled} onCheckedChange={(v) => set("approval", { enabled: v })} /> Require a second administrator</label>
           <Num label="Above" value={d.approval.thresholdRows} onChange={(n) => set("approval", { thresholdRows: n })} suffix="readings (0 = every deletion)" />
-          <p className="text-[11px] text-muted-foreground">Needs at least two administrators with the Manage assets permission. The hourly run of already approved policies does not need approval.</p>
+          <p className="text-[11px] text-muted-foreground">Needs at least two administrators with the Approve data changes permission. While it is on, switching it off, raising the limit, switching archiving off or keeping summaries for less time also waits for a second administrator. The hourly run of already approved policies does not need approval.</p>
         </Block>
 
         <Block title="Archive before delete" hint="Write each day of raw readings to a compressed file before pruning may delete it. Pruning waits while archiving fails. The first run archives every day up to the oldest cutoff, which can take a while and needs disk space (roughly a fifth of the table size).">

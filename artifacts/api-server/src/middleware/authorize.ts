@@ -142,40 +142,41 @@ const ROUTE_RULES: Rule[] = [
   { path: "/alarms",                          methods: READ,     module: "alarms", level: "read" },
   { path: "/alarms/history",                  methods: READ,     module: "alarms", level: "read" },
   //
-  // Write rules carry `level: "write"` (or "delete") even on simple modules, where
-  // the level makes no difference today. A rule with no level defaults to "read",
-  // so if a module ever becomes granular its write routes would otherwise open up
-  // to anyone with read access to it.
-  { path: "/alarms/:id/acknowledge",          methods: ["POST"], permission: "acknowledge_alarms", module: "alarms", level: "write" },
-  { path: "/alarms/history/:id/acknowledge",  methods: ["POST"], permission: "acknowledge_alarms", module: "alarms", level: "write" },
+  // A simple (on/off) module has no write or delete level, so a rule must not ask
+  // for one: it used to be silently treated as "read", which let one Engineer run
+  // the Data Management approval controls (audit H-2). assertRuleLevels() refuses
+  // such a rule at start-up; write access on a simple module comes from the
+  // permission verb. If a module ever becomes granular, its write rules need a level.
+  { path: "/alarms/:id/acknowledge",          methods: ["POST"], permission: "acknowledge_alarms", module: "alarms" },
+  { path: "/alarms/history/:id/acknowledge",  methods: ["POST"], permission: "acknowledge_alarms", module: "alarms" },
   { path: "/alarm-rules",                     methods: READ,     module: "alarms", level: "read" },
-  { path: "/alarm-rules",                     methods: WRITE,    permission: "manage_alarms", module: "alarms", level: "write" },
-  { path: "/alarm-rules/:id",                 methods: WRITE,    permission: "manage_alarms", module: "alarms", level: "write" },
-  { path: "/alarm-rules/:id",                 methods: ["DELETE"], permission: "manage_alarms", module: "alarms", level: "delete" },
-  { path: "/alarm-rules/:id/test-webhook",    methods: ["POST"], permission: "manage_alarms", module: "alarms", level: "write" },
+  { path: "/alarm-rules",                     methods: WRITE,    permission: "manage_alarms", module: "alarms" },
+  { path: "/alarm-rules/:id",                 methods: WRITE,    permission: "manage_alarms", module: "alarms" },
+  { path: "/alarm-rules/:id",                 methods: ["DELETE"], permission: "manage_alarms", module: "alarms" },
+  { path: "/alarm-rules/:id/test-webhook",    methods: ["POST"], permission: "manage_alarms", module: "alarms" },
 
   // ── Brokers & destinations ─────────────────────────────────────────────────
   // Platform-wide rows with no project column: a project-restricted user may read
   // them but not change them (lib/project-access.ts).
   { path: "/brokers",              methods: READ,       module: "brokers" },
-  { path: "/brokers",              methods: WRITE,      permission: "manage_brokers", module: "brokers", level: "write" },
-  { path: "/brokers/:id",          methods: WRITE,      permission: "manage_brokers", module: "brokers", level: "write" },
-  { path: "/brokers/:id",          methods: ["DELETE"], permission: "manage_brokers", module: "brokers", level: "delete" },
+  { path: "/brokers",              methods: WRITE,      permission: "manage_brokers", module: "brokers" },
+  { path: "/brokers/:id",          methods: WRITE,      permission: "manage_brokers", module: "brokers" },
+  { path: "/brokers/:id",          methods: ["DELETE"], permission: "manage_brokers", module: "brokers" },
   { path: "/brokers/:id/history",  methods: READ,       module: "brokers" },
   { path: "/destinations",         methods: READ,       module: "brokers" },
-  { path: "/destinations",         methods: WRITE,      permission: "manage_destinations", module: "brokers", level: "write" },
-  { path: "/destinations/:id",     methods: WRITE,      permission: "manage_destinations", module: "brokers", level: "write" },
-  { path: "/destinations/:id",     methods: ["DELETE"], permission: "manage_destinations", module: "brokers", level: "delete" },
-  { path: "/destinations/:id/test", methods: ["POST"],  permission: "manage_destinations", module: "brokers", level: "write" },
+  { path: "/destinations",         methods: WRITE,      permission: "manage_destinations", module: "brokers" },
+  { path: "/destinations/:id",     methods: WRITE,      permission: "manage_destinations", module: "brokers" },
+  { path: "/destinations/:id",     methods: ["DELETE"], permission: "manage_destinations", module: "brokers" },
+  { path: "/destinations/:id/test", methods: ["POST"],  permission: "manage_destinations", module: "brokers" },
 
   // ── API clients ────────────────────────────────────────────────────────────
   // Must precede /api-clients/:id so "projects" is not read as an id.
   { path: "/api-clients/projects",     methods: READ,      module: "api_clients" },
   { path: "/api-clients",              methods: READ,      module: "api_clients" },
-  { path: "/api-clients",              methods: WRITE,     permission: "manage_api_clients", module: "api_clients", level: "write" },
-  { path: "/api-clients/:id",          methods: WRITE,     permission: "manage_api_clients", module: "api_clients", level: "write" },
-  { path: "/api-clients/:id",          methods: ["DELETE"], permission: "manage_api_clients", module: "api_clients", level: "delete" },
-  { path: "/api-clients/:id/:action",  methods: ["POST"],  permission: "manage_api_clients", module: "api_clients", level: "write" },
+  { path: "/api-clients",              methods: WRITE,     permission: "manage_api_clients", module: "api_clients" },
+  { path: "/api-clients/:id",          methods: WRITE,     permission: "manage_api_clients", module: "api_clients" },
+  { path: "/api-clients/:id",          methods: ["DELETE"], permission: "manage_api_clients", module: "api_clients" },
+  { path: "/api-clients/:id/:action",  methods: ["POST"],  permission: "manage_api_clients", module: "api_clients" },
 
   // ── Integration Hub management (/integration/*) ────────────────────────────
   { path: "/integration/catalog",                    methods: READ,     anyModule: ["brokers", "api_clients"] },
@@ -183,18 +184,18 @@ const ROUTE_RULES: Rule[] = [
   { path: "/integration/verify-signature",           methods: ["POST"], anyModule: ["brokers", "api_clients"] },
   { path: "/integration/clients",                    methods: READ,     module: "api_clients" },
   { path: "/integration/clients/:id/usage",          methods: READ,     module: "api_clients" },
-  { path: "/integration/clients/:id/access",         methods: ["PUT"],  permission: "manage_api_clients", module: "api_clients", level: "write" },
-  { path: "/integration/clients/:id/:action",        methods: ["POST"], permission: "manage_api_clients", module: "api_clients", level: "write" },
+  { path: "/integration/clients/:id/access",         methods: ["PUT"],  permission: "manage_api_clients", module: "api_clients" },
+  { path: "/integration/clients/:id/:action",        methods: ["POST"], permission: "manage_api_clients", module: "api_clients" },
   { path: "/integration/destinations",               methods: READ,     module: "brokers" },
-  { path: "/integration/destinations/:id/delivery",  methods: ["PUT"],  permission: "manage_destinations", module: "brokers", level: "write" },
-  { path: "/integration/destinations/:id/:action",   methods: ["POST"], permission: "manage_destinations", module: "brokers", level: "write" },
+  { path: "/integration/destinations/:id/delivery",  methods: ["PUT"],  permission: "manage_destinations", module: "brokers" },
+  { path: "/integration/destinations/:id/:action",   methods: ["POST"], permission: "manage_destinations", module: "brokers" },
   { path: "/integration/deliveries",                 methods: READ,     module: "brokers" },
-  { path: "/integration/deliveries/:id/resend",      methods: ["POST"], permission: "manage_destinations", module: "brokers", level: "write" },
+  { path: "/integration/deliveries/:id/resend",      methods: ["POST"], permission: "manage_destinations", module: "brokers" },
   { path: "/integration/connectors",                 methods: READ,     module: "brokers" },
-  { path: "/integration/connectors",                 methods: ["POST"], permission: "manage_brokers", module: "brokers", level: "write" },
-  { path: "/integration/connectors/:id",             methods: ["PUT"],  permission: "manage_brokers", module: "brokers", level: "write" },
-  { path: "/integration/connectors/:id",             methods: ["DELETE"], permission: "manage_brokers", module: "brokers", level: "delete" },
-  { path: "/integration/connectors/:id/:action",     methods: ["POST"], permission: "manage_brokers", module: "brokers", level: "write" },
+  { path: "/integration/connectors",                 methods: ["POST"], permission: "manage_brokers", module: "brokers" },
+  { path: "/integration/connectors/:id",             methods: ["PUT"],  permission: "manage_brokers", module: "brokers" },
+  { path: "/integration/connectors/:id",             methods: ["DELETE"], permission: "manage_brokers", module: "brokers" },
+  { path: "/integration/connectors/:id/:action",     methods: ["POST"], permission: "manage_brokers", module: "brokers" },
 
   // ── Third-party API v1 (machine callers; routes check scopes via apiKeyAuth) ─
   { path: "/oauth/token",                 methods: ["POST"], public: true },
@@ -203,10 +204,10 @@ const ROUTE_RULES: Rule[] = [
   { path: "/v1/assets",                   methods: READ,     module: "api_clients", allowApiKey: true },
   { path: "/v1/assets/:id",               methods: READ,     module: "api_clients", allowApiKey: true },
   { path: "/v1/assets/:id/telemetry",     methods: READ,     module: "api_clients", allowApiKey: true },
-  { path: "/v1/assets/:id/attributes",    methods: ["PUT"],  module: "api_clients", level: "write", allowApiKey: true },
-  { path: "/v1/assets/:id/maintenance",   methods: ["POST"], module: "api_clients", level: "write", allowApiKey: true },
+  { path: "/v1/assets/:id/attributes",    methods: ["PUT"],  module: "api_clients", allowApiKey: true },
+  { path: "/v1/assets/:id/maintenance",   methods: ["POST"], module: "api_clients", allowApiKey: true },
   { path: "/v1/alarms",                   methods: READ,     module: "api_clients", allowApiKey: true },
-  { path: "/v1/alarms/:id/acknowledge",   methods: ["POST"], module: "api_clients", level: "write", allowApiKey: true },
+  { path: "/v1/alarms/:id/acknowledge",   methods: ["POST"], module: "api_clients", allowApiKey: true },
   { path: "/v1/alarm-rules",              methods: READ,     module: "api_clients", allowApiKey: true },
   { path: "/v1/events",                   methods: READ,     module: "api_clients", allowApiKey: true },
 
@@ -261,12 +262,12 @@ const ROUTE_RULES: Rule[] = [
 
   // ── Users & security ───────────────────────────────────────────────────────
   { path: "/users",                methods: READ,      permission: "manage_users", module: "users" },
-  { path: "/users",                methods: ["POST"],  permission: "manage_users", module: "users", level: "write" },
+  { path: "/users",                methods: ["POST"],  permission: "manage_users", module: "users" },
   { path: "/users/:id",            methods: READ,      permission: "manage_users", module: "users" },
-  { path: "/users/:id",            methods: WRITE,     permission: "manage_users", module: "users", level: "write" },
-  { path: "/users/:id",            methods: ["DELETE"], permission: "manage_users", module: "users", level: "delete" },
+  { path: "/users/:id",            methods: WRITE,     permission: "manage_users", module: "users" },
+  { path: "/users/:id",            methods: ["DELETE"], permission: "manage_users", module: "users" },
   { path: "/users/:id/:action",    methods: READ,      permission: "manage_users", module: "users" },
-  { path: "/users/:id/:action",    methods: ALL_WRITE, permission: "manage_users", module: "users", level: "write" },
+  { path: "/users/:id/:action",    methods: ALL_WRITE, permission: "manage_users", module: "users" },
   { path: "/security/rbac-catalog", methods: READ,     self: true },
   { path: "/security/:resource",          methods: "*", permission: "manage_security", module: "security" },
   { path: "/security/:resource/:id",      methods: "*", permission: "manage_security", module: "security" },
@@ -280,43 +281,47 @@ const ROUTE_RULES: Rule[] = [
   // POST only (L-9): costly and writes an entry, so a link must not start it. GET is unmapped, so refused.
   { path: "/activity-log/verify",  methods: ["POST"],  permission: "manage_security", module: "security" },
   { path: "/activity-log/alerts",  methods: READ,      module: "security" },
-  { path: "/activity-log/alerts/:id/acknowledge", methods: ["POST"], permission: "manage_security", module: "security", level: "write" },
+  { path: "/activity-log/alerts/:id/acknowledge", methods: ["POST"], permission: "manage_security", module: "security" },
   { path: "/activity-log/settings", methods: READ,     permission: "manage_security", module: "security" },
-  { path: "/activity-log/settings", methods: ["PUT"],  permission: "manage_security", module: "security", level: "write" },
+  { path: "/activity-log/settings", methods: ["PUT"],  permission: "manage_security", module: "security" },
   { path: "/system/storage",       methods: READ,      module: "data_management" },
   { path: "/system/aggregate",     methods: READ,      module: "reports" },
   { path: "/system/retention",     methods: READ,      module: "data_management" },
-  { path: "/system/retention",     methods: ["POST"],  permission: "manage_assets", module: "data_management", level: "write" },
-  { path: "/system/retention/run", methods: ["POST"],  permission: "manage_assets", module: "data_management", level: "write" },
+  { path: "/system/retention",     methods: ["POST"],  permission: "manage_assets", module: "data_management" },
+  { path: "/system/retention/run", methods: ["POST"],  permission: "manage_assets", module: "data_management" },
   // Data Management operations (routes/data_ops.ts). Reading needs Reports; anything
   // that deletes, restores, changes settings or shows raw SQL needs manage_assets too.
+  // Approving, rejecting, releasing a hold, changing settings and deleting a policy
+  // need approve_data_changes (administrators only).
   { path: "/system/storage/all",            methods: READ,     module: "data_management" },
   { path: "/system/data-health",            methods: READ,     module: "data_management" },
   { path: "/system/data-settings",          methods: READ,     module: "data_management" },
-  { path: "/system/data-settings",          methods: ["PUT"],  permission: "manage_assets", module: "data_management", level: "write" },
+  { path: "/system/data-settings",          methods: ["PUT"],  permission: "approve_data_changes", module: "data_management" },
   { path: "/system/alerts",                 methods: READ,     module: "data_management" },
-  { path: "/system/alerts/check",           methods: ["POST"], permission: "manage_assets", module: "data_management", level: "write" },
-  { path: "/system/alerts/:id/acknowledge", methods: ["POST"], permission: "manage_assets", module: "data_management", level: "write" },
+  { path: "/system/alerts/check",           methods: ["POST"], permission: "manage_assets", module: "data_management" },
+  { path: "/system/alerts/:id/acknowledge", methods: ["POST"], permission: "manage_assets", module: "data_management" },
   { path: "/system/backups",                methods: READ,     module: "data_management" },
   { path: "/system/db-health",              methods: READ,     permission: "manage_assets", module: "data_management" },
-  { path: "/system/db-health/vacuum",       methods: ["POST"], permission: "manage_assets", module: "data_management", level: "write" },
+  { path: "/system/db-health/vacuum",       methods: ["POST"], permission: "manage_assets", module: "data_management" },
   { path: "/system/holds",                  methods: READ,     module: "data_management" },
-  { path: "/system/holds",                  methods: ["POST"], permission: "manage_assets", module: "data_management", level: "write" },
-  { path: "/system/holds/:id/release",      methods: ["POST"], permission: "manage_assets", module: "data_management", level: "write" },
+  { path: "/system/holds",                  methods: ["POST"], permission: "manage_assets", module: "data_management" },
+  { path: "/system/holds/:id/release",      methods: ["POST"], permission: "approve_data_changes", module: "data_management" },
   { path: "/system/archives",               methods: READ,     module: "data_management" },
   { path: "/system/archives/:id/download",  methods: READ,     permission: "manage_assets", module: "data_management" },
-  { path: "/system/archives/:id/restore",   methods: ["POST"], permission: "manage_assets", module: "data_management", level: "write" },
+  { path: "/system/archives/:id/restore",   methods: ["POST"], permission: "manage_assets", module: "data_management" },
   { path: "/system/changes",                methods: READ,     module: "data_management" },
   { path: "/system/changes/range-preview",  methods: ["POST"], permission: "manage_assets", module: "data_management", level: "read" },
-  { path: "/system/changes/range-delete",   methods: ["POST"], permission: "manage_assets", module: "data_management", level: "delete" },
-  { path: "/system/changes/:id/approve",    methods: ["POST"], permission: "manage_assets", module: "data_management", level: "delete" },
-  { path: "/system/changes/:id/reject",     methods: ["POST"], permission: "manage_assets", module: "data_management", level: "write" },
+  { path: "/system/changes/range-delete",   methods: ["POST"], permission: "manage_assets", module: "data_management" },
+  { path: "/system/changes/:id/approve",    methods: ["POST"], permission: "approve_data_changes", module: "data_management" },
+  // The requester may withdraw their own request; rejecting anyone else's needs
+  // approve_data_changes, checked in the route.
+  { path: "/system/changes/:id/reject",     methods: ["POST"], permission: "manage_assets", module: "data_management" },
   { path: "/system/retention/runs/:id/report", methods: READ,  module: "data_management" },
   // Read-only: an estimate of what a policy would delete. POST only to carry the draft policy.
   { path: "/system/retention/preview", methods: ["POST"], module: "data_management", level: "read" },
   { path: "/system/retention/runs", methods: READ,     module: "data_management" },
-  { path: "/system/retention/:id", methods: WRITE,     permission: "manage_assets", module: "data_management", level: "write" },
-  { path: "/system/retention/:id", methods: ["DELETE"], permission: "manage_assets", module: "data_management", level: "delete" },
+  { path: "/system/retention/:id", methods: WRITE,     permission: "manage_assets", module: "data_management" },
+  { path: "/system/retention/:id", methods: ["DELETE"], permission: "approve_data_changes", module: "data_management" },
 
   // ── AI copilot ─────────────────────────────────────────────────────────────
   { path: "/ai/chat", methods: ["POST"], module: "ai_advisor", level: "read" },
@@ -335,6 +340,22 @@ function compile(rule: Rule): CompiledRule {
     .join("/");
   return { ...rule, regex: new RegExp(`^${pattern}/?$`) };
 }
+
+/**
+ * Refuses a rule that asks for a write or delete level on a simple (on/off)
+ * module: `hasModuleAccess` can only answer "on" for those, so the level would
+ * silently mean "read" (audit H-2). Throws at start-up, so the mistake cannot ship.
+ */
+export function assertRuleLevels(rules: ReadonlyArray<Pick<Rule, "path" | "module" | "anyModule" | "level">>): void {
+  const simple = new Set(MODULES.filter((m) => m.type === "simple").map((m) => m.key));
+  for (const r of rules) {
+    if (!r.level || r.level === "read") continue;
+    const mods = r.anyModule ?? (r.module ? [r.module] : []);
+    const bad = mods.find((m) => simple.has(m));
+    if (bad) throw new Error(`ROUTE_RULES: "${r.path}" asks for level "${r.level}" on the simple module "${bad}", which has no levels. Use a permission instead.`);
+  }
+}
+assertRuleLevels(ROUTE_RULES);
 
 const COMPILED = ROUTE_RULES.map(compile);
 

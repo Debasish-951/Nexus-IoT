@@ -13254,7 +13254,7 @@ export const getUpdateDataSettingsUrl = () => {
 };
 
 /**
- * @summary Change Data Management settings (any subset)
+ * @summary Change Data Management settings (any subset; needs approve_data_changes). While approval is on, changes that weaken the safeguards wait for a second administrator (202).
  */
 export const updateDataSettings = async (
   looseObject?: LooseObject,
@@ -13343,7 +13343,7 @@ export type UpdateDataSettingsMutationVariables = {
   data?: BodyType<LooseObject>;
 };
 
-/** @summary Change Data Management settings (any subset) */
+/** @summary Change Data Management settings (any subset; needs approve_data_changes). While approval is on, changes that weaken the safeguards wait for a second administrator (202). */
 export const useUpdateDataSettings = <
   TError = ErrorType<ValidationFailedResponse>,
   TContext = unknown,
@@ -14336,7 +14336,7 @@ export const getReleaseDataHoldUrl = (id: string) => {
 };
 
 /**
- * @summary Release a legal hold
+ * @summary Release a legal hold (needs approve_data_changes; waits for a second administrator while approval is on)
  */
 export const releaseDataHold = async (
   id: string,
@@ -14351,7 +14351,7 @@ export const releaseDataHold = async (
 export const getReleaseDataHoldMutationKey = () => ["releaseDataHold"] as const;
 
 export const getReleaseDataHoldMutationOptions = <
-  TError = ErrorType<unknown>,
+  TError = ErrorType<ErrorResponse>,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -14392,12 +14392,12 @@ export type ReleaseDataHoldMutationResult = NonNullable<
   Awaited<ReturnType<typeof releaseDataHold>>
 >;
 
-export type ReleaseDataHoldMutationError = ErrorType<unknown>;
+export type ReleaseDataHoldMutationError = ErrorType<ErrorResponse>;
 export type ReleaseDataHoldMutationVariables = { id: string };
 
-/** @summary Release a legal hold */
+/** @summary Release a legal hold (needs approve_data_changes; waits for a second administrator while approval is on) */
 export const useReleaseDataHold = <
-  TError = ErrorType<unknown>,
+  TError = ErrorType<ErrorResponse>,
   TContext = unknown,
 >(
   options?: {
@@ -14742,7 +14742,7 @@ export const restoreArchive = async (
 export const getRestoreArchiveMutationKey = () => ["restoreArchive"] as const;
 
 export const getRestoreArchiveMutationOptions = <
-  TError = ErrorType<unknown>,
+  TError = ErrorType<ErrorResponse>,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -14783,12 +14783,12 @@ export type RestoreArchiveMutationResult = NonNullable<
   Awaited<ReturnType<typeof restoreArchive>>
 >;
 
-export type RestoreArchiveMutationError = ErrorType<unknown>;
+export type RestoreArchiveMutationError = ErrorType<ErrorResponse>;
 export type RestoreArchiveMutationVariables = { id: string };
 
 /** @summary Re-insert an archived day and place a legal hold on it */
 export const useRestoreArchive = <
-  TError = ErrorType<unknown>,
+  TError = ErrorType<ErrorResponse>,
   TContext = unknown,
 >(
   options?: {
@@ -15092,7 +15092,7 @@ export const getRequestRangeDeleteUrl = () => {
 };
 
 /**
- * @summary Remove readings of one asset (and metric) in a time range; 202 when it waits for approval
+ * @summary Remove readings of one asset (and metric) in a time range. Always 202, either waiting for approval ('pendingApproval') or started in the background ('started'); the outcome appears in /system/changes.
  */
 export const requestRangeDelete = async (
   looseObject?: LooseObject,
@@ -15134,7 +15134,7 @@ export const getRequestRangeDeleteMutationKey = () =>
   ["requestRangeDelete"] as const;
 
 export const getRequestRangeDeleteMutationOptions = <
-  TError = ErrorType<ValidationFailedResponse>,
+  TError = ErrorType<ValidationFailedResponse | ErrorResponse>,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -15175,15 +15175,16 @@ export type RequestRangeDeleteMutationResult = NonNullable<
   Awaited<ReturnType<typeof requestRangeDelete>>
 >;
 export type RequestRangeDeleteMutationBody = BodyType<LooseObject> | undefined;
-export type RequestRangeDeleteMutationError =
-  ErrorType<ValidationFailedResponse>;
+export type RequestRangeDeleteMutationError = ErrorType<
+  ValidationFailedResponse | ErrorResponse
+>;
 export type RequestRangeDeleteMutationVariables = {
   data?: BodyType<LooseObject>;
 };
 
-/** @summary Remove readings of one asset (and metric) in a time range; 202 when it waits for approval */
+/** @summary Remove readings of one asset (and metric) in a time range. Always 202, either waiting for approval ('pendingApproval') or started in the background ('started'); the outcome appears in /system/changes. */
 export const useRequestRangeDelete = <
-  TError = ErrorType<ValidationFailedResponse>,
+  TError = ErrorType<ValidationFailedResponse | ErrorResponse>,
   TContext = unknown,
 >(
   options?: {
@@ -15213,7 +15214,7 @@ export const getApproveDataChangeUrl = (id: string) => {
 };
 
 /**
- * @summary Approve and carry out a pending request (not your own)
+ * @summary Approve and carry out a pending request (not your own; needs approve_data_changes). Removals and pruning runs start in the background (202).
  */
 export const approveDataChange = async (
   id: string,
@@ -15256,7 +15257,7 @@ export const getApproveDataChangeMutationKey = () =>
   ["approveDataChange"] as const;
 
 export const getApproveDataChangeMutationOptions = <
-  TError = ErrorType<ValidationFailedResponse>,
+  TError = ErrorType<ValidationFailedResponse | ErrorResponse>,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -15297,16 +15298,17 @@ export type ApproveDataChangeMutationResult = NonNullable<
   Awaited<ReturnType<typeof approveDataChange>>
 >;
 export type ApproveDataChangeMutationBody = BodyType<LooseObject> | undefined;
-export type ApproveDataChangeMutationError =
-  ErrorType<ValidationFailedResponse>;
+export type ApproveDataChangeMutationError = ErrorType<
+  ValidationFailedResponse | ErrorResponse
+>;
 export type ApproveDataChangeMutationVariables = {
   id: string;
   data?: BodyType<LooseObject>;
 };
 
-/** @summary Approve and carry out a pending request (not your own) */
+/** @summary Approve and carry out a pending request (not your own; needs approve_data_changes). Removals and pruning runs start in the background (202). */
 export const useApproveDataChange = <
-  TError = ErrorType<ValidationFailedResponse>,
+  TError = ErrorType<ValidationFailedResponse | ErrorResponse>,
   TContext = unknown,
 >(
   options?: {
@@ -15333,7 +15335,7 @@ export const getRejectDataChangeUrl = (id: string) => {
 };
 
 /**
- * @summary Reject or withdraw a pending request
+ * @summary Reject (needs approve_data_changes) or withdraw (the requester) a pending request
  */
 export const rejectDataChange = async (
   id: string,
@@ -15376,7 +15378,7 @@ export const getRejectDataChangeMutationKey = () =>
   ["rejectDataChange"] as const;
 
 export const getRejectDataChangeMutationOptions = <
-  TError = ErrorType<ValidationFailedResponse>,
+  TError = ErrorType<ValidationFailedResponse | ErrorResponse>,
   TContext = unknown,
 >(options?: {
   mutation?: UseMutationOptions<
@@ -15417,15 +15419,17 @@ export type RejectDataChangeMutationResult = NonNullable<
   Awaited<ReturnType<typeof rejectDataChange>>
 >;
 export type RejectDataChangeMutationBody = BodyType<LooseObject> | undefined;
-export type RejectDataChangeMutationError = ErrorType<ValidationFailedResponse>;
+export type RejectDataChangeMutationError = ErrorType<
+  ValidationFailedResponse | ErrorResponse
+>;
 export type RejectDataChangeMutationVariables = {
   id: string;
   data?: BodyType<LooseObject>;
 };
 
-/** @summary Reject or withdraw a pending request */
+/** @summary Reject (needs approve_data_changes) or withdraw (the requester) a pending request */
 export const useRejectDataChange = <
-  TError = ErrorType<ValidationFailedResponse>,
+  TError = ErrorType<ValidationFailedResponse | ErrorResponse>,
   TContext = unknown,
 >(
   options?: {
@@ -15833,13 +15837,13 @@ export const getDeleteRetentionPolicyUrl = (id: string) => {
 };
 
 /**
- * @summary Delete a retention policy
+ * @summary Delete a retention policy (needs approve_data_changes; 202 when it waits for approval)
  */
 export const deleteRetentionPolicy = async (
   id: string,
   options?: Parameters<typeof customFetch>[1],
-): Promise<void> => {
-  return customFetch<void>(getDeleteRetentionPolicyUrl(id), {
+): Promise<LooseObject | void> => {
+  return customFetch<LooseObject | void>(getDeleteRetentionPolicyUrl(id), {
     ...options,
     method: "DELETE",
   });
@@ -15893,7 +15897,7 @@ export type DeleteRetentionPolicyMutationResult = NonNullable<
 export type DeleteRetentionPolicyMutationError = ErrorType<NotFoundResponse>;
 export type DeleteRetentionPolicyMutationVariables = { id: string };
 
-/** @summary Delete a retention policy */
+/** @summary Delete a retention policy (needs approve_data_changes; 202 when it waits for approval) */
 export const useDeleteRetentionPolicy = <
   TError = ErrorType<NotFoundResponse>,
   TContext = unknown,
