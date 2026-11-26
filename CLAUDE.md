@@ -65,7 +65,7 @@ docs/                    extensive architecture/api/security/ops docs (treated a
 
 **Dependency rule:** `artifacts/*` are leaf nodes — they never import each other. The codegen chain is `lib/db` → `lib/api-spec` → `lib/api-zod` + `lib/api-client-react`. The API server imports `lib/db` and `lib/api-zod`; the frontend imports `lib/api-client-react`.
 
-**Codegen is the source of truth for the API contract.** Editing a route means editing `lib/api-spec/openapi.yaml` then running codegen. Never hand-edit `src/generated/` files. `lib/api-zod/src/index.ts` must contain ONLY `export * from "./generated/api";` (the codegen script now restores it and formats the output). Orval is pinned to zod 3 output in `orval.config.ts`; change that only together with a zod 4 upgrade.
+**Codegen is the source of truth for the API contract.** Editing a route means editing `lib/api-spec/openapi.yaml` then running codegen. Never hand-edit `src/generated/` files. `lib/api-zod/src/index.ts` must contain ONLY `export * from "./generated/api";` (the codegen script now restores it and formats the output). Orval is pinned to zod 4 output in `orval.config.ts` (matching the `zod` catalog entry), and that config turns `format: uuid` into a GUID pattern for the zod output only, because zod 4's `z.uuid()` refuses the seed's fixed ids; hand-written schemas use `v.uuid()` (`z.guid()`) for the same reason. zod 4 applies `.default()` inside `.optional()`, so build partial-update bodies with `partialUpdate()` from `lib/validation.ts`, not `.partial()`.
 
 ## Conventions that bite
 

@@ -13,7 +13,7 @@ import { recordSecurityEvent } from "../lib/security-log";
  *    all, and the ones that did each hand-rolled their own 400 shape, so the
  *    frontend could not reliably tell a user WHICH field was wrong.
  *
- * 2. `z.object()` in Zod 3 STRIPS unknown keys — it does not reject them. Every
+ * 2. `z.object()` in Zod (3 and 4) STRIPS unknown keys — it does not reject them. Every
  *    `safeParse` in this codebase therefore accepted `{"name":"x","role":"admin"}`
  *    without complaint, silently discarding `role`. Discarding is safe on its own,
  *    but it means an integration can send a field for months, believe it is being
@@ -46,7 +46,7 @@ export interface FieldError {
 
 function toFieldErrors(err: z.ZodError): FieldError[] {
   return err.issues.slice(0, 25).map((issue) => ({
-    field: issue.path.length > 0 ? issue.path.join(".") : "(root)",
+    field: issue.path.length > 0 ? issue.path.map(String).join(".") : "(root)",
     message:
       // Zod's default text for an unknown key names the key but not the fix.
       issue.code === "unrecognized_keys"
@@ -64,46 +64,63 @@ function toFieldErrors(err: z.ZodError): FieldError[] {
  * incomplete within a month. It also lets the GENERATED schemas — which are
  * never hand-edited — gain the behaviour without being touched.
  *
- * Unwraps the wrappers Orval emits (optional, nullable, default, effects) so a
+ * Unwraps the wrappers Orval emits (optional, nullable, default) so a
  * nested `z.object()` inside `z.array()` inside `.optional()` is still reached.
  */
-function strictify(schema: z.ZodTypeAny, depth = 0): z.ZodTypeAny {
+function strictify(schema: z.ZodType, depth = 0): z.ZodType {
   // Cheap insurance against a pathological or self-referencing schema.
   if (depth > 12) return schema;
 
+  // A schema carrying a `.refine()`/`.superRefine()` is returned untouched:
+  // rebuilding it here would drop the refinement. (Under zod 3 those were
+  // ZodEffects wrappers, left alone by the fall-through below; zod 4 stores them
+  // as checks on the schema itself, so they are detected explicitly.)
+  if (hasRefinement(schema)) return schema;
+
   if (schema instanceof z.ZodObject) {
-    const shape = schema.shape as Record<string, z.ZodTypeAny>;
-    const next: Record<string, z.ZodTypeAny> = {};
+    const shape = schema.shape as Record<string, z.ZodType>;
+    const next: Record<string, z.ZodType> = {};
     for (const key of Object.keys(shape)) next[key] = strictify(shape[key], depth + 1);
-    return z.object(next).strict();
+    return z.strictObject(next);
   }
   if (schema instanceof z.ZodArray) {
-    return z.array(strictify(schema.element as z.ZodTypeAny, depth + 1));
+    return z.array(strictify(schema.element as z.ZodType, depth + 1));
   }
   if (schema instanceof z.ZodOptional) {
-    return strictify(schema.unwrap() as z.ZodTypeAny, depth + 1).optional();
+    return strictify(schema.unwrap() as z.ZodType, depth + 1).optional();
   }
   if (schema instanceof z.ZodNullable) {
-    return strictify(schema.unwrap() as z.ZodTypeAny, depth + 1).nullable();
+    return strictify(schema.unwrap() as z.ZodType, depth + 1).nullable();
   }
   if (schema instanceof z.ZodDefault) {
-    return strictify(schema.removeDefault() as z.ZodTypeAny, depth + 1)
-      .default((schema._def as { defaultValue: () => unknown }).defaultValue());
+    // `def.defaultValue` is a getter returning a fresh copy, so read it per parse.
+    const def = schema.def as { defaultValue: unknown };
+    return strictify(schema.unwrap() as z.ZodType, depth + 1).default(() => def.defaultValue as never);
   }
-  if (schema instanceof z.ZodUnion) {
-    const opts = (schema.options as z.ZodTypeAny[]).map((o) => strictify(o, depth + 1));
-    return z.union(opts as [z.ZodTypeAny, z.ZodTypeAny, ...z.ZodTypeAny[]]);
+  if (schema instanceof z.ZodPrefault) {
+    const def = schema.def as { defaultValue: unknown };
+    return strictify(schema.unwrap() as z.ZodType, depth + 1).prefault(() => def.defaultValue as never);
   }
-  // ZodEffects (from .transform/.superRefine) and everything else are returned
-  // untouched: their inner type is already constrained by whoever wrote it, and
-  // rebuilding an effect chain here would drop the refinement.
+  // A discriminated union is a ZodUnion in zod 4 but was its own class in zod 3,
+  // which this pass never entered; keep it untouched as before.
+  if (schema instanceof z.ZodUnion && !(schema instanceof z.ZodDiscriminatedUnion)) {
+    const opts = (schema.options as readonly z.ZodType[]).map((o) => strictify(o, depth + 1));
+    return z.union(opts as [z.ZodType, z.ZodType, ...z.ZodType[]]);
+  }
+  // Transforms and pipes (.transform, .pipe, z.preprocess) and everything else are
+  // returned untouched: their inner type is already constrained by whoever wrote
+  // it, and rebuilding the chain here would drop the transform.
   return schema;
+}
+
+function hasRefinement(schema: z.ZodType): boolean {
+  return (schema._zod.def.checks ?? []).some((check) => check._zod.def.check === "custom");
 }
 
 // Strictifying walks the whole schema, so do it once per schema object rather
 // than on every request.
-const strictCache = new WeakMap<z.ZodTypeAny, z.ZodTypeAny>();
-function strictOnce(schema: z.ZodTypeAny): z.ZodTypeAny {
+const strictCache = new WeakMap<z.ZodType, z.ZodType>();
+function strictOnce(schema: z.ZodType): z.ZodType {
   let s = strictCache.get(schema);
   if (!s) { s = strictify(schema); strictCache.set(schema, s); }
   return s;

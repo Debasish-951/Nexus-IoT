@@ -49,13 +49,13 @@ export const AuditSettingsSchema = z.object({
   /** Days entries are kept; null = RETENTION_ACTIVITY_LOG_DAYS (default 365); 0 = for ever. Minimum 365. */
   retentionDays: z.number().int().min(0).max(36500).nullable().default(null),
   /** Sensitive-action alerts switched on (missing = on). */
-  alerts: z.record(z.boolean()).default({}),
+  alerts: z.record(z.string(), z.boolean()).default({}),
 });
 export type AuditSettings = z.infer<typeof AuditSettingsSchema>;
 
 export const AuditSettingsUpdate = z.object({
   retentionDays: z.number().int().min(0).max(36500).nullable().optional(),
-  alerts: z.record(z.boolean()).optional(),
+  alerts: z.record(z.string(), z.boolean()).optional(),
 }).strict();
 
 const SETTINGS_KEY = "audit_settings";

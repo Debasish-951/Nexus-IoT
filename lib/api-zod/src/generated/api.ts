@@ -34,8 +34,8 @@ export const ListAssetsResponseItem = zod.object({
   templateName: zod.string().nullish(),
   description: zod.string().nullish(),
   tags: zod.array(zod.string()),
-  childCount: zod.number().int(),
-  attributeCount: zod.number().int(),
+  childCount: zod.int(),
+  attributeCount: zod.int(),
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date(),
 });
@@ -62,8 +62,8 @@ export const CreateAssetResponse = zod.object({
   templateName: zod.string().nullish(),
   description: zod.string().nullish(),
   tags: zod.array(zod.string()),
-  childCount: zod.number().int(),
-  attributeCount: zod.number().int(),
+  childCount: zod.int(),
+  attributeCount: zod.int(),
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date(),
 });
@@ -84,8 +84,8 @@ export const GetAssetResponse = zod.object({
   templateName: zod.string().nullish(),
   description: zod.string().nullish(),
   tags: zod.array(zod.string()),
-  childCount: zod.number().int(),
-  attributeCount: zod.number().int(),
+  childCount: zod.int(),
+  attributeCount: zod.int(),
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date(),
 });
@@ -112,8 +112,8 @@ export const UpdateAssetResponse = zod.object({
   templateName: zod.string().nullish(),
   description: zod.string().nullish(),
   tags: zod.array(zod.string()),
-  childCount: zod.number().int(),
-  attributeCount: zod.number().int(),
+  childCount: zod.int(),
+  attributeCount: zod.int(),
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date(),
 });
@@ -150,7 +150,6 @@ export const ListAssetAttributesResponseItem = zod.object({
     ),
   uom: zod.string().nullish(),
   decimalPlaces: zod
-    .number()
     .int()
     .nullish()
     .describe("Number of decimal places for display (null = no rounding)"),
@@ -163,7 +162,6 @@ export const ListAssetAttributesResponseItem = zod.object({
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date(),
   sortOrder: zod
-    .number()
     .int()
     .describe(
       "Display order among this asset's attributes (ascending). Not user-editable; assigned by the server on creation.",
@@ -188,7 +186,7 @@ export const CreateAssetAttributeBody = zod.object({
   tagName: zod.string().nullish(),
   sourceMetric: zod.string().nullish(),
   uom: zod.string().nullish(),
-  decimalPlaces: zod.number().int().nullish(),
+  decimalPlaces: zod.int().nullish(),
   thousandSeparator: zod.boolean().optional(),
   expression: zod.string().nullish(),
 });
@@ -209,7 +207,6 @@ export const CreateAssetAttributeResponse = zod.object({
     ),
   uom: zod.string().nullish(),
   decimalPlaces: zod
-    .number()
     .int()
     .nullish()
     .describe("Number of decimal places for display (null = no rounding)"),
@@ -222,7 +219,6 @@ export const CreateAssetAttributeResponse = zod.object({
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date(),
   sortOrder: zod
-    .number()
     .int()
     .describe(
       "Display order among this asset's attributes (ascending). Not user-editable; assigned by the server on creation.",
@@ -244,7 +240,7 @@ export const UpdateAttributeBody = zod.object({
   sourceMetric: zod.string().nullish(),
   value: zod.unknown().optional(),
   uom: zod.string().nullish(),
-  decimalPlaces: zod.number().int().nullish(),
+  decimalPlaces: zod.int().nullish(),
   thousandSeparator: zod.boolean().optional(),
   expression: zod.string().nullish(),
 });
@@ -265,7 +261,6 @@ export const UpdateAttributeResponse = zod.object({
     ),
   uom: zod.string().nullish(),
   decimalPlaces: zod
-    .number()
     .int()
     .nullish()
     .describe("Number of decimal places for display (null = no rounding)"),
@@ -278,7 +273,6 @@ export const UpdateAttributeResponse = zod.object({
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date(),
   sortOrder: zod
-    .number()
     .int()
     .describe(
       "Display order among this asset's attributes (ascending). Not user-editable; assigned by the server on creation.",
@@ -305,7 +299,7 @@ export const ListAssetTemplatesResponseItem = zod.object({
   id: zod.string(),
   name: zod.string(),
   tags: zod.array(zod.string()),
-  attributeCount: zod.number().int(),
+  attributeCount: zod.int(),
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date(),
 });
@@ -325,7 +319,7 @@ export const CreateAssetTemplateResponse = zod.object({
   id: zod.string(),
   name: zod.string(),
   tags: zod.array(zod.string()),
-  attributeCount: zod.number().int(),
+  attributeCount: zod.int(),
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date(),
 });
@@ -341,7 +335,7 @@ export const GetAssetTemplateResponse = zod.object({
   id: zod.string(),
   name: zod.string(),
   tags: zod.array(zod.string()),
-  attributeCount: zod.number().int(),
+  attributeCount: zod.int(),
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date(),
 });
@@ -362,7 +356,7 @@ export const UpdateAssetTemplateResponse = zod.object({
   id: zod.string(),
   name: zod.string(),
   tags: zod.array(zod.string()),
-  attributeCount: zod.number().int(),
+  attributeCount: zod.int(),
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date(),
 });
@@ -389,7 +383,7 @@ export const IngestPayloadBody = zod.object({
 
 export const IngestPayloadResponse = zod.object({
   success: zod.boolean(),
-  recordsWritten: zod.number().int(),
+  recordsWritten: zod.int(),
   assetId: zod.string().nullish(),
   message: zod.string(),
 });
@@ -416,7 +410,7 @@ export const ValidatePayloadResponse = zod.object({
     .string()
     .describe("flat | nested-data | nested-metrics | unknown"),
   extractedMetrics: zod.record(zod.string(), zod.unknown()),
-  metricCount: zod.number().int(),
+  metricCount: zod.int(),
   warnings: zod.array(zod.string()),
 });
 
@@ -434,9 +428,9 @@ export const IngestBatchBody = zod.array(IngestBatchBodyItem);
 
 export const IngestBatchResponse = zod.object({
   success: zod.boolean(),
-  totalRecords: zod.number().int(),
-  successCount: zod.number().int(),
-  failureCount: zod.number().int(),
+  totalRecords: zod.int(),
+  successCount: zod.int(),
+  failureCount: zod.int(),
 });
 
 /**
@@ -586,9 +580,9 @@ export const ListAlarmRulesResponseItem = zod.object({
     .nullish(),
   threshold: zod.number().nullish(),
   deadband: zod.number().nullish(),
-  onDelay: zod.number().int().nullish(),
-  offDelay: zod.number().int().nullish(),
-  scanRate: zod.number().int().nullish(),
+  onDelay: zod.int().nullish(),
+  offDelay: zod.int().nullish(),
+  scanRate: zod.int().nullish(),
   enabled: zod.boolean(),
   requireAcknowledge: zod.boolean(),
   createdAt: zod.coerce.date(),
@@ -624,9 +618,9 @@ export const CreateAlarmRuleBody = zod.object({
     .nullish(),
   threshold: zod.number().nullish(),
   deadband: zod.number().nullish(),
-  onDelay: zod.number().int().nullish(),
-  offDelay: zod.number().int().nullish(),
-  scanRate: zod.number().int().nullish(),
+  onDelay: zod.int().nullish(),
+  offDelay: zod.int().nullish(),
+  scanRate: zod.int().nullish(),
   enabled: zod.boolean(),
   requireAcknowledge: zod.boolean(),
 });
@@ -657,9 +651,9 @@ export const CreateAlarmRuleResponse = zod.object({
     .nullish(),
   threshold: zod.number().nullish(),
   deadband: zod.number().nullish(),
-  onDelay: zod.number().int().nullish(),
-  offDelay: zod.number().int().nullish(),
-  scanRate: zod.number().int().nullish(),
+  onDelay: zod.int().nullish(),
+  offDelay: zod.int().nullish(),
+  scanRate: zod.int().nullish(),
   enabled: zod.boolean(),
   requireAcknowledge: zod.boolean(),
   createdAt: zod.coerce.date(),
@@ -692,12 +686,12 @@ export const UpdateAlarmRuleBody = zod.object({
       zod.literal(null),
     ])
     .nullish(),
-  scanRate: zod.number().int().nullish(),
+  scanRate: zod.int().nullish(),
   severity: zod.enum(["critical", "high", "medium", "low", "info"]).optional(),
   threshold: zod.number().nullish(),
   deadband: zod.number().nullish(),
-  onDelay: zod.number().int().nullish(),
-  offDelay: zod.number().int().nullish(),
+  onDelay: zod.int().nullish(),
+  offDelay: zod.int().nullish(),
   enabled: zod.boolean().optional(),
   requireAcknowledge: zod.boolean().optional(),
 });
@@ -728,9 +722,9 @@ export const UpdateAlarmRuleResponse = zod.object({
     .nullish(),
   threshold: zod.number().nullish(),
   deadband: zod.number().nullish(),
-  onDelay: zod.number().int().nullish(),
-  offDelay: zod.number().int().nullish(),
-  scanRate: zod.number().int().nullish(),
+  onDelay: zod.int().nullish(),
+  offDelay: zod.int().nullish(),
+  scanRate: zod.int().nullish(),
   enabled: zod.boolean(),
   requireAcknowledge: zod.boolean(),
   createdAt: zod.coerce.date(),
@@ -776,7 +770,7 @@ export const ListUsersResponseItem = zod.object({
   activatedAt: zod.coerce.date().nullish(),
   passwordUpdatedAt: zod.coerce.date().nullish(),
   mustChangePassword: zod.boolean().optional(),
-  failedLoginAttempts: zod.number().int().optional(),
+  failedLoginAttempts: zod.int().optional(),
   lockedUntil: zod.coerce.date().nullish(),
   isLocked: zod
     .boolean()
@@ -819,7 +813,6 @@ export const CreateUserBody = zod
       .min(createUserBodyUsernameMin)
       .max(createUserBodyUsernameMax),
     email: zod
-      .string()
       .email()
       .describe(
         "An address the user already owns. The platform does not create mailboxes.",
@@ -872,7 +865,7 @@ export const CreateUserResponse = zod.object({
   activatedAt: zod.coerce.date().nullish(),
   passwordUpdatedAt: zod.coerce.date().nullish(),
   mustChangePassword: zod.boolean().optional(),
-  failedLoginAttempts: zod.number().int().optional(),
+  failedLoginAttempts: zod.int().optional(),
   lockedUntil: zod.coerce.date().nullish(),
   isLocked: zod
     .boolean()
@@ -935,7 +928,7 @@ export const GetUserResponse = zod.object({
   activatedAt: zod.coerce.date().nullish(),
   passwordUpdatedAt: zod.coerce.date().nullish(),
   mustChangePassword: zod.boolean().optional(),
-  failedLoginAttempts: zod.number().int().optional(),
+  failedLoginAttempts: zod.int().optional(),
   lockedUntil: zod.coerce.date().nullish(),
   isLocked: zod
     .boolean()
@@ -972,7 +965,7 @@ export const UpdateUserParams = zod.object({
 });
 
 export const UpdateUserBody = zod.object({
-  email: zod.string().email().optional(),
+  email: zod.email().optional(),
   fullName: zod.string().optional(),
   role: zod
     .enum([
@@ -1023,7 +1016,7 @@ export const UpdateUserResponse = zod.object({
   activatedAt: zod.coerce.date().nullish(),
   passwordUpdatedAt: zod.coerce.date().nullish(),
   mustChangePassword: zod.boolean().optional(),
-  failedLoginAttempts: zod.number().int().optional(),
+  failedLoginAttempts: zod.int().optional(),
   lockedUntil: zod.coerce.date().nullish(),
   isLocked: zod
     .boolean()
@@ -1070,8 +1063,8 @@ export const ListBrokersResponseItem = zod.object({
   type: zod.enum(["mqtt", "rest_api", "azure_iot", "azure_event_hub"]),
   endpoint: zod.string().nullish(),
   status: zod.enum(["connected", "disconnected", "error"]),
-  connectedDevices: zod.number().int(),
-  totalRequests: zod.number().int(),
+  connectedDevices: zod.int(),
+  totalRequests: zod.int(),
   tags: zod.array(zod.string()),
   mqttTopic: zod.string().nullish(),
   mqttClientId: zod.string().nullish(),
@@ -1129,8 +1122,8 @@ export const CreateBrokerResponse = zod.object({
   type: zod.enum(["mqtt", "rest_api", "azure_iot", "azure_event_hub"]),
   endpoint: zod.string().nullish(),
   status: zod.enum(["connected", "disconnected", "error"]),
-  connectedDevices: zod.number().int(),
-  totalRequests: zod.number().int(),
+  connectedDevices: zod.int(),
+  totalRequests: zod.int(),
   tags: zod.array(zod.string()),
   mqttTopic: zod.string().nullish(),
   mqttClientId: zod.string().nullish(),
@@ -1213,8 +1206,8 @@ export const UpdateBrokerResponse = zod.object({
   type: zod.enum(["mqtt", "rest_api", "azure_iot", "azure_event_hub"]),
   endpoint: zod.string().nullish(),
   status: zod.enum(["connected", "disconnected", "error"]),
-  connectedDevices: zod.number().int(),
-  totalRequests: zod.number().int(),
+  connectedDevices: zod.int(),
+  totalRequests: zod.int(),
   tags: zod.array(zod.string()),
   mqttTopic: zod.string().nullish(),
   mqttClientId: zod.string().nullish(),
@@ -1289,7 +1282,7 @@ export const ListApiClientsResponseItem = zod.object({
     .describe(
       "Null except in the create and rotate-secret responses, which show the secret once.",
     ),
-  totalRequests: zod.number().int().optional(),
+  totalRequests: zod.int().optional(),
   lastUsedAt: zod.coerce.date().nullish(),
   tags: zod.array(zod.string()),
   scopes: zod.array(zod.string()),
@@ -1354,7 +1347,7 @@ export const CreateApiClientResponse = zod.object({
     .describe(
       "Null except in the create and rotate-secret responses, which show the secret once.",
     ),
-  totalRequests: zod.number().int().optional(),
+  totalRequests: zod.int().optional(),
   lastUsedAt: zod.coerce.date().nullish(),
   tags: zod.array(zod.string()),
   scopes: zod.array(zod.string()),
@@ -1418,7 +1411,7 @@ export const UpdateApiClientResponse = zod.object({
     .describe(
       "Null except in the create and rotate-secret responses, which show the secret once.",
     ),
-  totalRequests: zod.number().int().optional(),
+  totalRequests: zod.int().optional(),
   lastUsedAt: zod.coerce.date().nullish(),
   tags: zod.array(zod.string()),
   scopes: zod.array(zod.string()),
@@ -1440,11 +1433,11 @@ export const DeleteApiClientResponse = zod.void();
  * @summary Get dashboard summary stats
  */
 export const GetDashboardSummaryResponse = zod.object({
-  totalAssets: zod.number().int(),
-  activeAlarms: zod.number().int(),
-  criticalAlarms: zod.number().int(),
-  connectedBrokers: zod.number().int(),
-  totalUsers: zod.number().int(),
+  totalAssets: zod.int(),
+  activeAlarms: zod.int(),
+  criticalAlarms: zod.int(),
+  connectedBrokers: zod.int(),
+  totalUsers: zod.int(),
   telemetryRate: zod.number().describe("Records per minute (last 5 min)"),
   lastIngestionAt: zod.coerce.date().nullish(),
 });
@@ -1475,11 +1468,11 @@ export const GetRecentTelemetryResponse = zod.array(
  * @summary Get alarm statistics by severity
  */
 export const GetAlarmStatsResponse = zod.object({
-  critical: zod.number().int(),
-  high: zod.number().int(),
-  medium: zod.number().int(),
-  low: zod.number().int(),
-  info: zod.number().int(),
+  critical: zod.int(),
+  high: zod.int(),
+  medium: zod.int(),
+  low: zod.int(),
+  info: zod.int(),
 });
 
 /**
@@ -1527,7 +1520,7 @@ export const GetDashboardAttentionResponse = zod.object({
       assetId: zod.string().nullish(),
       assetName: zod.string().nullish(),
       since: zod.string().nullish(),
-      ageSeconds: zod.number().int().nullish(),
+      ageSeconds: zod.int().nullish(),
       action: zod.object({
         label: zod.string(),
         href: zod.string(),
@@ -1535,17 +1528,17 @@ export const GetDashboardAttentionResponse = zod.object({
     }),
   ),
   counts: zod.object({
-    total: zod.number().int(),
-    alarm: zod.number().int(),
-    stale: zod.number().int(),
-    unboundDevice: zod.number().int(),
-    apiKey: zod.number().int(),
+    total: zod.int(),
+    alarm: zod.int(),
+    stale: zod.int(),
+    unboundDevice: zod.int(),
+    apiKey: zod.int(),
     bySeverity: zod.object({
-      critical: zod.number().int(),
-      high: zod.number().int(),
-      medium: zod.number().int(),
-      low: zod.number().int(),
-      info: zod.number().int(),
+      critical: zod.int(),
+      high: zod.int(),
+      medium: zod.int(),
+      low: zod.int(),
+      info: zod.int(),
     }),
   }),
   inProgress: zod.array(
@@ -1566,10 +1559,10 @@ export const GetDashboardAttentionResponse = zod.object({
       assetName: zod.string().nullish(),
       severity: zod.string(),
       clearedAt: zod.string().nullish(),
-      openSeconds: zod.number().int().nullish(),
+      openSeconds: zod.int().nullish(),
     }),
   ),
-  staleMinutes: zod.number().int(),
+  staleMinutes: zod.int(),
 });
 
 /**
@@ -1597,8 +1590,8 @@ export const GetDashboardHealthIndexQueryParams = zod.object({
 });
 
 export const GetDashboardHealthIndexResponse = zod.object({
-  overall: zod.number().int(),
-  previous: zod.number().int().nullable(),
+  overall: zod.int(),
+  previous: zod.int().nullable(),
   factors: zod.object({
     alarmBurden: zod.number(),
     staleness: zod.number(),
@@ -1606,30 +1599,30 @@ export const GetDashboardHealthIndexResponse = zod.object({
   }),
   availability: zod.object({
     percent: zod.number().nullable(),
-    downtimeSeconds: zod.number().int(),
-    machineCount: zod.number().int(),
+    downtimeSeconds: zod.int(),
+    machineCount: zod.int(),
   }),
-  assetCount: zod.number().int(),
+  assetCount: zod.int(),
   worst: zod.array(
     zod.object({
       id: zod.string(),
       name: zod.string(),
-      score: zod.number().int(),
+      score: zod.int(),
     }),
   ),
   tree: zod.array(
     zod.object({
       id: zod.string(),
       name: zod.string(),
-      score: zod.number().int(),
-      ownScore: zod.number().int(),
-      assetCount: zod.number().int(),
+      score: zod.int(),
+      ownScore: zod.int(),
+      assetCount: zod.int(),
       children: zod.array(zod.unknown()),
     }),
   ),
   window: zod.object({
-    days: zod.number().int(),
-    staleMinutes: zod.number().int(),
+    days: zod.int(),
+    staleMinutes: zod.int(),
   }),
 });
 
@@ -1661,42 +1654,42 @@ export const GetDashboardAlarmTrendResponse = zod.object({
   series: zod.array(
     zod.object({
       date: zod.string(),
-      critical: zod.number().int(),
-      high: zod.number().int(),
-      medium: zod.number().int(),
-      low: zod.number().int(),
-      info: zod.number().int(),
-      total: zod.number().int(),
+      critical: zod.int(),
+      high: zod.int(),
+      medium: zod.int(),
+      low: zod.int(),
+      info: zod.int(),
+      total: zod.int(),
     }),
   ),
-  totals: zod.number().int(),
-  changePct: zod.number().int().nullable(),
+  totals: zod.int(),
+  changePct: zod.int().nullable(),
   peak: zod
     .object({
       date: zod.string(),
-      total: zod.number().int(),
+      total: zod.int(),
     })
     .nullable(),
   mttaSeconds: zod.number().nullable(),
   mttrSeconds: zod.number().nullable(),
-  acknowledgedCount: zod.number().int(),
-  clearedCount: zod.number().int(),
+  acknowledgedCount: zod.int(),
+  clearedCount: zod.int(),
   worstPerformers: zod.array(
     zod.object({
       assetId: zod.string(),
       assetName: zod.string(),
-      alarms: zod.number().int(),
+      alarms: zod.int(),
       openSeconds: zod.number(),
     }),
   ),
   rules: zod.object({
-    total: zod.number().int(),
-    enabled: zod.number().int(),
-    neverFired: zod.number().int(),
+    total: zod.int(),
+    enabled: zod.int(),
+    neverFired: zod.int(),
   }),
-  alarmsLastHour: zod.number().int(),
+  alarmsLastHour: zod.int(),
   window: zod.object({
-    days: zod.number().int(),
+    days: zod.int(),
     since: zod.string(),
   }),
 });
@@ -1729,25 +1722,25 @@ export const GetDashboardIngestSeriesResponse = zod.object({
   series: zod.array(
     zod.object({
       minute: zod.string(),
-      count: zod.number().int(),
+      count: zod.int(),
     }),
   ),
-  peakPerMinute: zod.number().int(),
-  totalPoints: zod.number().int(),
-  currentPerMinute: zod.number().int(),
+  peakPerMinute: zod.int(),
+  totalPoints: zod.int(),
+  currentPerMinute: zod.int(),
   lastIngestionAt: zod.string().nullable(),
-  quality: zod.record(zod.string(), zod.number().int()),
+  quality: zod.record(zod.string(), zod.int()),
   hours: zod.array(zod.string()),
   devices: zod.array(
     zod.object({
       deviceId: zod.string(),
       bound: zod.boolean(),
-      total: zod.number().int(),
-      buckets: zod.array(zod.number().int()),
+      total: zod.int(),
+      buckets: zod.array(zod.int()),
     }),
   ),
   window: zod.object({
-    hours: zod.number().int(),
+    hours: zod.int(),
   }),
 });
 
@@ -1963,8 +1956,8 @@ export const GetAuthSessionResponse = zod
  * @summary The password rules new passwords must meet
  */
 export const GetAuthPasswordPolicyResponse = zod.object({
-  minLength: zod.number().int(),
-  maxLength: zod.number().int(),
+  minLength: zod.int(),
+  maxLength: zod.int(),
   requireUppercase: zod.boolean(),
   requireLowercase: zod.boolean(),
   requireDigit: zod.boolean(),
@@ -1998,8 +1991,8 @@ export const GetAuthActivationResponse = zod.object({
   ]),
   expiresAt: zod.coerce.date(),
   passwordPolicy: zod.object({
-    minLength: zod.number().int(),
-    maxLength: zod.number().int(),
+    minLength: zod.int(),
+    maxLength: zod.int(),
     requireUppercase: zod.boolean(),
     requireLowercase: zod.boolean(),
     requireDigit: zod.boolean(),
@@ -2048,8 +2041,8 @@ export const GetAuthResetTokenResponse = zod.object({
   fullName: zod.string(),
   expiresAt: zod.coerce.date(),
   passwordPolicy: zod.object({
-    minLength: zod.number().int(),
-    maxLength: zod.number().int(),
+    minLength: zod.int(),
+    maxLength: zod.int(),
     requireUppercase: zod.boolean(),
     requireLowercase: zod.boolean(),
     requireDigit: zod.boolean(),
@@ -2086,7 +2079,6 @@ export const AuthChangePasswordBody = zod.object({
 export const AuthChangePasswordResponse = zod.object({
   ok: zod.boolean(),
   sessionsRevoked: zod
-    .number()
     .int()
     .describe("The user's other sessions that were signed out."),
 });
@@ -2120,8 +2112,8 @@ export const GetSecurityRbacCatalogResponse = zod.object({
   analyticsOptions: zod.array(zod.unknown()),
   apiScopeOptions: zod.array(zod.unknown()),
   passwordPolicy: zod.object({
-    minLength: zod.number().int(),
-    maxLength: zod.number().int(),
+    minLength: zod.int(),
+    maxLength: zod.int(),
     requireUppercase: zod.boolean(),
     requireLowercase: zod.boolean(),
     requireDigit: zod.boolean(),
@@ -2144,6 +2136,9 @@ export const listSecurityEventsQueryOffsetMax = 1000000;
 
 export const listSecurityEventsQueryEventTypeMax = 64;
 
+export const listSecurityEventsQueryUserIdRegExp = new RegExp(
+  "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+);
 export const listSecurityEventsQueryUsernameMax = 320;
 
 export const listSecurityEventsQueryDaysMax = 365;
@@ -2166,7 +2161,10 @@ export const ListSecurityEventsQueryParams = zod.object({
     .max(listSecurityEventsQueryEventTypeMax)
     .optional(),
   outcome: zod.enum(["success", "failure"]).optional(),
-  userId: zod.coerce.string().uuid().optional(),
+  userId: zod.coerce
+    .string()
+    .regex(listSecurityEventsQueryUserIdRegExp)
+    .optional(),
   username: zod.coerce
     .string()
     .max(listSecurityEventsQueryUsernameMax)
@@ -2194,9 +2192,9 @@ export const ListSecurityEventsResponse = zod.object({
       createdAt: zod.coerce.date(),
     }),
   ),
-  total: zod.number().int(),
-  limit: zod.number().int(),
-  offset: zod.number().int(),
+  total: zod.int(),
+  limit: zod.int(),
+  offset: zod.int(),
 });
 
 /**
@@ -2211,6 +2209,9 @@ export const listSecurityLoginHistoryQueryOffsetMax = 1000000;
 
 export const listSecurityLoginHistoryQueryEventTypeMax = 64;
 
+export const listSecurityLoginHistoryQueryUserIdRegExp = new RegExp(
+  "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+);
 export const listSecurityLoginHistoryQueryUsernameMax = 320;
 
 export const listSecurityLoginHistoryQueryDaysMax = 365;
@@ -2233,7 +2234,10 @@ export const ListSecurityLoginHistoryQueryParams = zod.object({
     .max(listSecurityLoginHistoryQueryEventTypeMax)
     .optional(),
   outcome: zod.enum(["success", "failure"]).optional(),
-  userId: zod.coerce.string().uuid().optional(),
+  userId: zod.coerce
+    .string()
+    .regex(listSecurityLoginHistoryQueryUserIdRegExp)
+    .optional(),
   username: zod.coerce
     .string()
     .max(listSecurityLoginHistoryQueryUsernameMax)
@@ -2261,37 +2265,37 @@ export const ListSecurityLoginHistoryResponse = zod.object({
       createdAt: zod.coerce.date(),
     }),
   ),
-  total: zod.number().int(),
-  limit: zod.number().int(),
-  offset: zod.number().int(),
+  total: zod.int(),
+  limit: zod.int(),
+  offset: zod.int(),
 });
 
 /**
  * @summary Counts for the last 24 hours plus the active security configuration
  */
 export const GetSecuritySummaryResponse = zod.object({
-  windowHours: zod.number().int(),
-  loginSuccess: zod.number().int(),
-  loginFailure: zod.number().int(),
-  loginBlocked: zod.number().int(),
-  authzDenied: zod.number().int(),
-  activeSessions: zod.number().int(),
-  lockedAccounts: zod.number().int(),
-  pendingInvitations: zod.number().int(),
+  windowHours: zod.int(),
+  loginSuccess: zod.int(),
+  loginFailure: zod.int(),
+  loginBlocked: zod.int(),
+  authzDenied: zod.int(),
+  activeSessions: zod.int(),
+  lockedAccounts: zod.int(),
+  pendingInvitations: zod.int(),
   byType: zod.array(
     zod.object({
       eventType: zod.string(),
       outcome: zod.string(),
-      total: zod.number().int(),
+      total: zod.int(),
     }),
   ),
   config: zod.object({
-    lockoutThreshold: zod.number().int().optional(),
-    lockoutMinutes: zod.number().int().optional(),
-    sessionIdleMinutes: zod.number().int().optional(),
-    sessionAbsoluteHours: zod.number().int().optional(),
-    activationTtlHours: zod.number().int().optional(),
-    passwordResetTtlMinutes: zod.number().int().optional(),
+    lockoutThreshold: zod.int().optional(),
+    lockoutMinutes: zod.int().optional(),
+    sessionIdleMinutes: zod.int().optional(),
+    sessionAbsoluteHours: zod.int().optional(),
+    activationTtlHours: zod.int().optional(),
+    passwordResetTtlMinutes: zod.int().optional(),
     emailTransport: zod.string().optional(),
     enforcementEnabled: zod.boolean().optional(),
   }),
@@ -2304,22 +2308,20 @@ export const ListSecuritySessionsQueryParams = zod.object({
   userId: zod.coerce.string().optional().describe("Only this user's sessions"),
 });
 
-export const ListSecuritySessionsResponseItem = zod
-  .object({
-    id: zod.string(),
-    userId: zod.string(),
-    username: zod.string().optional(),
-    fullName: zod.string().optional(),
-    ip: zod.string().nullish(),
-    userAgent: zod.string().nullish(),
-    createdAt: zod.coerce.date(),
-    lastSeenAt: zod.coerce.date().nullish(),
-    expiresAt: zod.coerce.date(),
-    isCurrent: zod
-      .boolean()
-      .describe("True for the session making this request."),
-  })
-  .passthrough();
+export const ListSecuritySessionsResponseItem = zod.looseObject({
+  id: zod.string(),
+  userId: zod.string(),
+  username: zod.string().optional(),
+  fullName: zod.string().optional(),
+  ip: zod.string().nullish(),
+  userAgent: zod.string().nullish(),
+  createdAt: zod.coerce.date(),
+  lastSeenAt: zod.coerce.date().nullish(),
+  expiresAt: zod.coerce.date(),
+  isCurrent: zod
+    .boolean()
+    .describe("True for the session making this request."),
+});
 export const ListSecuritySessionsResponse = zod.array(
   ListSecuritySessionsResponseItem,
 );
@@ -2342,7 +2344,7 @@ export const RevokeSecurityUserSessionsParams = zod.object({
 
 export const RevokeSecurityUserSessionsResponse = zod.object({
   ok: zod.boolean(),
-  revoked: zod.number().int(),
+  revoked: zod.int(),
 });
 
 /**
@@ -2392,6 +2394,9 @@ export const createVizTreeNodeBodyParentIdMax = 64;
 export const createVizTreeNodeBodyParentIdRegExp = new RegExp(
   "^[A-Za-z0-9_-]+$",
 );
+export const createVizTreeNodeBodyProjectIdRegExp = new RegExp(
+  "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+);
 export const createVizTreeNodeBodyWidgetsMax = 500;
 
 export const CreateVizTreeNodeBody = zod.object({
@@ -2406,7 +2411,7 @@ export const CreateVizTreeNodeBody = zod.object({
     .max(createVizTreeNodeBodyParentIdMax)
     .regex(createVizTreeNodeBodyParentIdRegExp)
     .nullish(),
-  projectId: zod.string().uuid().nullish(),
+  projectId: zod.string().regex(createVizTreeNodeBodyProjectIdRegExp).nullish(),
   widgets: zod
     .array(zod.unknown())
     .max(createVizTreeNodeBodyWidgetsMax)
@@ -2455,17 +2460,16 @@ export const ImportVizTreeNodesBody = zod.object({
 });
 
 export const ImportVizTreeNodesResponse = zod.object({
-  imported: zod.number().int(),
-  skipped: zod.number().int().describe("Nodes whose id already existed."),
+  imported: zod.int(),
+  skipped: zod.int().describe("Nodes whose id already existed."),
   rejected: zod
-    .number()
     .int()
     .optional()
     .describe("Absent when the request held no nodes."),
   rejectedDetail: zod
     .array(
       zod.object({
-        index: zod.number().int(),
+        index: zod.int(),
         reason: zod.string(),
       }),
     )
@@ -2494,6 +2498,9 @@ export const updateVizTreeNodeBodyParentIdMax = 64;
 export const updateVizTreeNodeBodyParentIdRegExp = new RegExp(
   "^[A-Za-z0-9_-]+$",
 );
+export const updateVizTreeNodeBodyProjectIdRegExp = new RegExp(
+  "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+);
 export const updateVizTreeNodeBodyWidgetsMax = 500;
 
 export const updateVizTreeNodeBodyExpectedUpdatedAtMax = 64;
@@ -2507,7 +2514,7 @@ export const UpdateVizTreeNodeBody = zod.object({
     .nullish(),
   projectId: zod
     .string()
-    .uuid()
+    .regex(updateVizTreeNodeBodyProjectIdRegExp)
     .nullish()
     .describe("Only a top-level node may carry a project."),
   widgets: zod
@@ -2564,7 +2571,7 @@ export const DeleteVizTreeNodeParams = zod.object({
 
 export const DeleteVizTreeNodeResponse = zod.object({
   success: zod.boolean(),
-  deleted: zod.number().int().describe("Nodes removed, including the subtree."),
+  deleted: zod.int().describe("Nodes removed, including the subtree."),
 });
 
 /**
@@ -2601,13 +2608,16 @@ export const ListVizTreeNodeSharesResponse = zod.object({
 export const putVizTreeNodeSharePathIdMax = 64;
 
 export const putVizTreeNodeSharePathIdRegExp = new RegExp("^[A-Za-z0-9_-]+$");
+export const putVizTreeNodeSharePathUserIdRegExp = new RegExp(
+  "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+);
 
 export const PutVizTreeNodeShareParams = zod.object({
   id: zod.coerce
     .string()
     .max(putVizTreeNodeSharePathIdMax)
     .regex(putVizTreeNodeSharePathIdRegExp),
-  userId: zod.coerce.string().uuid(),
+  userId: zod.coerce.string().regex(putVizTreeNodeSharePathUserIdRegExp),
 });
 
 export const PutVizTreeNodeShareBody = zod.object({
@@ -2631,13 +2641,16 @@ export const deleteVizTreeNodeSharePathIdMax = 64;
 export const deleteVizTreeNodeSharePathIdRegExp = new RegExp(
   "^[A-Za-z0-9_-]+$",
 );
+export const deleteVizTreeNodeSharePathUserIdRegExp = new RegExp(
+  "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+);
 
 export const DeleteVizTreeNodeShareParams = zod.object({
   id: zod.coerce
     .string()
     .max(deleteVizTreeNodeSharePathIdMax)
     .regex(deleteVizTreeNodeSharePathIdRegExp),
-  userId: zod.coerce.string().uuid(),
+  userId: zod.coerce.string().regex(deleteVizTreeNodeSharePathUserIdRegExp),
 });
 
 export const DeleteVizTreeNodeShareResponse = zod.object({
@@ -2669,8 +2682,8 @@ export const ListSitesResponseItem = zod.object({
   latitudeAttrId: zod.string().nullable(),
   longitudeAttrId: zod.string().nullable(),
   addressAttrId: zod.string().nullable(),
-  assetCount: zod.number().int(),
-  maintenanceCount: zod.number().int(),
+  assetCount: zod.int(),
+  maintenanceCount: zod.int(),
   lastDataAt: zod.coerce.date().nullable(),
 });
 export const ListSitesResponse = zod.array(ListSitesResponseItem);
@@ -2689,7 +2702,7 @@ export const ListPlantTwinsResponseItem = zod.object({
       "Taken from `scene.kind`; plant when absent. `machine` is the detailed pump skid, `asset` a canvas of machines from the library, `image` a 2D twin (drawing or photo with mapped readings), `process` a P&ID, `folder` a node of the Live Twin hierarchy.",
     ),
   projectId: zod.string().nullable(),
-  machines: zod.number().int(),
+  machines: zod.int(),
   parentId: zod
     .string()
     .nullable()
@@ -2717,6 +2730,10 @@ export const createPlantTwinBodyIdMax = 64;
 export const createPlantTwinBodyIdRegExp = new RegExp("^[A-Za-z0-9_-]+$");
 export const createPlantTwinBodyNameMax = 200;
 
+export const createPlantTwinBodyProjectIdRegExp = new RegExp(
+  "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+);
+
 export const CreatePlantTwinBody = zod.object({
   id: zod
     .string()
@@ -2724,7 +2741,7 @@ export const CreatePlantTwinBody = zod.object({
     .regex(createPlantTwinBodyIdRegExp)
     .optional(),
   name: zod.string().min(1).max(createPlantTwinBodyNameMax),
-  projectId: zod.string().uuid().nullish(),
+  projectId: zod.string().regex(createPlantTwinBodyProjectIdRegExp).nullish(),
   scene: zod.record(zod.string(), zod.unknown()),
 });
 
@@ -2738,7 +2755,7 @@ export const CreatePlantTwinResponse = zod
         "Taken from `scene.kind`; plant when absent. `machine` is the detailed pump skid, `asset` a canvas of machines from the library, `image` a 2D twin (drawing or photo with mapped readings), `process` a P&ID, `folder` a node of the Live Twin hierarchy.",
       ),
     projectId: zod.string().nullable(),
-    machines: zod.number().int(),
+    machines: zod.int(),
     parentId: zod
       .string()
       .nullable()
@@ -2770,6 +2787,9 @@ export const CreatePlantTwinResponse = zod
  * Pairs with no reading yet are absent.
  * @summary Latest reading for each asset + metric pair a twin shows
  */
+export const getPlantTwinValuesBodyPairsItemAssetIdRegExp = new RegExp(
+  "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+);
 export const getPlantTwinValuesBodyPairsItemMetricMax = 200;
 
 export const getPlantTwinValuesBodyPairsMax = 500;
@@ -2778,7 +2798,9 @@ export const GetPlantTwinValuesBody = zod.object({
   pairs: zod
     .array(
       zod.object({
-        assetId: zod.string().uuid(),
+        assetId: zod
+          .string()
+          .regex(getPlantTwinValuesBodyPairsItemAssetIdRegExp),
         metric: zod
           .string()
           .min(1)
@@ -2822,7 +2844,7 @@ export const GetPlantTwinResponse = zod
         "Taken from `scene.kind`; plant when absent. `machine` is the detailed pump skid, `asset` a canvas of machines from the library, `image` a 2D twin (drawing or photo with mapped readings), `process` a P&ID, `folder` a node of the Live Twin hierarchy.",
       ),
     projectId: zod.string().nullable(),
-    machines: zod.number().int(),
+    machines: zod.int(),
     parentId: zod
       .string()
       .nullable()
@@ -2864,9 +2886,13 @@ export const UpdatePlantTwinParams = zod.object({
 
 export const updatePlantTwinBodyNameMax = 200;
 
+export const updatePlantTwinBodyProjectIdRegExp = new RegExp(
+  "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+);
+
 export const UpdatePlantTwinBody = zod.object({
   name: zod.string().min(1).max(updatePlantTwinBodyNameMax).optional(),
-  projectId: zod.string().uuid().nullish(),
+  projectId: zod.string().regex(updatePlantTwinBodyProjectIdRegExp).nullish(),
   scene: zod.record(zod.string(), zod.unknown()).optional(),
   parentId: zod
     .string()
@@ -2892,7 +2918,7 @@ export const UpdatePlantTwinResponse = zod
         "Taken from `scene.kind`; plant when absent. `machine` is the detailed pump skid, `asset` a canvas of machines from the library, `image` a 2D twin (drawing or photo with mapped readings), `process` a P&ID, `folder` a node of the Live Twin hierarchy.",
       ),
     projectId: zod.string().nullable(),
-    machines: zod.number().int(),
+    machines: zod.int(),
     parentId: zod
       .string()
       .nullable()
@@ -2964,9 +2990,9 @@ export const ListUploadsResponseItem = zod.object({
   id: zod.string(),
   name: zod.string().describe("Original file name, for display only."),
   mimeType: zod.string().describe("Type detected from the content."),
-  size: zod.number().int(),
-  width: zod.number().int().nullish(),
-  height: zod.number().int().nullish(),
+  size: zod.int(),
+  width: zod.int().nullish(),
+  height: zod.int().nullish(),
   scanStatus: zod
     .string()
     .describe("Malware scan verdict, e.g. clean, skipped or infected."),
@@ -3003,9 +3029,9 @@ export const CreateUploadsResponse = zod.object({
       id: zod.string(),
       name: zod.string().describe("Original file name, for display only."),
       mimeType: zod.string().describe("Type detected from the content."),
-      size: zod.number().int(),
-      width: zod.number().int().nullish(),
-      height: zod.number().int().nullish(),
+      size: zod.int(),
+      width: zod.int().nullish(),
+      height: zod.int().nullish(),
       scanStatus: zod
         .string()
         .describe("Malware scan verdict, e.g. clean, skipped or infected."),
@@ -3034,8 +3060,12 @@ export const CreateUploadsResponse = zod.object({
  * Only the uploader or an administrator (manage_users) may delete a file.
  * @summary Delete an uploaded file
  */
+export const deleteUploadPathIdRegExp = new RegExp(
+  "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+);
+
 export const DeleteUploadParams = zod.object({
-  id: zod.coerce.string().uuid(),
+  id: zod.coerce.string().regex(deleteUploadPathIdRegExp),
 });
 
 export const DeleteUploadResponse = zod.void();
@@ -3044,8 +3074,12 @@ export const DeleteUploadResponse = zod.void();
  * Served with the detected MIME type, `nosniff` and a sandbox CSP.
  * @summary Download a stored file as an attachment
  */
+export const downloadUploadContentPathIdRegExp = new RegExp(
+  "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+);
+
 export const DownloadUploadContentParams = zod.object({
-  id: zod.coerce.string().uuid(),
+  id: zod.coerce.string().regex(downloadUploadContentPathIdRegExp),
 });
 
 export const DownloadUploadContentResponse = zod.unknown();
@@ -3055,10 +3089,13 @@ export const DownloadUploadContentResponse = zod.unknown();
  * from the hourly summaries (telemetry_rollups), cached for a minute.
  * @summary Telemetry size, growth, disk space, per-asset counts and summary-job status
  */
+export const getSystemStorageResponseLastRunOneIdRegExp = new RegExp(
+  "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+);
+
 export const GetSystemStorageResponse = zod.object({
   telemetry: zod.object({
     totalRows: zod
-      .number()
       .int()
       .describe(
         "The planner's estimate (pg_class.reltuples), not an exact count.",
@@ -3076,8 +3113,8 @@ export const GetSystemStorageResponse = zod.object({
     zod.object({
       assetId: zod.string(),
       assetName: zod.string(),
-      rows: zod.number().int(),
-      metrics: zod.number().int(),
+      rows: zod.int(),
+      metrics: zod.int(),
       oldest: zod.coerce.date(),
       newest: zod.coerce.date(),
       bytes: zod
@@ -3085,13 +3122,12 @@ export const GetSystemStorageResponse = zod.object({
         .nullish()
         .describe("Estimated share of the table on disk."),
       minDays: zod
-        .number()
         .int()
         .nullish()
         .describe(
           "Shortest retention among this asset's metrics; null when no policy applies.",
         ),
-      maxDays: zod.number().int().nullish(),
+      maxDays: zod.int().nullish(),
       keptForever: zod
         .boolean()
         .optional()
@@ -3108,7 +3144,7 @@ export const GetSystemStorageResponse = zod.object({
         .array(
           zod.object({
             day: zod.coerce.date(),
-            rows: zod.number().int(),
+            rows: zod.int(),
           }),
         )
         .describe("Readings that arrived per plant-time day, last 30 days."),
@@ -3131,7 +3167,7 @@ export const GetSystemStorageResponse = zod.object({
       path: zod.string(),
       totalBytes: zod.number(),
       freeBytes: zod.number(),
-      daysUntilFull: zod.number().int().nullable(),
+      daysUntilFull: zod.int().nullable(),
     })
     .nullish()
     .describe(
@@ -3144,7 +3180,7 @@ export const GetSystemStorageResponse = zod.object({
       startedFrom: zod.coerce.date().nullable(),
       progressPct: zod.number(),
       complete: zod.boolean(),
-      summaryRows: zod.number().int(),
+      summaryRows: zod.int(),
       oldestSummary: zod.coerce.date().nullable(),
       size: zod.string(),
       error: zod.string().nullable(),
@@ -3152,13 +3188,13 @@ export const GetSystemStorageResponse = zod.object({
     .optional(),
   retention: zod
     .object({
-      enabledPolicies: zod.number().int(),
+      enabledPolicies: zod.int(),
       operational: zod.array(
         zod.object({
           key: zod.string(),
           label: zod.string(),
           env: zod.string(),
-          days: zod.number().int().describe("0 means kept for ever."),
+          days: zod.int().describe("0 means kept for ever."),
         }),
       ),
     })
@@ -3166,15 +3202,15 @@ export const GetSystemStorageResponse = zod.object({
   lastRun: zod
     .union([
       zod.object({
-        id: zod.string().uuid(),
+        id: zod.string().regex(getSystemStorageResponseLastRunOneIdRegExp),
         trigger: zod.enum(["hourly", "manual"]),
         userId: zod.string().nullable(),
         username: zod.string().nullable(),
         startedAt: zod.coerce.date(),
         finishedAt: zod.coerce.date().nullable(),
-        telemetryDeleted: zod.number().int(),
+        telemetryDeleted: zod.int(),
         details: zod.array(zod.record(zod.string(), zod.unknown())),
-        operational: zod.record(zod.string(), zod.number().int()),
+        operational: zod.record(zod.string(), zod.int()),
         error: zod.string().nullable(),
       }),
       zod.null(),
@@ -3186,6 +3222,9 @@ export const GetSystemStorageResponse = zod.object({
 /**
  * @summary Bucketed telemetry aggregates (avg, min, max, sum, count)
  */
+export const getSystemAggregateQueryAssetIdRegExp = new RegExp(
+  "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+);
 export const getSystemAggregateQueryMetricMax = 200;
 
 export const getSystemAggregateQueryBucketDefault = `1h`;
@@ -3193,7 +3232,10 @@ export const getSystemAggregateQueryLimitDefault = 1000;
 export const getSystemAggregateQueryLimitMax = 10000;
 
 export const GetSystemAggregateQueryParams = zod.object({
-  assetId: zod.coerce.string().uuid().optional(),
+  assetId: zod.coerce
+    .string()
+    .regex(getSystemAggregateQueryAssetIdRegExp)
+    .optional(),
   metric: zod.coerce.string().max(getSystemAggregateQueryMetricMax).optional(),
   bucket: zod
     .enum(["1m", "5m", "15m", "30m", "1h", "6h", "12h", "1d", "1w"])
@@ -3210,7 +3252,7 @@ export const GetSystemAggregateQueryParams = zod.object({
 
 export const GetSystemAggregateResponse = zod.object({
   bucket: zod.string(),
-  count: zod.number().int(),
+  count: zod.int(),
   truncated: zod
     .boolean()
     .describe(
@@ -3229,7 +3271,7 @@ export const GetSystemAggregateResponse = zod.object({
         min_val: zod.string(),
         max_val: zod.string(),
         sum_val: zod.string(),
-        count: zod.number().int(),
+        count: zod.int(),
       })
       .describe(
         "One bucket, oldest first. Numeric aggregates arrive as strings (PostgreSQL numeric).",
@@ -3246,10 +3288,10 @@ export const ListRetentionPoliciesResponseItem = zod.object({
   name: zod.string(),
   assetId: zod.string().nullable().describe("Null applies to all assets."),
   metric: zod.string().nullable().describe("Null applies to all metrics."),
-  retentionDays: zod.number().int(),
+  retentionDays: zod.int(),
   enabled: zod.boolean(),
   lastPrunedAt: zod.coerce.date().nullish(),
-  rowsPruned: zod.number().int(),
+  rowsPruned: zod.int(),
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date(),
 });
@@ -3262,16 +3304,18 @@ export const ListRetentionPoliciesResponse = zod.array(
  */
 export const createRetentionPolicyBodyNameMax = 200;
 
+export const createRetentionPolicyBodyAssetIdRegExp = new RegExp(
+  "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+);
 export const createRetentionPolicyBodyMetricMax = 200;
 
 export const createRetentionPolicyBodyRetentionDaysMax = 3650;
 
 export const CreateRetentionPolicyBody = zod.object({
   name: zod.string().min(1).max(createRetentionPolicyBodyNameMax),
-  assetId: zod.string().uuid().nullish(),
+  assetId: zod.string().regex(createRetentionPolicyBodyAssetIdRegExp).nullish(),
   metric: zod.string().max(createRetentionPolicyBodyMetricMax).nullish(),
   retentionDays: zod
-    .number()
     .int()
     .min(1)
     .max(createRetentionPolicyBodyRetentionDaysMax),
@@ -3283,10 +3327,10 @@ export const CreateRetentionPolicyResponse = zod.object({
   name: zod.string(),
   assetId: zod.string().nullable().describe("Null applies to all assets."),
   metric: zod.string().nullable().describe("Null applies to all metrics."),
-  retentionDays: zod.number().int(),
+  retentionDays: zod.int(),
   enabled: zod.boolean(),
   lastPrunedAt: zod.coerce.date().nullish(),
-  rowsPruned: zod.number().int(),
+  rowsPruned: zod.int(),
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date(),
 });
@@ -3294,25 +3338,37 @@ export const CreateRetentionPolicyResponse = zod.object({
 /**
  * @summary Estimate what the next pruning run would delete with a draft change (read-only)
  */
+export const previewRetentionBodyPolicyIdRegExp = new RegExp(
+  "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+);
+export const previewRetentionBodyPolicyAssetIdRegExp = new RegExp(
+  "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+);
 export const previewRetentionBodyPolicyMetricMax = 200;
 
 export const previewRetentionBodyPolicyRetentionDaysMax = 3650;
 
+export const previewRetentionBodyRemoveIdRegExp = new RegExp(
+  "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+);
+
 export const PreviewRetentionBody = zod.object({
   policy: zod
     .object({
-      id: zod.string().uuid().optional(),
-      assetId: zod.string().uuid().nullish(),
+      id: zod.string().regex(previewRetentionBodyPolicyIdRegExp).optional(),
+      assetId: zod
+        .string()
+        .regex(previewRetentionBodyPolicyAssetIdRegExp)
+        .nullish(),
       metric: zod.string().max(previewRetentionBodyPolicyMetricMax).nullish(),
       retentionDays: zod
-        .number()
         .int()
         .min(1)
         .max(previewRetentionBodyPolicyRetentionDaysMax),
       enabled: zod.boolean().optional(),
     })
     .optional(),
-  removeId: zod.string().uuid().optional(),
+  removeId: zod.string().regex(previewRetentionBodyRemoveIdRegExp).optional(),
 });
 
 export const PreviewRetentionResponse = zod.object({
@@ -3320,19 +3376,18 @@ export const PreviewRetentionResponse = zod.object({
     .boolean()
     .describe("False when hourly summaries are switched off."),
   rows: zod
-    .number()
     .int()
     .describe("Readings the next run would delete with the change."),
   bytes: zod.number().nullable(),
   current: zod.object({
-    rows: zod.number().int(),
+    rows: zod.int(),
     bytes: zod.number().nullable(),
   }),
   byAsset: zod.array(
     zod.object({
       assetId: zod.string(),
       assetName: zod.string(),
-      rows: zod.number().int(),
+      rows: zod.int(),
     }),
   ),
   complete: zod
@@ -3348,16 +3403,20 @@ export const PreviewRetentionResponse = zod.object({
 /**
  * @summary Pruning history, newest first (last 50)
  */
+export const listRetentionRunsResponseIdRegExp = new RegExp(
+  "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+);
+
 export const ListRetentionRunsResponseItem = zod.object({
-  id: zod.string().uuid(),
+  id: zod.string().regex(listRetentionRunsResponseIdRegExp),
   trigger: zod.enum(["hourly", "manual"]),
   userId: zod.string().nullable(),
   username: zod.string().nullable(),
   startedAt: zod.coerce.date(),
   finishedAt: zod.coerce.date().nullable(),
-  telemetryDeleted: zod.number().int(),
+  telemetryDeleted: zod.int(),
   details: zod.array(zod.record(zod.string(), zod.unknown())),
-  operational: zod.record(zod.string(), zod.number().int()),
+  operational: zod.record(zod.string(), zod.int()),
   error: zod.string().nullable(),
 });
 export const ListRetentionRunsResponse = zod.array(
@@ -3427,8 +3486,12 @@ export const CheckSystemAlertsResponse = zod
 /**
  * @summary Acknowledge an active alert
  */
+export const acknowledgeSystemAlertPathIdRegExp = new RegExp(
+  "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+);
+
 export const AcknowledgeSystemAlertParams = zod.object({
-  id: zod.coerce.string().uuid(),
+  id: zod.coerce.string().regex(acknowledgeSystemAlertPathIdRegExp),
 });
 
 export const AcknowledgeSystemAlertResponse = zod
@@ -3497,8 +3560,12 @@ export const CreateDataHoldResponse = zod
 /**
  * @summary Release a legal hold (needs approve_data_changes; waits for a second administrator while approval is on)
  */
+export const releaseDataHoldPathIdRegExp = new RegExp(
+  "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+);
+
 export const ReleaseDataHoldParams = zod.object({
-  id: zod.coerce.string().uuid(),
+  id: zod.coerce.string().regex(releaseDataHoldPathIdRegExp),
 });
 
 export const ReleaseDataHoldResponse = zod
@@ -3519,8 +3586,12 @@ export const ListArchivesResponse = zod
 /**
  * @summary Download one archive file (gzip JSON lines)
  */
+export const downloadArchivePathIdRegExp = new RegExp(
+  "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+);
+
 export const DownloadArchiveParams = zod.object({
-  id: zod.coerce.string().uuid(),
+  id: zod.coerce.string().regex(downloadArchivePathIdRegExp),
 });
 
 export const DownloadArchiveResponse = zod
@@ -3532,8 +3603,12 @@ export const DownloadArchiveResponse = zod
 /**
  * @summary Re-insert an archived day and place a legal hold on it
  */
+export const restoreArchivePathIdRegExp = new RegExp(
+  "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+);
+
 export const RestoreArchiveParams = zod.object({
-  id: zod.coerce.string().uuid(),
+  id: zod.coerce.string().regex(restoreArchivePathIdRegExp),
 });
 
 export const RestoreArchiveResponse = zod
@@ -3584,8 +3659,12 @@ export const RequestRangeDeleteResponse = zod
 /**
  * @summary Approve and carry out a pending request (not your own; needs approve_data_changes). Removals and pruning runs start in the background (202).
  */
+export const approveDataChangePathIdRegExp = new RegExp(
+  "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+);
+
 export const ApproveDataChangeParams = zod.object({
-  id: zod.coerce.string().uuid(),
+  id: zod.coerce.string().regex(approveDataChangePathIdRegExp),
 });
 
 export const ApproveDataChangeBody = zod
@@ -3603,8 +3682,12 @@ export const ApproveDataChangeResponse = zod
 /**
  * @summary Reject (needs approve_data_changes) or withdraw (the requester) a pending request
  */
+export const rejectDataChangePathIdRegExp = new RegExp(
+  "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+);
+
 export const RejectDataChangeParams = zod.object({
-  id: zod.coerce.string().uuid(),
+  id: zod.coerce.string().regex(rejectDataChangePathIdRegExp),
 });
 
 export const RejectDataChangeBody = zod
@@ -3622,8 +3705,12 @@ export const RejectDataChangeResponse = zod
 /**
  * @summary One pruning run as CSV
  */
+export const getRetentionRunReportPathIdRegExp = new RegExp(
+  "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+);
+
 export const GetRetentionRunReportParams = zod.object({
-  id: zod.coerce.string().uuid(),
+  id: zod.coerce.string().regex(getRetentionRunReportPathIdRegExp),
 });
 
 export const GetRetentionRunReportResponse = zod
@@ -3637,18 +3724,17 @@ export const GetRetentionRunReportResponse = zod
  */
 export const RunRetentionPruningResponse = zod.object({
   policiesRun: zod
-    .number()
     .int()
     .describe(
       "Plan items run; policies with the same scope merge into one item.",
     ),
-  totalRowsDeleted: zod.number().int(),
+  totalRowsDeleted: zod.int(),
   details: zod.array(
     zod.object({
       policyId: zod.string(),
       mergedPolicyIds: zod.array(zod.string()),
       name: zod.string(),
-      rowsDeleted: zod.number().int(),
+      rowsDeleted: zod.int(),
       cutoff: zod.coerce.date(),
     }),
   ),
@@ -3657,22 +3743,28 @@ export const RunRetentionPruningResponse = zod.object({
 /**
  * @summary Update a retention policy (any subset of fields)
  */
+export const updateRetentionPolicyPathIdRegExp = new RegExp(
+  "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+);
+
 export const UpdateRetentionPolicyParams = zod.object({
-  id: zod.coerce.string().uuid(),
+  id: zod.coerce.string().regex(updateRetentionPolicyPathIdRegExp),
 });
 
 export const updateRetentionPolicyBodyNameMax = 200;
 
+export const updateRetentionPolicyBodyAssetIdRegExp = new RegExp(
+  "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+);
 export const updateRetentionPolicyBodyMetricMax = 200;
 
 export const updateRetentionPolicyBodyRetentionDaysMax = 3650;
 
 export const UpdateRetentionPolicyBody = zod.object({
   name: zod.string().min(1).max(updateRetentionPolicyBodyNameMax).optional(),
-  assetId: zod.string().uuid().nullish(),
+  assetId: zod.string().regex(updateRetentionPolicyBodyAssetIdRegExp).nullish(),
   metric: zod.string().max(updateRetentionPolicyBodyMetricMax).nullish(),
   retentionDays: zod
-    .number()
     .int()
     .min(1)
     .max(updateRetentionPolicyBodyRetentionDaysMax)
@@ -3685,10 +3777,10 @@ export const UpdateRetentionPolicyResponse = zod.object({
   name: zod.string(),
   assetId: zod.string().nullable().describe("Null applies to all assets."),
   metric: zod.string().nullable().describe("Null applies to all metrics."),
-  retentionDays: zod.number().int(),
+  retentionDays: zod.int(),
   enabled: zod.boolean(),
   lastPrunedAt: zod.coerce.date().nullish(),
-  rowsPruned: zod.number().int(),
+  rowsPruned: zod.int(),
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date(),
 });
@@ -3696,8 +3788,12 @@ export const UpdateRetentionPolicyResponse = zod.object({
 /**
  * @summary Delete a retention policy (needs approve_data_changes; 202 when it waits for approval)
  */
+export const deleteRetentionPolicyPathIdRegExp = new RegExp(
+  "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+);
+
 export const DeleteRetentionPolicyParams = zod.object({
-  id: zod.coerce.string().uuid(),
+  id: zod.coerce.string().regex(deleteRetentionPolicyPathIdRegExp),
 });
 
 export const DeleteRetentionPolicyResponse = zod
@@ -3717,11 +3813,11 @@ export const GetExportHealthResponse = zod.object({
   version: zod.string().optional(),
   stats: zod
     .object({
-      totalAssets: zod.number().int(),
-      activeAlarms: zod.number().int(),
-      connectedBrokers: zod.number().int(),
-      telemetryRateLast60s: zod.number().int(),
-      assetsInMaintenance: zod.number().int(),
+      totalAssets: zod.int(),
+      activeAlarms: zod.int(),
+      connectedBrokers: zod.int(),
+      telemetryRateLast60s: zod.int(),
+      assetsInMaintenance: zod.int(),
     })
     .optional(),
 });
@@ -3743,9 +3839,8 @@ export const ExportAssetsQueryParams = zod.object({
 
 export const ExportAssetsResponse = zod
   .object({
-    count: zod.number().int(),
+    count: zod.int(),
     limit: zod
-      .number()
       .int()
       .optional()
       .describe("Present on telemetry, alarms and alarm-history exports."),
@@ -3757,13 +3852,19 @@ export const ExportAssetsResponse = zod
 /**
  * @summary Telemetry rows, newest first (scope read:telemetry)
  */
+export const exportTelemetryQueryAssetIdRegExp = new RegExp(
+  "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+);
 export const exportTelemetryQueryMetricMax = 200;
 
 export const exportTelemetryQueryLimitDefault = 500;
 export const exportTelemetryQueryLimitMax = 5000;
 
 export const ExportTelemetryQueryParams = zod.object({
-  assetId: zod.coerce.string().uuid().optional(),
+  assetId: zod.coerce
+    .string()
+    .regex(exportTelemetryQueryAssetIdRegExp)
+    .optional(),
   metric: zod.coerce.string().max(exportTelemetryQueryMetricMax).optional(),
   from: zod.coerce.date().optional(),
   to: zod.coerce.date().optional(),
@@ -3781,9 +3882,8 @@ export const ExportTelemetryQueryParams = zod.object({
 
 export const ExportTelemetryResponse = zod
   .object({
-    count: zod.number().int(),
+    count: zod.int(),
     limit: zod
-      .number()
       .int()
       .optional()
       .describe("Present on telemetry, alarms and alarm-history exports."),
@@ -3815,9 +3915,8 @@ export const ExportAlarmsQueryParams = zod.object({
 
 export const ExportAlarmsResponse = zod
   .object({
-    count: zod.number().int(),
+    count: zod.int(),
     limit: zod
-      .number()
       .int()
       .optional()
       .describe("Present on telemetry, alarms and alarm-history exports."),
@@ -3829,11 +3928,17 @@ export const ExportAlarmsResponse = zod
 /**
  * @summary Alarm history, newest first (scope read:alarm-history)
  */
+export const exportAlarmHistoryQueryAssetIdRegExp = new RegExp(
+  "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+);
 export const exportAlarmHistoryQueryLimitDefault = 200;
 export const exportAlarmHistoryQueryLimitMax = 5000;
 
 export const ExportAlarmHistoryQueryParams = zod.object({
-  assetId: zod.coerce.string().uuid().optional(),
+  assetId: zod.coerce
+    .string()
+    .regex(exportAlarmHistoryQueryAssetIdRegExp)
+    .optional(),
   from: zod.coerce.date().optional(),
   to: zod.coerce.date().optional(),
   limit: zod.coerce
@@ -3850,9 +3955,8 @@ export const ExportAlarmHistoryQueryParams = zod.object({
 
 export const ExportAlarmHistoryResponse = zod
   .object({
-    count: zod.number().int(),
+    count: zod.int(),
     limit: zod
-      .number()
       .int()
       .optional()
       .describe("Present on telemetry, alarms and alarm-history exports."),
@@ -3918,7 +4022,7 @@ export const RotateApiClientSecretResponse = zod.object({
     .describe(
       "Null except in the create and rotate-secret responses, which show the secret once.",
     ),
-  totalRequests: zod.number().int().optional(),
+  totalRequests: zod.int().optional(),
   lastUsedAt: zod.coerce.date().nullish(),
   tags: zod.array(zod.string()),
   scopes: zod.array(zod.string()),
@@ -3973,7 +4077,7 @@ export const RegenerateApiClientIngestUrlResponse = zod.object({
     .describe(
       "Null except in the create and rotate-secret responses, which show the secret once.",
     ),
-  totalRequests: zod.number().int().optional(),
+  totalRequests: zod.int().optional(),
   lastUsedAt: zod.coerce.date().nullish(),
   tags: zod.array(zod.string()),
   scopes: zod.array(zod.string()),
@@ -4028,7 +4132,7 @@ export const RevokeApiClientResponse = zod.object({
     .describe(
       "Null except in the create and rotate-secret responses, which show the secret once.",
     ),
-  totalRequests: zod.number().int().optional(),
+  totalRequests: zod.int().optional(),
   lastUsedAt: zod.coerce.date().nullish(),
   tags: zod.array(zod.string()),
   scopes: zod.array(zod.string()),
@@ -4083,7 +4187,7 @@ export const RestoreApiClientResponse = zod.object({
     .describe(
       "Null except in the create and rotate-secret responses, which show the secret once.",
     ),
-  totalRequests: zod.number().int().optional(),
+  totalRequests: zod.int().optional(),
   lastUsedAt: zod.coerce.date().nullish(),
   tags: zod.array(zod.string()),
   scopes: zod.array(zod.string()),
@@ -4112,7 +4216,7 @@ export const ListDestinationsResponseItem = zod
     enabled: zod.boolean(),
     lastSentAt: zod.coerce.date().nullish(),
     lastError: zod.string().nullish(),
-    sendCount: zod.number().int(),
+    sendCount: zod.int(),
     hasToken: zod.boolean(),
     hasSecretKey: zod.boolean(),
     hasBasicPass: zod.boolean(),
@@ -4195,7 +4299,7 @@ export const CreateDestinationResponse = zod
     enabled: zod.boolean(),
     lastSentAt: zod.coerce.date().nullish(),
     lastError: zod.string().nullish(),
-    sendCount: zod.number().int(),
+    sendCount: zod.int(),
     hasToken: zod.boolean(),
     hasSecretKey: zod.boolean(),
     hasBasicPass: zod.boolean(),
@@ -4209,8 +4313,12 @@ export const CreateDestinationResponse = zod
 /**
  * @summary Update a destination (any subset of fields; an empty secret clears it)
  */
+export const updateDestinationPathIdRegExp = new RegExp(
+  "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+);
+
 export const UpdateDestinationParams = zod.object({
-  id: zod.coerce.string().uuid(),
+  id: zod.coerce.string().regex(updateDestinationPathIdRegExp),
 });
 
 export const updateDestinationBodyNameMax = 200;
@@ -4279,7 +4387,7 @@ export const UpdateDestinationResponse = zod
     enabled: zod.boolean(),
     lastSentAt: zod.coerce.date().nullish(),
     lastError: zod.string().nullish(),
-    sendCount: zod.number().int(),
+    sendCount: zod.int(),
     hasToken: zod.boolean(),
     hasSecretKey: zod.boolean(),
     hasBasicPass: zod.boolean(),
@@ -4293,8 +4401,12 @@ export const UpdateDestinationResponse = zod
 /**
  * @summary Delete a destination
  */
+export const deleteDestinationPathIdRegExp = new RegExp(
+  "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+);
+
 export const DeleteDestinationParams = zod.object({
-  id: zod.coerce.string().uuid(),
+  id: zod.coerce.string().regex(deleteDestinationPathIdRegExp),
 });
 
 export const DeleteDestinationResponse = zod.void();
@@ -4310,7 +4422,6 @@ export const TestDestinationResponse = zod
   .object({
     success: zod.boolean(),
     statusCode: zod
-      .number()
       .int()
       .optional()
       .describe("HTTP status the receiver answered with."),
@@ -4331,6 +4442,10 @@ export const askAiAssistantBodyQuestionMax = 2000;
 
 export const askAiAssistantBodyTimeZoneMax = 64;
 
+export const askAiAssistantBodyScopeAssetIdRegExp = new RegExp(
+  "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+);
+
 export const AskAiAssistantBody = zod.object({
   question: zod.string().max(askAiAssistantBodyQuestionMax),
   range: zod
@@ -4346,7 +4461,7 @@ export const AskAiAssistantBody = zod.object({
     .describe("IANA time zone for presenting times; ignored when invalid."),
   scopeAssetId: zod
     .string()
-    .uuid()
+    .regex(askAiAssistantBodyScopeAssetIdRegExp)
     .nullish()
     .describe(
       "Project or asset the question is about. The assistant then uses only\nthis asset and the assets beneath it: tools taking an asset id refuse\nothers, and search, list, alarm and summary tools are filtered.\nOmitted or null means all assets.\n",
@@ -4403,10 +4518,14 @@ export const AskAiAssistantResponse = zod.object({
  * `unverifiedNumbers`. Rate limited per user.
  * @summary Generate an AI report for an asset, a project or all visible assets
  */
+export const generateAiReportBodyAssetIdRegExp = new RegExp(
+  "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+);
+
 export const GenerateAiReportBody = zod.object({
   assetId: zod
     .string()
-    .uuid()
+    .regex(generateAiReportBodyAssetIdRegExp)
     .nullish()
     .describe(
       "Asset or project (root asset); its whole subtree is reported. Omit for all assets the caller may see.",
@@ -4440,11 +4559,10 @@ export const GenerateAiReportResponse = zod.object({
     ),
   narrative: zod.union([
     zod
-      .object({
+      .looseObject({
         level: zod.enum(["executive", "manager", "engineer"]),
         summary: zod.string(),
       })
-      .passthrough()
       .describe(
         "Shape depends on `level`. executive: headline, summary, risks[{title,\nwhat, impact, cause, decision}] (at most 3), improvements[], decisions[],\noutlook. manager: summary, problemAreas[{area, issue, impact, cause}],\nresponse, patterns[], priorities[{action, owner}]. engineer: summary,\ndiagnoses[{asset, observation, correlated, rootCause, confidence\n(low|medium|high)}], alarmSequence[], dataIssues[], actions[{action,\nurgency (immediate|this_week|planned)}].\n",
       ),
@@ -4466,8 +4584,8 @@ export const GenerateAiReportResponse = zod.object({
           summary: zod.string(),
         }),
       ),
-      toolCalls: zod.number().int(),
-      durationMs: zod.number().int(),
+      toolCalls: zod.int(),
+      durationMs: zod.int(),
     })
     .describe(
       "How the narrative was written. investigated: the model looked up the database with read-only tools; single: written from the figures alone after the investigation failed; none: no narrative.",
@@ -4568,41 +4686,39 @@ export const ListActivityLogQueryParams = zod.object({
 
 export const ListActivityLogResponse = zod.object({
   entries: zod.array(
-    zod
-      .object({
-        id: zod.string(),
-        action: zod.string(),
-        category: zod.string(),
-        actorName: zod.string().optional(),
-        actorRole: zod.string().optional(),
-        actorUsername: zod.string().nullish(),
-        targetId: zod.string().nullish(),
-        targetName: zod.string().nullish(),
-        detail: zod.string().nullish(),
-        timestamp: zod.coerce.date(),
-        source: zod.enum(["audit", "security"]).optional(),
-        actorUserId: zod.string().nullish(),
-        changes: zod
-          .array(
-            zod.object({
-              field: zod.string(),
-              from: zod.unknown().optional(),
-              to: zod.unknown().optional(),
-            }),
-          )
-          .nullish(),
-        outcome: zod.enum(["success", "failure", "denied"]).optional(),
-        ip: zod.string().nullish(),
-        userAgent: zod.string().nullish(),
-        correlationId: zod.string().nullish(),
-        assetId: zod.string().nullish(),
-        projectId: zod.string().nullish(),
-        hash: zod.string().nullish(),
-        seq: zod.number().int().nullish(),
-      })
-      .passthrough(),
+    zod.looseObject({
+      id: zod.string(),
+      action: zod.string(),
+      category: zod.string(),
+      actorName: zod.string().optional(),
+      actorRole: zod.string().optional(),
+      actorUsername: zod.string().nullish(),
+      targetId: zod.string().nullish(),
+      targetName: zod.string().nullish(),
+      detail: zod.string().nullish(),
+      timestamp: zod.coerce.date(),
+      source: zod.enum(["audit", "security"]).optional(),
+      actorUserId: zod.string().nullish(),
+      changes: zod
+        .array(
+          zod.object({
+            field: zod.string(),
+            from: zod.unknown().optional(),
+            to: zod.unknown().optional(),
+          }),
+        )
+        .nullish(),
+      outcome: zod.enum(["success", "failure", "denied"]).optional(),
+      ip: zod.string().nullish(),
+      userAgent: zod.string().nullish(),
+      correlationId: zod.string().nullish(),
+      assetId: zod.string().nullish(),
+      projectId: zod.string().nullish(),
+      hash: zod.string().nullish(),
+      seq: zod.int().nullish(),
+    }),
   ),
-  total: zod.number().int(),
+  total: zod.int(),
   totalCapped: zod
     .boolean()
     .optional()
@@ -4682,19 +4798,19 @@ export const GetActivityLogSummaryResponse = zod.object({
   perDay: zod.array(
     zod.object({
       day: zod.string().optional(),
-      count: zod.number().int().optional(),
+      count: zod.int().optional(),
     }),
   ),
   topActors: zod.array(
     zod.object({
       name: zod.string().optional(),
-      count: zod.number().int().optional(),
+      count: zod.int().optional(),
     }),
   ),
   sensitive: zod.record(zod.string(), zod.unknown()),
   failures: zod.object({
-    audit: zod.number().int().optional(),
-    security: zod.number().int().optional(),
+    audit: zod.int().optional(),
+    security: zod.int().optional(),
   }),
 });
 
@@ -4705,13 +4821,13 @@ export const GetActivityLogSummaryResponse = zod.object({
  */
 export const VerifyActivityLogResponse = zod.object({
   ok: zod.boolean(),
-  checked: zod.number().int(),
+  checked: zod.int(),
   verifiedAt: zod.coerce.date(),
   checkpoint: zod.record(zod.string(), zod.unknown()).nullish(),
   broken: zod
     .object({
       id: zod.string().optional(),
-      seq: zod.number().int().optional(),
+      seq: zod.int().optional(),
       timestamp: zod.string().optional(),
       reason: zod
         .enum([
@@ -4734,8 +4850,8 @@ export const VerifyActivityLogResponse = zod.object({
     .describe(
       "Only entries after the last signed check (fromSeq) were walked; a full walk runs at least weekly or with ?full=true",
     ),
-  fromSeq: zod.number().int().optional(),
-  lastSeq: zod.number().int().optional(),
+  fromSeq: zod.int().optional(),
+  lastSeq: zod.int().optional(),
   keyed: zod
     .boolean()
     .optional()
@@ -4747,26 +4863,24 @@ export const VerifyActivityLogResponse = zod.object({
 /**
  * @summary Active sensitive-action alerts (Security Settings module)
  */
-export const ListAuditAlertsResponseItem = zod
-  .object({
-    id: zod.string(),
-    rule: zod.string(),
-    severity: zod.string(),
-    title: zod.string(),
-    message: zod.string(),
-    entryId: zod.string().nullish(),
-    status: zod.string(),
-    raisedAt: zod.coerce.date(),
-    acknowledgedBy: zod.string().nullish(),
-    acknowledgedAt: zod.coerce.date().nullish(),
-    raisedBySelf: zod
-      .boolean()
-      .optional()
-      .describe(
-        "Raised by the caller's own action; another administrator must acknowledge it (403 `own_action`).",
-      ),
-  })
-  .passthrough();
+export const ListAuditAlertsResponseItem = zod.looseObject({
+  id: zod.string(),
+  rule: zod.string(),
+  severity: zod.string(),
+  title: zod.string(),
+  message: zod.string(),
+  entryId: zod.string().nullish(),
+  status: zod.string(),
+  raisedAt: zod.coerce.date(),
+  acknowledgedBy: zod.string().nullish(),
+  acknowledgedAt: zod.coerce.date().nullish(),
+  raisedBySelf: zod
+    .boolean()
+    .optional()
+    .describe(
+      "Raised by the caller's own action; another administrator must acknowledge it (403 `own_action`).",
+    ),
+});
 export const ListAuditAlertsResponse = zod.array(ListAuditAlertsResponseItem);
 
 /**
@@ -4776,70 +4890,66 @@ export const AcknowledgeAuditAlertParams = zod.object({
   id: zod.coerce.string(),
 });
 
-export const AcknowledgeAuditAlertResponse = zod
-  .object({
-    id: zod.string(),
-    rule: zod.string(),
-    severity: zod.string(),
-    title: zod.string(),
-    message: zod.string(),
-    entryId: zod.string().nullish(),
-    status: zod.string(),
-    raisedAt: zod.coerce.date(),
-    acknowledgedBy: zod.string().nullish(),
-    acknowledgedAt: zod.coerce.date().nullish(),
-    raisedBySelf: zod
-      .boolean()
-      .optional()
-      .describe(
-        "Raised by the caller's own action; another administrator must acknowledge it (403 `own_action`).",
-      ),
-  })
-  .passthrough();
+export const AcknowledgeAuditAlertResponse = zod.looseObject({
+  id: zod.string(),
+  rule: zod.string(),
+  severity: zod.string(),
+  title: zod.string(),
+  message: zod.string(),
+  entryId: zod.string().nullish(),
+  status: zod.string(),
+  raisedAt: zod.coerce.date(),
+  acknowledgedBy: zod.string().nullish(),
+  acknowledgedAt: zod.coerce.date().nullish(),
+  raisedBySelf: zod
+    .boolean()
+    .optional()
+    .describe(
+      "Raised by the caller's own action; another administrator must acknowledge it (403 `own_action`).",
+    ),
+});
 
 /**
  * @summary Audit retention (minimum 365 days) and which sensitive-action alerts are on
  */
-export const GetAuditSettingsResponse = zod
-  .object({
-    retentionDays: zod.number().int().nullish(),
-    effectiveRetentionDays: zod.number().int().optional(),
-    defaultRetentionDays: zod.number().int().optional(),
-    minimumRetentionDays: zod.number().int().optional(),
-    alerts: zod
-      .array(
-        zod.object({
-          key: zod.string().optional(),
-          title: zod.string().optional(),
-          severity: zod.string().optional(),
-          enabled: zod.boolean().optional(),
-          pendingDisable: zod
-            .object({
-              requestedBy: zod.string().optional(),
-              requestedAt: zod.coerce.date().optional(),
-            })
-            .nullish()
-            .describe(
-              "A request to switch this alert off, waiting for a second administrator.",
-            ),
-        }),
-      )
-      .optional(),
-    secondAdminRequired: zod
-      .boolean()
-      .optional()
-      .describe(
-        "Switching an alert off needs two administrators (AUDIT_ALERTS_SECOND_ADMIN).",
-      ),
-    waitingForSecondAdmin: zod
-      .array(zod.string())
-      .optional()
-      .describe(
-        "In a PUT response, the alerts this request asked to switch off that now wait for a second administrator.",
-      ),
-    checkpoint: zod.record(zod.string(), zod.unknown()).nullish(),
-  })
-  .passthrough();
+export const GetAuditSettingsResponse = zod.looseObject({
+  retentionDays: zod.int().nullish(),
+  effectiveRetentionDays: zod.int().optional(),
+  defaultRetentionDays: zod.int().optional(),
+  minimumRetentionDays: zod.int().optional(),
+  alerts: zod
+    .array(
+      zod.object({
+        key: zod.string().optional(),
+        title: zod.string().optional(),
+        severity: zod.string().optional(),
+        enabled: zod.boolean().optional(),
+        pendingDisable: zod
+          .object({
+            requestedBy: zod.string().optional(),
+            requestedAt: zod.coerce.date().optional(),
+          })
+          .nullish()
+          .describe(
+            "A request to switch this alert off, waiting for a second administrator.",
+          ),
+      }),
+    )
+    .optional(),
+  secondAdminRequired: zod
+    .boolean()
+    .optional()
+    .describe(
+      "Switching an alert off needs two administrators (AUDIT_ALERTS_SECOND_ADMIN).",
+    ),
+  waitingForSecondAdmin: zod
+    .array(zod.string())
+    .optional()
+    .describe(
+      "In a PUT response, the alerts this request asked to switch off that now wait for a second administrator.",
+    ),
+  checkpoint: zod.record(zod.string(), zod.unknown()).nullish(),
+});
 
 /**
  * @summary Change audit retention or switch sensitive-action alerts on or off
@@ -4849,7 +4959,6 @@ export const updateAuditSettingsBodyRetentionDaysMax = 36500;
 
 export const UpdateAuditSettingsBody = zod.object({
   retentionDays: zod
-    .number()
     .int()
     .min(updateAuditSettingsBodyRetentionDaysMin)
     .max(updateAuditSettingsBodyRetentionDaysMax)
@@ -4876,7 +4985,6 @@ export const TestAlarmRuleWebhookResponse = zod
   .object({
     success: zod.boolean(),
     statusCode: zod
-      .number()
       .int()
       .optional()
       .describe("HTTP status the receiver answered with."),
@@ -4935,8 +5043,8 @@ export const SetAssetMaintenanceModeResponse = zod.object({
   templateName: zod.string().nullish(),
   description: zod.string().nullish(),
   tags: zod.array(zod.string()),
-  childCount: zod.number().int(),
-  attributeCount: zod.number().int(),
+  childCount: zod.int(),
+  attributeCount: zod.int(),
   createdAt: zod.coerce.date(),
   updatedAt: zod.coerce.date(),
 });
@@ -4963,7 +5071,7 @@ export const BulkCreateAssetAttributesBody = zod.object({
           value: zod.unknown().optional(),
           tagName: zod.string().optional(),
           uom: zod.string().optional(),
-          decimalPlaces: zod.number().int().optional(),
+          decimalPlaces: zod.int().optional(),
         })
         .describe(
           "Unknown `type` falls back to static, unknown `dataType` to text. Items without a name are skipped.",
@@ -4973,8 +5081,8 @@ export const BulkCreateAssetAttributesBody = zod.object({
 });
 
 export const BulkCreateAssetAttributesResponse = zod.object({
-  created: zod.number().int(),
-  skipped: zod.number().int(),
+  created: zod.int(),
+  skipped: zod.int(),
   skippedItems: zod.array(zod.string()),
 });
 
@@ -4991,8 +5099,8 @@ export const ApplyAssetTemplateBody = zod.object({
 });
 
 export const ApplyAssetTemplateResponse = zod.object({
-  created: zod.number().int(),
-  skipped: zod.number().int(),
+  created: zod.int(),
+  skipped: zod.int(),
   skippedItems: zod.array(zod.string()),
   templateName: zod.string().optional(),
   deviceIdBound: zod
@@ -5024,17 +5132,16 @@ export const GetAssetHealthResponse = zod.object({
   assetName: zod.string(),
   health: zod.enum(["ok", "stale", "alarm"]),
   freshnessPct: zod
-    .number()
     .int()
     .nullable()
     .describe(
       "Share of dynamic attributes updated in the last hour; null when there are none.",
     ),
-  activeAlarms: zod.number().int(),
+  activeAlarms: zod.int(),
   lastSeen: zod.coerce.date().nullable(),
-  totalAttributes: zod.number().int(),
-  dynamicAttributes: zod.number().int(),
-  freshAttributes: zod.number().int(),
+  totalAttributes: zod.int(),
+  dynamicAttributes: zod.int(),
+  freshAttributes: zod.int(),
   keyMetrics: zod.array(
     zod.object({
       name: zod.string(),
@@ -5050,10 +5157,15 @@ export const GetAssetHealthResponse = zod.object({
  * Newest stored reading, active alarm count, expected reporting interval and latest live attributes of each asset named in `ids`. A read sent as POST to carry the id list. Ids outside the caller's projects are refused (403); unknown ids are left out of the answer.
  * @summary Live Feed data for many assets in one request
  */
+export const getAssetsLiveSummaryBodyIdsItemRegExp = new RegExp(
+  "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$",
+);
 export const getAssetsLiveSummaryBodyIdsMax = 500;
 
 export const GetAssetsLiveSummaryBody = zod.object({
-  ids: zod.array(zod.string().uuid()).max(getAssetsLiveSummaryBodyIdsMax),
+  ids: zod
+    .array(zod.string().regex(getAssetsLiveSummaryBodyIdsItemRegExp))
+    .max(getAssetsLiveSummaryBodyIdsMax),
 });
 
 export const GetAssetsLiveSummaryResponseItem = zod.object({
@@ -5064,7 +5176,7 @@ export const GetAssetsLiveSummaryResponseItem = zod.object({
     .describe(
       "Newest stored reading of the asset; null when it never reported.",
     ),
-  activeAlarms: zod.number().int(),
+  activeAlarms: zod.int(),
   expectedInterval: zod
     .unknown()
     .describe(
@@ -5078,7 +5190,7 @@ export const GetAssetsLiveSummaryResponseItem = zod.object({
       sourceMetric: zod.string().nullable(),
       value: zod.unknown(),
       uom: zod.string().nullable(),
-      decimalPlaces: zod.number().int().nullable(),
+      decimalPlaces: zod.int().nullable(),
       timestamp: zod.coerce.date().nullable(),
     }),
   ),
@@ -5093,7 +5205,7 @@ export const GetAssetsLiveSummaryResponse = zod.array(
 export const ListSeenDevicesResponseItem = zod.object({
   deviceId: zod.string(),
   lastSeen: zod.coerce.date(),
-  count: zod.number().int(),
+  count: zod.int(),
   matched: zod
     .boolean()
     .describe("The id has matched an existing asset at least once."),
@@ -5105,7 +5217,7 @@ export const ListSeenDevicesResponse = zod.array(ListSeenDevicesResponseItem);
  */
 export const PruneSeenDevicesResponse = zod.object({
   ok: zod.boolean(),
-  removed: zod.number().int(),
+  removed: zod.int(),
 });
 
 /**
@@ -5151,7 +5263,7 @@ export const IngestClientPayloadBody = zod.object({
 
 export const IngestClientPayloadResponse = zod.object({
   success: zod.boolean(),
-  recordsWritten: zod.number().int(),
+  recordsWritten: zod.int(),
   assetId: zod.string().nullish(),
   message: zod.string(),
 });
@@ -5184,7 +5296,7 @@ export const ValidateClientPayloadResponse = zod.object({
     .string()
     .describe("flat | nested-data | nested-metrics | unknown"),
   extractedMetrics: zod.record(zod.string(), zod.unknown()),
-  metricCount: zod.number().int(),
+  metricCount: zod.int(),
   warnings: zod.array(zod.string()),
 });
 
@@ -5208,9 +5320,9 @@ export const IngestClientBatchBody = zod.array(IngestClientBatchBodyItem);
 
 export const IngestClientBatchResponse = zod.object({
   success: zod.boolean(),
-  totalRecords: zod.number().int(),
-  successCount: zod.number().int(),
-  failureCount: zod.number().int(),
+  totalRecords: zod.int(),
+  successCount: zod.int(),
+  failureCount: zod.int(),
 });
 
 /**
@@ -5232,7 +5344,7 @@ export const IngestTokenPayloadBody = zod.object({
 
 export const IngestTokenPayloadResponse = zod.object({
   success: zod.boolean(),
-  recordsWritten: zod.number().int(),
+  recordsWritten: zod.int(),
   assetId: zod.string().nullish(),
   message: zod.string(),
 });
@@ -5265,7 +5377,7 @@ export const ValidateTokenPayloadResponse = zod.object({
     .string()
     .describe("flat | nested-data | nested-metrics | unknown"),
   extractedMetrics: zod.record(zod.string(), zod.unknown()),
-  metricCount: zod.number().int(),
+  metricCount: zod.int(),
   warnings: zod.array(zod.string()),
 });
 
@@ -5289,9 +5401,9 @@ export const IngestTokenBatchBody = zod.array(IngestTokenBatchBodyItem);
 
 export const IngestTokenBatchResponse = zod.object({
   success: zod.boolean(),
-  totalRecords: zod.number().int(),
-  successCount: zod.number().int(),
-  failureCount: zod.number().int(),
+  totalRecords: zod.int(),
+  successCount: zod.int(),
+  failureCount: zod.int(),
 });
 
 /**
@@ -5359,10 +5471,9 @@ export const UpdateUserAccessParams = zod.object({
 });
 
 export const UpdateUserAccessBody = zod
-  .object({
+  .looseObject({
     overrides: zod.record(zod.string(), zod.unknown()).optional(),
   })
-  .passthrough()
   .describe(
     "The overrides object, either under `overrides` or as the whole body.",
   );
@@ -5437,7 +5548,6 @@ export const issueUserTemporaryPasswordBodyExpiresInMinutesMax = 1440;
 
 export const IssueUserTemporaryPasswordBody = zod.object({
   expiresInMinutes: zod
-    .number()
     .int()
     .min(1)
     .max(issueUserTemporaryPasswordBodyExpiresInMinutesMax)
@@ -5452,7 +5562,7 @@ export const IssueUserTemporaryPasswordResponse = zod.object({
   username: zod.string(),
   email: zod.string(),
   expiresAt: zod.coerce.date(),
-  expiresInMinutes: zod.number().int(),
+  expiresInMinutes: zod.int(),
   mustChangePassword: zod.boolean(),
 });
 
@@ -5490,7 +5600,7 @@ export const UnlockUserResponse = zod.object({
   activatedAt: zod.coerce.date().nullish(),
   passwordUpdatedAt: zod.coerce.date().nullish(),
   mustChangePassword: zod.boolean().optional(),
-  failedLoginAttempts: zod.number().int().optional(),
+  failedLoginAttempts: zod.int().optional(),
   lockedUntil: zod.coerce.date().nullish(),
   isLocked: zod
     .boolean()
@@ -5529,11 +5639,7 @@ export const UpdateUserSessionLimitParams = zod.object({
 export const updateUserSessionLimitBodyMaxSessionsMax = 20;
 
 export const UpdateUserSessionLimitBody = zod.object({
-  maxSessions: zod
-    .number()
-    .int()
-    .min(1)
-    .max(updateUserSessionLimitBodyMaxSessionsMax),
+  maxSessions: zod.int().min(1).max(updateUserSessionLimitBodyMaxSessionsMax),
 });
 
 export const UpdateUserSessionLimitResponse = zod.object({
@@ -5563,7 +5669,7 @@ export const UpdateUserSessionLimitResponse = zod.object({
   activatedAt: zod.coerce.date().nullish(),
   passwordUpdatedAt: zod.coerce.date().nullish(),
   mustChangePassword: zod.boolean().optional(),
-  failedLoginAttempts: zod.number().int().optional(),
+  failedLoginAttempts: zod.int().optional(),
   lockedUntil: zod.coerce.date().nullish(),
   isLocked: zod
     .boolean()
@@ -5626,7 +5732,7 @@ export const RequireUserPasswordChangeResponse = zod.object({
   activatedAt: zod.coerce.date().nullish(),
   passwordUpdatedAt: zod.coerce.date().nullish(),
   mustChangePassword: zod.boolean().optional(),
-  failedLoginAttempts: zod.number().int().optional(),
+  failedLoginAttempts: zod.int().optional(),
   lockedUntil: zod.coerce.date().nullish(),
   isLocked: zod
     .boolean()

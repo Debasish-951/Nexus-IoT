@@ -67,8 +67,8 @@ export function text(max: number, min = 0) {
   return z.string()
     .transform((s) => s.normalize("NFC").trim())
     .superRefine((s, ctx) => {
-      if (s.length < min) ctx.addIssue({ code: z.ZodIssueCode.too_small, minimum: min, type: "string", inclusive: true, message: min === 1 ? "must not be empty" : `must be at least ${min} characters` });
-      if (s.length > max) ctx.addIssue({ code: z.ZodIssueCode.too_big, maximum: max, type: "string", inclusive: true, message: `must be at most ${max} characters` });
+      if (s.length < min) ctx.addIssue({ code: "too_small", minimum: min, origin: "string", inclusive: true, message: min === 1 ? "must not be empty" : `must be at least ${min} characters` });
+      if (s.length > max) ctx.addIssue({ code: "too_big", maximum: max, origin: "string", inclusive: true, message: `must be at most ${max} characters` });
       rejectDangerousChars(s, ctx);
     });
 }
@@ -96,8 +96,15 @@ export const identifier = () =>
         .regex(/^[A-Za-z0-9._:/-]+$/, "may contain only letters, digits and . _ : / -"),
     );
 
-/** A UUID, as produced by the database. */
-export const uuid = () => z.string().uuid("must be a valid UUID");
+/**
+ * A UUID, as produced by the database.
+ *
+ * Any 8-4-4-4-12 hex string, as zod 3's `.uuid()` accepted. zod 4's `z.uuid()`
+ * also enforces the RFC 9562 version and variant bits, which would refuse ids the
+ * platform already holds (the seed's fixed ids such as
+ * 00000011-0000-0000-0000-000000000001); `z.guid()` keeps the old rule.
+ */
+export const uuid = () => z.guid("must be a valid UUID");
 
 /**
  * A client-minted node id (`vn-<uuid>`) or a UUID.
@@ -182,6 +189,28 @@ export const oneOf = <T extends readonly [string, ...string[]]>(values: T) => z.
 /** Bounded array of bounded things. */
 export const boundedArray = <T extends z.ZodTypeAny>(item: T, max: number) =>
   z.array(item).max(max, `must contain at most ${max} items`);
+
+type WithoutDefault<T> = T extends z.ZodDefault<infer I> ? I : T extends z.ZodPrefault<infer I> ? I : T;
+
+/**
+ * `schema.partial()` for a partial-update body, without the fields' defaults.
+ *
+ * zod 4 applies a field's `.default()` even when the field is wrapped in
+ * `.optional()` (zod 3 did not), so `Create.partial()` would fill every field
+ * the client left out with its default, and the update would overwrite stored
+ * values the client never mentioned. Each field's default is removed first, so
+ * an omitted field stays absent as it did under zod 3.
+ */
+export function partialUpdate<T extends z.ZodRawShape>(
+  schema: z.ZodObject<T>,
+): z.ZodObject<{ [K in keyof T]: z.ZodOptional<WithoutDefault<T[K]>> }> {
+  const shape: Record<string, z.ZodType> = {};
+  for (const [key, field] of Object.entries(schema.shape) as [string, z.ZodType][]) {
+    const inner = field instanceof z.ZodDefault || field instanceof z.ZodPrefault ? (field.unwrap() as z.ZodType) : field;
+    shape[key] = inner.optional();
+  }
+  return schema.extend(shape) as never;
+}
 
 // ── Structural limits for free-form JSON ─────────────────────────────────────
 

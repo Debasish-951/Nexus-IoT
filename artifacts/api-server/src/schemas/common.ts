@@ -24,8 +24,8 @@ export const formatEnum = z.enum(["json", "csv"]).optional();
 
 /** Shared list-window controls. */
 export const paginationQuery = {
-  limit: v.boundedInt(1, 500, 100).optional(),
-  offset: v.boundedInt(0, 1_000_000, 0).optional(),
+  limit: v.boundedInt(1, 500).optional(),
+  offset: v.boundedInt(0, 1_000_000).optional(),
 };
 
 /** Shared time window. */
@@ -42,7 +42,7 @@ export const TelemetryExportQuery = z.object({
   assetId: v.uuid().optional(),
   metric: v.text(200).optional(),
   ...rangeQuery,
-  limit: v.boundedInt(1, 5000, 500).optional(),
+  limit: v.boundedInt(1, 5000).optional(),
   format: formatEnum,
 });
 
@@ -53,14 +53,14 @@ export const AlarmExportQuery = z.object({
   status: z.enum(["active", "acknowledged", "cleared"]).optional(),
   severity: z.enum(["critical", "high", "medium", "low", "info"]).optional(),
   // Newest first. The export used to return every alarm ever raised.
-  limit: v.boundedInt(1, 5000, 5000).optional(),
+  limit: v.boundedInt(1, 5000).optional(),
   format: formatEnum,
 });
 
 export const AlarmHistoryExportQuery = z.object({
   assetId: v.uuid().optional(),
   ...rangeQuery,
-  limit: v.boundedInt(1, 5000, 200).optional(),
+  limit: v.boundedInt(1, 5000).optional(),
   format: formatEnum,
 });
 
@@ -82,7 +82,7 @@ export const AggregateQuery = z.object({
   metric: v.text(200).optional(),
   bucket: bucketEnum.default("1h"),
   ...rangeQuery,
-  limit: v.boundedInt(1, 10_000, 1000).optional(),
+  limit: v.boundedInt(1, 10_000).optional(),
 });
 
 export const RetentionBody = z.object({
@@ -256,14 +256,16 @@ export const CreateDestinationBody = z.object({
   enabled: z.boolean().default(true),
 });
 
-export const UpdateDestinationBody = CreateDestinationBody.partial();
+// Not `.partial()`: under zod 4 that would apply the create defaults (authType,
+// eventTypes, enabled, ...) to every field an update leaves out.
+export const UpdateDestinationBody = v.partialUpdate(CreateDestinationBody);
 
 export const IdParams = z.object({ id: v.uuid() });
 
 // ── Dashboard / broker history ───────────────────────────────────────────────
 
 export const DashboardQuery = z.object({
-  limit: v.boundedInt(1, 100, 20).optional(),
+  limit: v.boundedInt(1, 100).optional(),
 });
 
 export const BrokerHistoryQuery = z.object({
@@ -283,37 +285,37 @@ export const BrokerHistoryQuery = z.object({
  * so this cannot be derived — it is a caller-supplied threshold with a sane
  * default rather than a guess dressed up as a measurement.
  */
-const staleMinutes = () => v.boundedInt(1, 10_080, 60).optional();
+const staleMinutes = () => v.boundedInt(1, 10_080).optional();
 
 export const AttentionQuery = z.object({
   staleMinutes: staleMinutes(),
   /** Days ahead to treat an API key expiry as worth surfacing. */
-  keyExpiryDays: v.boundedInt(1, 365, 14).optional(),
-  limit: v.boundedInt(1, 100, 25).optional(),
+  keyExpiryDays: v.boundedInt(1, 365).optional(),
+  limit: v.boundedInt(1, 100).optional(),
 });
 
 export const HealthIndexQuery = z.object({
   staleMinutes: staleMinutes(),
   /** Window for the downtime component of the score. */
-  days: v.boundedInt(1, 90, 7).optional(),
+  days: v.boundedInt(1, 90).optional(),
 });
 
 export const AlarmTrendQuery = z.object({
-  days: v.boundedInt(1, 90, 30).optional(),
+  days: v.boundedInt(1, 90).optional(),
   /** Rows in the worst-performers table. */
-  topAssets: v.boundedInt(1, 20, 5).optional(),
+  topAssets: v.boundedInt(1, 20).optional(),
 });
 
 export const IngestSeriesQuery = z.object({
-  hours: v.boundedInt(1, 48, 6).optional(),
+  hours: v.boundedInt(1, 48).optional(),
   /** Devices shown in the connectivity matrix, busiest first. */
-  devices: v.boundedInt(1, 40, 8).optional(),
+  devices: v.boundedInt(1, 40).optional(),
 });
 
 export const LiveMetricsQuery = z.object({
-  limit: v.boundedInt(1, 12, 6).optional(),
+  limit: v.boundedInt(1, 12).optional(),
   /** Points per sparkline. */
-  points: v.boundedInt(2, 200, 40).optional(),
+  points: v.boundedInt(2, 200).optional(),
 });
 
 // ── Asset templates ──────────────────────────────────────────────────────────

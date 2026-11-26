@@ -13,6 +13,36 @@ const titleTransformer: InputTransformerFn = (config) => {
   return config;
 };
 
+// zod 4's `z.uuid()` (what Orval emits for `format: uuid`) enforces the RFC 9562
+// version and variant bits. Ids the platform already uses do not all have them —
+// the seed's fixed ids such as 00000011-0000-0000-0000-000000000001, and any
+// row created with them — and zod 3's `.uuid()` accepted any 8-4-4-4-12 hex
+// string. For the zod output only, `format: uuid` is therefore turned into the
+// same pattern zod 4 uses for `z.guid()`, which keeps the zod 3 behaviour. The
+// spec and the react-query client keep `format: uuid`.
+const GUID_PATTERN =
+  "^([0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12})$";
+
+const uuidAsGuid = (node: unknown): void => {
+  if (Array.isArray(node)) {
+    node.forEach(uuidAsGuid);
+    return;
+  }
+  if (!node || typeof node !== "object") return;
+  const schema = node as Record<string, unknown>;
+  if (schema.format === "uuid" && typeof schema.pattern !== "string") {
+    delete schema.format;
+    schema.pattern = GUID_PATTERN;
+  }
+  Object.values(schema).forEach(uuidAsGuid);
+};
+
+const zodTransformer: InputTransformerFn = (config) => {
+  const copy = structuredClone(titleTransformer(config));
+  uuidAsGuid(copy);
+  return copy;
+};
+
 export default defineConfig({
   "api-client-react": {
     input: {
@@ -47,7 +77,7 @@ export default defineConfig({
     input: {
       target: "./openapi.yaml",
       override: {
-        transformer: titleTransformer,
+        transformer: zodTransformer,
       },
     },
     output: {
@@ -59,10 +89,10 @@ export default defineConfig({
       prettier: true,
       override: {
         zod: {
-          // The workspace uses zod 3. Orval otherwise picks the zod 4 call syntax
-          // (e.g. zod.int()) from its own zod 4 dependency, and the output no longer
-          // compiles. Change to 4 together with a zod 4 upgrade.
-          version: 3,
+          // The workspace uses zod 4 (catalog in pnpm-workspace.yaml). Pinned
+          // explicitly so the output matches the installed zod, not whatever Orval
+          // detects.
+          version: 4,
           coerce: {
             // Query params always arrive as strings — a date-time query param (e.g.
             // /telemetry/:assetId?from=&to=) needs `date` coerced here too, or it comes
