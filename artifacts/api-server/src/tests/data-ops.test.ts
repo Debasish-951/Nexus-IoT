@@ -14,6 +14,11 @@ import { estimatePrune, type PairDays } from "../routes/system";
 import { ruleAllows } from "../middleware/authorize";
 import { resolveAccess } from "../lib/rbac";
 
+// These tests cover Live Twin and AI Advisor while switched on; both are off by
+// default (lib/rbac.ts MODULE_SWITCHES). module-switches.test.ts covers off.
+process.env.ENABLE_LIVE_TWIN = "true";
+process.env.ENABLE_AI_ADVISOR = "true";
+
 const DAY = 86_400_000;
 const NOW = new Date("2026-11-14T12:00:00Z");
 

@@ -27,7 +27,7 @@ function accessChanges(before: unknown, after: unknown): AuditChange[] {
   return diffFields(a, b);
 }
 import { isTopAdminRole,
-  isRole, resolveAccess, sanitiseAccessOverrides, ROLES,
+  isRole, resolveAccess, sanitiseAccessOverrides, keepSwitchedOffModules, ROLES,
   canActOnRole, canGrantRole, SELF_ROLE_CHANGE_MESSAGE,
 } from "../lib/rbac";
 import { getPasswordPolicy, generateTemporaryPassword, hashPassword } from "../lib/password";
@@ -395,7 +395,11 @@ router.put("/users/:id", async (req, res): Promise<void> => {
   }
 
   if ((req.body as Record<string, unknown>).accessOverrides !== undefined) {
-    updateData.accessOverrides = sanitiseAccessOverrides((req.body as Record<string, unknown>).accessOverrides);
+    // Switched-off modules (Live Twin, AI Advisor) keep their stored access.
+    updateData.accessOverrides = keepSwitchedOffModules(
+      sanitiseAccessOverrides((req.body as Record<string, unknown>).accessOverrides),
+      existing.accessOverrides as UserAccessOverrides | null,
+    );
     if (await refuseUnknownProjects(res, updateData.accessOverrides as UserAccessOverrides)) return;
   }
   // The account after the change must still be inside the actor's projects (M-5).
@@ -495,7 +499,11 @@ router.put("/users/:id/access", async (req, res): Promise<void> => {
     return;
   }
 
-  const overrides = sanitiseAccessOverrides((req.body as Record<string, unknown>)?.overrides ?? req.body);
+  // Switched-off modules (Live Twin, AI Advisor) keep their stored access.
+  const overrides = keepSwitchedOffModules(
+    sanitiseAccessOverrides((req.body as Record<string, unknown>)?.overrides ?? req.body),
+    user.accessOverrides as UserAccessOverrides | null,
+  );
   if (await refuseUnknownProjects(res, overrides)) return;
   if (refuseIfOutsideProjects(req, res, { id: user.id, role: user.role, accessOverrides: overrides }, "result")) return;
 

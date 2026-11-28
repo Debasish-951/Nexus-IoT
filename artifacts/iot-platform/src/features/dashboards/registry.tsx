@@ -229,6 +229,20 @@ export const WIDGET_CATEGORIES: { name: string; items: WidgetDef[] }[] = ALL_WID
   .map((c) => ({ ...c, items: c.items.filter((it) => isWidgetTypeEnabled(it.type)) }))
   .filter((c) => c.items.length > 0);
 
+/**
+ * Widget types that need a module. When the user lacks it, including when the
+ * server has switched the module off for the installation (Live Twin), the type
+ * is not offered; a dashboard that already holds one shows its no-access note.
+ */
+const WIDGET_TYPE_MODULES: Record<string, string> = { livetwin: "live_twin" };
+
+/** WIDGET_CATEGORIES without the types whose module the user cannot open. */
+export function offeredWidgetCategories(canModule: (moduleKey: string) => boolean): { name: string; items: WidgetDef[] }[] {
+  return WIDGET_CATEGORIES
+    .map((c) => ({ ...c, items: c.items.filter((it) => !WIDGET_TYPE_MODULES[it.type] || canModule(WIDGET_TYPE_MODULES[it.type])) }))
+    .filter((c) => c.items.length > 0);
+}
+
 // Built from the full list so a saved widget of a hidden type still has a label and icon.
 const BY_TYPE: Record<string, WidgetDef> = {};
 for (const c of ALL_WIDGET_CATEGORIES) for (const it of c.items) BY_TYPE[it.type] = it;

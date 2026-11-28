@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { useListAssets } from "@workspace/api-client-react";
-import { WIDGET_CATEGORIES, PALETTE, SERIES_COLORS, widgetDef, CARD_ICONS, CARD_ICON_KEYS, GROUPED_TYPES, MULTI_SERIES_TYPES, GAUGE_STYLES, isWidgetTypeEnabled } from "./registry";
+import { offeredWidgetCategories, PALETTE, SERIES_COLORS, widgetDef, CARD_ICONS, CARD_ICON_KEYS, GROUPED_TYPES, MULTI_SERIES_TYPES, GAUGE_STYLES } from "./registry";
 import { useMetricChoices } from "./useWidgetData";
 import { ColorField } from "./ColorField";
 import { AssetPickerDialog } from "./AssetPickerDialog";
@@ -13,6 +13,7 @@ import { AttributeSelect } from "./AttributeSelect";
 import { CombinedFields } from "./CombinedFields";
 import { ProFields, PRO_SINGLE_TYPES, PRO_SCOPE_TYPES, proDef } from "./pro";
 import { SitesMapFields, LiveTwinFields } from "@/features/sitesMap/widgetFields";
+import { useCurrentUser } from "@/contexts/UserContext";
 
 // Gauge/Thermometer/Tank/Progress/Battery moved from single assetId+tag binding
 // to the grouped `metrics` model (same as Card) — their editor lives in the
@@ -319,6 +320,9 @@ export function WidgetConfigPanel({
 }) {
   const [type, setType] = useState(initialType);
   const [draft, setDraft] = useState<Record<string, any>>(initialConfig);
+  // Types the user may add; a saved widget of any other type keeps its own entry below.
+  const { canModule } = useCurrentUser();
+  const offeredCategories = offeredWidgetCategories(canModule);
 
   const set = (patch: Record<string, any>) => setDraft((d) => ({ ...d, ...patch }));
 
@@ -387,14 +391,14 @@ export function WidgetConfigPanel({
       <div className="flex-1 overflow-auto p-3 space-y-3">
         <Field label="Widget Type">
           <select value={type} onChange={(e) => handleTypeChange(e.target.value)} className={selCls}>
-            {WIDGET_CATEGORIES.map((cat) => (
+            {offeredCategories.map((cat) => (
               <optgroup key={cat.name} label={cat.name}>
                 {cat.items.map((it) => <option key={it.type} value={it.type}>{it.label}</option>)}
               </optgroup>
             ))}
             {/* A saved widget of a type that is now switched off still needs its
                 own entry, or the dropdown would show some other type. */}
-            {!isWidgetTypeEnabled(type) && <option value={type}>{widgetDef(type)?.label ?? type} (not available)</option>}
+            {!offeredCategories.some((c) => c.items.some((it) => it.type === type)) && <option value={type}>{widgetDef(type)?.label ?? type} (not available)</option>}
           </select>
         </Field>
 

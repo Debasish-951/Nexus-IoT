@@ -35,8 +35,11 @@ export default function LiveFeedPage() {
   const { currentProjectId } = useProject();
   // The server refuses AI Advisor chat for project-restricted users (I-1), so the
   // button stays visible but disabled, with the reason.
-  const { session } = useCurrentUser();
+  const { session, canModule } = useCurrentUser();
   const aiBlocked = !!session?.restrictProjects;
+  // Hidden while the module or its feature switch (lib/features.ts) is off.
+  const showLiveTwin = canModule("live_twin");
+  const showAi = canModule("ai_advisor");
   const [scope, setScope] = useState<string>(() => currentProjectId || "all");
   const [machine, setMachine] = useState("");
   const [query, setQuery] = useState("");
@@ -246,10 +249,12 @@ export default function LiveFeedPage() {
                     </div>
                     <div className="flex items-center gap-1">
                       <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => openAsset(it.asset.id)}>{t("Open asset")}</Button>
-                      <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => navigate("/live-twin")}>{t("Live Twin")}</Button>
-                      <span title={aiBlocked ? t("AI Advisor chat is not available yet for users limited to specific projects.") : undefined}>
-                        <Button size="sm" variant="ghost" className="h-7 px-2 text-xs gap-1" disabled={aiBlocked} onClick={() => askAi(it.asset, it.detail)}><BrainCircuit className="w-3.5 h-3.5" /> {t("Ask AI Advisor")}</Button>
-                      </span>
+                      {showLiveTwin && <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => navigate("/live-twin")}>{t("Live Twin")}</Button>}
+                      {showAi && (
+                        <span title={aiBlocked ? t("AI Advisor chat is not available yet for users limited to specific projects.") : undefined}>
+                          <Button size="sm" variant="ghost" className="h-7 px-2 text-xs gap-1" disabled={aiBlocked} onClick={() => askAi(it.asset, it.detail)}><BrainCircuit className="w-3.5 h-3.5" /> {t("Ask AI Advisor")}</Button>
+                        </span>
+                      )}
                     </div>
                   </li>
                 ))}

@@ -1,15 +1,18 @@
 import { useMemo, useState } from "react";
 import { Search, LayoutGrid, X } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { WIDGET_CATEGORIES } from "./registry";
+import { offeredWidgetCategories } from "./registry";
+import { useCurrentUser } from "@/contexts/UserContext";
 
 export function WidgetPanel({ onClose }: { onClose?: () => void }) {
   const [q, setQ] = useState("");
+  const { canModule } = useCurrentUser();
   const cats = useMemo(() => {
+    const offered = offeredWidgetCategories(canModule);
     const query = q.trim().toLowerCase();
-    if (!query) return WIDGET_CATEGORIES;
-    return WIDGET_CATEGORIES.map((c) => ({ ...c, items: c.items.filter((i) => i.label.toLowerCase().includes(query)) })).filter((c) => c.items.length);
-  }, [q]);
+    if (!query) return offered;
+    return offered.map((c) => ({ ...c, items: c.items.filter((i) => i.label.toLowerCase().includes(query)) })).filter((c) => c.items.length);
+  }, [q, canModule]);
 
   return (
     <div className="flex flex-col h-full">

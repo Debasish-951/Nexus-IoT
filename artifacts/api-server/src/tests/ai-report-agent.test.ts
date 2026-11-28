@@ -15,6 +15,11 @@ import { parseRange, reportAgentTools, runScopedTool, toolByName, toolNamesFor }
 import { resolveAccess } from "../lib/rbac";
 import { subtree, type ChatScope } from "../lib/ai-scope";
 
+// These tests cover Live Twin and AI Advisor while switched on; both are off by
+// default (lib/rbac.ts MODULE_SWITCHES). module-switches.test.ts covers off.
+process.env.ENABLE_LIVE_TWIN = "true";
+process.env.ENABLE_AI_ADVISOR = "true";
+
 const A = "00000000-0000-0000-0000-0000000000a1";
 const OTHER = "00000000-0000-0000-0000-0000000000b9";
 const FROM = new Date("2026-11-20T00:00:00Z"), TO = new Date("2026-11-21T00:00:00Z");

@@ -136,6 +136,57 @@ export const MODULES: ModuleDef[] = [
 export const MODULE_KEYS = MODULES.map((m) => m.key);
 const MODULE_BY_KEY = new Map(MODULES.map((m) => [m.key, m]));
 
+/**
+ * Whole sections switched off for this installation (owner's request, 28 Nov
+ * 2026: Live Twin and AI Advisor, to be enabled later). While a module is off:
+ * nobody holds it (`resolveAccess` leaves it out, so every route, AI tool and
+ * WebSocket channel that needs it refuses), the Access Control editor does not
+ * list it (`rbacCatalog`), and saving a user keeps whatever was stored for it
+ * (`keepSwitchedOffModules`), so turning it back on restores each user's
+ * previous access. The SPA follows the session, so its menu, pages, buttons
+ * and widgets disappear with no frontend switch. Turn a section back on in the
+ * server .env and restart the API:
+ *
+ *   ENABLE_LIVE_TWIN=true
+ *   ENABLE_AI_ADVISOR=true
+ *
+ * Read on every call so a test or a restart picks up the current value.
+ */
+const MODULE_SWITCHES: Record<string, string> = {
+  live_twin: "ENABLE_LIVE_TWIN",
+  ai_advisor: "ENABLE_AI_ADVISOR",
+};
+
+/** False when the module's installation switch is off. Modules without a switch are always on. */
+export function isModuleSwitchedOn(moduleKey: string): boolean {
+  const envName = MODULE_SWITCHES[moduleKey];
+  return !envName || process.env[envName] === "true";
+}
+
+/** Modules in force for this installation, in catalogue order. */
+export function activeModules(): ModuleDef[] {
+  return MODULES.filter((m) => isModuleSwitchedOn(m.key));
+}
+
+/**
+ * Carry the stored overrides of switched-off modules over into a newly saved
+ * set. The editor cannot see those modules, so without this a save would wipe
+ * each user's access to them and re-enabling would not restore it.
+ */
+export function keepSwitchedOffModules(
+  next: UserAccessOverrides,
+  previous: UserAccessOverrides | null | undefined,
+): UserAccessOverrides {
+  const kept: NonNullable<UserAccessOverrides["modules"]> = {};
+  for (const key of Object.keys(MODULE_SWITCHES)) {
+    if (isModuleSwitchedOn(key)) continue;
+    const value = previous?.modules?.[key];
+    if (value !== undefined) kept[key] = value;
+  }
+  if (Object.keys(kept).length === 0) return next;
+  return { ...next, modules: { ...(next.modules ?? {}), ...kept } };
+}
+
 export type GranularPerm = { r: boolean; w: boolean; d: boolean };
 export type ModuleAccess = boolean | GranularPerm;
 
@@ -329,7 +380,8 @@ export function resolveAccess(
   const overriddenModules: string[] = [];
   const projects = projectRule(role);
 
-  for (const mod of MODULES) {
+  // Switched-off modules are left out entirely, so hasModuleAccess() refuses them.
+  for (const mod of activeModules()) {
     const base = defaultForModule(role, mod.key);
     const legacy = LEGACY_SOURCE[mod.key];
     let override = overrides?.modules?.[mod.key];
@@ -429,17 +481,20 @@ export function canAccessProject(access: EffectiveAccess, projectId: string): bo
 
 /** Payload for GET /api/security/rbac-catalog — drives the Access Control editor. */
 export function rbacCatalog() {
+  const modules = activeModules();
+  const keys = new Set(modules.map((m) => m.key));
   return {
     roles: ROLES.map((r) => ({
       key: r,
       label: ROLE_LABELS[r],
       permissions: ROLE_PERMISSIONS[r],
-      moduleDefaults: ROLE_MODULE_DEFAULTS[r],
+      // Switched-off modules are not offered in the Access Control editor.
+      moduleDefaults: Object.fromEntries(Object.entries(ROLE_MODULE_DEFAULTS[r] ?? {}).filter(([k]) => keys.has(k))),
       apiScopeDefaults: ROLE_API_SCOPE_DEFAULTS[r],
       projectAccess: projectRule(r),
     })),
     permissions: PERMISSIONS,
-    modules: MODULES,
+    modules,
     analyticsOptions: ANALYTICS_OPTIONS,
     apiScopeOptions: API_SCOPE_OPTIONS,
   };

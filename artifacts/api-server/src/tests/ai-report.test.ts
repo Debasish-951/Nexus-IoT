@@ -16,6 +16,11 @@ import { mergeBuckets, mergeCoverage, planRead, reportBucketMs } from "../lib/re
 import { ruleAllows } from "../middleware/authorize";
 import { resolveAccess, ROLES } from "../lib/rbac";
 
+// These tests cover Live Twin and AI Advisor while switched on; both are off by
+// default (lib/rbac.ts MODULE_SWITCHES). module-switches.test.ts covers off.
+process.env.ENABLE_LIVE_TWIN = "true";
+process.env.ENABLE_AI_ADVISOR = "true";
+
 const A = "00000000-0000-0000-0000-00000000000a";
 const B = "00000000-0000-0000-0000-00000000000b";
 const C = "00000000-0000-0000-0000-00000000000c";

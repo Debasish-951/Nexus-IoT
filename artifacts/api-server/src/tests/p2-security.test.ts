@@ -12,6 +12,11 @@ import { resolveAccess } from "../lib/rbac";
 import { originAllowed } from "../lib/ws-broadcast";
 import { toolNamesFor, MAX_QUESTION_CHARS } from "../routes/ai";
 
+// These tests cover Live Twin and AI Advisor while switched on; both are off by
+// default (lib/rbac.ts MODULE_SWITCHES). module-switches.test.ts covers off.
+process.env.ENABLE_LIVE_TWIN = "true";
+process.env.ENABLE_AI_ADVISOR = "true";
+
 test("SEC-19: an exact allowlist address no longer admits addresses it is a prefix of", () => {
   assert.equal(ipAllowed("10.0.0.1", ["10.0.0.1"]), true);
   assert.equal(ipAllowed("10.0.0.10", ["10.0.0.1"]), false);
